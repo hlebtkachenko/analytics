@@ -9,6 +9,19 @@ catalog:
   '@nestjs/core': 12.0.1
   '@nestjs/platform-express': 12.0.1
   '@nestjs/testing': 12.0.1
+  '@carbon/charts-react': 1.27.18
+  '@carbon/colors': 11.57.0
+  '@carbon/grid': 11.61.0
+  '@carbon/icons-react': 11.87.0
+  '@carbon/layout': 11.58.0
+  '@carbon/motion': 11.51.0
+  '@carbon/react': 1.115.0
+  '@carbon/styles': 1.114.0
+  '@carbon/themes': 11.80.0
+  '@carbon/type': 11.66.0
+  '@ibm/plex-mono': 1.1.0
+  '@ibm/plex-sans': 1.1.0
+  '@ibm/plex-serif': 2.0.0
   '@testing-library/jest-dom': 7.0.1
   '@testing-library/react': 16.3.3
   '@types/node': 24.13.3
@@ -27,8 +40,10 @@ catalog:
   prettier: 3.9.6
   react: 19.2.8
   react-dom: 19.2.8
+  react-is: 19.2.8
   reflect-metadata: 0.2.2
   rxjs: 7.8.2
+  sass: 1.103.1
   supertest: 7.2.2
   turbo: 2.10.12
   typescript: 6.0.3
@@ -37,7 +52,32 @@ catalog:
   zod: 4.4.3
 
 allowBuilds:
+  '@carbon/charts': false
+  '@carbon/charts-react': false
+  '@carbon/colors': false
+  '@carbon/feature-flags': false
+  '@carbon/grid': false
+  '@carbon/icon-helpers': false
+  '@carbon/icons-react': false
+  '@carbon/layout': false
+  '@carbon/motion': false
+  '@carbon/react': false
+  '@carbon/styles': false
+  '@carbon/themes': false
+  '@carbon/type': false
+  '@carbon/utilities': false
+  '@carbon/utils-position': false
+  '@ibm/plex': false
+  '@ibm/plex-mono': false
+  '@ibm/plex-sans': false
+  '@ibm/plex-sans-arabic': false
+  '@ibm/plex-sans-devanagari': false
+  '@ibm/plex-sans-hebrew': false
+  '@ibm/plex-sans-thai': false
+  '@ibm/plex-sans-thai-looped': false
+  '@ibm/plex-serif': false
   '@nestjs/core': true
+  '@parcel/watcher': false
   '@swc/core': true
   esbuild: true
   sharp: true
@@ -51,6 +91,18 @@ strictDepBuilds: true
 strictPeerDependencies: true
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
+  - '@carbon/colors@11.57.0'
+  - '@carbon/feature-flags@1.8.0'
+  - '@carbon/grid@11.61.0'
+  - '@carbon/icon-helpers@10.81.0'
+  - '@carbon/icons-react@11.87.0'
+  - '@carbon/layout@11.58.0'
+  - '@carbon/motion@11.51.0'
+  - '@carbon/react@1.115.0'
+  - '@carbon/styles@1.114.0'
+  - '@carbon/themes@11.80.0'
+  - '@carbon/type@11.66.0'
+  - '@carbon/utilities@0.25.0'
   - '@nestjs/cli@12.0.0'
   - '@testing-library/react@16.3.3'
   - '@vitejs/plugin-react@6.1.1'
