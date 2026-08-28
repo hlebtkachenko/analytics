@@ -23,33 +23,8 @@ env:
   TURBO_TELEMETRY_DISABLED: '1'
 
 jobs:
-  workspace:
-    name: Workspace
-    runs-on: ubuntu-latest
-    timeout-minutes: 1
-    outputs:
-      ready: ${{ steps.detect.outputs.ready }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Detect monorepo
-        id: detect
-        shell: bash
-        run: |
-          if [[ -f package.json && -f pnpm-lock.yaml && -f pnpm-workspace.yaml ]]; then
-            echo 'ready=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'ready=false' >> "$GITHUB_OUTPUT"
-            echo 'Monorepo files are not present yet.' >> "$GITHUB_STEP_SUMMARY"
-          fi
-
   verify:
     name: Verify / ${{ matrix.name }}
-    needs: workspace
-    if: needs.workspace.outputs.ready == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 4
     strategy:
@@ -96,8 +71,6 @@ jobs:
 
   compose:
     name: Compose configuration
-    needs: workspace
-    if: needs.workspace.outputs.ready == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 4
     env:
@@ -120,8 +93,6 @@ jobs:
 
   container-smoke:
     name: Container smoke
-    needs: workspace
-    if: needs.workspace.outputs.ready == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 4
     env:

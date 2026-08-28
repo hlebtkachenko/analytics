@@ -75,19 +75,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Detect monorepo
-        id: detect
-        shell: bash
-        run: |
-          if [[ -f package.json && -f pnpm-lock.yaml && -f pnpm-workspace.yaml ]]; then
-            echo 'ready=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'ready=false' >> "$GITHUB_OUTPUT"
-            echo 'Monorepo files are not present yet.' >> "$GITHUB_STEP_SUMMARY"
-          fi
-
       - name: Set up pnpm and Node.js
-        if: steps.detect.outputs.ready == 'true'
         uses: pnpm/setup@84cb39b217b10273981911c288cd62326dc7c6d2 # v2.0.2
         with:
           cache: true
@@ -96,15 +84,12 @@ jobs:
           version: 11.24.0
 
       - name: Verify package signatures
-        if: steps.detect.outputs.ready == 'true'
         run: pnpm audit signatures
 
       - name: Install dependencies
-        if: steps.detect.outputs.ready == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Audit high-severity advisories
-        if: steps.detect.outputs.ready == 'true'
         run: pnpm audit --audit-level high
 
   codeql:
@@ -120,24 +105,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Detect source workspace
-        id: detect
-        shell: bash
-        run: |
-          if [[ -f package.json ]]; then
-            echo 'ready=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'ready=false' >> "$GITHUB_OUTPUT"
-            echo 'Source workspace is not present yet.' >> "$GITHUB_STEP_SUMMARY"
-          fi
-
       - name: Initialize CodeQL
-        if: steps.detect.outputs.ready == 'true'
         uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           build-mode: none
           languages: javascript-typescript
 
       - name: Analyze
-        if: steps.detect.outputs.ready == 'true'
         uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
