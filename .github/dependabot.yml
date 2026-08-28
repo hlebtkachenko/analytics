@@ -7,7 +7,7 @@ updates:
     groups:
       github-actions:
         patterns:
-          - "*"
+          - '*'
 
   - package-ecosystem: npm
     directory: /
@@ -17,8 +17,8 @@ updates:
       development-dependencies:
         dependency-type: development
         patterns:
-          - "*"
+          - '*'
       production-dependencies:
         dependency-type: production
         patterns:
-          - "*"
+          - '*'

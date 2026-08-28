@@ -11,15 +11,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group:
+    ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
-  CI: "true"
-  IBM_TELEMETRY_DISABLED: "true"
-  NEXT_TELEMETRY_DISABLED: "1"
-  NO_UPDATE_NOTIFIER: "1"
-  TURBO_TELEMETRY_DISABLED: "1"
+  CI: 'true'
+  IBM_TELEMETRY_DISABLED: 'true'
+  NEXT_TELEMETRY_DISABLED: '1'
+  NO_UPDATE_NOTIFIER: '1'
+  TURBO_TELEMETRY_DISABLED: '1'
 
 jobs:
   workspace:
@@ -108,10 +109,14 @@ jobs:
           persist-credentials: false
 
       - name: Validate development configuration
-        run: docker compose -f compose.yaml -f compose.development.yaml config --quiet
+        run:
+          docker compose -f compose.yaml -f compose.development.yaml config
+          --quiet
 
       - name: Validate production configuration
-        run: docker compose -f compose.yaml -f compose.production.yaml config --quiet
+        run:
+          docker compose -f compose.yaml -f compose.production.yaml config
+          --quiet
 
   container-smoke:
     name: Container smoke
@@ -120,11 +125,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 4
     env:
-      API_PORT: "39101"
+      API_PORT: '39101'
       POSTGRES_PASSWORD: ci-only-container-value
-      POSTGRES_PORT: "39432"
-      REPORTING_API_PORT: "39102"
-      WEB_PORT: "39100"
+      POSTGRES_PORT: '39432'
+      REPORTING_API_PORT: '39102'
+      WEB_PORT: '39100'
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -145,8 +150,12 @@ jobs:
 
       - name: Show failure logs
         if: failure() && steps.stack.outcome == 'failure'
-        run: docker compose -f compose.yaml -f compose.development.yaml logs --no-color
+        run:
+          docker compose -f compose.yaml -f compose.development.yaml logs
+          --no-color
 
       - name: Stop stack
         if: always()
-        run: docker compose -f compose.yaml -f compose.development.yaml down --volumes
+        run:
+          docker compose -f compose.yaml -f compose.development.yaml down
+          --volumes

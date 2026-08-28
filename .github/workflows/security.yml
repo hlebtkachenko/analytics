@@ -6,22 +6,23 @@ on:
     branches:
       - main
   schedule:
-    - cron: "23 3 * * 0"
+    - cron: '23 3 * * 0'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group:
+    ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
-  CI: "true"
-  IBM_TELEMETRY_DISABLED: "true"
-  NEXT_TELEMETRY_DISABLED: "1"
-  NO_UPDATE_NOTIFIER: "1"
-  TURBO_TELEMETRY_DISABLED: "1"
+  CI: 'true'
+  IBM_TELEMETRY_DISABLED: 'true'
+  NEXT_TELEMETRY_DISABLED: '1'
+  NO_UPDATE_NOTIFIER: '1'
+  TURBO_TELEMETRY_DISABLED: '1'
 
 jobs:
   gitleaks:
@@ -41,8 +42,8 @@ jobs:
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          GITLEAKS_ENABLE_COMMENTS: "false"
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          GITLEAKS_ENABLE_COMMENTS: 'false'
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
           GITLEAKS_VERSION: 8.30.1
 
   dependency-review:
