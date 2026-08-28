@@ -179,3 +179,7 @@ jobs:
         run:
           docker compose -f compose.yaml -f compose.development.yaml down
           --volumes
+
+  operational-proof:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/operational-proof.yml
