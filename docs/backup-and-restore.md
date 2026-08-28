@@ -36,6 +36,13 @@ database service.
   credential and the role credential set.
 
 All operations fail before database work when a required file is unreadable.
+Compose file-backed secrets remain host-owned mode `0600`. The operations image
+uses a fixed root entry wrapper with only `CHOWN`, `DAC_READ_SEARCH`, `SETGID`,
+and `SETUID` to copy its allowlisted credentials into a 64 KiB, mode `0750`
+tmpfs. Copies are owned by UID/GID `999:999` with mode `0400`. Database
+passwords become escaped PostgreSQL passfiles and never enter a process
+environment. The wrapper immediately executes the operation as PostgreSQL UID
+999; the backend rejects startup unless its effective capability mask is zero.
 
 The delivered proof uses only `restic_repository` and `restic_password` with a
 local encrypted repository. One-shot restic clients have a dedicated,
@@ -51,7 +58,9 @@ credential file.
 The scheduled/manual workflow creates a temporary local repository, backs up
 disposable PostgreSQL state, runs `restic check`, restores into the isolated
 target, and verifies one restored owner membership plus the current migration
-identifier. This proves the commands and role boundaries only.
+identifier. Disposable backup and migrator passwords contain both `:` and `\` so
+the proof also exercises PostgreSQL passfile escaping. This proves the commands
+and role boundaries only.
 
 Authenticated off-host storage, TLS or host-key trust, scheduling, retention,
 alerts, off-host durability, Caddy state backup, RPO, RTO, and monthly restore

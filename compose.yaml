@@ -311,16 +311,13 @@ services:
     environment:
       BAP_DATABASE_HOST: database
       BAP_DATABASE_NAME: ${POSTGRES_DB:-bap}
-      BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
-      BAP_DATABASE_USER: bap_backup
-      RESTIC_PASSWORD_FILE: /run/credentials/restic-password
-      RESTIC_REPOSITORY_FILE: /run/credentials/restic-repository
     networks:
       - data
       - operations-egress
     read_only: true
     tmpfs:
       - /tmp
+      - /run/bap-credentials:rw,noexec,nosuid,nodev,size=64k,mode=0750,uid=0,gid=999
     secrets:
       - source: bap_backup_password
         target: /run/credentials/database-password
@@ -332,6 +329,11 @@ services:
       - restic_repository_data:/repository
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+      - SETGID
+      - SETUID
     security_opt:
       - no-new-privileges:true
 
@@ -341,14 +343,12 @@ services:
       context: .
       dockerfile: docker/backup.Dockerfile
     command: [check]
-    environment:
-      RESTIC_PASSWORD_FILE: /run/credentials/restic-password
-      RESTIC_REPOSITORY_FILE: /run/credentials/restic-repository
     networks:
       - operations-egress
     read_only: true
     tmpfs:
       - /tmp
+      - /run/bap-credentials:rw,noexec,nosuid,nodev,size=64k,mode=0750,uid=0,gid=999
     secrets:
       - source: restic_password
         target: /run/credentials/restic-password
@@ -358,6 +358,11 @@ services:
       - restic_repository_data:/repository
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+      - SETGID
+      - SETUID
     security_opt:
       - no-new-privileges:true
 
@@ -383,16 +388,13 @@ services:
     environment:
       BAP_DATABASE_HOST: restore-database
       BAP_DATABASE_NAME: bap_restore
-      BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
-      BAP_DATABASE_USER: bap_migrator
-      RESTIC_PASSWORD_FILE: /run/credentials/restic-password
-      RESTIC_REPOSITORY_FILE: /run/credentials/restic-repository
     networks:
       - data
       - operations-egress
     read_only: true
     tmpfs:
       - /tmp
+      - /run/bap-credentials:rw,noexec,nosuid,nodev,size=64k,mode=0750,uid=0,gid=999
     secrets:
       - source: bap_migrator_password
         target: /run/credentials/database-password
@@ -404,6 +406,11 @@ services:
       - restic_repository_data:/repository
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+      - SETGID
+      - SETUID
     security_opt:
       - no-new-privileges:true
 

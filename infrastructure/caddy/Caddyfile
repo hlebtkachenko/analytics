@@ -20,3 +20,8 @@
 		header_up X-BAP-Request-ID {http.request.uuid}
 	}
 }
+
+http://, https:// {
+	header -Server
+	respond 421
+}

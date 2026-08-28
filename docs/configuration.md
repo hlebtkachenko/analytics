@@ -48,12 +48,14 @@ backup, Better Auth, and restic credential files listed in
 pnpm secrets:local
 ```
 
-The command writes ignored files under `.secrets` with restrictive permissions.
-Production secret values and paths are owner-managed deployment inputs. The
-delivered restic contract contains only an encrypted repository locator and
-password for local proof. An off-host backend needs fixed, backend-specific
-credential and trust-file mounts after the owner selects that backend. Generic
-credential files are not sourced or parsed.
+The command writes ignored files under `.secrets` with mode `0600`. One-shot
+operations stage only their granted files as mode `0400` copies in container
+tmpfs before dropping to UID 999. Database clients receive a PostgreSQL passfile
+path, never a password environment variable. Production secret values and paths
+are owner-managed deployment inputs. The delivered restic contract contains only
+an encrypted repository locator and password for local proof. An off-host
+backend needs fixed, backend-specific credential and trust-file mounts after the
+owner selects that backend. Generic credential files are not sourced or parsed.
 
 Do not introduce `NEXT_PUBLIC_*` variables for server credentials or internal
 service locations. Production secrets must be injected by the deployment

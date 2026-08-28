@@ -22,6 +22,13 @@ browser and backup/restore exercise. Automated scans do not replace manual
 review of configuration, workflows, fixtures, container files, and generated
 artifacts before every push.
 
+The one-shot operations image has one narrow exception: its fixed entry wrapper
+starts as root with only `CHOWN`, `DAC_READ_SEARCH`, `SETGID`, and `SETUID` so
+it can stage host-owned mode `0600` Compose secrets into a protected tmpfs. It
+then drops to UID/GID `999:999`; the backup backend refuses to run unless its
+effective capability mask is zero. Password values are never placed in process
+environments.
+
 ## Runtime boundary
 
 Caddy is the sole public entry point. It blocks `/ready` and `/metrics` before

@@ -33,10 +33,14 @@ destination allowlist. Production Caddy enables TLS when the owner supplies a
 valid public host, origin, DNS, and ACME reachability.
 
 Application images use Node.js 24.20.0, frozen pnpm dependencies, non-root
-runtime users, dropped Linux capabilities, and health checks. The read-only web
-container has an ephemeral writable Next.js cache. PostgreSQL 18 stores data
-under a named volume mounted at `/var/lib/postgresql`, which is the official
-image path for version 18 and newer.
+runtime users, dropped Linux capabilities, and health checks. The operations
+image has a root-only credential staging wrapper with four explicit
+capabilities, then executes every networked restic and PostgreSQL client as UID
+999 with zero effective capabilities. Its mode `0400` credential copies exist
+only in a dedicated tmpfs. The read-only web container has an ephemeral writable
+Next.js cache. PostgreSQL 18 stores data under a named volume mounted at
+`/var/lib/postgresql`, which is the official image path for version 18 and
+newer.
 
 Use `docker compose stop` for routine shutdown. Never add `down -v` to a normal
 workflow because it removes the database volume.

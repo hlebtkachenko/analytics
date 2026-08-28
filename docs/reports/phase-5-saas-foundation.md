@@ -23,6 +23,9 @@ introducing product or business logic.
 - Compose supplies secret-file mounts, internal networking, non-root images,
   database role bootstrap, and isolated restic backup/restore services. A
   dedicated network permits outbound access only for one-shot restic clients.
+- The operations image stages host-owned mode `0600` credentials in a protected
+  tmpfs through a four-capability root wrapper, then runs every restic and
+  PostgreSQL client as UID 999 with zero effective capabilities.
 - CI includes focused security and quality checks. A scheduled/manual
   operational workflow proves browser access and one-shot backup/restore with
   disposable state.

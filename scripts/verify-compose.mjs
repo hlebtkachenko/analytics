@@ -12,6 +12,10 @@ const backupEntrypoint = readFileSync(
   new URL('./backup-entrypoint.sh', import.meta.url),
   'utf8',
 );
+const backupStageEntrypoint = readFileSync(
+  new URL('./backup-stage-entrypoint.sh', import.meta.url),
+  'utf8',
+);
 
 function invariant(condition, message) {
   if (!condition) {
@@ -36,7 +40,10 @@ function expectSecrets(service, expected) {
 }
 
 invariant(
-  !/(^|\s)(eval|source)\s/m.test(backupEntrypoint) &&
+  !/(^|\s)(eval|source)\s/m.test(
+    `${backupStageEntrypoint}\n${backupEntrypoint}`,
+  ) &&
+    !backupStageEntrypoint.includes('RESTIC_BACKEND_CREDENTIALS') &&
     !backupEntrypoint.includes('RESTIC_BACKEND_CREDENTIALS'),
   'The backup entrypoint must not execute generic credential input.',
 );
@@ -144,6 +151,42 @@ if (mode === 'operations') {
     invariant(
       networkNames(service).join() === 'operations-egress',
       `${service} must use only operations egress.`,
+    );
+  }
+  for (const service of [
+    'backup',
+    'backup-check',
+    'backup-init',
+    'backup-prune',
+    'restore',
+  ]) {
+    const model = configuration.services[service];
+    const operationEnvironment = model.environment ?? {};
+    invariant(
+      model.read_only === true &&
+        model.cap_drop.join() === 'ALL' &&
+        [...model.cap_add].sort().join() ===
+          'CHOWN,DAC_READ_SEARCH,SETGID,SETUID' &&
+        model.security_opt.join() === 'no-new-privileges:true',
+      `${service} must retain the staging privilege boundary.`,
+    );
+    invariant(
+      JSON.stringify([...model.tmpfs].sort()) ===
+        JSON.stringify(
+          [
+            '/tmp',
+            '/run/bap-credentials:rw,noexec,nosuid,nodev,size=64k,mode=0750,uid=0,gid=999',
+          ].sort(),
+        ),
+      `${service} must use only ephemeral credential staging.`,
+    );
+    invariant(
+      !Object.hasOwn(operationEnvironment, 'BAP_DATABASE_PASSWORD_FILE') &&
+        !Object.hasOwn(operationEnvironment, 'BAP_DATABASE_USER') &&
+        !Object.hasOwn(operationEnvironment, 'PGPASSWORD') &&
+        !Object.hasOwn(operationEnvironment, 'RESTIC_PASSWORD_FILE') &&
+        !Object.hasOwn(operationEnvironment, 'RESTIC_REPOSITORY_FILE'),
+      `${service} must use fixed credential paths and database roles.`,
     );
   }
   for (const service of ['restore-database', 'restore-role-bootstrap']) {
