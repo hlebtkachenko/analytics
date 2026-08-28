@@ -1,3 +1,7 @@
+import '@bap/design-system/styles.scss';
+import '@bap/design-system/fonts.scss';
+import '@bap/design-system/charts.css';
+import { DesignSystemProvider } from '@bap/design-system/theme';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 
@@ -12,8 +16,10 @@ type RootLayoutProperties = Readonly<{
 
 export default function RootLayout({ children }: RootLayoutProperties) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html data-carbon-theme="white" lang="en">
+      <body>
+        <DesignSystemProvider theme="white">{children}</DesignSystemProvider>
+      </body>
     </html>
   );
 }

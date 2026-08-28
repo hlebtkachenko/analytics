@@ -4,11 +4,11 @@
   "private": true,
   "description": "Business Analytics Platform monorepo",
   "scripts": {
-    "build": "turbo run build",
+    "build": "IBM_TELEMETRY_DISABLED=true NEXT_TELEMETRY_DISABLED=1 turbo run build",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "compose:config": "docker compose -f compose.yaml -f compose.development.yaml config --quiet",
     "compose:config:production": "docker compose -f compose.yaml -f compose.production.yaml config --quiet",
-    "dev": "turbo run dev --concurrency=4",
+    "dev": "IBM_TELEMETRY_DISABLED=true NEXT_TELEMETRY_DISABLED=1 turbo run dev --concurrency=4",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "turbo run lint",

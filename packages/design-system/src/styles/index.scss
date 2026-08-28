@@ -1,0 +1,23 @@
+@use '@carbon/react/scss/config' with (
+  $css--font-face: false
+);
+@use '@carbon/react';
+@use '@carbon/react/scss/theme' as theme;
+@use '@carbon/react/scss/themes' as themes;
+
+:root,
+:root[data-carbon-theme='white'] {
+  @include theme.theme(themes.$white);
+}
+
+:root[data-carbon-theme='g10'] {
+  @include theme.theme(themes.$g10);
+}
+
+:root[data-carbon-theme='g90'] {
+  @include theme.theme(themes.$g90);
+}
+
+:root[data-carbon-theme='g100'] {
+  @include theme.theme(themes.$g100);
+}

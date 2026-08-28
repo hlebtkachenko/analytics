@@ -39,3 +39,4 @@ config
 docs
 compose*.yaml
 *.md
+!THIRD_PARTY_NOTICES.md

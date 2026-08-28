@@ -7,6 +7,9 @@
       "env": ["NODE_ENV"],
       "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**", "dist/**"]
     },
+    "@bap/design-system#build": {
+      "outputs": []
+    },
     "dev": {
       "cache": false,
       "env": ["API_PORT", "HOST", "PORT", "REPORTING_API_PORT", "WEB_PORT"],

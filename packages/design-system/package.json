@@ -1,0 +1,72 @@
+{
+  "name": "@bap/design-system",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./charts": "./src/charts.ts",
+    "./charts.css": "./src/styles/charts.css",
+    "./icons": "./src/icons.ts",
+    "./react": "./src/react.ts",
+    "./styles.scss": "./src/styles/index.scss",
+    "./tokens.scss": "./src/styles/tokens.scss",
+    "./tokens/colors.scss": "./src/styles/tokens/colors.scss",
+    "./tokens/grid.scss": "./src/styles/tokens/grid.scss",
+    "./tokens/layout.scss": "./src/styles/tokens/layout.scss",
+    "./tokens/motion.scss": "./src/styles/tokens/motion.scss",
+    "./tokens/spacing.scss": "./src/styles/tokens/spacing.scss",
+    "./tokens/theme.scss": "./src/styles/tokens/theme.scss",
+    "./tokens/themes.scss": "./src/styles/tokens/themes.scss",
+    "./tokens/type.scss": "./src/styles/tokens/type.scss",
+    "./fonts.scss": "./src/styles/fonts.scss",
+    "./theme": "./src/theme-provider.tsx",
+    "./tokens": "./src/tokens.ts"
+  },
+  "scripts": {
+    "build": "sass --load-path=node_modules --load-path=../../node_modules/.pnpm/node_modules --no-source-map src/styles/index.scss /dev/null && sass --load-path=node_modules --load-path=../../node_modules/.pnpm/node_modules --no-source-map src/styles/fonts.scss /dev/null && sass --load-path=node_modules --load-path=../../node_modules/.pnpm/node_modules --no-source-map src/styles/tokens.scss /dev/null && sass --load-path=node_modules --load-path=../../node_modules/.pnpm/node_modules --no-source-map src/styles/tokens/colors.scss /dev/null && sass --load-path=node_modules --load-path=../../node_modules/.pnpm/node_modules --no-source-map src/styles/tokens/grid.scss /dev/null && sass --load-path=node_modules --load-path=../../node_modules/.pnpm/node_modules --no-source-map src/styles/tokens/layout.scss /dev/null && sass --load-path=node_modules --load-path=../../node_modules/.pnpm/node_modules --no-source-map src/styles/tokens/motion.scss /dev/null && sass --load-path=node_modules --load-path=../../node_modules/.pnpm/node_modules --no-source-map src/styles/tokens/spacing.scss /dev/null && sass --load-path=node_modules --load-path=../../node_modules/.pnpm/node_modules --no-source-map src/styles/tokens/theme.scss /dev/null && sass --load-path=node_modules --load-path=../../node_modules/.pnpm/node_modules --no-source-map src/styles/tokens/themes.scss /dev/null && sass --load-path=node_modules --load-path=../../node_modules/.pnpm/node_modules --no-source-map src/styles/tokens/type.scss /dev/null",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@carbon/charts-react": "catalog:",
+    "@carbon/icons-react": "catalog:",
+    "@carbon/react": "catalog:",
+    "@carbon/styles": "catalog:",
+    "@ibm/plex-mono": "catalog:",
+    "@ibm/plex-sans": "catalog:",
+    "@ibm/plex-serif": "catalog:"
+  },
+  "devDependencies": {
+    "@bap/eslint-config": "workspace:*",
+    "@bap/typescript-config": "workspace:*",
+    "@carbon/colors": "catalog:",
+    "@carbon/grid": "catalog:",
+    "@carbon/layout": "catalog:",
+    "@carbon/motion": "catalog:",
+    "@carbon/themes": "catalog:",
+    "@carbon/type": "catalog:",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "jsdom": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-is": "catalog:",
+    "sass": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "react": ">=19.0.0 <20",
+    "react-dom": ">=19.0.0 <20",
+    "react-is": ">=19.0.0 <20"
+  }
+}

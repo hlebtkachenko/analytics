@@ -10,6 +10,7 @@ intentionally developed separately.
 - `apps/web`: Next.js App Router web application
 - `apps/api`: NestJS application API
 - `apps/reporting-api`: NestJS reporting API
+- `packages/design-system`: Carbon components, tokens, themes, charts, and fonts
 - `packages/eslint-config`: shared flat ESLint configurations
 - `packages/typescript-config`: shared strict TypeScript configurations
 

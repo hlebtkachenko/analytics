@@ -1,0 +1,49 @@
+@use 'sass:map';
+@use '@carbon/styles/scss/fonts/unicode/mono' as mono-unicode;
+@use '@carbon/styles/scss/fonts/unicode/sans' as sans-unicode;
+@use '@carbon/styles/scss/fonts/unicode/serif' as serif-unicode;
+
+$font-ranges: (Cyrillic, Pi, Latin3, Latin2, Latin1);
+$font-faces: (
+  (Light, normal, 300),
+  (LightItalic, italic, 300),
+  (Regular, normal, 400),
+  (Italic, italic, 400),
+  (SemiBold, normal, 600),
+  (SemiBoldItalic, italic, 600)
+);
+
+@mixin plex-family($family, $file-prefix, $package, $unicode-ranges) {
+  @each $file-suffix, $style, $weight in $font-faces {
+    @each $range in $font-ranges {
+      @font-face {
+        font-display: swap;
+        font-family: $family;
+        font-style: $style;
+        font-weight: $weight;
+        src: url('../../node_modules/#{$package}/fonts/split/woff2/#{$file-prefix}-#{$file-suffix}-#{$range}.woff2')
+          format('woff2');
+        unicode-range: map.get($unicode-ranges, $range);
+      }
+    }
+  }
+}
+
+@include plex-family(
+  'IBM Plex Sans',
+  'IBMPlexSans',
+  '@ibm/plex-sans',
+  sans-unicode.$ranges
+);
+@include plex-family(
+  'IBM Plex Mono',
+  'IBMPlexMono',
+  '@ibm/plex-mono',
+  mono-unicode.$ranges
+);
+@include plex-family(
+  'IBM Plex Serif',
+  'IBMPlexSerif',
+  '@ibm/plex-serif',
+  serif-unicode.$ranges
+);

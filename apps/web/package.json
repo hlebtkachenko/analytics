@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev --turbopack --port ${WEB_PORT:-${PORT:-3000}}",
-    "build": "next build",
-    "start": "next start",
+    "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --turbopack --port ${WEB_PORT:-${PORT:-3000}}",
+    "build": "NEXT_TELEMETRY_DISABLED=1 next build",
+    "start": "NEXT_TELEMETRY_DISABLED=1 next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
@@ -14,9 +14,11 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@bap/design-system": "workspace:*",
     "next": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "react-is": "catalog:"
   },
   "devDependencies": {
     "@bap/eslint-config": "workspace:*",
@@ -29,6 +31,7 @@
     "@vitejs/plugin-react": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "jsdom": "catalog:",
+    "sass": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }
