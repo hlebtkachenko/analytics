@@ -1,7 +1,16 @@
 services:
-  web:
+  caddy:
+    environment:
+      BAP_PUBLIC_HOST: ${BAP_PUBLIC_HOST:?Set BAP_PUBLIC_HOST}
     ports:
-      - '${BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-3000}:3000'
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    restart: unless-stopped
+
+  web:
+    environment:
+      BAP_PUBLIC_ORIGIN: ${BAP_PUBLIC_ORIGIN:?Set BAP_PUBLIC_ORIGIN}
     read_only: true
     restart: unless-stopped
     tmpfs:
@@ -9,16 +18,16 @@ services:
       - /app/apps/web/.next/cache:uid=1001,gid=1001,mode=0750
 
   api:
-    ports:
-      - '${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-3001}:3001'
+    environment:
+      BAP_PUBLIC_ORIGIN: ${BAP_PUBLIC_ORIGIN:?Set BAP_PUBLIC_ORIGIN}
     read_only: true
     restart: unless-stopped
     tmpfs:
       - /tmp
 
   reporting-api:
-    ports:
-      - '${BIND_ADDRESS:-127.0.0.1}:${REPORTING_API_PORT:-3002}:3002'
+    environment:
+      BAP_PUBLIC_ORIGIN: ${BAP_PUBLIC_ORIGIN:?Set BAP_PUBLIC_ORIGIN}
     read_only: true
     restart: unless-stopped
     tmpfs:

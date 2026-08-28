@@ -1,0 +1,279 @@
+import {
+  PostgreSqlContainer,
+  type StartedPostgreSqlContainer,
+} from '@testcontainers/postgresql';
+import { Pool, type PoolClient } from 'pg';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import {
+  bootstrapDatabaseRoles,
+  checkMigrationCompatibility,
+  resolveMembership,
+  runMigrations,
+  withTenantContext,
+} from './index.js';
+
+const postgresImage =
+  'postgres:18.6-bookworm@sha256:1c59e2c3c818eaa0f0628f695b36e7c9e362d6b219b36a54a32df645cbd7e1af';
+const testPassword = 'test-only-database-credential';
+
+let apiPool: Pool;
+let authPool: Pool;
+let backupPool: Pool;
+let container: StartedPostgreSqlContainer;
+let migratorPool: Pool;
+let reportingPool: Pool;
+let rootPool: Pool;
+let initialMigrationResults: Awaited<ReturnType<typeof runMigrations>>[];
+
+function poolFor(user: string, password: string): Pool {
+  return new Pool({
+    database: container.getDatabase(),
+    host: container.getHost(),
+    password,
+    port: container.getPort(),
+    user,
+  });
+}
+
+async function asOwner<T>(
+  operation: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await migratorPool.connect();
+  await client.query('begin');
+  await client.query('set local role bap_owner');
+
+  try {
+    const result = await operation(client);
+    await client.query('commit');
+    return result;
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+beforeAll(async () => {
+  container = await new PostgreSqlContainer(postgresImage)
+    .withDatabase('bap')
+    .withUsername('postgres')
+    .withPassword(testPassword)
+    .start();
+  rootPool = poolFor('postgres', testPassword);
+  const root = await rootPool.connect();
+
+  try {
+    await bootstrapDatabaseRoles(root, {
+      bap_api: testPassword,
+      bap_auth: testPassword,
+      bap_backup: testPassword,
+      bap_migrator: testPassword,
+      bap_reporting: testPassword,
+    });
+  } finally {
+    root.release();
+  }
+
+  migratorPool = poolFor('bap_migrator', testPassword);
+  authPool = poolFor('bap_auth', testPassword);
+  apiPool = poolFor('bap_api', testPassword);
+  reportingPool = poolFor('bap_reporting', testPassword);
+  backupPool = poolFor('bap_backup', testPassword);
+  const concurrentMigratorPool = poolFor('bap_migrator', testPassword);
+
+  try {
+    initialMigrationResults = await Promise.all([
+      runMigrations(migratorPool),
+      runMigrations(concurrentMigratorPool),
+    ]);
+  } finally {
+    await concurrentMigratorPool.end();
+  }
+  await asOwner(async (client) => {
+    await client.query(`
+      insert into auth."user" (id, name, email, email_verified)
+      values ('user-1', 'Member', 'member@example.test', true),
+             ('user-2', 'Other', 'other@example.test', true)
+    `);
+    await client.query(`
+      insert into auth.organization (id, name, slug)
+      values ('org-1', 'One', 'one'), ('org-2', 'Two', 'two')
+    `);
+    await client.query(`
+      insert into auth.member (id, organization_id, user_id, role)
+      values ('member-1', 'org-1', 'user-1', 'owner'),
+             ('member-2', 'org-2', 'user-2', 'member')
+    `);
+    await client.query(`
+      create table app.tenant_test (
+        id text primary key,
+        organization_id text not null,
+        value text not null
+      )
+    `);
+    await client.query('alter table app.tenant_test enable row level security');
+    await client.query('alter table app.tenant_test force row level security');
+    await client.query(`
+      create policy tenant_test_isolation on app.tenant_test
+      using (organization_id = current_setting('bap.organization_id', true))
+      with check (organization_id = current_setting('bap.organization_id', true))
+    `);
+    await client.query('grant usage on schema app to bap_api');
+    await client.query('grant select on app.tenant_test to bap_api');
+  });
+  await rootPool.query(`
+    insert into app.tenant_test (id, organization_id, value)
+    values ('record-1', 'org-1', 'first'), ('record-2', 'org-2', 'second')
+  `);
+});
+
+afterAll(async () => {
+  await Promise.all([
+    apiPool.end(),
+    authPool.end(),
+    backupPool.end(),
+    migratorPool.end(),
+    reportingPool.end(),
+    rootPool.end(),
+  ]);
+  await container.stop();
+});
+
+describe('PostgreSQL 18 isolation', () => {
+  it('runs idempotent migrations and exposes compatibility by a narrow function', async () => {
+    const result = await runMigrations(migratorPool);
+    const compatibility = await checkMigrationCompatibility(apiPool);
+
+    expect(result.applied).toEqual([]);
+    expect(compatibility).toMatchObject({
+      compatible: true,
+      version: '20260828.0001',
+    });
+    expect(initialMigrationResults.flatMap(({ applied }) => applied)).toEqual([
+      '20260828.0001',
+    ]);
+  });
+
+  it('resolves verified membership without auth table access', async () => {
+    await expect(apiPool.query('select * from auth."user"')).rejects.toThrow();
+    await expect(
+      reportingPool.query('select * from auth.member'),
+    ).rejects.toThrow();
+    await expect(
+      resolveMembership(apiPool, {
+        organizationId: 'org-1',
+        subjectId: 'user-1',
+      }),
+    ).resolves.toEqual({ emailVerified: true, role: 'owner' });
+    await expect(
+      resolveMembership(apiPool, {
+        organizationId: 'org-2',
+        subjectId: 'user-1',
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('permits Better Auth database rate limits only to the auth role', async () => {
+    await expect(
+      authPool.query(
+        "insert into auth.rate_limit (id, key, count, last_request) values ('rate-limit-1', 'test-key', 1, 1) on conflict (key) do update set count = excluded.count, last_request = excluded.last_request",
+      ),
+    ).resolves.toBeDefined();
+    await expect(
+      authPool.query(
+        "insert into auth.rate_limit (id, key, count, last_request) values ('rate-limit-2', 'test-key', 1, 1)",
+      ),
+    ).rejects.toThrow();
+    await expect(
+      authPool.query<{ id: string; key: string }>(
+        "select id, key from auth.rate_limit where key = 'test-key'",
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ id: 'rate-limit-1', key: 'test-key' }],
+    });
+    await expect(
+      apiPool.query('select * from auth.rate_limit'),
+    ).rejects.toThrow();
+    await expect(
+      reportingPool.query('select * from auth.rate_limit'),
+    ).rejects.toThrow();
+  });
+
+  it('fails closed without tenant context and resets settings after a transaction', async () => {
+    await expect(
+      apiPool.query('select id from app.tenant_test'),
+    ).resolves.toMatchObject({ rows: [] });
+    const client = await apiPool.connect();
+
+    try {
+      const rows = await withTenantContext(
+        client,
+        { organizationId: 'org-1', userId: 'user-1' },
+        async (transaction) => {
+          const result = await transaction.query<{ id: string }>(
+            'select id from app.tenant_test order by id',
+          );
+          return result.rows;
+        },
+      );
+      expect(rows).toEqual([{ id: 'record-1' }]);
+      const otherRows = await withTenantContext(
+        client,
+        { organizationId: 'org-2', userId: 'user-2' },
+        async (transaction) => {
+          const result = await transaction.query<{ id: string }>(
+            'select id from app.tenant_test order by id',
+          );
+          return result.rows;
+        },
+      );
+      expect(otherRows).toEqual([{ id: 'record-2' }]);
+      await expect(
+        client.query('select id from app.tenant_test'),
+      ).resolves.toMatchObject({ rows: [] });
+    } finally {
+      client.release();
+    }
+  });
+
+  it('permits dump-only backup access and rejects writes, schema changes, and role changes', async () => {
+    await expect(
+      backupPool.query('select count(*) from auth."user"'),
+    ).resolves.toBeDefined();
+    await expect(
+      backupPool.query(
+        "insert into auth.organization (id, name, slug) values ('denied', 'Denied', 'denied')",
+      ),
+    ).rejects.toThrow();
+    await expect(
+      backupPool.query('create table app.denied (id text)'),
+    ).rejects.toThrow();
+    await expect(backupPool.query('set role bap_owner')).rejects.toThrow();
+  });
+
+  it('runs a full pg_dump as the backup role', async () => {
+    try {
+      const result = await container.exec(
+        [
+          'pg_dump',
+          '--format=custom',
+          '--username',
+          'bap_backup',
+          '--dbname',
+          container.getDatabase(),
+          '--file',
+          '/tmp/bap-backup-test.dump',
+          '--no-owner',
+          '--no-acl',
+        ],
+        { env: { PGPASSWORD: testPassword } },
+      );
+
+      expect(result.exitCode).toBe(0);
+    } finally {
+      await container.exec(['rm', '-f', '/tmp/bap-backup-test.dump']);
+    }
+  });
+});

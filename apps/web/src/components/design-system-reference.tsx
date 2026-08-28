@@ -15,15 +15,22 @@ import {
   carbonComponentFamilies,
   carbonThemes,
 } from '@bap/design-system/tokens';
+import { useTranslation } from 'react-i18next';
+
+import '../i18n/client';
 
 export function DesignSystemReference() {
+  const { t } = useTranslation();
+
   return (
     <main aria-labelledby="design-system-heading">
       <Grid>
         <Column lg={16} md={8} sm={4}>
           <Stack gap={7}>
             <header>
-              <Heading id="design-system-heading">Carbon design system</Heading>
+              <Heading id="design-system-heading">
+                {t('reference.title')}
+              </Heading>
               <p>
                 BAP exposes the official Carbon React, icon, and chart APIs
                 through a version-pinned workspace package.

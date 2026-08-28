@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --turbopack --port ${WEB_PORT:-${PORT:-3000}}",
     "build": "NEXT_TELEMETRY_DISABLED=1 next build",
+    "build:cli": "tsc --project tsconfig.cli.json --noEmit && node scripts/build-cli.mjs",
+    "bootstrap-owner": "node dist-cli/cli/bootstrap-owner.js",
+    "create-synthetic-account": "node dist-cli/cli/create-synthetic-account.js",
     "start": "NEXT_TELEMETRY_DISABLED=1 next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "next typegen && tsc --noEmit",
@@ -14,11 +17,19 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@bap/db": "workspace:*",
     "@bap/design-system": "workspace:*",
+    "@prometheus-io/client": "catalog:",
+    "better-auth": "catalog:",
+    "i18next": "catalog:",
     "next": "catalog:",
+    "pg": "catalog:",
+    "pino": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "react-is": "catalog:"
+    "react-i18next": "catalog:",
+    "react-is": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@bap/eslint-config": "workspace:*",
@@ -26,10 +37,12 @@
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
     "@types/node": "catalog:",
+    "@types/pg": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "@vitest/coverage-v8": "catalog:",
+    "esbuild": "catalog:",
     "jsdom": "catalog:",
     "sass": "catalog:",
     "typescript": "catalog:",

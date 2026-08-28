@@ -3,15 +3,18 @@
 ## Validate models
 
 ```sh
-POSTGRES_PASSWORD=local-validation-only pnpm compose:config
-POSTGRES_PASSWORD=local-validation-only pnpm compose:config:production
+pnpm secrets:local
+pnpm compose:config
+pnpm compose:config:production
+pnpm compose:verify
 ```
 
-## Local production-parity stack
+## Local Compose stack
 
 ```sh
 cp config/compose.environment.example .env
-docker compose --env-file .env -f compose.yaml -f compose.development.yaml up --build
+pnpm secrets:local
+BAP_PUBLIC_HOST=http://localhost docker compose --env-file .env -f compose.yaml -f compose.development.yaml up --build
 ```
 
 ## Production model
@@ -20,10 +23,14 @@ docker compose --env-file .env -f compose.yaml -f compose.development.yaml up --
 docker compose --env-file /path/to/runtime.environment -f compose.yaml -f compose.production.yaml up -d --build
 ```
 
-The production model binds application ports to loopback by default and does not
-publish PostgreSQL. A reverse proxy, TLS, backup policy, secret provider, and
-deployment automation are phase 4 decisions. Do not expose this phase 1 model
-directly to the public internet.
+The delivered topology is Caddy on the public edge, with web on the internal
+application and data networks, and both Nest APIs on internal application and
+data networks. PostgreSQL joins only the internal data network. Caddy blocks
+`/ready` and `/metrics` before proxying and is the only published application
+entry point. Dedicated `operations-egress` access is limited to one-shot restic
+clients and is unrestricted outbound connectivity while they run, not a
+destination allowlist. Production Caddy enables TLS when the owner supplies a
+valid public host, origin, DNS, and ACME reachability.
 
 Application images use Node.js 24.20.0, frozen pnpm dependencies, non-root
 runtime users, dropped Linux capabilities, and health checks. The read-only web
@@ -33,3 +40,15 @@ image path for version 18 and newer.
 
 Use `docker compose stop` for routine shutdown. Never add `down -v` to a normal
 workflow because it removes the database volume.
+
+## Delivered and deferred operations
+
+Delivered: pinned images, Caddy reverse proxy, secret-file mounts, database role
+bootstrap and migrations, health checks, private readiness and metrics routes,
+and an isolated restic backup and restore proof.
+
+Owner-dependent: production secret distribution, DNS and TLS issuance, off-host
+restic storage and its backend-specific credentials and trust files, recurring
+production backup scheduling and retention, monitoring collection and alerts,
+deployment automation, RPO/RTO commitments, and recovery ownership. These
+require a real operating environment and are not configured by this repository.

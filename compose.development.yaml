@@ -1,15 +1,11 @@
 services:
+  caddy:
+    ports:
+      - '127.0.0.1:${WEB_PORT:-3000}:80'
+
   web:
-    ports:
-      - '127.0.0.1:${WEB_PORT:-3000}:3000'
-
-  api:
-    ports:
-      - '127.0.0.1:${API_PORT:-3001}:3001'
-
-  reporting-api:
-    ports:
-      - '127.0.0.1:${REPORTING_API_PORT:-3002}:3002'
+    environment:
+      BAP_PUBLIC_ORIGIN: http://localhost:${WEB_PORT:-3000}
 
   database:
     ports:

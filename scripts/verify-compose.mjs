@@ -1,0 +1,188 @@
+import { readFileSync } from 'node:fs';
+
+const chunks = [];
+
+for await (const chunk of process.stdin) {
+  chunks.push(chunk);
+}
+
+const configuration = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+const mode = process.argv[2];
+const backupEntrypoint = readFileSync(
+  new URL('./backup-entrypoint.sh', import.meta.url),
+  'utf8',
+);
+
+function invariant(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+function names(values = []) {
+  return values.map((value) => value.source).sort();
+}
+
+function networkNames(service) {
+  return Object.keys(configuration.services[service]?.networks ?? {}).sort();
+}
+
+function expectSecrets(service, expected) {
+  invariant(
+    JSON.stringify(names(configuration.services[service]?.secrets)) ===
+      JSON.stringify([...expected].sort()),
+    `Unexpected credentials for ${service}.`,
+  );
+}
+
+invariant(
+  !/(^|\s)(eval|source)\s/m.test(backupEntrypoint) &&
+    !backupEntrypoint.includes('RESTIC_BACKEND_CREDENTIALS'),
+  'The backup entrypoint must not execute generic credential input.',
+);
+
+for (const service of ['web', 'api', 'reporting-api']) {
+  invariant(
+    configuration.services[service].healthcheck.test
+      .join(' ')
+      .includes('/ready'),
+    `${service} must use readiness health checks.`,
+  );
+}
+
+invariant(
+  networkNames('database').join() === 'data',
+  'PostgreSQL must use only the data network.',
+);
+invariant(
+  networkNames('caddy').join() === 'app,edge',
+  'Caddy must use only edge and app networks.',
+);
+invariant(
+  configuration.services.database.image.includes(
+    'sha256:1c59e2c3c818eaa0f0628f695b36e7c9e362d6b219b36a54a32df645cbd7e1af',
+  ),
+  'PostgreSQL image must use the accepted digest.',
+);
+invariant(
+  configuration.services.caddy.image.includes(
+    'sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648',
+  ),
+  'Caddy image must use the accepted digest.',
+);
+
+expectSecrets('database', ['postgres_admin_password']);
+expectSecrets('web', ['bap_auth_password', 'better_auth_secret']);
+expectSecrets('api', ['bap_api_password']);
+expectSecrets('reporting-api', ['bap_reporting_password']);
+expectSecrets('migrator', ['bap_migrator_password']);
+expectSecrets('role-bootstrap', [
+  'bap_api_password',
+  'bap_auth_password',
+  'bap_backup_password',
+  'bap_migrator_password',
+  'bap_reporting_password',
+  'postgres_admin_password',
+]);
+
+const published = Object.entries(configuration.services)
+  .filter(([, service]) => (service.ports?.length ?? 0) > 0)
+  .map(([name]) => name)
+  .sort();
+
+if (mode === 'production') {
+  invariant(
+    published.join() === 'caddy',
+    'Only Caddy may publish production ports.',
+  );
+  invariant(
+    configuration.networks.app.internal,
+    'The app network must be internal.',
+  );
+  invariant(
+    configuration.networks.data.internal,
+    'The data network must be internal.',
+  );
+}
+
+if (mode === 'development') {
+  invariant(
+    published.join() === 'caddy,database',
+    'Development may publish only Caddy and PostgreSQL.',
+  );
+}
+
+if (mode === 'operations') {
+  expectSecrets('backup', [
+    'bap_backup_password',
+    'restic_password',
+    'restic_repository',
+  ]);
+  expectSecrets('restore', [
+    'bap_migrator_password',
+    'restic_password',
+    'restic_repository',
+  ]);
+  expectSecrets('backup-check', ['restic_password', 'restic_repository']);
+  invariant(
+    configuration.networks.data.internal === true,
+    'The operations model must retain the internal data network.',
+  );
+  invariant(
+    configuration.networks['operations-egress'].internal !== true,
+    'The operations egress network must permit outbound access.',
+  );
+  invariant(
+    networkNames('backup').join() === 'data,operations-egress',
+    'Backup must use only data and operations egress.',
+  );
+  invariant(
+    networkNames('restore').join() === 'data,operations-egress',
+    'Restore must use only data and operations egress.',
+  );
+  for (const service of ['backup-check', 'backup-init', 'backup-prune']) {
+    invariant(
+      networkNames(service).join() === 'operations-egress',
+      `${service} must use only operations egress.`,
+    );
+  }
+  for (const service of ['restore-database', 'restore-role-bootstrap']) {
+    invariant(
+      networkNames(service).join() === 'data',
+      `${service} must use only the data network.`,
+    );
+  }
+  const operationsMembers = Object.entries(configuration.services)
+    .filter(([, service]) =>
+      Object.hasOwn(service.networks ?? {}, 'operations-egress'),
+    )
+    .map(([name]) => name)
+    .sort();
+  invariant(
+    operationsMembers.join() ===
+      'backup,backup-check,backup-init,backup-prune,restore',
+    `Unexpected operations egress members: ${operationsMembers.join(',')}.`,
+  );
+  for (const service of operationsMembers) {
+    invariant(
+      (configuration.services[service].ports?.length ?? 0) === 0,
+      `${service} must not publish ports.`,
+    );
+  }
+}
+
+if (mode === 'bootstrap') {
+  expectSecrets('bootstrap-owner', ['bap_auth_password', 'better_auth_secret']);
+  invariant(
+    Object.keys(configuration.services['bootstrap-owner'].networks).join() ===
+      'data',
+    'Owner bootstrap must use only the data network.',
+  );
+  invariant(
+    configuration.services['bootstrap-owner'].stdin_open === true &&
+      configuration.services['bootstrap-owner'].tty === true,
+    'Owner bootstrap must require an interactive terminal.',
+  );
+}
+
+process.stdout.write(`Compose ${mode} contract verified.\n`);

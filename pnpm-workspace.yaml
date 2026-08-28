@@ -8,7 +8,11 @@ catalog:
   '@nestjs/common': 12.0.1
   '@nestjs/core': 12.0.1
   '@nestjs/platform-express': 12.0.1
+  '@nestjs/swagger': 12.0.1
   '@nestjs/testing': 12.0.1
+  '@playwright/test': 1.62.1
+  '@prometheus-io/client': 0.16.0
+  '@testcontainers/postgresql': 12.1.0
   '@carbon/charts-react': 1.27.18
   '@carbon/colors': 11.57.0
   '@carbon/grid': 11.61.0
@@ -25,22 +29,33 @@ catalog:
   '@testing-library/jest-dom': 7.0.1
   '@testing-library/react': 16.3.3
   '@types/node': 24.13.3
+  '@types/pg': 8.23.1
   '@types/react': 19.2.18
   '@types/react-dom': 19.2.5
   '@types/supertest': 7.2.1
   '@vitejs/plugin-react': 6.1.1
   '@vitest/coverage-v8': 4.1.11
+  better-auth: 1.7.2
+  drizzle-kit: 0.31.10
+  drizzle-orm: 0.45.2
+  esbuild: 0.28.2
   eslint: 9.39.5
   eslint-config-next: 16.3.3
   eslint-config-prettier: 10.1.8
   eslint-plugin-turbo: 2.10.12
   globals: 17.11.0
+  helmet: 8.3.0
+  i18next: 26.4.0
   jsdom: 30.0.1
+  jose: 6.2.10
   next: 16.3.3
+  pg: 8.23.0
+  pino: 10.3.1
   prettier: 3.9.6
   react: 19.2.8
   react-dom: 19.2.8
   react-is: 19.2.8
+  react-i18next: 17.0.12
   reflect-metadata: 0.2.2
   rxjs: 7.8.2
   sass: 1.103.1
@@ -78,9 +93,13 @@ allowBuilds:
   '@ibm/plex-serif': false
   '@nestjs/core': true
   '@parcel/watcher': false
+  '@scarf/scarf': false
   '@swc/core': true
+  cpu-features: false
   esbuild: true
+  protobufjs: false
   sharp: true
+  ssh2: false
   unrs-resolver: true
 catalogMode: strict
 catalogPrune: true
@@ -104,5 +123,6 @@ minimumReleaseAgeExclude:
   - '@carbon/type@11.66.0'
   - '@carbon/utilities@0.25.0'
   - '@nestjs/cli@12.0.0'
+  - '@nestjs/swagger@12.0.1'
   - '@testing-library/react@16.3.3'
   - '@vitejs/plugin-react@6.1.1'

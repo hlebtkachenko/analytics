@@ -30,3 +30,36 @@ blocks those scripts through its pnpm build policy. Repository build scripts and
 Docker stages additionally set `IBM_TELEMETRY_DISABLED=true`.
 
 - Source: <https://github.com/ibm-telemetry/telemetry-js>
+
+## SaaS foundation libraries
+
+The Phase 5 foundation uses the following direct open-source dependencies:
+
+- Better Auth, JOSE, node-postgres, Pino, Helmet, i18next, react-i18next,
+  Drizzle Kit, and esbuild under their MIT licenses.
+- Drizzle ORM, the Prometheus JavaScript client, Swagger UI, and Playwright
+  under Apache License 2.0.
+- NestJS Swagger under the MIT license.
+
+Copyright notices and license texts remain in each installed package. Important
+upstream notices include Better Auth copyright 2024-present Bereket Engida, JOSE
+copyright 2018 Filip Skokan, node-postgres copyright 2010-2021 Brian Carlson,
+Pino copyright 2016-2025 Matteo Collina, David Mark Clements and its
+contributors, Helmet copyright 2012-2026 Evan Hahn and Adam Baldwin, and i18next
+copyright 2011-present i18next.
+
+- Better Auth: <https://github.com/better-auth/better-auth>
+- Drizzle: <https://github.com/drizzle-team/drizzle-orm>
+- JOSE: <https://github.com/panva/jose>
+- Prometheus JavaScript client: <https://github.com/prometheus/client_js>
+- License: [Apache License 2.0](licenses/APACHE-2.0.txt)
+
+## Container foundation
+
+Caddy is licensed under Apache License 2.0. PostgreSQL is licensed under the
+PostgreSQL License. Restic is licensed under the BSD 2-Clause License.
+
+- Caddy: <https://github.com/caddyserver/caddy>
+- PostgreSQL: <https://www.postgresql.org/about/licence/>
+- Restic: <https://github.com/restic/restic>
+- Restic license: [BSD 2-Clause](licenses/RESTIC-BSD-2-CLAUSE.txt)

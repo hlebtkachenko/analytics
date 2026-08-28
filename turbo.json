@@ -12,6 +12,7 @@
     },
     "dev": {
       "cache": false,
+      "dependsOn": ["^build"],
       "env": ["API_PORT", "HOST", "PORT", "REPORTING_API_PORT", "WEB_PORT"],
       "persistent": true
     },
