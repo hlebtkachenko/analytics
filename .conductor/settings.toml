@@ -1,0 +1,24 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+setup = "corepack pnpm install --frozen-lockfile"
+run_mode = "concurrent"
+
+[scripts.run.dev]
+available_in = ["local"]
+command = "WEB_PORT=$CONDUCTOR_PORT API_PORT=$(($CONDUCTOR_PORT + 1)) REPORTING_API_PORT=$(($CONDUCTOR_PORT + 2)) pnpm dev"
+default = true
+icon = "play"
+
+[scripts.run.verify]
+command = "pnpm check"
+icon = "circle-check"
+
+[scripts.run.test-watch]
+command = "pnpm test:watch"
+icon = "test-tube"
+
+[scripts.run.stack]
+available_in = ["local"]
+command = "COMPOSE_PROJECT_NAME=bap-$CONDUCTOR_WORKSPACE_ID BIND_ADDRESS=127.0.0.1 WEB_PORT=$CONDUCTOR_PORT API_PORT=$(($CONDUCTOR_PORT + 1)) REPORTING_API_PORT=$(($CONDUCTOR_PORT + 2)) POSTGRES_PORT=$(($CONDUCTOR_PORT + 3)) POSTGRES_PASSWORD=local-development-only docker compose -f compose.yaml -f compose.development.yaml up --build"
+icon = "container"

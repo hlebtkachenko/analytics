@@ -1,0 +1,5 @@
+{
+  "extends": "@bap/typescript-config/nestjs.json",
+  "include": ["src/**/*.ts", "vitest.config.ts"],
+  "exclude": ["dist", "node_modules"]
+}

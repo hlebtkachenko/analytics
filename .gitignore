@@ -27,6 +27,8 @@ credentials.json
 *.sqlite
 *.sqlite3
 *.db
+*.dump
+*.backup
 data/
 dumps/
 *.csv
