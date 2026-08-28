@@ -1,0 +1,143 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '23 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group:
+    ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: 'true'
+  IBM_TELEMETRY_DISABLED: 'true'
+  NEXT_TELEMETRY_DISABLED: '1'
+  NO_UPDATE_NOTIFIER: '1'
+  TURBO_TELEMETRY_DISABLED: '1'
+
+jobs:
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan for secrets
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITLEAKS_ENABLE_COMMENTS: 'false'
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
+          GITLEAKS_VERSION: 8.30.1
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-scopes: runtime,development
+          fail-on-severity: high
+          show-openssf-scorecard: false
+          show-patched-versions: true
+
+  package-audit:
+    name: Package audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Detect monorepo
+        id: detect
+        shell: bash
+        run: |
+          if [[ -f package.json && -f pnpm-lock.yaml && -f pnpm-workspace.yaml ]]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            echo 'Monorepo files are not present yet.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Set up pnpm and Node.js
+        if: steps.detect.outputs.ready == 'true'
+        uses: pnpm/setup@84cb39b217b10273981911c288cd62326dc7c6d2 # v2.0.2
+        with:
+          cache: true
+          install: false
+          runtime: node@24.20.0
+          version: 11.24.0
+
+      - name: Verify package signatures
+        if: steps.detect.outputs.ready == 'true'
+        run: pnpm audit signatures
+
+      - name: Install dependencies
+        if: steps.detect.outputs.ready == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit high-severity advisories
+        if: steps.detect.outputs.ready == 'true'
+        run: pnpm audit --audit-level high
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      security-events: write # Upload CodeQL results.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Detect source workspace
+        id: detect
+        shell: bash
+        run: |
+          if [[ -f package.json ]]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            echo 'Source workspace is not present yet.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Initialize CodeQL
+        if: steps.detect.outputs.ready == 'true'
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          build-mode: none
+          languages: javascript-typescript
+
+      - name: Analyze
+        if: steps.detect.outputs.ready == 'true'
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
