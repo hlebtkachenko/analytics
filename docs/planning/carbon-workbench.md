@@ -10,6 +10,13 @@ workbench without fetching documentation from the internet.
 The BAP package remains a facade over official Carbon packages. It does not fork
 Carbon source, copy the Carbon website, or add speculative product UI.
 
+## Status
+
+Delivered to `main` on 2026-08-29 through PR #3. PR #4 supplied the narrow
+post-merge dependency and accessibility-fixture corrections. At this delivery
+checkpoint, required CI and security workflows pass, the public dependency alert
+is closed, and no delivery pull request remains open.
+
 ## Pinned evidence
 
 | Source          | Pin                                                                | Closed-world input                                                                   |
@@ -123,14 +130,14 @@ pnpm design-system:offline:check
 
 ## Progress ledger
 
-| Workstream                 | Completion evidence                                                                         |
-| -------------------------- | ------------------------------------------------------------------------------------------- |
-| Research and source freeze | Three source pins and closed-world counts recorded above                                    |
-| Offline handbook           | Eleven chapters plus source-coverage documents exist and relative links validate            |
-| Package catalog            | Generated manifests classify all installed exports and token surfaces                       |
-| Storybook workbench        | Static build exposes all generated entries, explorers, patterns, and handbook pages         |
-| Contract tests             | Catalog check, facade parity, story coverage, offline test, and accessibility checks pass   |
-| Delivery                   | Pending final review, branch push, and green remote checks; the pull request stays unmerged |
+| Workstream                 | Completion evidence                                                                       |
+| -------------------------- | ----------------------------------------------------------------------------------------- |
+| Research and source freeze | Three source pins and closed-world counts recorded above                                  |
+| Offline handbook           | Eleven chapters plus source-coverage documents exist and relative links validate          |
+| Package catalog            | Generated manifests classify all installed exports and token surfaces                     |
+| Storybook workbench        | Static build exposes all generated entries, explorers, patterns, and handbook pages       |
+| Contract tests             | Catalog check, facade parity, story coverage, offline test, and accessibility checks pass |
+| Delivery                   | Complete on `main`; PRs #3 and #4 merged after required CI and security checks passed     |
 
 ## Acceptance
 
