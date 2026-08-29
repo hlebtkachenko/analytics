@@ -606,8 +606,11 @@ function headingIds(source) {
     [...source.matchAll(/<a id="([^"]+)"><\/a>/g)].map((match) => match[1]),
   );
   for (const match of source.matchAll(/^#{1,6}\s+(.+)$/gm)) {
-    const heading = match[1]
-      .replace(/<[^>]+>/g, '')
+    const rawHeading = match[1];
+    if (/[<>]/.test(rawHeading)) {
+      throw new Error('HTML is not allowed in knowledge-base headings.');
+    }
+    const heading = rawHeading
       .replace(/[`*_]/g, '')
       .replace(/\s+#+$/, '')
       .trim()
