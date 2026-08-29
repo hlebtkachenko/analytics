@@ -2,15 +2,43 @@
 
 ## Carbon Design System
 
-`@carbon/react`, `@carbon/icons-react`, `@carbon/charts-react`, and their Carbon
-dependencies are licensed under Apache License 2.0.
+`@carbon/react`, `@carbon/icons-react`, `@carbon/pictograms-react`,
+`@carbon/charts-react`, and their Carbon dependencies are licensed under Apache
+License 2.0. BAP's original offline guidance is source-attributed to the Carbon
+website repository, which is also licensed under Apache License 2.0.
 
 - Carbon copyright notice: Copyright 2015 IBM Corp.
 - Carbon Charts copyright notice: Copyright 2018 IBM.
 
 - Source: <https://github.com/carbon-design-system/carbon>
+- Website source: <https://github.com/carbon-design-system/carbon-website>
 - Charts source: <https://github.com/carbon-design-system/carbon-charts>
 - License: [Apache License 2.0](licenses/APACHE-2.0.txt)
+
+Carbon, IBM, and IBM Plex are trademarks of IBM. BAP is not affiliated with,
+endorsed by, or maintained by IBM. Carbon source code and website content are
+not redistributed by BAP; local guidance and fixtures are modified,
+source-attributed summaries for the pinned public APIs.
+
+## Design-system workbench
+
+The local workbench uses Storybook, TanStack Virtual, and MiniSearch. Storybook
+provides the interactive component catalog, TanStack Virtual keeps complete icon
+and pictogram explorers bounded, and MiniSearch indexes local knowledge content.
+All three are licensed under the MIT license. BAP disables Storybook telemetry
+in configuration and every Storybook execution environment.
+
+- Storybook: <https://github.com/storybookjs/storybook>
+- TanStack Virtual: <https://github.com/TanStack/virtual>
+- MiniSearch: <https://github.com/lucaong/minisearch>
+- Storybook license: [MIT](licenses/STORYBOOK-MIT.txt)
+- TanStack Virtual license: [MIT](licenses/TANSTACK-VIRTUAL-MIT.txt)
+- MiniSearch license: [MIT](licenses/MINISEARCH-MIT.txt)
+
+Cube UI Kit informed only the workbench information architecture. No Cube UI Kit
+source, documentation, or visual implementation is included.
+
+- Cube UI Kit: <https://github.com/cube-js/cube-ui-kit>
 
 ## IBM Plex
 

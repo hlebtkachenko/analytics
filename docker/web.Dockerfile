@@ -12,6 +12,7 @@ FROM base AS dependencies
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY apps/web/package.json apps/web/package.json
 COPY apps/api/package.json apps/api/package.json
+COPY apps/design-system-workbench/package.json apps/design-system-workbench/package.json
 COPY apps/reporting-api/package.json apps/reporting-api/package.json
 COPY packages/eslint-config/package.json packages/eslint-config/package.json
 COPY packages/typescript-config/package.json packages/typescript-config/package.json

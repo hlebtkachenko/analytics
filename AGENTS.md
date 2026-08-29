@@ -46,6 +46,14 @@ financial, operational, or development data.
 ## Commands
 
 - `pnpm dev`: run all applications in watch mode
+- `pnpm design-system:dev`: run the local Carbon workbench
+- `pnpm design-system:build`: build the static Carbon workbench
+- `pnpm design-system:browser:install`: install its local Chromium runtime
+- `pnpm design-system:catalog:check`: verify pinned Carbon coverage artifacts
+- `pnpm design-system:offline:check`: verify the static workbench without
+  network access
+- `pnpm design-system:test:browser`: run workbench browser and accessibility
+  checks
 - `pnpm check`: run formatting, linting, type checking, tests, and builds
 - `pnpm test:watch`: run workspace tests in watch mode
 - `pnpm test:integration`: verify PostgreSQL roles, migrations, and RLS

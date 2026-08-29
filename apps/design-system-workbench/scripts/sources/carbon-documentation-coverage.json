@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "pinnedSources": {
+    "carbonCharts": {
+      "commit": "abd30134f12462c9215a823543fdda56779719e6",
+      "tag": "v1.27.18"
+    },
+    "carbonReact": {
+      "commit": "7518c84ffd00f22434fe19d83119692c12fccb2f",
+      "tag": "v11.115.0"
+    },
+    "carbonWebsite": {
+      "commit": "df723531e56036f90bac8b1bbec7a0414a285063"
+    }
+  },
+  "records": {
+    "reactMdx": {
+      "count": 198,
+      "recordDigest": "e8cbddbf7dfec0b45c701af062809e09d57c0f59bfcbf157e0cc3ac403c20a71",
+      "sourcePathDigest": "a854ae13a97c43113300a6afb1145a8ed89586b0e80b66a8ce967223c1d0c7c8"
+    },
+    "reactStoryFiles": {
+      "count": 147,
+      "recordDigest": "d7b5d23e03f9ccea849771d7b932fd80a23fec6663fb7940baba7870736be05a",
+      "sourcePathDigest": "f7deffe7b3abd02b9676e41a7c94df9505352cd1e2ae0c63660abab88494f9dc"
+    },
+    "reactStoryNames": {
+      "count": 547,
+      "recordDigest": "ad306913d4851e3d69f5021713734030b3e47741d86a8434d7837e4822a98f35",
+      "sourcePathDigest": "9dba8773d19c0677a2b09157c972e779c0fa594aa533a49d5c625b79ad7b16d3"
+    },
+    "websiteMdx": {
+      "count": 317,
+      "recordDigest": "711924b6c17d50ca197b196a313da280cb6060b5e36489213e5aa581024a277e",
+      "sourcePathDigest": "cff6e2953842ccb9aaac9efe87c3004000d43f647cc1a4756823f98aad1d6ffc"
+    }
+  }
+}

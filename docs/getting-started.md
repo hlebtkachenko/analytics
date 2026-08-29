@@ -15,6 +15,13 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
+Install the workbench browser once when you need its Storybook browser,
+accessibility, or offline-static checks:
+
+```sh
+pnpm design-system:browser:install
+```
+
 ```sh
 cp config/compose.environment.example .env
 pnpm secrets:local

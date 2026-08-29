@@ -10,6 +10,7 @@ intentionally developed separately.
 - `apps/web`: Next.js App Router web application
 - `apps/api`: NestJS application API
 - `apps/reporting-api`: NestJS reporting API
+- `apps/design-system-workbench`: local and static Carbon component workbench
 - `packages/design-system`: Carbon components, tokens, themes, charts, and fonts
 - `packages/db`: reviewed migrations, PostgreSQL roles, pools, and tenant
   context
@@ -41,3 +42,10 @@ database roles and migrations exist.
 Run `pnpm check`, `pnpm test:integration`, and `pnpm compose:verify` before
 shipping foundation changes. See [docs/README.md](docs/README.md) for setup,
 architecture, testing, deployment, configuration, and security documentation.
+
+Run `pnpm design-system:dev` to inspect the complete local Carbon workbench. Use
+`pnpm design-system:catalog:check` to verify that its generated API and
+documentation coverage still matches the pinned Carbon release. Run
+`pnpm design-system:browser:install` once before the browser suite, then use
+`pnpm design-system:test:browser` and `pnpm design-system:offline:check` for the
+executable accessibility and no-network gates.

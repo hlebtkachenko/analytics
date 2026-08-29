@@ -25,6 +25,26 @@ The suite proves:
 Coverage is available for local investigation but is not a substitute for
 behavioral assertions.
 
+## Design-system verification
+
+```sh
+pnpm design-system:catalog:check
+pnpm design-system:test
+pnpm design-system:test:browser
+pnpm design-system:offline:check
+```
+
+The catalog check compares the installed Carbon exports, declarations, tokens,
+Sass API, fixtures, and closed-world source mappings. Browser tests execute
+Storybook stories with accessibility enforcement. The offline check serves the
+static output, rejects remote requests, and verifies the local component, chart,
+pattern, visual-asset, and handbook surfaces.
+
+The browser suite includes seven deterministic visual contracts with a 0.5%
+pixel mismatch cap and a 0.2 pixelmatch threshold. Chromium baselines are
+platform-specific: `chromium-darwin` supports local development and
+`chromium-linux` is refreshed in Playwright 1.62.1 Noble for GitHub Actions.
+
 ## Integration and operational proof
 
 ```sh

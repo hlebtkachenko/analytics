@@ -10,6 +10,10 @@
     "@bap/design-system#build": {
       "outputs": []
     },
+    "@bap/design-system-workbench#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["storybook-static/**"]
+    },
     "dev": {
       "cache": false,
       "dependsOn": ["^build"],

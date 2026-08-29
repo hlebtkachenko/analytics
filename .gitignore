@@ -10,6 +10,7 @@ dist/
 dist-cli/
 build/
 out/
+storybook-static/
 .next/
 .turbo/
 *.tsbuildinfo
@@ -51,6 +52,7 @@ coverage/
 .nyc_output/
 playwright-report/
 test-results/
+/apps/design-system-workbench/.vitest-attachments/
 
 # Caches
 .cache/

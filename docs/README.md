@@ -11,6 +11,8 @@
 - [Phase 5 SaaS foundation report](reports/phase-5-saas-foundation.md)
 - [Foundation research](foundation-research.md)
 - [Carbon integration](design-system/carbon.md)
+- [Carbon offline knowledge base](design-system/knowledge-base/README.md)
+- [Carbon workbench plan and verification](planning/carbon-workbench.md)
 - [Carbon patterns](design-system/patterns.md)
 - [Carbon accessibility](design-system/accessibility.md)
 - [Architecture](../ARCHITECTURE.md)

@@ -1,9 +1,11 @@
 # Carbon Accessibility
 
-Carbon components follow the IBM accessibility checklist, which aligns with WCAG
-AA, Section 508, and European standards. This does not make a product
-automatically accessible: BAP code must preserve semantic structure, labels,
-focus order, and equivalent information.
+The complete offline guide is
+[Accessibility, internationalization, and content](knowledge-base/10-accessibility-i18n-content.md).
+The adapted
+[component definition of done](knowledge-base/09-component-definition-of-done.md)
+defines the design, code, test, documentation, and assistive-technology release
+gate. This page remains the compact repository contract.
 
 ## Required implementation rules
 
@@ -29,10 +31,11 @@ equivalent is mandatory.
 
 ## Verification
 
-The design-system tests verify theme synchronization, the chart-table fallback,
-and pinned export inventories. The web reference page verifies the client facade
-under Next App Router. Before merging product UI, add focused keyboard,
-screen-reader, and axe assertions for the actual interaction.
+The design-system checks verify theme synchronization, the chart-table fallback,
+mode-specific facade parity, generated inventories, source coverage, and the
+static workbench. Before merging product UI, add focused keyboard, VoiceOver,
+axe, localization, zoom, and reduced-motion assertions for the actual
+interaction.
 
 ## Sources
 

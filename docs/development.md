@@ -17,6 +17,29 @@ pnpm build
 `pnpm check` is the complete local gate. A second unchanged build should use
 Turborepo cache entries.
 
+## Carbon workbench
+
+Use the local Storybook workbench to inspect the complete pinned Carbon Core
+surface and its offline handbook:
+
+```sh
+pnpm design-system:dev
+pnpm design-system:catalog:check
+pnpm design-system:build
+```
+
+Install the pinned local Chromium runtime once before running browser and
+accessibility checks:
+
+```sh
+pnpm design-system:browser:install
+pnpm design-system:test:browser
+pnpm design-system:offline:check
+```
+
+The generated catalog, component entries, and source mappings must be refreshed
+in the same change as a Carbon dependency upgrade.
+
 ## Local runtimes
 
 `pnpm dev` runs workspace development commands. It is suitable for UI and

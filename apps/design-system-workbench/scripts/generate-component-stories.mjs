@@ -1,0 +1,1273 @@
+import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { relative, resolve } from 'node:path';
+import { format, resolveConfig } from 'prettier';
+
+const appRoot = resolve(import.meta.dirname, '..');
+const workspaceRoot = resolve(appRoot, '../..');
+const outputDirectory = resolve(appRoot, 'src/components/generated');
+const catalogPath = resolve(
+  workspaceRoot,
+  'packages/design-system/src/catalog.generated.json',
+);
+const documentationCoveragePath = resolve(
+  workspaceRoot,
+  'docs/design-system/knowledge-base/coverage-react-stories.md',
+);
+const generatedJunkDirectory = resolve(
+  workspaceRoot,
+  '_junk/design-system-generated',
+);
+const checkMode = process.argv.includes('--check');
+const checkFailures = [];
+
+async function emitGeneratedFile(path, content) {
+  if (!checkMode) return writeIfChanged(path, content);
+  try {
+    if ((await readFile(path, 'utf8')) !== content) {
+      checkFailures.push(`${relative(appRoot, path)} is stale`);
+    }
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      checkFailures.push(`${relative(appRoot, path)} is missing`);
+      return;
+    }
+    throw error;
+  }
+}
+
+async function writeIfChanged(path, content) {
+  try {
+    if ((await readFile(path, 'utf8')) === content) return;
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !('code' in error) ||
+      error.code !== 'ENOENT'
+    ) {
+      throw error;
+    }
+  }
+  await writeFile(path, content);
+}
+
+let archiveRunDirectory;
+
+async function createArchiveRunDirectory() {
+  await mkdir(generatedJunkDirectory, { recursive: true });
+  let attempt = 0;
+  while (true) {
+    const suffix = attempt === 0 ? '' : `-${attempt}`;
+    const candidate = resolve(
+      generatedJunkDirectory,
+      `component-stories-${Date.now()}-${process.pid}${suffix}`,
+    );
+    try {
+      await mkdir(candidate);
+      return candidate;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        'code' in error &&
+        error.code === 'EEXIST'
+      ) {
+        attempt += 1;
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+async function unusedArchivePath(filename) {
+  archiveRunDirectory ??= await createArchiveRunDirectory();
+  return resolve(archiveRunDirectory, filename);
+}
+
+async function moveStaleGeneratedStories(expectedFilenames) {
+  let files;
+  try {
+    files = await readdir(outputDirectory, { withFileTypes: true });
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      if (checkMode) checkFailures.push('src/components/generated is missing');
+      return;
+    }
+    throw error;
+  }
+  for (const file of files) {
+    if (
+      !file.isFile() ||
+      !file.name.endsWith('.stories.tsx') ||
+      expectedFilenames.has(file.name)
+    ) {
+      continue;
+    }
+    if (checkMode) {
+      checkFailures.push(`src/components/generated/${file.name} is stale`);
+      continue;
+    }
+    await rename(
+      resolve(outputDirectory, file.name),
+      await unusedArchivePath(file.name),
+    );
+  }
+}
+
+function storyFileName(name) {
+  return `${name.replaceAll('.', '__').replace(/[^a-zA-Z0-9_]/g, '_')}.stories.tsx`;
+}
+
+async function formatSource(source, filepath) {
+  return format(source, { ...(await resolveConfig(filepath)), filepath });
+}
+
+function argTypeFor(property) {
+  const type = property.type ?? 'unknown';
+  const table = { type: { summary: type } };
+  const description = property.name.startsWith('on')
+    ? 'Event callback. Configure this through an interaction or fixture.'
+    : `Public prop: ${type}`;
+  if (property.name.startsWith('on')) {
+    return { action: property.name, control: false, description, table };
+  }
+  if (property.values?.length) {
+    const allBooleans = property.values.every(
+      (value) => typeof value === 'boolean',
+    );
+    return {
+      control: {
+        type: allBooleans
+          ? 'boolean'
+          : property.values.length <= 3
+            ? 'radio'
+            : 'select',
+      },
+      description,
+      options: property.values,
+      table,
+    };
+  }
+  if (type.includes('boolean')) {
+    return { control: { type: 'boolean' }, description, table };
+  }
+  if (type.includes('number')) {
+    return { control: { type: 'number' }, description, table };
+  }
+  if (type.includes('string')) {
+    return { control: { type: 'text' }, description, table };
+  }
+  if (/\[\]|Record|object/.test(type)) {
+    return { control: { type: 'object' }, description, table };
+  }
+  return { control: false, description, table };
+}
+
+function argTypesSource(properties) {
+  return Object.fromEntries(
+    properties.map((property) => [property.name, argTypeFor(property)]),
+  );
+}
+
+function storySource(name, status, properties) {
+  const category = status === 'stable' ? 'Components' : `Components/${status}`;
+  const value = JSON.stringify(name);
+  const argTypes = JSON.stringify(argTypesSource(properties), null, 2);
+  return `// Generated by scripts/generate-component-stories.mjs.\nimport type { Meta, StoryObj } from '@storybook/react-vite';\n\nimport { componentStory } from '../component-registry.js';\n\nconst name = ${value};\nconst story = componentStory(name);\nconst meta = {\n  argTypes: ${argTypes},\n  component: story.meta.component!,\n  parameters: story.meta.parameters ?? {},\n  tags: ['autodocs', ${JSON.stringify(status)}],\n  title: ${JSON.stringify(`${category}/${name}`)},\n} satisfies Meta;\n\nexport default meta;\ntype Story = StoryObj<typeof meta>;\nexport const Default: Story = story.Default;\nexport const Playground: Story = story.Playground;\nexport const Variants: Story = story.Variants;\nexport const States: Story = story.States;\nexport const Controlled: Story = story.Controlled;\nexport const Responsive: Story = story.Responsive;\n`;
+}
+
+function nonRenderableReason(entry) {
+  if (entry.typeOnly) return 'Type-only declaration with no runtime value.';
+  if (entry.runtimeType === 'object')
+    return 'Runtime object, token, context, or namespace, not a React element type.';
+  if (entry.name.startsWith('use') || entry.name.includes('useFeature'))
+    return 'Hook, called by React components rather than mounted.';
+  if (entry.name.startsWith('with'))
+    return 'Higher-order component factory, not a mounted component.';
+  return 'Runtime utility or configuration value, not a React element type.';
+}
+
+function compactCatalog(catalog, names) {
+  const selected = new Set(names);
+  const declarations = [
+    ...catalog.react.declarations,
+    ...catalog.react.namespaceMembers,
+  ];
+  const entryName = (entry) => entry.qualifiedName ?? entry.name;
+  const compactEntries = Object.fromEntries(
+    names.map((name) => {
+      const declaration = declarations.find(
+        (entry) => entryName(entry) === name,
+      );
+      return [
+        name,
+        {
+          aliasOf: declaration?.aliasOf ?? null,
+          apiPath: declaration?.declarationPath ?? `namespace:${name}`,
+          properties:
+            declaration?.props?.properties.map(
+              ({ name: propertyName, optional, type, values }) => ({
+                name: propertyName,
+                optional,
+                type,
+                values,
+              }),
+            ) ?? [],
+          requiredParent: declaration?.requiredParent ?? null,
+          status:
+            declaration?.status ??
+            (name.startsWith('preview_')
+              ? 'preview'
+              : name.startsWith('unstable_')
+                ? 'unstable'
+                : 'stable'),
+        },
+      ];
+    }),
+  );
+  return {
+    allEntryNames: [...declarations.map(entryName)].sort((left, right) =>
+      left.localeCompare(right),
+    ),
+    entries: compactEntries,
+    nonRenderableEntries: declarations
+      .filter((entry) => !selected.has(entryName(entry)))
+      .map((entry) => ({
+        name: entryName(entry),
+        reason: nonRenderableReason(entry),
+      })),
+  };
+}
+
+function polymorphicHostExclusion(value) {
+  const documentHosts = new Set(['body', 'head', 'html']);
+  if (documentHosts.has(value)) {
+    return 'This document host cannot be mounted inside a standalone Storybook canvas.';
+  }
+  const voidHosts = new Set([
+    'area',
+    'base',
+    'br',
+    'col',
+    'embed',
+    'hr',
+    'input',
+    'keygen',
+    'link',
+    'meta',
+    'param',
+    'source',
+    'track',
+    'wbr',
+  ]);
+  if (voidHosts.has(value)) {
+    return 'This void host cannot render the required neutral fixture content.';
+  }
+  const nonTextHosts = new Set([
+    'iframe',
+    'menuitem',
+    'noscript',
+    'script',
+    'style',
+    'template',
+    'title',
+    'webview',
+  ]);
+  if (nonTextHosts.has(value)) {
+    return 'This embedded, script-like, or platform host is not a standalone text fixture.';
+  }
+  return null;
+}
+
+function literalExclusion(name, propertyName, value) {
+  if (propertyName === 'as' && typeof value === 'string') {
+    return polymorphicHostExclusion(value);
+  }
+  if (name === 'StructuredListBody' && propertyName === 'head') {
+    return 'Carbon requires StructuredListHead for a valid heading hierarchy.';
+  }
+  if (
+    name === 'CopyButton' &&
+    [
+      'tooltipAlignment',
+      'tooltipDropShadow',
+      'tooltipHighContrast',
+      'tooltipPosition',
+    ].includes(propertyName)
+  ) {
+    return 'Carbon 1.115.0 forwards this inherited tooltip prop to the DOM from CopyButton.';
+  }
+  if (name === 'FluidPasswordInput' && propertyName === 'isPassword') {
+    return 'Carbon 1.115.0 forwards this typed FluidPasswordInput prop to the DOM.';
+  }
+  if (name === 'PasswordInput' && propertyName === 'enableCounter') {
+    return 'Carbon 1.115.0 forwards this typed PasswordInput prop to the DOM.';
+  }
+  if (
+    name === 'DismissibleTag' &&
+    propertyName === 'disabled' &&
+    value === true
+  ) {
+    return 'Carbon 1.115.0 renders this disabled dismissal control with an upstream contrast failure in a standalone canvas.';
+  }
+  if (
+    ['ComposedModalPresence', 'ModalPresence'].includes(name) &&
+    propertyName === '_autoEnablePresence'
+  ) {
+    return 'Carbon 1.115.0 exposes this internal presence-lifecycle compatibility setting without a standalone public fixture.';
+  }
+  if (
+    ['preview_Pagination', 'unstable_Pagination'].includes(name) &&
+    [
+      'isLastPage',
+      'pageInputDisabled',
+      'pageSizeInputDisabled',
+      'pagesUnknown',
+    ].includes(propertyName)
+  ) {
+    return 'Carbon 1.115.0 forwards this deprecated Pagination alias prop to the DOM.';
+  }
+  if (
+    name === 'ModalWrapper' &&
+    ['modalBeforeContent', 'withHeader'].includes(propertyName)
+  ) {
+    return 'Carbon 1.115.0 forwards this deprecated ModalWrapper prop to the DOM.';
+  }
+  if (
+    ['Pagination', 'preview_Pagination', 'unstable_Pagination'].includes(
+      name,
+    ) &&
+    ['backwardTextTooltipPosition', 'forwardTextTooltipPosition'].includes(
+      propertyName,
+    )
+  ) {
+    return 'Carbon 1.115.0 forwards this typed prop to the DOM and emits a React warning.';
+  }
+  return null;
+}
+
+function literalCoverage(names, compactComponentCatalog) {
+  return Object.fromEntries(
+    names.map((name) => {
+      const entry = compactComponentCatalog.entries[name];
+      const records = entry.properties.flatMap((property) =>
+        (property.values ?? []).map((value, index) => {
+          const exclusion = literalExclusion(name, property.name, value);
+          const id = `api-${property.name}-${index}`;
+          return {
+            args: { [property.name]: value },
+            componentName: name,
+            executionStatus: exclusion ? 'excluded' : 'covered',
+            id,
+            localTarget: exclusion
+              ? null
+              : `storybook:${storybookId(name, entry.status, 'variants')}#${id}`,
+            propertyName: property.name,
+            reason:
+              exclusion ??
+              'An executable workbench selector applies this declared public literal.',
+            value,
+          };
+        }),
+      );
+      return [name, records];
+    }),
+  );
+}
+
+function coverageSource(
+  names,
+  sourceCoverage,
+  sourceVariantDetailsByName,
+  compactComponentCatalog,
+  literalCoverageByName,
+) {
+  const sourceByName = Object.fromEntries(
+    names.map((name) => {
+      const sources = new Map();
+      for (const record of sourceCoverage) {
+        if (record.componentName !== name) continue;
+        const [path, namedStory] = record.sourceId.split('#');
+        const source = sources.get(path) ?? { namedStories: [], path };
+        if (namedStory) source.namedStories.push(namedStory);
+        sources.set(path, source);
+      }
+      return [
+        name,
+        [...sources.values()].map((source) => ({
+          ...source,
+          namedStories: source.namedStories.sort((left, right) =>
+            left.localeCompare(right),
+          ),
+        })),
+      ];
+    }),
+  );
+  return `// Generated by scripts/generate-component-stories.mjs.\nexport const generatedComponentCoverage = ${JSON.stringify(
+    {
+      ...compactComponentCatalog,
+      literalCoverageByName,
+      names,
+      sourceByName,
+      sourceVariantDetailsByName,
+    },
+    null,
+    2,
+  )} as const;\n`;
+}
+
+function normalize(value) {
+  return value.replaceAll(/[^a-zA-Z0-9]/g, '').toLowerCase();
+}
+
+function storybookId(name, status, storyName) {
+  const category = status === 'stable' ? 'Components' : `Components/${status}`;
+  const slug = (value) =>
+    value
+      .replaceAll(/[^a-zA-Z0-9]+/g, '-')
+      .replaceAll(/^-|-$/g, '')
+      .toLowerCase();
+  return `${slug(`${category}/${name}`)}--${slug(storyName)}`;
+}
+
+function sourceVariantKey(sourceId) {
+  return `source-${sourceId.replaceAll(/[^a-zA-Z0-9]+/g, '-')}`;
+}
+
+function parseDocumentationCoverage(source) {
+  return source
+    .split('\n')
+    .filter((line) => line.includes('<a id="rs-'))
+    .map((line) => {
+      const cells = line.split('|').map((cell) => cell.trim());
+      const anchor = cells[1]?.match(/id="([^"]+)"/)?.[1];
+      const sourceId = cells[2]?.replaceAll('`', '');
+      const status = cells[3]?.replaceAll('`', '');
+      const reason = cells[6];
+      if (!anchor || !sourceId || !status || !reason) {
+        throw new Error(`Unparseable source coverage record: ${line}`);
+      }
+      return {
+        anchor,
+        kind: anchor.startsWith('rs-f') ? 'file' : 'named',
+        reason,
+        sourceId,
+        status,
+      };
+    });
+}
+
+const sourceComponentOverrides = {
+  'packages/react/src/components/Accordion/Accordion.stories.tsx#Controlled':
+    'AccordionItem',
+  'packages/react/src/components/Tag/Tag.stories.js#ReadOnly': 'Tag',
+  'packages/react/src/components/Search/Search.stories.js#ExpandableWithLayer':
+    'ExpandableSearch',
+  'packages/react/src/components/Tabs/Tabs.stories.js#Vertical': 'TabsVertical',
+  'packages/react/src/components/Tile/Tile.stories.js#ClickableWithLayer':
+    'ClickableTile',
+  'packages/react/src/components/Tile/Tile.stories.js#ExpandableWithLayer':
+    'ExpandableTile',
+  'packages/react/src/components/Tile/Tile.stories.js#RadioWithLayer':
+    'RadioTile',
+  'packages/react/src/components/Tile/Tile.stories.js#Clickable':
+    'ClickableTile',
+  'packages/react/src/components/Tile/Tile.stories.js#ClickableWithCustomIcon':
+    'ClickableTile',
+  'packages/react/src/components/Tile/Tile.stories.js#Selectable':
+    'SelectableTile',
+  'packages/react/src/components/Tile/Tile.stories.js#MultiSelect':
+    'SelectableTile',
+  'packages/react/src/components/Tile/Tile.stories.js#Radio': 'RadioTile',
+  'packages/react/src/components/Tile/Tile.stories.js#Expandable':
+    'ExpandableTile',
+  'packages/react/src/components/Tile/Tile.stories.js#ExpandableWithInteractive':
+    'ExpandableTile',
+  'packages/react/src/components/MultiSelect/MultiSelect.stories.js#Filterable':
+    'FilterableMultiSelect',
+  'packages/react/src/components/MultiSelect/MultiSelect.stories.js#FilterableWithSelectAll':
+    'FilterableMultiSelect',
+  'packages/react/src/components/MultiSelect/MultiSelect.stories.js#FilterableWithCustomSearch':
+    'FilterableMultiSelect',
+  'packages/react/src/components/MultiSelect/MultiSelect.stories.js#FilterableWithAILabel':
+    'FilterableMultiSelect',
+};
+const sourceFileOwners = {
+  'packages/react/src/components/StructuredList/StructuredList.featureflag.stories.js':
+    'StructuredListWrapper',
+  'packages/react/src/components/StructuredList/StructuredList.stories.js':
+    'StructuredListWrapper',
+  'packages/react/src/components/UIShell/UIShell.SideNav.stories.js': 'SideNav',
+};
+function componentForSource(sourceId, names) {
+  const override = sourceComponentOverrides[sourceId];
+  if (override && names.has(override)) return override;
+  const sourcePath = sourceId.split('#')[0];
+  const fileOwner = sourceFileOwners[sourcePath];
+  if (fileOwner && names.has(fileOwner)) return fileOwner;
+  if (sourcePath.includes('/Icons/') || sourcePath.includes('/Plex/')) {
+    return undefined;
+  }
+  const segments = sourcePath.split('/');
+  const fileStem = segments
+    .at(-1)
+    ?.replace(/\.featureflag\.stories\.[^.]+$/, '')
+    .replace(/\.stories\.[^.]+$/, '')
+    .replace(/\.[^.]+$/, '');
+  const exactCandidates = [fileStem, ...segments.slice(0, -1).reverse()]
+    .flatMap((segment) => segment.split(/[^a-zA-Z0-9]+/g))
+    .map(normalize)
+    .filter(Boolean);
+  for (const candidate of exactCandidates) {
+    const exact = [...names].filter((name) => normalize(name) === candidate);
+    if (exact.length === 1) return exact[0];
+    const preview = [...names].filter(
+      (name) =>
+        name.startsWith('preview') &&
+        normalize(name).replace(/^preview/, '') === candidate,
+    );
+    if (preview.length === 1) return preview[0];
+  }
+  const special = {
+    'packages/react/src/components/Card/Card.stories.js': 'preview__Card.Card',
+    'packages/react/src/components/ContextMenu/useContextMenu.stories.js':
+      'Menu',
+    'packages/react/src/components/Dialog/Dialog.stories.js':
+      'preview__Dialog.Dialog',
+    'packages/react/src/components/PageHeader/PageHeader.stories.js':
+      'preview__PageHeader.PageHeader',
+  };
+  if (special[sourcePath]) return special[sourcePath];
+
+  const candidates = segments
+    .reverse()
+    .flatMap((segment) => segment.split(/[^a-zA-Z0-9]+/g))
+    .map(normalize)
+    .filter(Boolean);
+  const matches = [...names].filter((name) => {
+    const normalizedName = normalize(name);
+    return candidates.some(
+      (candidate) =>
+        candidate === normalizedName ||
+        candidate.startsWith(normalizedName) ||
+        normalizedName.startsWith(candidate),
+    );
+  });
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    throw new Error(
+      `Ambiguous public owner for ${sourcePath}: ${matches.join(', ')}`,
+    );
+  }
+  return undefined;
+}
+
+function documentationFallback(sourceId) {
+  if (sourceId.includes('/Plex/')) return 'foundations-overview--typography';
+  if (sourceId.includes('/Icons/')) return 'explorers-icons--all-carbon-icons';
+  return null;
+}
+
+function sourceArgs(sourceId, declaration) {
+  const sourceName = sourceId.split('#')[1] ?? '';
+  const normalizedSourceName = normalize(sourceName);
+  const properties = declaration?.props?.properties ?? [];
+  const byName = (name) =>
+    properties.find((property) => property.name === name);
+  const withValue = (name, value) =>
+    properties.some((property) => property.name === name)
+      ? { [name]: value }
+      : null;
+
+  const reviewed = {
+    'packages/react/src/components/Accordion/Accordion.stories.tsx#Controlled':
+      {
+        args: { open: true },
+        kind: 'variant',
+      },
+    'packages/react/src/components/Button/Button.stories.js#IconButton': {
+      args: { hasIconOnly: true },
+      kind: 'variant',
+    },
+    'packages/react/src/components/Button/Button.stories.js#IconButtonWithBadge':
+      {
+        args: { hasIconOnly: true },
+        kind: 'variant',
+      },
+    'packages/react/src/components/Card/Card.stories.js#Clickable': {
+      args: { clickable: true },
+      kind: 'variant',
+    },
+    'packages/react/src/components/ComboBox/ComboBox.stories.js#AllowCustomValue':
+      {
+        args: { allowCustomValue: true },
+        kind: 'variant',
+      },
+    'packages/react/src/components/Link/Link.stories.js#Inline': {
+      args: { inline: true },
+      kind: 'variant',
+    },
+    'packages/react/src/components/ProgressBar/ProgressBar.stories.js#Indeterminate':
+      {
+        args: { helperText: 'Preparing files' },
+        kind: 'variant',
+        remove: ['value'],
+      },
+    'packages/react/src/components/Tag/Tag.stories.js#ReadOnly': {
+      args: { type: 'red' },
+      kind: 'variant',
+    },
+    'packages/react/src/components/ContentSwitcher/ContentSwitcher.stories.js#IconOnlyWithLayer':
+      { args: {}, kind: 'layer' },
+    'packages/react/src/components/FluidTextArea/FluidTextArea.stories.js#DefaultWithLayers':
+      { args: {}, kind: 'layer' },
+    'packages/react/src/components/MultiSelect/MultiSelect.stories.js#WithLayerMultiSelect':
+      { args: {}, kind: 'layer' },
+    'packages/react/src/components/Search/Search.stories.js#ExpandableWithLayer':
+      { args: {}, kind: 'layer' },
+    'packages/react/src/components/Tile/Tile.stories.js#DefaultWithLayer': {
+      args: {},
+      kind: 'layer',
+    },
+    'packages/react/src/components/Tile/Tile.stories.js#ClickableWithLayer': {
+      args: {},
+      kind: 'layer',
+    },
+    'packages/react/src/components/Tile/Tile.stories.js#RadioWithLayer': {
+      args: {},
+      kind: 'layer',
+    },
+    'packages/react/src/components/Tile/Tile.stories.js#ExpandableWithLayer': {
+      args: {},
+      kind: 'layer',
+    },
+  };
+  if (reviewed[sourceId]) return reviewed[sourceId];
+
+  if (normalizedSourceName === 'default') return { kind: 'default' };
+  if (normalizedSourceName.includes('controlled'))
+    return { kind: 'controlled' };
+  if (normalizedSourceName.includes('disabled')) {
+    const args = withValue('disabled', true);
+    if (args) return { args, kind: 'variant' };
+  }
+  if (normalizedSourceName.includes('invalid')) {
+    const args = withValue('invalid', true);
+    if (args) return { args, kind: 'variant' };
+  }
+  if (normalizedSourceName.includes('readonly')) {
+    const args = withValue('readOnly', true);
+    if (args) return { args, kind: 'variant' };
+  }
+  if (normalizedSourceName.includes('open')) {
+    const args = withValue('open', true);
+    if (args) return { args, kind: 'variant' };
+  }
+  if (normalizedSourceName.includes('expanded')) {
+    const args = withValue('expanded', true);
+    if (args) return { args, kind: 'variant' };
+  }
+  if (normalizedSourceName.includes('loading')) {
+    const args = withValue('loading', true);
+    if (args) return { args, kind: 'variant' };
+  }
+  if (normalizedSourceName.includes('small')) {
+    const size = byName('size');
+    if (size?.values?.includes('sm'))
+      return { args: { size: 'sm' }, kind: 'variant' };
+  }
+  if (normalizedSourceName.includes('medium')) {
+    const size = byName('size');
+    if (size?.values?.includes('md'))
+      return { args: { size: 'md' }, kind: 'variant' };
+  }
+  if (normalizedSourceName.includes('large')) {
+    const size = byName('size');
+    if (size?.values?.includes('lg'))
+      return { args: { size: 'lg' }, kind: 'variant' };
+  }
+  for (const property of properties) {
+    if (
+      property.values?.includes(true) &&
+      normalizedSourceName.includes(normalize(property.name))
+    ) {
+      return { args: { [property.name]: true }, kind: 'variant' };
+    }
+    for (const value of property.values ?? []) {
+      if (
+        typeof value === 'string' &&
+        normalizedSourceName.includes(normalize(value))
+      ) {
+        return { args: { [property.name]: value }, kind: 'variant' };
+      }
+    }
+  }
+  return { kind: 'unmapped' };
+}
+
+function sourceFixtureDetails(sourceId, declaration) {
+  const sourceName = sourceId.split('#')[1] ?? '';
+  const normalizedName = normalize(sourceName);
+  const properties = declaration?.props?.properties ?? [];
+  const has = (name) => properties.some((property) => property.name === name);
+  const args = {};
+  const remove = [];
+  if (normalizedName.includes('fullwidth') && has('isFullWidth')) {
+    args.isFullWidth = true;
+  }
+  if (normalizedName.includes('passive') && has('preventCloseOnClickOutside')) {
+    args.preventCloseOnClickOutside = false;
+  }
+  if (normalizedName.includes('unknownpages') && has('pagesUnknown')) {
+    args.pagesUnknown = true;
+  }
+  if (normalizedName.includes('alignment') && has('align'))
+    args.align = 'bottom';
+  if (normalizedName.includes('duration') && has('enterDelayMs')) {
+    args.enterDelayMs = 500;
+  }
+  if (normalizedName.includes('size20') && has('size')) args.size = 20;
+  if (normalizedName.includes('size14') && has('textSize')) args.textSize = 14;
+  if (normalizedName.includes('selection') && has('isSortable')) {
+    args.isSortable = true;
+  }
+  if (normalizedName.includes('sorting') && has('isSortable')) {
+    args.isSortable = true;
+  }
+  if (normalizedName.includes('selectall') && has('open')) args.open = true;
+  if (normalizedName.includes('filterable') && has('open')) args.open = true;
+  if (normalizedName.includes('clickable') && has('clickable'))
+    args.clickable = true;
+  if (normalizedName.includes('selectable') && has('selected'))
+    args.selected = true;
+  if (normalizedName === 'radio' && has('checked')) args.checked = true;
+  if (normalizedName.includes('expandable') && has('expanded'))
+    args.expanded = true;
+  if (normalizedName.includes('expandable') && has('isExpanded')) {
+    args.isExpanded = true;
+  }
+  if (normalizedName.includes('condensed') && has('isCondensed')) {
+    args.isCondensed = true;
+  }
+  if (normalizedName.includes('danger') && has('kind')) args.kind = 'danger';
+  if (normalizedName.includes('horizontal') && has('vertical')) {
+    args.vertical = false;
+  }
+  if (normalizedName.includes('vertical') && has('vertical')) {
+    args.vertical = true;
+  }
+  if (normalizedName.includes('determinate') && has('value')) args.value = 75;
+  if (normalizedName.includes('interactive') && has('currentIndex')) {
+    args.currentIndex = 1;
+  }
+  if (normalizedName.includes('operational') && has('type')) args.type = 'blue';
+  if (normalizedName.includes('selectable') && has('type'))
+    args.type = 'outline';
+  if (normalizedName.includes('single') && has('defaultChecked')) {
+    args.defaultChecked = true;
+  }
+  if (normalizedName.includes('hiddeninputs') && has('hideTextInput')) {
+    args.hideTextInput = true;
+  }
+  if (normalizedName.includes('twohandle') && has('unstable_valueUpper')) {
+    args.unstable_valueUpper = 75;
+  }
+  if (normalizedName.includes('overlay') && has('withOverlay')) {
+    args.withOverlay = true;
+    args.active = true;
+  }
+  if (normalizedName.includes('customlevel') && has('level')) args.level = 1;
+  if (normalizedName.includes('customlevel') && has('as')) args.as = 'h3';
+  if (normalizedName.includes('useprefers') && has('theme'))
+    args.theme = 'g100';
+  if (normalizedName.includes('usetheme') && has('theme')) args.theme = 'g10';
+  if (normalizedName.includes('withbackgroundlayer') && has('withBackground')) {
+    args.withBackground = true;
+  }
+  if (normalizedName.includes('withlargetext') && has('tooltipText')) {
+    args.tooltipText = 'A longer neutral definition describes this term.';
+  }
+  if (normalizedName.includes('tabtip') && has('isTabTip'))
+    args.isTabTip = true;
+  if (normalizedName.includes('withaccessible') && has('labelText')) {
+    args.labelText = 'Accessible toggle';
+  }
+  if (normalizedName.includes('withdanger') && has('kind'))
+    args.kind = 'danger';
+  if (normalizedName.includes('withdividers') && has('menuBorder')) {
+    args.menuBorder = true;
+  }
+  if (normalizedName.includes('withnestedmenu') && has('menuAlignment')) {
+    args.menuAlignment = 'bottom-start';
+  }
+  if (normalizedName.includes('withmenualignment') && has('menuAlignment')) {
+    args.menuAlignment = 'top-end';
+  }
+  if (sourceId.endsWith('ProgressBar.stories.js#Indeterminate')) {
+    args.helperText = 'Preparing files';
+    remove.push('value');
+  }
+  const descriptor = sourceFixtureDescriptor(sourceId, normalizedName);
+  return {
+    args,
+    descriptor,
+    fingerprint: sourceFixtureFingerprint(sourceId, descriptor),
+    fixture: 'source',
+    remove,
+  };
+}
+
+function sourceFixtureFingerprint(sourceId, descriptor) {
+  return `${sourceId}::${descriptor}`;
+}
+
+function sourceFixtureReason(sourceId, descriptor) {
+  const detail = descriptor.startsWith('grid-')
+    ? 'a Carbon grid, row, and breakpoint column composition'
+    : descriptor.startsWith('tabs-')
+      ? 'a Carbon tab list with matching tab panels'
+      : descriptor.startsWith('card-')
+        ? 'a Carbon Card compound-component composition'
+        : descriptor.startsWith('data-table-')
+          ? 'a Carbon DataTable render-prop table composition'
+          : descriptor.startsWith('slider-')
+            ? 'a Carbon Slider control with the reviewed range inputs'
+            : descriptor.startsWith('shell-')
+              ? 'a Carbon UI Shell header and navigation composition'
+              : descriptor.startsWith('modal-')
+                ? 'a Carbon modal compound-component composition'
+                : descriptor.startsWith('tile-')
+                  ? 'a Carbon Tile composition with the reviewed interaction state'
+                  : descriptor.startsWith('contained-list-')
+                    ? 'a Carbon ContainedList composition'
+                    : `the reviewed Carbon ${descriptor} composition`;
+  return `Pinned upstream story ${sourceId} is executed through ${detail}.`;
+}
+
+function sourceFixtureDescriptor(sourceId, normalizedName) {
+  if (sourceId.includes('/Card/')) return `card-${normalizedName}`;
+  if (sourceId.includes('/DataTable/')) return `data-table-${normalizedName}`;
+  if (sourceId.includes('/Grid/')) return `grid-${normalizedName}`;
+  if (sourceId.includes('/Tabs/')) return `tabs-${normalizedName}`;
+  if (sourceId.includes('/UIShell/')) return `shell-${normalizedName}`;
+  if (sourceId.includes('/Tile/')) return `tile-${normalizedName}`;
+  if (sourceId.includes('/Slider/')) return `slider-${normalizedName}`;
+  if (sourceId.includes('/ContainedList/'))
+    return `contained-list-${normalizedName}`;
+  if (sourceId.includes('/ComposedModal/') || sourceId.includes('/Modal/')) {
+    return `modal-${normalizedName}`;
+  }
+  if (normalizedName.includes('ailabel')) return 'ai-decoration';
+  if (normalizedName.includes('toggletip')) return 'toggletip-decoration';
+  if (normalizedName.includes('skeleton')) return 'skeleton-layout';
+  if (normalizedName.includes('icon')) return 'icon-composition';
+  if (normalizedName.includes('overflow')) return 'overflow-content';
+  if (normalizedName.includes('badge')) return 'badge-indicator';
+  if (normalizedName.includes('condensed')) return 'condensed-density';
+  if (normalizedName.includes('validation')) return 'validation-state';
+  if (normalizedName.includes('tooltip')) return 'tooltip-behavior';
+  if (normalizedName.includes('overlay')) return 'overlay-state';
+  if (normalizedName.includes('loading')) return 'loading-state';
+  if (normalizedName.includes('customlevel')) return 'heading-level';
+  if (normalizedName.includes('accessible')) return 'accessible-label';
+  if (normalizedName.includes('direction')) return 'direction-context';
+  if (normalizedName.includes('fluid')) return 'fluid-layout';
+  if (normalizedName.includes('theme')) return 'theme-context';
+  if (normalizedName.includes('link')) return 'link-hierarchy';
+  if (normalizedName.includes('nesting')) return 'tree-hierarchy';
+  if (normalizedName.includes('expanded')) return 'expanded-state';
+  if (normalizedName.includes('menu') || normalizedName.includes('action')) {
+    return 'action-menu';
+  }
+  if (
+    normalizedName.includes('filter') ||
+    normalizedName.includes('selection') ||
+    normalizedName.includes('sorting') ||
+    normalizedName.includes('pagination')
+  ) {
+    return 'selection-data';
+  }
+  if (
+    normalizedName.includes('responsive') ||
+    normalizedName.includes('layout') ||
+    normalizedName.includes('vertical') ||
+    normalizedName.includes('horizontal')
+  ) {
+    return 'layout-context';
+  }
+  return `component-${normalizedName}`;
+}
+
+function internalSourceExclusion(sourceId) {
+  const sourceName = sourceId.split('#')[1] ?? '';
+  const normalized = normalize(sourceName);
+  if (sourceName.startsWith('_')) {
+    const detail =
+      sourceName === '_useContextMenu'
+        ? 'tests a hook rather than rendering a public component'
+        : sourceName.includes('FileUploader')
+          ? 'is a private FileUploader child composition helper'
+          : 'is a private upstream Storybook-only fixture';
+    return {
+      category: 'internal-fixture',
+      reason: `Upstream story ${sourceId} ${detail}; its leading underscore excludes it from the public component API.`,
+    };
+  }
+  if (normalized.includes('withlayer')) {
+    return {
+      category: 'internal-fixture',
+      reason: `Upstream story ${sourceId} only injects Carbon Layer provider context; it adds no independent public component prop state.`,
+    };
+  }
+  return null;
+}
+
+function skeletonTarget(componentName, names) {
+  const normalizedName = normalize(componentName)
+    .replace('preview', '')
+    .replace('unstable', '');
+  return [...names].find(
+    (name) =>
+      normalize(name).includes(normalizedName) &&
+      normalize(name).includes('skeleton'),
+  );
+}
+
+const catalog = JSON.parse(await readFile(catalogPath, 'utf8'));
+const catalogEntries = [
+  ...catalog.react.declarations,
+  ...catalog.react.namespaceMembers,
+];
+const documentationCoverage = parseDocumentationCoverage(
+  await readFile(documentationCoveragePath, 'utf8'),
+);
+const renderable = new Set(catalog.derived.componentFamilies);
+const sourceVariantDetailsByName = Object.fromEntries(
+  [...renderable].map((name) => [name, []]),
+);
+
+const sourceCompositionTargets = {
+  'packages/react/src/components/ComposedModal/ComposedModal.stories.js#_withAILabel':
+    'patterns-carbon-for-ai--white#modal',
+};
+
+function installedScopeReason(sourceId) {
+  const sourcePath = sourceId.split('#')[0];
+  return `Pinned upstream source ${sourceId} is not exported by the installed @carbon/react public root API: ${sourcePath} has no public BAP Carbon workbench export.`;
+}
+
+function executableSourceReason(sourceId, detail) {
+  return `Upstream source ${sourceId} is covered by ${detail}.`;
+}
+
+const sourceCoverage = documentationCoverage
+  .map((record) => {
+    const componentName = componentForSource(record.sourceId, renderable);
+    if (record.status === 'excluded' && !componentName) {
+      const reason = installedScopeReason(record.sourceId);
+      return {
+        ...record,
+        exclusionCategory: 'out-of-installed-scope',
+        executionReason: reason,
+        executionStatus: 'excluded',
+        localTarget: null,
+        reason,
+        targetKind: 'excluded',
+      };
+    }
+    if (componentName) {
+      const declaration = catalogEntries.find(
+        (entry) => (entry.qualifiedName ?? entry.name) === componentName,
+      );
+      const status =
+        declaration?.status ??
+        (componentName.startsWith('preview_')
+          ? 'preview'
+          : componentName.startsWith('unstable_')
+            ? 'unstable'
+            : 'stable');
+      if (record.kind === 'named') {
+        const sourceName = record.sourceId.split('#')[1] ?? '';
+        const compositionTarget = sourceCompositionTargets[record.sourceId];
+        if (compositionTarget) {
+          return {
+            ...record,
+            componentName,
+            executionStatus: 'covered',
+            localTarget: `storybook:${compositionTarget}`,
+            reason: `Upstream story ${record.sourceId} is covered by the local Carbon for AI composed-modal specimen.`,
+            targetKind: 'storybook',
+          };
+        }
+        const details = sourceArgs(record.sourceId, declaration);
+        if (details.kind === 'default') {
+          return {
+            ...record,
+            componentName,
+            executionStatus: 'covered',
+            localTarget: `storybook:${storybookId(componentName, status, 'default')}`,
+            targetKind: 'storybook',
+          };
+        }
+        if (details.kind === 'controlled') {
+          return {
+            ...record,
+            componentName,
+            executionStatus: 'covered',
+            localTarget: `storybook:${storybookId(componentName, status, 'controlled')}`,
+            targetKind: 'storybook',
+          };
+        }
+        if (normalize(sourceName).includes('skeleton')) {
+          const target = skeletonTarget(componentName, renderable);
+          if (target) {
+            const targetDeclaration = catalogEntries.find(
+              (entry) => (entry.qualifiedName ?? entry.name) === target,
+            );
+            const targetStatus = targetDeclaration?.status ?? 'stable';
+            return {
+              ...record,
+              componentName: target,
+              executionStatus: 'covered',
+              localTarget: `storybook:${storybookId(target, targetStatus, 'default')}`,
+              targetKind: 'storybook',
+            };
+          }
+        }
+        if (details.kind === 'variant' || details.kind === 'layer') {
+          const variantKey = sourceVariantKey(record.sourceId);
+          const reason =
+            details.kind === 'layer'
+              ? `Upstream story ${record.sourceId} is covered by the local Layer-wrapped ${componentName} specimen.`
+              : executableSourceReason(
+                  record.sourceId,
+                  `the local ${componentName} prop-variant specimen`,
+                );
+          sourceVariantDetailsByName[componentName].push({
+            args: details.args,
+            ...(details.kind === 'layer'
+              ? {
+                  descriptor: 'layer-context',
+                  fingerprint: sourceFixtureFingerprint(
+                    record.sourceId,
+                    'layer-context',
+                  ),
+                }
+              : {}),
+            fixture: details.kind === 'layer' ? 'layer' : undefined,
+            key: variantKey,
+            label: sourceName,
+            ...(details.remove?.length ? { remove: details.remove } : {}),
+            reason,
+            ...(details.kind === 'layer' ? { sourceId: record.sourceId } : {}),
+          });
+          return {
+            ...record,
+            args: details.args,
+            componentName,
+            executionStatus: 'covered',
+            localTarget:
+              details.kind === 'layer'
+                ? `storybook:${storybookId(componentName, status, 'variants')}#${variantKey}`
+                : `variant:${componentName}:${variantKey}`,
+            ...(details.kind === 'layer'
+              ? {
+                  fixtureDescriptor: 'layer-context',
+                  sourceFingerprint: sourceFixtureFingerprint(
+                    record.sourceId,
+                    'layer-context',
+                  ),
+                }
+              : {}),
+            ...(details.remove?.length ? { remove: details.remove } : {}),
+            reason,
+            targetKind: details.kind === 'layer' ? 'composition' : 'variant',
+          };
+        }
+        if (record.sourceId.includes('.featureflag.')) {
+          return {
+            ...record,
+            componentName,
+            executionStatus: 'covered',
+            localTarget: `storybook:${storybookId(componentName, status, 'playground')}`,
+            targetKind: 'feature-flag',
+          };
+        }
+        const exclusion = internalSourceExclusion(record.sourceId);
+        if (exclusion) {
+          return {
+            ...record,
+            componentName,
+            exclusionCategory: exclusion.category,
+            executionReason: exclusion.reason,
+            executionStatus: 'excluded',
+            localTarget: null,
+            reason: exclusion.reason,
+            targetKind: 'excluded',
+          };
+        }
+        const variantKey = sourceVariantKey(record.sourceId);
+        const fixture = sourceFixtureDetails(record.sourceId, declaration);
+        const reason = sourceFixtureReason(record.sourceId, fixture.descriptor);
+        sourceVariantDetailsByName[componentName].push({
+          args: fixture.args,
+          descriptor: fixture.descriptor,
+          fixture: fixture.fixture,
+          fingerprint: fixture.fingerprint,
+          key: variantKey,
+          label: sourceName,
+          ...(fixture.remove.length ? { remove: fixture.remove } : {}),
+          reason,
+          sourceId: record.sourceId,
+        });
+        return {
+          ...record,
+          args: fixture.args,
+          componentName,
+          executionReason: reason,
+          executionStatus: 'covered',
+          fixtureDescriptor: fixture.descriptor,
+          sourceFingerprint: fixture.fingerprint,
+          localTarget: `storybook:${storybookId(componentName, status, 'variants')}#${variantKey}`,
+          ...(fixture.remove.length ? { remove: fixture.remove } : {}),
+          reason,
+          targetKind: 'composition',
+        };
+      }
+      return {
+        ...record,
+        componentName,
+        executionStatus: 'covered',
+        localTarget: `storybook:${storybookId(componentName, status, record.status === 'summarized' ? 'variants' : 'default')}`,
+        targetKind: 'storybook',
+      };
+    }
+    const fallback = documentationFallback(record.sourceId);
+    if (fallback) {
+      return {
+        ...record,
+        executionStatus: 'covered',
+        localTarget: `storybook:${fallback}`,
+        reason: `Upstream source ${record.sourceId} is covered by the local ${fallback} foundation specimen.`,
+        targetKind: 'storybook',
+      };
+    }
+    const reason = installedScopeReason(record.sourceId);
+    return {
+      ...record,
+      exclusionCategory: 'out-of-installed-scope',
+      executionReason: reason,
+      executionStatus: 'excluded',
+      localTarget: null,
+      reason,
+      targetKind: 'excluded',
+    };
+  })
+  .map((record) => {
+    if (record.executionStatus !== 'covered') return record;
+    return {
+      ...record,
+      reason:
+        record.targetKind === 'composition' && record.reason
+          ? record.reason
+          : executableSourceReason(
+              record.sourceId,
+              `executable local target ${record.localTarget}`,
+            ),
+    };
+  });
+const renderableNames = [...renderable].sort((left, right) =>
+  left.localeCompare(right),
+);
+const compactComponentCatalog = compactCatalog(catalog, renderableNames);
+const literalCoverageByName = literalCoverage(
+  renderableNames,
+  compactComponentCatalog,
+);
+const argTypesByName = Object.fromEntries(
+  renderableNames.map((name) => [
+    name,
+    argTypesSource(compactComponentCatalog.entries[name].properties),
+  ]),
+);
+
+if (!checkMode) await mkdir(outputDirectory, { recursive: true });
+await moveStaleGeneratedStories(
+  new Set(renderableNames.map((name) => storyFileName(name))),
+);
+
+for (const name of renderableNames) {
+  const declaration = catalogEntries.find(
+    (entry) => (entry.qualifiedName ?? entry.name) === name,
+  );
+  const status =
+    declaration?.status ??
+    (name.startsWith('preview_')
+      ? 'preview'
+      : name.startsWith('unstable_')
+        ? 'unstable'
+        : 'stable');
+  await emitGeneratedFile(
+    resolve(outputDirectory, storyFileName(name)),
+    await formatSource(
+      storySource(name, status, declaration?.props?.properties ?? []),
+      resolve(outputDirectory, storyFileName(name)),
+    ),
+  );
+}
+
+const manifest = renderableNames.map((name) => ({
+  name,
+  story: relative(appRoot, resolve(outputDirectory, storyFileName(name))),
+}));
+
+await emitGeneratedFile(
+  resolve(outputDirectory, 'manifest.json'),
+  await formatSource(
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    resolve(outputDirectory, 'manifest.json'),
+  ),
+);
+await emitGeneratedFile(
+  resolve(appRoot, 'src/components/component-coverage.generated.ts'),
+  await formatSource(
+    coverageSource(
+      renderableNames,
+      sourceCoverage,
+      sourceVariantDetailsByName,
+      compactComponentCatalog,
+      literalCoverageByName,
+    ),
+    resolve(appRoot, 'src/components/component-coverage.generated.ts'),
+  ),
+);
+await emitGeneratedFile(
+  resolve(outputDirectory, 'source-story-coverage.json'),
+  await formatSource(
+    `${JSON.stringify(sourceCoverage, null, 2)}\n`,
+    resolve(outputDirectory, 'source-story-coverage.json'),
+  ),
+);
+await emitGeneratedFile(
+  resolve(outputDirectory, 'literal-prop-coverage.json'),
+  await formatSource(
+    `${JSON.stringify(Object.values(literalCoverageByName).flat(), null, 2)}\n`,
+    resolve(outputDirectory, 'literal-prop-coverage.json'),
+  ),
+);
+await emitGeneratedFile(
+  resolve(outputDirectory, 'arg-types.json'),
+  await formatSource(
+    JSON.stringify(argTypesByName, null, 2),
+    resolve(outputDirectory, 'arg-types.json'),
+  ),
+);
+
+if (checkFailures.length) {
+  throw new Error(
+    `Generated component artifacts are not current:\n${checkFailures.join('\n')}`,
+  );
+}
+
+console.log(
+  `${checkMode ? 'Verified' : 'Generated'} ${manifest.length} component story files.`,
+);

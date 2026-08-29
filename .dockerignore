@@ -11,6 +11,7 @@
 **/dist-cli
 **/node_modules
 **/playwright-report
+**/storybook-static
 **/test-results
 **/*.tsbuildinfo
 **/.en[v]

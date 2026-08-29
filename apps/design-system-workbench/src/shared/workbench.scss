@@ -1,0 +1,50 @@
+.bap-workbench-canvas {
+  min-height: 100vh;
+  padding: 1rem;
+}
+.bap-workbench-canvas[data-workbench-motion='reduced'],
+.bap-workbench-canvas[data-workbench-motion='reduced'] * {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: 0.01ms !important;
+}
+.bap-workbench-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+}
+.bap-workbench-card {
+  border: 1px solid var(--cds-border-subtle);
+  min-height: 8rem;
+  padding: 1rem;
+}
+.bap-workbench-virtual {
+  height: 38rem;
+  overflow: auto;
+}
+.bap-workbench-virtual-inner {
+  position: relative;
+  width: 100%;
+}
+.bap-workbench-virtual-row {
+  left: 0;
+  min-height: 4.5rem;
+  padding: 0.75rem;
+  position: absolute;
+  right: 0;
+}
+.bap-workbench-virtual-row p {
+  margin: 0.25rem 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.bap-workbench-icon {
+  align-items: center;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+}
+.bap-workbench-icon code {
+  overflow-wrap: anywhere;
+}

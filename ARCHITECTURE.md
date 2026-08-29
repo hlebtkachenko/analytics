@@ -59,6 +59,7 @@ flowchart TD
   web[apps/web]
   api[apps/api]
   reporting[apps/reporting-api]
+  workbench[apps/design-system-workbench]
   design[packages/design-system]
   db[packages/db]
   security[packages/security]
@@ -77,11 +78,19 @@ flowchart TD
   reporting --> typescript
   reporting --> db
   reporting --> security
+  workbench --> eslint
+  workbench --> typescript
+  workbench --> design
 ```
 
 Applications do not import one another. Packages cannot import applications.
 `@bap/db` is the only database boundary, `@bap/security` owns service-neutral
 JWT/access contracts, and `@bap/design-system` is the only UI library.
+
+The design-system workbench is a development and static-reference application,
+not a production container. It consumes only public `@bap/design-system`
+entrypoints and verifies the generated Carbon catalog, executable stories, and
+offline handbook against the pinned upstream release.
 
 ## Deployment
 
