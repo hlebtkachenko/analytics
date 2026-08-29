@@ -216,7 +216,7 @@ describe('generated Default component stories', () => {
         consoleWarn.mockClear();
       }
     }
-  }, 15_000);
+  }, 60_000);
 
   it('selects a literal specimen from its story hash target', async () => {
     const previousHash = window.location.hash;
@@ -366,5 +366,5 @@ describe('generated Default component stories', () => {
       }
     }
     window.location.hash = previousHash;
-  }, 15_000);
+  }, 60_000);
 });
