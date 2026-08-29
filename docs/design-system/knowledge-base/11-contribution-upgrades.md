@@ -158,8 +158,8 @@ Before delivery:
 - scan fixtures and static output for sensitive or realistic data;
 - review license and attribution changes;
 - perform focused code, accessibility, and security review;
-- leave the Phase 5 pull request unmerged unless the owner explicitly changes
-  that boundary.
+- merge a delivery pull request only after explicit owner authorization and
+  green required CI and security checks.
 
 ## Known limits
 

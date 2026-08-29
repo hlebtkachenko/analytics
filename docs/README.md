@@ -1,5 +1,14 @@
 # BAP Documentation
 
+## Current status
+
+The operational SaaS foundation and the pinned Carbon workbench are delivered on
+`main`. Analytics product behavior and production rollout remain deliberately
+deferred until their requirements and owner-provided infrastructure inputs
+exist.
+
+## Documentation map
+
 - [Getting started](getting-started.md)
 - [Development workflow](development.md)
 - [Configuration](configuration.md)

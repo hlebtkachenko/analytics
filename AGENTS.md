@@ -13,6 +13,8 @@ financial, operational, or development data.
 - Next.js App Router in `apps/web`
 - NestJS application API in `apps/api`
 - NestJS reporting API in `apps/reporting-api`
+- Carbon facade in `packages/design-system` and its Storybook workbench in
+  `apps/design-system-workbench`
 - PostgreSQL 18
 - Better Auth for browser identity and organization membership
 - Caddy for public ingress and restic for one-shot backup operations
@@ -25,6 +27,9 @@ financial, operational, or development data.
 - Applications must not import each other.
 - Database access must go through `@bap/db`.
 - Service JWT and access contracts must go through `@bap/security`.
+- Application UI must import Carbon through `@bap/design-system`.
+- The design-system workbench must consume only public design-system
+  entrypoints.
 - Browser sessions and resource JWTs must never cross their documented boundary.
 - Add a shared package only when at least 2 real consumers justify it.
 - Keep product logic out of operational health routes and infrastructure code.
@@ -48,10 +53,12 @@ financial, operational, or development data.
 - `pnpm dev`: run all applications in watch mode
 - `pnpm design-system:dev`: run the local Carbon workbench
 - `pnpm design-system:build`: build the static Carbon workbench
+- `pnpm design-system:catalog`: refresh generated Carbon and workbench artifacts
 - `pnpm design-system:browser:install`: install its local Chromium runtime
 - `pnpm design-system:catalog:check`: verify pinned Carbon coverage artifacts
 - `pnpm design-system:offline:check`: verify the static workbench without
   network access
+- `pnpm design-system:test`: run design-system and workbench unit tests
 - `pnpm design-system:test:browser`: run workbench browser and accessibility
   checks
 - `pnpm check`: run formatting, linting, type checking, tests, and builds
