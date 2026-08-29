@@ -15,6 +15,11 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
+`engineStrict` is enabled, so `pnpm install` fails with
+`ERR_PNPM_UNSUPPORTED_ENGINE` when the active Node.js version is not 24.20.0.
+Run `nvm use` in the shell, or restart the editor or terminal application when
+it still carries an older Node.js path from a previous session.
+
 Install the workbench browser once when you need its Storybook browser,
 accessibility, or offline-static checks:
 
