@@ -405,6 +405,9 @@ function defaultArgsFor(name: string, declaration?: CompactCatalogEntry) {
       })),
     };
   }
+  if (name === 'IconTab') {
+    return { ...defaults, enterDelayMs: 5_000, leaveDelayMs: 0 };
+  }
   if (name === 'MenuItemRadioGroup') {
     return {
       ...defaults,

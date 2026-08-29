@@ -112,6 +112,11 @@ describe('component catalog registry', () => {
           ((item: { text: string }) => string) | undefined
       )?.({ text: 'Option one' }),
     ).toBe('Option one');
+    expect(
+      componentEntries.find((entry) => entry.name === 'IconTab')?.defaultArgs,
+    ).toEqual(
+      expect.objectContaining({ enterDelayMs: 5_000, leaveDelayMs: 0 }),
+    );
   });
 
   it('records parent context for every known compound child', () => {
