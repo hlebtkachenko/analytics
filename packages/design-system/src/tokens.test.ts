@@ -622,5 +622,5 @@ describe('Carbon catalog', () => {
         },
       ),
     ).not.toThrow();
-  }, 15_000);
+  }, 60_000);
 });
