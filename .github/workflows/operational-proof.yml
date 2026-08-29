@@ -1,0 +1,118 @@
+name: Operational proof
+
+on:
+  schedule:
+    - cron: '47 3 * * 1'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: operational-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: 'true'
+  IBM_TELEMETRY_DISABLED: 'true'
+  NEXT_TELEMETRY_DISABLED: '1'
+  NO_UPDATE_NOTIFIER: '1'
+  TURBO_TELEMETRY_DISABLED: '1'
+
+jobs:
+  operational-proof:
+    name: Browser and recovery proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      BAP_OPERATIONAL_BASE_URL: http://localhost:39100
+      BAP_OPERATIONAL_EMAIL: owner@bap.invalid
+      BAP_PUBLIC_HOST: http://localhost
+      BAP_PUBLIC_ORIGIN: http://localhost:39100
+      POSTGRES_PORT: '39432'
+      WEB_PORT: '39100'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm and Node.js
+        uses: pnpm/setup@84cb39b217b10273981911c288cd62326dc7c6d2 # v2.0.2
+        with:
+          cache: true
+          install: false
+          runtime: node@24.20.0
+          version: 11.24.0
+
+      - name: Install dependencies and Chromium
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+
+      - name: Create disposable credentials
+        shell: bash
+        run: |
+          umask 077
+          bash scripts/create-local-secrets.sh
+          operational_password=$(openssl rand -base64 36 | tr -d '\n')
+          printf '::add-mask::%s\n' "$operational_password"
+          printf 'BAP_OPERATIONAL_PASSWORD=%s\n' "$operational_password" >> "$GITHUB_ENV"
+
+      - name: Build and start disposable stack
+        id: stack
+        shell: bash
+        run: |
+          started_at=$(date +%s)
+          docker compose -f compose.yaml -f compose.development.yaml up --build --detach --wait --wait-timeout 90
+          curl --fail --silent --show-error "$BAP_OPERATIONAL_BASE_URL/health"
+          elapsed_seconds=$(($(date +%s) - started_at))
+          printf '### Stack startup\n\n- Duration: %ss\n' "$elapsed_seconds" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create synthetic owner and organization
+        shell: bash
+        run: |
+          input=$(jq -cn \
+            --arg email "$BAP_OPERATIONAL_EMAIL" \
+            --arg name 'Operational Owner' \
+            --arg organization_name 'BAP Operational' \
+            --arg organization_slug 'bap-operational' \
+            '{email: $email, password: env.BAP_OPERATIONAL_PASSWORD, name: $name, organizationName: $organization_name, organizationSlug: $organization_slug}')
+          result=$(printf '%s' "$input" | docker compose exec -T -e BAP_E2E_SETUP=true web node apps/web/dist-cli/cli/create-synthetic-account.js)
+          organization_id=$(printf '%s' "$result" | jq -er 'select(.status == "created") | .organizationId | select(type == "string" and test("^[A-Za-z0-9_-]{1,128}$"))')
+          printf 'BAP_OPERATIONAL_ORGANIZATION_ID=%s\n' "$organization_id" >> "$GITHUB_ENV"
+
+      - name: Run browser proof
+        shell: bash
+        run: |
+          pnpm exec playwright test --config playwright.operational.config.ts
+          if docker compose logs --no-color web | grep -Fq 'could not determine a client IP'; then
+            exit 1
+          fi
+
+      - name: Prove backup, check, and restore
+        shell: bash
+        run: |
+          docker compose --profile operations -f compose.yaml -f compose.development.yaml run --rm backup-init
+          docker compose --profile operations -f compose.yaml -f compose.development.yaml run --rm backup
+          docker compose --profile operations -f compose.yaml -f compose.development.yaml run --rm backup-check
+          docker compose --profile operations -f compose.yaml -f compose.development.yaml up --detach --wait restore-database
+          docker compose --profile operations -f compose.yaml -f compose.development.yaml run --rm restore-role-bootstrap
+          docker compose --profile operations -f compose.yaml -f compose.development.yaml run --rm --no-deps restore
+          owner_memberships=$(printf '%s\n' "select count(*) from auth.member where organization_id = :'organization_id' and role = 'owner';" | docker compose exec -T -u postgres restore-database psql -U postgres -d bap_restore -v ON_ERROR_STOP=1 -v organization_id="$BAP_OPERATIONAL_ORGANIZATION_ID" -tA)
+          test "$owner_memberships" = 1
+          migration_version=$(docker compose exec -T -u postgres restore-database psql -U postgres -d bap_restore -tAc "select id from bap_migrations.schema_migrations order by id desc limit 1")
+          test "$migration_version" = 20260828.0001
+
+      - name: Show failure logs
+        if: failure()
+        run: >-
+          docker compose -f compose.yaml -f compose.development.yaml logs
+          --no-color || true
+
+      - name: Stop stack
+        if: always()
+        run:
+          docker compose -f compose.yaml -f compose.development.yaml down
+          --volumes

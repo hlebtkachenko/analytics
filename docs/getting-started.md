@@ -15,19 +15,35 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-Run `pnpm dev` to start the web app and both APIs. Default local URLs are:
+Install the workbench browser once when you need its Storybook browser,
+accessibility, or offline-static checks:
 
-- Web: `http://localhost:3000`
-- Application API health: `http://localhost:3001/health`
-- Reporting API health: `http://localhost:3002/health`
-
-The applications currently do not require PostgreSQL to boot. Start it when
-working on persistence:
+```sh
+pnpm design-system:browser:install
+```
 
 ```sh
 cp config/compose.environment.example .env
-docker compose -f compose.yaml -f compose.development.yaml up database
+pnpm secrets:local
+BAP_PUBLIC_HOST=http://localhost docker compose --env-file .env -f compose.yaml -f compose.development.yaml up --build --detach --wait
 ```
 
-All example values are synthetic and must be replaced outside source control for
-any shared or production environment.
+`pnpm check` is the repository quality gate. The public local endpoint is
+`http://localhost:3000/health`. Caddy is the only published application service.
+PostgreSQL is published only to loopback for local diagnostics.
+
+The committed template uses production-shaped public values. The inline local
+host override above is required unless you set
+`BAP_PUBLIC_HOST=http://localhost` in the ignored `.env` file.
+
+Create the first owner once, from an interactive terminal, after the stack is
+healthy:
+
+```sh
+docker compose --env-file .env --profile bootstrap -f compose.yaml -f compose.development.yaml run --rm bootstrap-owner
+```
+
+The command asks for an owner email, display name, organization name, and a
+hidden 14-128 character password. Do not use it in automation. All example
+values are synthetic, and shared or production environments require
+owner-provided secret files and origins.

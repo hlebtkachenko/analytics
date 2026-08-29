@@ -3,12 +3,15 @@
 **/.github
 **/.next
 **/.pnpm-store
+**/.secrets
 **/.turbo
 **/_junk
 **/coverage
 **/dist
+**/dist-cli
 **/node_modules
 **/playwright-report
+**/storybook-static
 **/test-results
 **/*.tsbuildinfo
 **/.en[v]

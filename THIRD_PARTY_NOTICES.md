@@ -2,15 +2,43 @@
 
 ## Carbon Design System
 
-`@carbon/react`, `@carbon/icons-react`, `@carbon/charts-react`, and their Carbon
-dependencies are licensed under Apache License 2.0.
+`@carbon/react`, `@carbon/icons-react`, `@carbon/pictograms-react`,
+`@carbon/charts-react`, and their Carbon dependencies are licensed under Apache
+License 2.0. BAP's original offline guidance is source-attributed to the Carbon
+website repository, which is also licensed under Apache License 2.0.
 
 - Carbon copyright notice: Copyright 2015 IBM Corp.
 - Carbon Charts copyright notice: Copyright 2018 IBM.
 
 - Source: <https://github.com/carbon-design-system/carbon>
+- Website source: <https://github.com/carbon-design-system/carbon-website>
 - Charts source: <https://github.com/carbon-design-system/carbon-charts>
 - License: [Apache License 2.0](licenses/APACHE-2.0.txt)
+
+Carbon, IBM, and IBM Plex are trademarks of IBM. BAP is not affiliated with,
+endorsed by, or maintained by IBM. Carbon source code and website content are
+not redistributed by BAP; local guidance and fixtures are modified,
+source-attributed summaries for the pinned public APIs.
+
+## Design-system workbench
+
+The local workbench uses Storybook, TanStack Virtual, and MiniSearch. Storybook
+provides the interactive component catalog, TanStack Virtual keeps complete icon
+and pictogram explorers bounded, and MiniSearch indexes local knowledge content.
+All three are licensed under the MIT license. BAP disables Storybook telemetry
+in configuration and every Storybook execution environment.
+
+- Storybook: <https://github.com/storybookjs/storybook>
+- TanStack Virtual: <https://github.com/TanStack/virtual>
+- MiniSearch: <https://github.com/lucaong/minisearch>
+- Storybook license: [MIT](licenses/STORYBOOK-MIT.txt)
+- TanStack Virtual license: [MIT](licenses/TANSTACK-VIRTUAL-MIT.txt)
+- MiniSearch license: [MIT](licenses/MINISEARCH-MIT.txt)
+
+Cube UI Kit informed only the workbench information architecture. No Cube UI Kit
+source, documentation, or visual implementation is included.
+
+- Cube UI Kit: <https://github.com/cube-js/cube-ui-kit>
 
 ## IBM Plex
 
@@ -30,3 +58,36 @@ blocks those scripts through its pnpm build policy. Repository build scripts and
 Docker stages additionally set `IBM_TELEMETRY_DISABLED=true`.
 
 - Source: <https://github.com/ibm-telemetry/telemetry-js>
+
+## SaaS foundation libraries
+
+The Phase 5 foundation uses the following direct open-source dependencies:
+
+- Better Auth, JOSE, node-postgres, Pino, Helmet, i18next, react-i18next,
+  Drizzle Kit, and esbuild under their MIT licenses.
+- Drizzle ORM, the Prometheus JavaScript client, Swagger UI, and Playwright
+  under Apache License 2.0.
+- NestJS Swagger under the MIT license.
+
+Copyright notices and license texts remain in each installed package. Important
+upstream notices include Better Auth copyright 2024-present Bereket Engida, JOSE
+copyright 2018 Filip Skokan, node-postgres copyright 2010-2021 Brian Carlson,
+Pino copyright 2016-2025 Matteo Collina, David Mark Clements and its
+contributors, Helmet copyright 2012-2026 Evan Hahn and Adam Baldwin, and i18next
+copyright 2011-present i18next.
+
+- Better Auth: <https://github.com/better-auth/better-auth>
+- Drizzle: <https://github.com/drizzle-team/drizzle-orm>
+- JOSE: <https://github.com/panva/jose>
+- Prometheus JavaScript client: <https://github.com/prometheus/client_js>
+- License: [Apache License 2.0](licenses/APACHE-2.0.txt)
+
+## Container foundation
+
+Caddy is licensed under Apache License 2.0. PostgreSQL is licensed under the
+PostgreSQL License. Restic is licensed under the BSD 2-Clause License.
+
+- Caddy: <https://github.com/caddyserver/caddy>
+- PostgreSQL: <https://www.postgresql.org/about/licence/>
+- Restic: <https://github.com/restic/restic>
+- Restic license: [BSD 2-Clause](licenses/RESTIC-BSD-2-CLAUSE.txt)

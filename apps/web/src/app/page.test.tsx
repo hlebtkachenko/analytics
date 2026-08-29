@@ -1,20 +1,38 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import HomePage from './page';
 
-describe('HomePage', () => {
-  it('shows the platform foundation status', () => {
-    render(<HomePage />);
+const mocks = vi.hoisted(() => ({
+  getSession: vi.fn(),
+  redirect: vi.fn(),
+}));
 
-    expect(
-      screen.getByRole('heading', { name: 'Business Analytics Platform' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('heading', { name: 'Foundation status' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText('A service health endpoint is available.'),
-    ).toBeInTheDocument();
+vi.mock('../lib/auth/server', () => ({
+  getAuth: async () => ({ api: { getSession: mocks.getSession } }),
+}));
+
+vi.mock('next/headers', () => ({
+  headers: async () => new Headers(),
+}));
+
+vi.mock('next/navigation', () => ({ redirect: mocks.redirect }));
+
+describe('HomePage', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('sends a verified session to organization access', async () => {
+    mocks.getSession.mockResolvedValue({ user: { emailVerified: true } });
+
+    await HomePage();
+
+    expect(mocks.redirect).toHaveBeenCalledWith('/access');
+  });
+
+  it('sends an unauthenticated visitor to sign in', async () => {
+    mocks.getSession.mockResolvedValue(null);
+
+    await HomePage();
+
+    expect(mocks.redirect).toHaveBeenCalledWith('/sign-in');
   });
 });

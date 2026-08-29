@@ -20,6 +20,7 @@ env:
   IBM_TELEMETRY_DISABLED: 'true'
   NEXT_TELEMETRY_DISABLED: '1'
   NO_UPDATE_NOTIFIER: '1'
+  STORYBOOK_DISABLE_TELEMETRY: '1'
   TURBO_TELEMETRY_DISABLED: '1'
 
 jobs:
@@ -69,12 +70,104 @@ jobs:
           elapsed_seconds=$(($(date +%s) - started_at))
           printf '### %s\n\n- Duration: %ss\n' "$RUN_NAME" "$elapsed_seconds" >> "$GITHUB_STEP_SUMMARY"
 
+  design-system-contract:
+    name: Carbon catalog and static build
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm and Node.js
+        uses: pnpm/setup@84cb39b217b10273981911c288cd62326dc7c6d2 # v2.0.2
+        with:
+          cache: true
+          install: false
+          runtime: node@24.20.0
+          version: 11.24.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify catalog and static index
+        shell: bash
+        run: |
+          started_at=$(date +%s)
+          pnpm --filter @bap/design-system catalog:check
+          pnpm design-system:build
+          pnpm --filter @bap/design-system-workbench catalog:check:built
+          elapsed_seconds=$(($(date +%s) - started_at))
+          printf '### Carbon catalog and static build\n\n- Duration: %ss\n' "$elapsed_seconds" >> "$GITHUB_STEP_SUMMARY"
+
+  design-system-browser:
+    name: Carbon browser / ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: offline-static
+            kind: offline
+            shard: 0
+          - name: stories-1-of-4
+            kind: stories
+            shard: 1
+          - name: stories-2-of-4
+            kind: stories
+            shard: 2
+          - name: stories-3-of-4
+            kind: stories
+            shard: 3
+          - name: stories-4-of-4
+            kind: stories
+            shard: 4
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm and Node.js
+        uses: pnpm/setup@84cb39b217b10273981911c288cd62326dc7c6d2 # v2.0.2
+        with:
+          cache: true
+          install: false
+          runtime: node@24.20.0
+          version: 11.24.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run:
+          pnpm --filter @bap/design-system-workbench exec playwright install
+          --with-deps chromium
+
+      - name: Run ${{ matrix.name }}
+        shell: bash
+        env:
+          CHECK_KIND: ${{ matrix.kind }}
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: |
+          started_at=$(date +%s)
+          if [ "$CHECK_KIND" = 'offline' ]; then
+            pnpm design-system:offline:check
+          else
+            BAP_BROWSER_SHARD_INDEX="$SHARD_INDEX" BAP_BROWSER_SHARD_TOTAL=4 pnpm design-system:test:browser
+          fi
+          elapsed_seconds=$(($(date +%s) - started_at))
+          printf '### Carbon browser %s\n\n- Duration: %ss\n' "$CHECK_KIND" "$elapsed_seconds" >> "$GITHUB_STEP_SUMMARY"
+
   compose:
     name: Compose configuration
     runs-on: ubuntu-latest
     timeout-minutes: 4
     env:
-      POSTGRES_PASSWORD: ci-only-compose-value
+      BAP_PUBLIC_HOST: bap.invalid
+      BAP_PUBLIC_ORIGIN: https://bap.invalid
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -82,24 +175,76 @@ jobs:
           persist-credentials: false
 
       - name: Validate development configuration
-        run:
+        run: >-
           docker compose -f compose.yaml -f compose.development.yaml config
-          --quiet
+          --format json | node scripts/verify-compose.mjs development
+
+      - name: Validate backup entrypoints
+        run: |
+          bash -n scripts/backup-entrypoint.sh scripts/backup-stage-entrypoint.sh scripts/create-local-secrets.sh
+          shellcheck scripts/backup-entrypoint.sh scripts/backup-stage-entrypoint.sh scripts/create-local-secrets.sh
 
       - name: Validate production configuration
-        run:
+        run: >-
           docker compose -f compose.yaml -f compose.production.yaml config
-          --quiet
+          --format json | node scripts/verify-compose.mjs production
+
+      - name: Validate operations configuration
+        run: >-
+          docker compose --profile operations -f compose.yaml -f
+          compose.production.yaml config --format json | node
+          scripts/verify-compose.mjs operations
+
+      - name: Validate owner bootstrap configuration
+        run: >-
+          docker compose --profile bootstrap -f compose.yaml -f
+          compose.development.yaml config --format json | node
+          scripts/verify-compose.mjs bootstrap
+
+      - name: Validate Caddy configuration
+        run: >-
+          docker run --rm -e BAP_PUBLIC_HOST=bap.invalid -v
+          "$PWD/infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro"
+          caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+          caddy validate --config /etc/caddy/Caddyfile
+
+  database-integration:
+    name: PostgreSQL integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm and Node.js
+        uses: pnpm/setup@84cb39b217b10273981911c288cd62326dc7c6d2 # v2.0.2
+        with:
+          cache: true
+          install: false
+          runtime: node@24.20.0
+          version: 11.24.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify PostgreSQL boundaries
+        shell: bash
+        run: |
+          started_at=$(date +%s)
+          pnpm test:integration
+          elapsed_seconds=$(($(date +%s) - started_at))
+          printf '### PostgreSQL integration\n\n- Duration: %ss\n' "$elapsed_seconds" >> "$GITHUB_STEP_SUMMARY"
 
   container-smoke:
     name: Container smoke
     runs-on: ubuntu-latest
     timeout-minutes: 4
     env:
-      API_PORT: '39101'
-      POSTGRES_PASSWORD: ci-only-container-value
+      BAP_PUBLIC_HOST: http://localhost
+      BAP_PUBLIC_ORIGIN: http://localhost:39100
       POSTGRES_PORT: '39432'
-      REPORTING_API_PORT: '39102'
       WEB_PORT: '39100'
     steps:
       - name: Check out repository
@@ -112,10 +257,12 @@ jobs:
         shell: bash
         run: |
           started_at=$(date +%s)
+          bash scripts/create-local-secrets.sh
           docker compose -f compose.yaml -f compose.development.yaml up --build --detach --wait --wait-timeout 60
-          curl --fail --silent --show-error "http://127.0.0.1:${WEB_PORT}/health"
-          curl --fail --silent --show-error "http://127.0.0.1:${API_PORT}/health"
-          curl --fail --silent --show-error "http://127.0.0.1:${REPORTING_API_PORT}/health"
+          curl --fail --silent --show-error "http://localhost:${WEB_PORT}/health"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://localhost:${WEB_PORT}/ready")" = 404
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://localhost:${WEB_PORT}/metrics")" = 404
+          test "$(curl --header 'Host: unknown.invalid' --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${WEB_PORT}/health")" = 421
           elapsed_seconds=$(($(date +%s) - started_at))
           printf '### Container smoke\n\n- Duration: %ss\n' "$elapsed_seconds" >> "$GITHUB_STEP_SUMMARY"
 
@@ -130,3 +277,7 @@ jobs:
         run:
           docker compose -f compose.yaml -f compose.development.yaml down
           --volumes
+
+  operational-proof:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/operational-proof.yml

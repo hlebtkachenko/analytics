@@ -17,16 +17,17 @@ outside the research scope.
 | NestJS     |         12.0.1 | Current ESM-ready framework release                     |
 | PostgreSQL |           18.6 | Current PostgreSQL 18 security release                  |
 | Vitest     |         4.1.11 | NestJS 12 ESM and web unit test runner                  |
-| ESLint     |         9.39.5 | Current release compatible with Next.js plugins         |
+| ESLint     |         9.39.5 | Temporary EOL pin required by Next.js plugin peers      |
 | Prettier   |          3.9.6 | Deterministic repository formatting                     |
 
 TypeScript 7 is not used because the requested baseline is TypeScript 6 and the
 pinned typescript-eslint release supports TypeScript versions below 6.1. ESLint
-10 is not used because the React plugins required by the current Next.js
-configuration do not yet execute on ESLint 10. Strict peer validation remains
-enabled instead of suppressing that incompatibility. No ORM, database driver,
-auth library, cache, queue, telemetry vendor, or domain package was selected
-without real requirements.
+9 reached end of support on 2026-08-06, but the React, import, and accessibility
+plugins required by stable Next.js 16.3.3 do not yet accept ESLint 10. Strict
+peer validation remains enabled instead of suppressing that incompatibility.
+Recheck the pin whenever Next.js updates its official plugin set. No ORM,
+database driver, auth library, cache, queue, telemetry vendor, or domain package
+was selected without real requirements.
 
 ## Primary references
 

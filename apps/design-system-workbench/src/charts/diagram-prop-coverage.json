@@ -1,0 +1,652 @@
+[
+  {
+    "args": {
+      "position": "end"
+    },
+    "component": "ArrowLeftMarker",
+    "executionStatus": "covered",
+    "id": "api-arrowleftmarker-position-0",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-arrowleftmarker-position-0",
+    "property": "position",
+    "reason": "Pinned marker alias literal rendered in a neutral SVG fixture.",
+    "value": "end"
+  },
+  {
+    "args": {
+      "position": "start"
+    },
+    "component": "ArrowLeftMarker",
+    "executionStatus": "covered",
+    "id": "api-arrowleftmarker-position-1",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-arrowleftmarker-position-1",
+    "property": "position",
+    "reason": "Pinned marker alias literal rendered in a neutral SVG fixture.",
+    "value": "start"
+  },
+  {
+    "args": {
+      "position": "end"
+    },
+    "component": "ArrowRightMarker",
+    "executionStatus": "covered",
+    "id": "api-arrowrightmarker-position-0",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-arrowrightmarker-position-0",
+    "property": "position",
+    "reason": "Pinned marker alias literal rendered in a neutral SVG fixture.",
+    "value": "end"
+  },
+  {
+    "args": {
+      "position": "start"
+    },
+    "component": "ArrowRightMarker",
+    "executionStatus": "covered",
+    "id": "api-arrowrightmarker-position-1",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-arrowrightmarker-position-1",
+    "property": "position",
+    "reason": "Pinned marker alias literal rendered in a neutral SVG fixture.",
+    "value": "start"
+  },
+  {
+    "args": {
+      "tag": "div"
+    },
+    "component": "CardNode",
+    "executionStatus": "covered",
+    "id": "api-cardnode-tag-0",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-cardnode-tag-0",
+    "property": "tag",
+    "reason": "Pinned CardNode literal rendered with neutral contents and any required host props.",
+    "value": "div"
+  },
+  {
+    "args": {
+      "tag": "a"
+    },
+    "component": "CardNode",
+    "executionStatus": "covered",
+    "id": "api-cardnode-tag-1",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-cardnode-tag-1",
+    "property": "tag",
+    "reason": "Pinned CardNode literal rendered with neutral contents and any required host props.",
+    "value": "a"
+  },
+  {
+    "args": {
+      "tag": "button"
+    },
+    "component": "CardNode",
+    "executionStatus": "covered",
+    "id": "api-cardnode-tag-2",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-cardnode-tag-2",
+    "property": "tag",
+    "reason": "Pinned CardNode literal rendered with neutral contents and any required host props.",
+    "value": "button"
+  },
+  {
+    "args": {
+      "stacked": false
+    },
+    "component": "CardNode",
+    "executionStatus": "covered",
+    "id": "api-cardnode-stacked-0",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-cardnode-stacked-0",
+    "property": "stacked",
+    "reason": "Pinned CardNode literal rendered with neutral contents and any required host props.",
+    "value": false
+  },
+  {
+    "args": {
+      "stacked": true
+    },
+    "component": "CardNode",
+    "executionStatus": "covered",
+    "id": "api-cardnode-stacked-1",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-cardnode-stacked-1",
+    "property": "stacked",
+    "reason": "Pinned CardNode literal rendered with neutral contents and any required host props.",
+    "value": true
+  },
+  {
+    "args": {
+      "position": "fixed"
+    },
+    "component": "CardNode",
+    "executionStatus": "covered",
+    "id": "api-cardnode-position-0",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-cardnode-position-0",
+    "property": "position",
+    "reason": "Pinned CardNode literal rendered with neutral contents and any required host props.",
+    "value": "fixed"
+  },
+  {
+    "args": {
+      "position": "absolute"
+    },
+    "component": "CardNode",
+    "executionStatus": "covered",
+    "id": "api-cardnode-position-1",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-cardnode-position-1",
+    "property": "position",
+    "reason": "Pinned CardNode literal rendered with neutral contents and any required host props.",
+    "value": "absolute"
+  },
+  {
+    "args": {
+      "position": "relative"
+    },
+    "component": "CardNode",
+    "executionStatus": "covered",
+    "id": "api-cardnode-position-2",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-cardnode-position-2",
+    "property": "position",
+    "reason": "Pinned CardNode literal rendered with neutral contents and any required host props.",
+    "value": "relative"
+  },
+  {
+    "args": {
+      "position": "static"
+    },
+    "component": "CardNode",
+    "executionStatus": "covered",
+    "id": "api-cardnode-position-3",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-cardnode-position-3",
+    "property": "position",
+    "reason": "Pinned CardNode literal rendered with neutral contents and any required host props.",
+    "value": "static"
+  },
+  {
+    "args": {
+      "position": "sticky"
+    },
+    "component": "CardNode",
+    "executionStatus": "covered",
+    "id": "api-cardnode-position-4",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-cardnode-position-4",
+    "property": "position",
+    "reason": "Pinned CardNode literal rendered with neutral contents and any required host props.",
+    "value": "sticky"
+  },
+  {
+    "args": {
+      "farsideColumn": false
+    },
+    "component": "CardNodeColumn",
+    "executionStatus": "covered",
+    "id": "api-cardnodecolumn-farsidecolumn-0",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-cardnodecolumn-farsidecolumn-0",
+    "property": "farsideColumn",
+    "reason": "Pinned CardNodeColumn literal rendered inside a neutral CardNode.",
+    "value": false
+  },
+  {
+    "args": {
+      "farsideColumn": true
+    },
+    "component": "CardNodeColumn",
+    "executionStatus": "covered",
+    "id": "api-cardnodecolumn-farsidecolumn-1",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-cardnodecolumn-farsidecolumn-1",
+    "property": "farsideColumn",
+    "reason": "Pinned CardNodeColumn literal rendered inside a neutral CardNode.",
+    "value": true
+  },
+  {
+    "args": {
+      "position": "end"
+    },
+    "component": "CircleMarker",
+    "executionStatus": "covered",
+    "id": "api-circlemarker-position-0",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-circlemarker-position-0",
+    "property": "position",
+    "reason": "Pinned marker alias literal rendered in a neutral SVG fixture.",
+    "value": "end"
+  },
+  {
+    "args": {
+      "position": "start"
+    },
+    "component": "CircleMarker",
+    "executionStatus": "covered",
+    "id": "api-circlemarker-position-1",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-circlemarker-position-1",
+    "property": "position",
+    "reason": "Pinned marker alias literal rendered in a neutral SVG fixture.",
+    "value": "start"
+  },
+  {
+    "args": {
+      "position": "end"
+    },
+    "component": "DiamondMarker",
+    "executionStatus": "covered",
+    "id": "api-diamondmarker-position-0",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-diamondmarker-position-0",
+    "property": "position",
+    "reason": "Pinned marker alias literal rendered in a neutral SVG fixture.",
+    "value": "end"
+  },
+  {
+    "args": {
+      "position": "start"
+    },
+    "component": "DiamondMarker",
+    "executionStatus": "covered",
+    "id": "api-diamondmarker-position-1",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-diamondmarker-position-1",
+    "property": "position",
+    "reason": "Pinned marker alias literal rendered in a neutral SVG fixture.",
+    "value": "start"
+  },
+  {
+    "args": {
+      "position": "end"
+    },
+    "component": "Marker",
+    "executionStatus": "covered",
+    "id": "api-marker-position-0",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-marker-position-0",
+    "property": "position",
+    "reason": "Pinned marker literal rendered in a neutral SVG fixture.",
+    "value": "end"
+  },
+  {
+    "args": {
+      "position": "start"
+    },
+    "component": "Marker",
+    "executionStatus": "covered",
+    "id": "api-marker-position-1",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-marker-position-1",
+    "property": "position",
+    "reason": "Pinned marker literal rendered in a neutral SVG fixture.",
+    "value": "start"
+  },
+  {
+    "args": {
+      "shape": "circle"
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-shape-0",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-shape-0",
+    "property": "shape",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": "circle"
+  },
+  {
+    "args": {
+      "shape": "square"
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-shape-1",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-shape-1",
+    "property": "shape",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": "square"
+  },
+  {
+    "args": {
+      "shape": "rounded-square"
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-shape-2",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-shape-2",
+    "property": "shape",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": "rounded-square"
+  },
+  {
+    "args": {
+      "tag": "div"
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-tag-0",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-tag-0",
+    "property": "tag",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": "div"
+  },
+  {
+    "args": {
+      "tag": "a"
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-tag-1",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-tag-1",
+    "property": "tag",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": "a"
+  },
+  {
+    "args": {
+      "tag": "button"
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-tag-2",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-tag-2",
+    "property": "tag",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": "button"
+  },
+  {
+    "args": {
+      "position": "fixed"
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-position-0",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-position-0",
+    "property": "position",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": "fixed"
+  },
+  {
+    "args": {
+      "position": "absolute"
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-position-1",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-position-1",
+    "property": "position",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": "absolute"
+  },
+  {
+    "args": {
+      "position": "relative"
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-position-2",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-position-2",
+    "property": "position",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": "relative"
+  },
+  {
+    "args": {
+      "position": "static"
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-position-3",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-position-3",
+    "property": "position",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": "static"
+  },
+  {
+    "args": {
+      "position": "sticky"
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-position-4",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-position-4",
+    "property": "position",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": "sticky"
+  },
+  {
+    "args": {
+      "bodyPosition": "fixed"
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-bodyposition-0",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-bodyposition-0",
+    "property": "bodyPosition",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": "fixed"
+  },
+  {
+    "args": {
+      "bodyPosition": "absolute"
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-bodyposition-1",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-bodyposition-1",
+    "property": "bodyPosition",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": "absolute"
+  },
+  {
+    "args": {
+      "bodyPosition": "relative"
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-bodyposition-2",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-bodyposition-2",
+    "property": "bodyPosition",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": "relative"
+  },
+  {
+    "args": {
+      "bodyPosition": "static"
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-bodyposition-3",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-bodyposition-3",
+    "property": "bodyPosition",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": "static"
+  },
+  {
+    "args": {
+      "bodyPosition": "sticky"
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-bodyposition-4",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-bodyposition-4",
+    "property": "bodyPosition",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": "sticky"
+  },
+  {
+    "args": {
+      "stacked": false
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-stacked-0",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-stacked-0",
+    "property": "stacked",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": false
+  },
+  {
+    "args": {
+      "stacked": true
+    },
+    "component": "ShapeNode",
+    "executionStatus": "covered",
+    "id": "api-shapenode-stacked-1",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-shapenode-stacked-1",
+    "property": "stacked",
+    "reason": "Pinned ShapeNode literal rendered with its required icon and neutral text.",
+    "value": true
+  },
+  {
+    "args": {
+      "position": "end"
+    },
+    "component": "SquareMarker",
+    "executionStatus": "covered",
+    "id": "api-squaremarker-position-0",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-squaremarker-position-0",
+    "property": "position",
+    "reason": "Pinned marker alias literal rendered in a neutral SVG fixture.",
+    "value": "end"
+  },
+  {
+    "args": {
+      "position": "start"
+    },
+    "component": "SquareMarker",
+    "executionStatus": "covered",
+    "id": "api-squaremarker-position-1",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-squaremarker-position-1",
+    "property": "position",
+    "reason": "Pinned marker alias literal rendered in a neutral SVG fixture.",
+    "value": "start"
+  },
+  {
+    "args": {
+      "position": "end"
+    },
+    "component": "TeeMarker",
+    "executionStatus": "covered",
+    "id": "api-teemarker-position-0",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-teemarker-position-0",
+    "property": "position",
+    "reason": "Pinned marker alias literal rendered in a neutral SVG fixture.",
+    "value": "end"
+  },
+  {
+    "args": {
+      "position": "start"
+    },
+    "component": "TeeMarker",
+    "executionStatus": "covered",
+    "id": "api-teemarker-position-1",
+    "kind": "declaration-literal",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-teemarker-position-1",
+    "property": "position",
+    "reason": "Pinned marker alias literal rendered in a neutral SVG fixture.",
+    "value": "start"
+  },
+  {
+    "args": {
+      "variant": "dash-sm"
+    },
+    "component": "Edge",
+    "executionStatus": "covered",
+    "id": "api-edge-variant-0",
+    "kind": "guidance-variant",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-edge-variant-0",
+    "property": "variant",
+    "reason": "Pinned Carbon Charts 1.27.18 documented Edge variant rendered in an SVG fixture.",
+    "value": "dash-sm"
+  },
+  {
+    "args": {
+      "variant": "dash-md"
+    },
+    "component": "Edge",
+    "executionStatus": "covered",
+    "id": "api-edge-variant-1",
+    "kind": "guidance-variant",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-edge-variant-1",
+    "property": "variant",
+    "reason": "Pinned Carbon Charts 1.27.18 documented Edge variant rendered in an SVG fixture.",
+    "value": "dash-md"
+  },
+  {
+    "args": {
+      "variant": "dash-lg"
+    },
+    "component": "Edge",
+    "executionStatus": "covered",
+    "id": "api-edge-variant-2",
+    "kind": "guidance-variant",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-edge-variant-2",
+    "property": "variant",
+    "reason": "Pinned Carbon Charts 1.27.18 documented Edge variant rendered in an SVG fixture.",
+    "value": "dash-lg"
+  },
+  {
+    "args": {
+      "variant": "dash-xl"
+    },
+    "component": "Edge",
+    "executionStatus": "covered",
+    "id": "api-edge-variant-3",
+    "kind": "guidance-variant",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-edge-variant-3",
+    "property": "variant",
+    "reason": "Pinned Carbon Charts 1.27.18 documented Edge variant rendered in an SVG fixture.",
+    "value": "dash-xl"
+  },
+  {
+    "args": {
+      "variant": "double"
+    },
+    "component": "Edge",
+    "executionStatus": "covered",
+    "id": "api-edge-variant-4",
+    "kind": "guidance-variant",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-edge-variant-4",
+    "property": "variant",
+    "reason": "Pinned Carbon Charts 1.27.18 documented Edge variant rendered in an SVG fixture.",
+    "value": "double"
+  },
+  {
+    "args": {
+      "variant": "tunnel"
+    },
+    "component": "Edge",
+    "executionStatus": "covered",
+    "id": "api-edge-variant-5",
+    "kind": "guidance-variant",
+    "localTarget": "storybook:charts-diagram-primitives--all-prop-literals#api-edge-variant-5",
+    "property": "variant",
+    "reason": "Pinned Carbon Charts 1.27.18 documented Edge variant rendered in an SVG fixture.",
+    "value": "tunnel"
+  }
+]

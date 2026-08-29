@@ -1,26 +1,61 @@
 # Configuration
 
-## Application variables
+## Public and Compose inputs
 
-| Variable   | Process         | Default                 | Validation                   |
-| ---------- | --------------- | ----------------------- | ---------------------------- |
-| `PORT`     | Web             | 3000                    | Next.js runtime              |
-| `HOSTNAME` | Web             | `0.0.0.0` in containers | Next.js runtime              |
-| `PORT`     | Application API | 3001                    | Integer from 1 through 65535 |
-| `HOST`     | Application API | `0.0.0.0`               | Non-empty string             |
-| `PORT`     | Reporting API   | 3002                    | Integer from 1 through 65535 |
-| `HOST`     | Reporting API   | `0.0.0.0`               | Non-empty string             |
+`config/compose.environment.example` is the complete non-secret Compose input
+template. Copy it to an ignored file for local development.
+
+| Variable            | Purpose                                    | Development default     |
+| ------------------- | ------------------------------------------ | ----------------------- |
+| `WEB_PORT`          | Caddy host port                            | `3000`                  |
+| `POSTGRES_PORT`     | Loopback PostgreSQL host port              | `5432`                  |
+| `POSTGRES_DB`       | Database name                              | `bap`                   |
+| `BAP_PUBLIC_HOST`   | Caddy site address                         | `http://localhost`      |
+| `BAP_PUBLIC_ORIGIN` | Exact Better Auth issuer and public origin | `http://localhost:3000` |
+
+`BAP_PUBLIC_ORIGIN` must be an origin without a path. It is never a
+`NEXT_PUBLIC_*` value. Production accepts HTTPS origins, with plain HTTP
+restricted to local loopback development.
+
+The committed template uses production-shaped host and origin values. Override
+`BAP_PUBLIC_HOST` to `http://localhost` for the development Compose stack; its
+overlay sets the matching local origin from `WEB_PORT`.
+
+## Runtime configuration
+
+Compose provides service hosts, ports, database login names, and credential file
+paths. These are internal runtime values, not user configuration.
+
+- Web uses `BAP_DATABASE_*` and `BETTER_AUTH_SECRET_FILE`. Its two BFF targets
+  are fixed internal service origins, not deployment inputs.
+- Application and reporting APIs use `BAP_DATABASE_*`, `BAP_JWKS_URL`, and
+  `BAP_PUBLIC_ORIGIN`.
+- Web listens on `PORT` with `HOSTNAME`; Nest services validate `PORT` and
+  `HOST` at startup.
+- Caddy provides the only public application port and replaces client identity
+  with `X-BAP-Client-IP`.
 
 Next.js telemetry is disabled in container builds and runtimes.
 
-`WEB_PORT`, `API_PORT`, and `REPORTING_API_PORT` control host port publishing
-and development scripts. They are not public browser configuration.
+## Secret files
 
-## Compose variables
+Compose accepts paths, never literal passwords. The required local file names
+are the PostgreSQL administrator, migrator, auth, application, reporting,
+backup, Better Auth, and restic credential files listed in
+`config/compose.environment.example`. Create disposable local values with:
 
-`config/compose.environment.example` documents every Compose input. Copy it to
-an ignored environment file for local use. PostgreSQL requires an explicitly
-provided password and does not have a committed fallback.
+```sh
+pnpm secrets:local
+```
+
+The command writes ignored files under `.secrets` with mode `0600`. One-shot
+operations stage only their granted files as mode `0400` copies in container
+tmpfs before dropping to UID 999. Database clients receive a PostgreSQL passfile
+path, never a password environment variable. Production secret values and paths
+are owner-managed deployment inputs. The delivered restic contract contains only
+an encrypted repository locator and password for local proof. An off-host
+backend needs fixed, backend-specific credential and trust-file mounts after the
+owner selects that backend. Generic credential files are not sourced or parsed.
 
 Do not introduce `NEXT_PUBLIC_*` variables for server credentials or internal
 service locations. Production secrets must be injected by the deployment

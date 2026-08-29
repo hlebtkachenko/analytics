@@ -1,14 +1,59 @@
 name: bap
 
 services:
+  caddy:
+    image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    environment:
+      BAP_PUBLIC_HOST: ${BAP_PUBLIC_HOST:-http://localhost}
+    depends_on:
+      api:
+        condition: service_healthy
+      reporting-api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'caddy', 'validate', '--config', '/etc/caddy/Caddyfile']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    init: true
+    networks:
+      - edge
+      - app
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+
   web:
     build:
       context: .
       dockerfile: docker/web.Dockerfile
     environment:
+      BAP_DATABASE_HOST: database
+      BAP_DATABASE_NAME: ${POSTGRES_DB:-bap}
+      BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
+      BAP_DATABASE_PORT: 5432
+      BAP_DATABASE_USER: bap_auth
+      BAP_PUBLIC_ORIGIN: ${BAP_PUBLIC_ORIGIN:-http://localhost:3000}
+      BETTER_AUTH_SECRET_FILE: /run/credentials/auth-secret
       HOSTNAME: 0.0.0.0
       NODE_ENV: production
       PORT: 3000
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
     expose:
       - '3000'
     healthcheck:
@@ -17,7 +62,7 @@ services:
           'CMD',
           'node',
           '-e',
-          "fetch('http://127.0.0.1:3000/health').then((response)=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))",
+          "fetch('http://127.0.0.1:3000/ready').then((response)=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))",
         ]
       interval: 10s
       timeout: 3s
@@ -25,7 +70,49 @@ services:
       start_period: 10s
     init: true
     networks:
-      - application
+      - app
+      - data
+    secrets:
+      - source: bap_auth_password
+        target: /run/credentials/database-password
+      - source: better_auth_secret
+        target: /run/credentials/auth-secret
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  bootstrap-owner:
+    profiles: [bootstrap]
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    command: ['node', 'apps/web/dist-cli/cli/bootstrap-owner.js']
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    environment:
+      BAP_DATABASE_HOST: database
+      BAP_DATABASE_NAME: ${POSTGRES_DB:-bap}
+      BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
+      BAP_DATABASE_PORT: 5432
+      BAP_DATABASE_USER: bap_auth
+      BAP_PUBLIC_ORIGIN: ${BAP_PUBLIC_ORIGIN:-http://localhost:3000}
+      BETTER_AUTH_SECRET_FILE: /run/credentials/auth-secret
+      NODE_ENV: production
+    init: true
+    networks:
+      - data
+    read_only: true
+    stdin_open: true
+    tty: true
+    tmpfs:
+      - /tmp
+    secrets:
+      - source: bap_auth_password
+        target: /run/credentials/database-password
+      - source: better_auth_secret
+        target: /run/credentials/auth-secret
     cap_drop:
       - ALL
     security_opt:
@@ -36,9 +123,19 @@ services:
       context: .
       dockerfile: docker/api.Dockerfile
     environment:
+      BAP_DATABASE_HOST: database
+      BAP_DATABASE_NAME: ${POSTGRES_DB:-bap}
+      BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
+      BAP_DATABASE_PORT: 5432
+      BAP_DATABASE_USER: bap_api
+      BAP_JWKS_URL: http://web:3000/api/auth/jwks
+      BAP_PUBLIC_ORIGIN: ${BAP_PUBLIC_ORIGIN:-http://localhost:3000}
       HOST: 0.0.0.0
       NODE_ENV: production
       PORT: 3001
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
     expose:
       - '3001'
     healthcheck:
@@ -47,7 +144,7 @@ services:
           'CMD',
           'node',
           '-e',
-          "fetch('http://127.0.0.1:3001/health').then((response)=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))",
+          "fetch('http://127.0.0.1:3001/ready').then((response)=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))",
         ]
       interval: 10s
       timeout: 3s
@@ -55,8 +152,11 @@ services:
       start_period: 10s
     init: true
     networks:
-      - application
+      - app
       - data
+    secrets:
+      - source: bap_api_password
+        target: /run/credentials/database-password
     cap_drop:
       - ALL
     security_opt:
@@ -67,9 +167,19 @@ services:
       context: .
       dockerfile: docker/reporting-api.Dockerfile
     environment:
+      BAP_DATABASE_HOST: database
+      BAP_DATABASE_NAME: ${POSTGRES_DB:-bap}
+      BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
+      BAP_DATABASE_PORT: 5432
+      BAP_DATABASE_USER: bap_reporting
+      BAP_JWKS_URL: http://web:3000/api/auth/jwks
+      BAP_PUBLIC_ORIGIN: ${BAP_PUBLIC_ORIGIN:-http://localhost:3000}
       HOST: 0.0.0.0
       NODE_ENV: production
       PORT: 3002
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
     expose:
       - '3002'
     healthcheck:
@@ -78,7 +188,7 @@ services:
           'CMD',
           'node',
           '-e',
-          "fetch('http://127.0.0.1:3002/health').then((response)=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))",
+          "fetch('http://127.0.0.1:3002/ready').then((response)=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))",
         ]
       interval: 10s
       timeout: 3s
@@ -86,20 +196,22 @@ services:
       start_period: 10s
     init: true
     networks:
-      - application
+      - app
       - data
+    secrets:
+      - source: bap_reporting_password
+        target: /run/credentials/database-password
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
 
   database:
-    image: postgres:18.6-bookworm
+    image: postgres:18.6-bookworm@sha256:1c59e2c3c818eaa0f0628f695b36e7c9e362d6b219b36a54a32df645cbd7e1af
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-bap}
-      POSTGRES_PASSWORD:
-        ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the environment}
-      POSTGRES_USER: ${POSTGRES_USER:-bap}
+      POSTGRES_PASSWORD_FILE: /run/credentials/database-password
+      POSTGRES_USER: postgres
     healthcheck:
       test:
         ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
@@ -110,13 +222,296 @@ services:
     init: true
     networks:
       - data
+    secrets:
+      - source: postgres_admin_password
+        target: /run/credentials/database-password
     volumes:
       - postgres_data:/var/lib/postgresql
 
+  role-bootstrap:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: ['node', 'node_modules/@bap/db/dist/cli.js', 'bootstrap-roles']
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      BAP_API_PASSWORD_FILE: /run/credentials/api-password
+      BAP_AUTH_PASSWORD_FILE: /run/credentials/auth-password
+      BAP_BACKUP_PASSWORD_FILE: /run/credentials/backup-password
+      BAP_DATABASE_HOST: database
+      BAP_DATABASE_NAME: ${POSTGRES_DB:-bap}
+      BAP_DATABASE_PASSWORD_FILE: /run/credentials/admin-password
+      BAP_DATABASE_PORT: 5432
+      BAP_DATABASE_USER: postgres
+      BAP_MIGRATOR_PASSWORD_FILE: /run/credentials/migrator-password
+      BAP_REPORTING_PASSWORD_FILE: /run/credentials/reporting-password
+    init: true
+    networks:
+      - data
+    read_only: true
+    tmpfs:
+      - /tmp
+    secrets:
+      - source: postgres_admin_password
+        target: /run/credentials/admin-password
+      - source: bap_migrator_password
+        target: /run/credentials/migrator-password
+      - source: bap_auth_password
+        target: /run/credentials/auth-password
+      - source: bap_api_password
+        target: /run/credentials/api-password
+      - source: bap_reporting_password
+        target: /run/credentials/reporting-password
+      - source: bap_backup_password
+        target: /run/credentials/backup-password
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  migrator:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: ['node', 'node_modules/@bap/db/dist/cli.js', 'migrate']
+    depends_on:
+      role-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      BAP_DATABASE_HOST: database
+      BAP_DATABASE_NAME: ${POSTGRES_DB:-bap}
+      BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
+      BAP_DATABASE_PORT: 5432
+      BAP_DATABASE_USER: bap_migrator
+    init: true
+    networks:
+      - data
+    read_only: true
+    tmpfs:
+      - /tmp
+    secrets:
+      - source: bap_migrator_password
+        target: /run/credentials/database-password
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  backup:
+    profiles: [operations]
+    build:
+      context: .
+      dockerfile: docker/backup.Dockerfile
+    command: [backup]
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    environment:
+      BAP_DATABASE_HOST: database
+      BAP_DATABASE_NAME: ${POSTGRES_DB:-bap}
+    networks:
+      - data
+      - operations-egress
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run/bap-credentials:rw,noexec,nosuid,nodev,size=64k,mode=0750,uid=0,gid=999
+    secrets:
+      - source: bap_backup_password
+        target: /run/credentials/database-password
+      - source: restic_password
+        target: /run/credentials/restic-password
+      - source: restic_repository
+        target: /run/credentials/restic-repository
+    volumes:
+      - restic_repository_data:/repository
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+
+  backup-check:
+    profiles: [operations]
+    build:
+      context: .
+      dockerfile: docker/backup.Dockerfile
+    command: [check]
+    networks:
+      - operations-egress
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run/bap-credentials:rw,noexec,nosuid,nodev,size=64k,mode=0750,uid=0,gid=999
+    secrets:
+      - source: restic_password
+        target: /run/credentials/restic-password
+      - source: restic_repository
+        target: /run/credentials/restic-repository
+    volumes:
+      - restic_repository_data:/repository
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+
+  backup-init:
+    profiles: [operations]
+    extends: backup-check
+    command: [init]
+
+  backup-prune:
+    profiles: [operations]
+    extends: backup-check
+    command: [prune]
+
+  restore:
+    profiles: [operations]
+    build:
+      context: .
+      dockerfile: docker/backup.Dockerfile
+    command: [restore]
+    depends_on:
+      restore-role-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      BAP_DATABASE_HOST: restore-database
+      BAP_DATABASE_NAME: bap_restore
+    networks:
+      - data
+      - operations-egress
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run/bap-credentials:rw,noexec,nosuid,nodev,size=64k,mode=0750,uid=0,gid=999
+    secrets:
+      - source: bap_migrator_password
+        target: /run/credentials/database-password
+      - source: restic_password
+        target: /run/credentials/restic-password
+      - source: restic_repository
+        target: /run/credentials/restic-repository
+    volumes:
+      - restic_repository_data:/repository
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+
+  restore-database:
+    profiles: [operations]
+    image: postgres:18.6-bookworm@sha256:1c59e2c3c818eaa0f0628f695b36e7c9e362d6b219b36a54a32df645cbd7e1af
+    environment:
+      POSTGRES_DB: bap_restore
+      POSTGRES_PASSWORD_FILE: /run/credentials/database-password
+      POSTGRES_USER: postgres
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    init: true
+    networks:
+      - data
+    secrets:
+      - source: postgres_admin_password
+        target: /run/credentials/database-password
+    volumes:
+      - restore_postgres_data:/var/lib/postgresql
+
+  restore-role-bootstrap:
+    profiles: [operations]
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: ['node', 'node_modules/@bap/db/dist/cli.js', 'bootstrap-roles']
+    depends_on:
+      restore-database:
+        condition: service_healthy
+    environment:
+      BAP_API_PASSWORD_FILE: /run/credentials/api-password
+      BAP_AUTH_PASSWORD_FILE: /run/credentials/auth-password
+      BAP_BACKUP_PASSWORD_FILE: /run/credentials/backup-password
+      BAP_DATABASE_HOST: restore-database
+      BAP_DATABASE_NAME: bap_restore
+      BAP_DATABASE_PASSWORD_FILE: /run/credentials/admin-password
+      BAP_DATABASE_PORT: 5432
+      BAP_DATABASE_USER: postgres
+      BAP_MIGRATOR_PASSWORD_FILE: /run/credentials/migrator-password
+      BAP_REPORTING_PASSWORD_FILE: /run/credentials/reporting-password
+    init: true
+    networks:
+      - data
+    read_only: true
+    tmpfs:
+      - /tmp
+    secrets:
+      - source: postgres_admin_password
+        target: /run/credentials/admin-password
+      - source: bap_migrator_password
+        target: /run/credentials/migrator-password
+      - source: bap_auth_password
+        target: /run/credentials/auth-password
+      - source: bap_api_password
+        target: /run/credentials/api-password
+      - source: bap_reporting_password
+        target: /run/credentials/reporting-password
+      - source: bap_backup_password
+        target: /run/credentials/backup-password
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
 networks:
-  application: {}
+  edge: {}
+  app:
+    internal: true
   data:
     internal: true
+  operations-egress: {}
+
+secrets:
+  postgres_admin_password:
+    file: ${POSTGRES_ADMIN_PASSWORD_FILE:-.secrets/postgres_admin_password}
+  bap_migrator_password:
+    file: ${BAP_MIGRATOR_PASSWORD_FILE:-.secrets/bap_migrator_password}
+  bap_auth_password:
+    file: ${BAP_AUTH_PASSWORD_FILE:-.secrets/bap_auth_password}
+  bap_api_password:
+    file: ${BAP_API_PASSWORD_FILE:-.secrets/bap_api_password}
+  bap_reporting_password:
+    file: ${BAP_REPORTING_PASSWORD_FILE:-.secrets/bap_reporting_password}
+  bap_backup_password:
+    file: ${BAP_BACKUP_PASSWORD_FILE:-.secrets/bap_backup_password}
+  better_auth_secret:
+    file: ${BETTER_AUTH_SECRET_FILE:-.secrets/better_auth_secret}
+  restic_password:
+    file: ${RESTIC_PASSWORD_FILE:-.secrets/restic_password}
+  restic_repository:
+    file: ${RESTIC_REPOSITORY_FILE:-.secrets/restic_repository}
 
 volumes:
+  caddy_config:
+  caddy_data:
   postgres_data:
+  restic_repository_data:
+  restore_postgres_data:

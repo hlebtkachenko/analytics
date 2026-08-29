@@ -7,8 +7,10 @@ node_modules/
 
 # Build output
 dist/
+dist-cli/
 build/
 out/
+storybook-static/
 .next/
 .turbo/
 *.tsbuildinfo
@@ -17,6 +19,7 @@ out/
 .env
 .env.*
 !.env.example
+.secrets/
 *.key
 *.pem
 *.enc
@@ -31,6 +34,7 @@ credentials.json
 *.backup
 data/
 dumps/
+.restic-repository/
 *.csv
 *.parquet
 !**/fixtures/**/*.csv
@@ -48,6 +52,7 @@ coverage/
 .nyc_output/
 playwright-report/
 test-results/
+/apps/design-system-workbench/.vitest-attachments/
 
 # Caches
 .cache/

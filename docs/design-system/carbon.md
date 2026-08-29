@@ -1,5 +1,10 @@
 # Carbon Integration
 
+The complete offline handbook starts at the
+[Carbon knowledge base](knowledge-base/README.md). Use that handbook for design,
+component, pattern, chart, accessibility, contribution, and upgrade guidance.
+This page records the package integration contract only.
+
 ## Scope
 
 `@bap/design-system` is the only BAP design-system package. It adapts the
@@ -11,6 +16,7 @@ Current exact versions are maintained in the workspace catalog:
 
 - `@carbon/react` `1.115.0`
 - `@carbon/icons-react` `11.87.0`
+- `@carbon/pictograms-react` `11.109.0`
 - `@carbon/charts-react` `1.27.18`
 - `@ibm/plex-sans` `1.1.0`
 - `@ibm/plex-mono` `1.1.0`
@@ -22,29 +28,42 @@ peers so an application provides one compatible React runtime.
 
 ## Public entrypoints
 
-| Entrypoint                       | Boundary    | Purpose                                                    |
-| -------------------------------- | ----------- | ---------------------------------------------------------- |
-| `@bap/design-system`             | Server-safe | Semantic metadata and type exports only                    |
-| `@bap/design-system/react`       | Client      | Full official `@carbon/react` public API                   |
-| `@bap/design-system/icons`       | Client      | Full official `@carbon/icons-react` public API             |
-| `@bap/design-system/charts`      | Client      | Full official `@carbon/charts-react` API plus `ChartFrame` |
-| `@bap/design-system/theme`       | Client      | `DesignSystemProvider`                                     |
-| `@bap/design-system/tokens`      | Server-safe | Semantic inventory and theme types                         |
-| `@bap/design-system/styles.scss` | Global      | Carbon CSS plus BAP root theme selectors                   |
-| `@bap/design-system/fonts.scss`  | Global      | Selected self-hosted IBM Plex faces                        |
-| `@bap/design-system/charts.css`  | Global      | Official Carbon Charts styles                              |
+| Entrypoint                             | Boundary             | Purpose                                                                |
+| -------------------------------------- | -------------------- | ---------------------------------------------------------------------- |
+| `@bap/design-system`                   | Server-safe, compact | Semantic metadata and type exports only                                |
+| `@bap/design-system/catalog`           | Server-safe, heavy   | Exhaustive generated API, declarations, token, flag, and Sass metadata |
+| `@bap/design-system/component-catalog` | Server-safe, compact | Renderable exports, status, parents, aliases, and controls             |
+| `@bap/design-system/react`             | Client               | Full official `@carbon/react` public API                               |
+| `@bap/design-system/icons`             | Client               | Full official `@carbon/icons-react` public API                         |
+| `@bap/design-system/pictograms`        | Client               | Full official Carbon React pictogram public API                        |
+| `@bap/design-system/charts`            | Client               | Full official `@carbon/charts-react` API plus `ChartFrame`             |
+| `@bap/design-system/theme`             | Client               | `DesignSystemProvider`                                                 |
+| `@bap/design-system/tokens`            | Server-safe, compact | Semantic inventory and theme types                                     |
+| `@bap/design-system/styles.scss`       | Global               | Carbon CSS plus BAP root theme selectors                               |
+| `@bap/design-system/fonts.scss`        | Global               | Selected self-hosted IBM Plex faces                                    |
+| `@bap/design-system/charts.css`        | Global               | Official Carbon Charts styles                                          |
 
-The React, icon, and chart facades use `export *`, so their installed public
-APIs are complete without maintaining a hand-written component barrel. The
-pinned React package currently exposes 367 public keys and the package test
-asserts that count and representative primitives. The source-family inventory in
-`tokens.ts` is documentation metadata, not a claim that every family name is a
-direct React export.
+The React, icon, pictogram, and chart facades use `export *`, so their installed
+public APIs do not depend on a hand-written component barrel. The pinned React
+package exposes a 367-key ESM namespace and a 365-key CommonJS namespace. The
+catalog records module modes separately, classifies recursive namespace members,
+and exact-compares each facade with its matching upstream mode. Renderable API
+metadata resolves props from exported types, call signatures, construct
+signatures, and class instances, including aliased and namespace exports. It
+separates Carbon-owned fields from inherited React and DOM fields and records
+portable declaration paths. Every current renderable has a public props record.
+The two Overflow Menu V2 aliases are explicitly reviewed upstream `any` props;
+there are no genuine no-props renderables in the pinned release. It also records
+the public declaration surfaces of `@carbon/charts-react` and `@carbon/charts`,
+including type-only exports, aliases, declaration paths, property types, and
+literal option controls. The generated catalog, not a manual family list or
+count, is the exhaustive API reference.
 
 Use the client facades from a Client Component. Server Components may import
-metadata from the root or `tokens` entrypoints, then pass serializable props to
-client leaf components. The web app opts into workspace transpilation through
-`transpilePackages`.
+metadata from the root, `tokens`, or `component-catalog` entrypoints, then pass
+serializable props to client leaf components. Import the full `catalog`
+entrypoint only in tooling or an intentionally lazy reference view. The web app
+opts into workspace transpilation through `transpilePackages`.
 
 ## Themes and colors
 
@@ -106,16 +125,20 @@ reduced-motion preferences whenever adding motion beyond component behavior.
 
 ## Components, icons, and charts
 
-The React facade supplies all installed Carbon components. The package tracks
-the current Carbon source component families in `carbonComponentFamilies`,
-including forms, UI Shell, tables, menus, modals, tiles, skeletons, loading,
-notifications, pagination, date/time controls, tree views, AI labels, and layout
-primitives. Feature-flagged, experimental, or deprecated upstream exports remain
-upstream API and must be assessed before product use.
+The React facade supplies the installed Carbon public API. Stable, preview,
+unstable, deprecated, feature-flagged, compound, hook, context, utility, and
+constant surfaces are separate catalog classifications. A source folder or
+upstream story is not proof that a name is a public root export. See the
+[component guide](knowledge-base/05-components.md) and generated workbench.
 
 The icon facade exports every official Carbon React icon. Use named imports and
 the approved 16, 20, 24, or 32px sizes. Use an accessible text label or an
 appropriate `aria-label` when an icon conveys an action.
+
+The pictogram facade is separate from icons and exports every installed Carbon
+React pictogram. Pictograms communicate broader concepts and are not compact
+control glyphs. The workbench virtualizes both visual inventories so it remains
+responsive without omitting exports.
 
 The charts facade exports the 25 standard React chart components: area, stacked
 area, grouped/simple/stacked bar, boxplot, bubble, bullet, choropleth, donut,
@@ -124,6 +147,9 @@ treemap, circle pack, word cloud, alluvial, and heatmap. It also exports
 `ExperimentalChoroplethChart` and all diagram primitives, including CardNode
 parts, Edge, ShapeNode, and marker exports. The metadata and tests distinguish
 these categories and assert every chart-related name against the pinned package.
+The local workbench lazily exposes both chart declaration inventories, so
+`ChartOptions`, event, data, configuration, and type-only contracts remain
+searchable offline alongside runtime chart components.
 
 `ChartFrame` is the only BAP-owned visual utility. It wraps a caller-supplied
 chart with a title, optional description, and equivalent Carbon table. Supply
@@ -150,15 +176,21 @@ Carbon and Plex packages contain IBM Telemetry postinstall scripts. The pnpm
 `allowBuilds` policy blocks those lifecycle scripts for every installation.
 Repository build scripts and every Docker stage additionally set
 `IBM_TELEMETRY_DISABLED=true`. The web and root scripts set
-`NEXT_TELEMETRY_DISABLED=1`.
+`NEXT_TELEMETRY_DISABLED=1`. The workbench config disables Storybook telemetry,
+and every Storybook command plus CI sets `STORYBOOK_DISABLE_TELEMETRY=1`.
 
-Carbon React, Carbon Charts, and Carbon Icons are Apache-2.0. IBM Plex is
-OFL-1.1. See `THIRD_PARTY_NOTICES.md`. When upgrading, update the exact catalog
-versions and lockfile together, run the complete gate, review Carbon release
-notes, verify facade inventory tests, Sass compilation, and the emitted WOFF2
-count. The current Next/Turbopack build preserves Carbon's valid `@position-try`
-rules but emits four parser warnings. Do not strip upstream CSS; reassess the
-warnings when upgrading Next or Carbon.
+Carbon React, Carbon Charts, Carbon Icons, and Carbon Pictograms are Apache-2.0.
+IBM Plex is OFL-1.1. See `THIRD_PARTY_NOTICES.md`. When upgrading, update the
+exact catalog versions and lockfile together, run the complete gate, review
+Carbon release notes, verify facade inventory tests, Sass compilation, and the
+emitted WOFF2 count. The current Next/Turbopack build preserves Carbon's valid
+`@position-try` rules but emits four parser warnings. Do not strip upstream CSS;
+reassess the warnings when upgrading Next or Carbon.
+
+The pinned source mapping covers 147 React story files, 547 AST-derived named
+stories, 198 React-package MDX files, and 317 Carbon website MDX files. Review
+the [closed-world coverage](knowledge-base/source-coverage.md) during every
+Carbon upgrade.
 
 ## Official sources
 

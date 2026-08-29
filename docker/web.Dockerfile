@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:24.20.0-bookworm-slim AS base
+FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS base
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV IBM_TELEMETRY_DISABLED=true
 ENV PNPM_HOME=/pnpm
@@ -12,18 +12,23 @@ FROM base AS dependencies
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY apps/web/package.json apps/web/package.json
 COPY apps/api/package.json apps/api/package.json
+COPY apps/design-system-workbench/package.json apps/design-system-workbench/package.json
 COPY apps/reporting-api/package.json apps/reporting-api/package.json
 COPY packages/eslint-config/package.json packages/eslint-config/package.json
 COPY packages/typescript-config/package.json packages/typescript-config/package.json
 COPY packages/design-system/package.json packages/design-system/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY packages/security/package.json packages/security/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --filter @bap/web...
 
 FROM dependencies AS build
 COPY apps/web apps/web
 COPY packages packages
-RUN pnpm --filter @bap/web build
+RUN pnpm --filter @bap/db build \
+  && pnpm --filter @bap/web build \
+  && pnpm --filter @bap/web build:cli
 
-FROM node:24.20.0-bookworm-slim AS runtime
+FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime
 ENV HOSTNAME=0.0.0.0
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV IBM_TELEMETRY_DISABLED=true
@@ -33,6 +38,7 @@ WORKDIR /app
 RUN groupadd --system --gid 1001 nodejs && useradd --system --uid 1001 --gid nodejs nextjs
 COPY --from=build --chown=nextjs:nodejs /workspace/apps/web/.next/standalone ./
 COPY --from=build --chown=nextjs:nodejs /workspace/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build --chown=nextjs:nodejs /workspace/apps/web/dist-cli ./apps/web/dist-cli
 COPY --chown=nextjs:nodejs THIRD_PARTY_NOTICES.md ./
 COPY --chown=nextjs:nodejs licenses ./licenses
 USER nextjs

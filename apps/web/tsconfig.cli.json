@@ -1,0 +1,21 @@
+{
+  "extends": "@bap/typescript-config/base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist-cli",
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": "src",
+    "target": "ES2024",
+    "types": ["node"]
+  },
+  "include": [
+    "src/cli/**/*.ts",
+    "src/lib/auth/bootstrap-owner.ts",
+    "src/lib/auth/contract.ts",
+    "src/lib/auth/models.ts",
+    "src/lib/auth/server.ts"
+  ],
+  "exclude": ["src/**/*.test.ts"]
+}

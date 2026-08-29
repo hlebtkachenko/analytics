@@ -1,0 +1,27 @@
+{
+	admin off
+}
+
+{$BAP_PUBLIC_HOST:http://localhost} {
+	@private path /ready /ready/* /metrics /metrics/*
+	respond @private 404
+
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		X-Request-ID {http.request.uuid}
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), geolocation=(), microphone=()"
+	}
+
+	reverse_proxy web:3000 {
+		header_up -X-Real-IP
+		header_up X-BAP-Client-IP {remote_host}
+		header_up X-BAP-Request-ID {http.request.uuid}
+	}
+}
+
+http://, https:// {
+	header -Server
+	respond 421
+}
