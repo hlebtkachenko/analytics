@@ -5,7 +5,8 @@
   "description": "Business Analytics Platform monorepo",
   "scripts": {
     "build": "IBM_TELEMETRY_DISABLED=true NEXT_TELEMETRY_DISABLED=1 STORYBOOK_DISABLE_TELEMETRY=1 turbo run build",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "check": "pnpm check:node-pins && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "check:node-pins": "node scripts/check-node-pins.mjs",
     "compose:config": "docker compose -f compose.yaml -f compose.development.yaml config --quiet",
     "compose:config:production": "BAP_PUBLIC_HOST=bap.invalid BAP_PUBLIC_ORIGIN=https://bap.invalid docker compose -f compose.yaml -f compose.production.yaml config --quiet",
     "compose:verify": "docker compose -f compose.yaml -f compose.development.yaml config --format json | node scripts/verify-compose.mjs development && BAP_PUBLIC_HOST=bap.invalid BAP_PUBLIC_ORIGIN=https://bap.invalid docker compose -f compose.yaml -f compose.production.yaml config --format json | node scripts/verify-compose.mjs production && BAP_PUBLIC_HOST=bap.invalid BAP_PUBLIC_ORIGIN=https://bap.invalid docker compose --profile operations -f compose.yaml -f compose.production.yaml config --format json | node scripts/verify-compose.mjs operations && docker compose --profile bootstrap -f compose.yaml -f compose.development.yaml config --format json | node scripts/verify-compose.mjs bootstrap",

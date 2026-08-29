@@ -22,3 +22,16 @@ updates:
         dependency-type: production
         patterns:
           - '*'
+
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+    groups:
+      base-images:
+        patterns:
+          - '*'
+    ignore:
+      - dependency-name: node
+        update-types:
+          - version-update:semver-major
