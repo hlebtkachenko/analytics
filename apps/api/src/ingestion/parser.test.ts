@@ -10,6 +10,7 @@ import {
   inferColumnTypes,
   openDataset,
   resolveDatasetFormat,
+  sanitizeText,
 } from './parser.js';
 import type { DatasetValue } from './parser.js';
 
@@ -115,6 +116,90 @@ describe('CSV parsing', () => {
     await expect(collect(path, 'csv')).rejects.toThrow(
       new DatasetParseError('The file has no header row.') as Error,
     );
+  });
+
+  it('reads LF, CRLF and classic Mac CR line endings identically', async () => {
+    const expected = {
+      columns: ['label', 'amount'],
+      rows: [
+        ['first', '1'],
+        ['second', '2'],
+      ],
+    };
+    const lineFeed = await writeCsv(
+      'endings-lf.csv',
+      'label,amount\nfirst,1\nsecond,2\n',
+    );
+    const both = await writeCsv(
+      'endings-crlf.csv',
+      'label,amount\r\nfirst,1\r\nsecond,2\r\n',
+    );
+    // A bare CR used to be discarded, which collapsed the whole file into one header row.
+    const carriageReturn = await writeCsv(
+      'endings-cr.csv',
+      'label,amount\rfirst,1\rsecond,2\r',
+    );
+
+    await expect(collect(lineFeed, 'csv')).resolves.toEqual(expected);
+    await expect(collect(both, 'csv')).resolves.toEqual(expected);
+    await expect(collect(carriageReturn, 'csv')).resolves.toEqual(expected);
+  });
+
+  it('keeps a CRLF terminator whole when a read splits it', async () => {
+    // The header is 3 bytes and each record 7, so one CR is the last byte of the first 64 KiB read.
+    const path = await writeCsv(
+      'chunked.csv',
+      `a\r\n${'value\r\n'.repeat(20_000)}`,
+    );
+    const result = await collect(path, 'csv');
+
+    expect(result.columns).toEqual(['a']);
+    expect(result.rows).toHaveLength(20_000);
+    expect(new Set(result.rows.map((row) => row[0]))).toEqual(
+      new Set(['value']),
+    );
+  });
+
+  it('removes a character PostgreSQL cannot store and reports the count', async () => {
+    const path = await writeCsv(
+      'unstorable.csv',
+      'la\u0000bel,note\nfirst,a\u0000b\n',
+    );
+    const dataset = await openDataset(path, 'csv');
+    const rows: (readonly DatasetValue[])[] = [];
+
+    for await (const row of dataset.rows) {
+      rows.push(row);
+    }
+
+    expect(dataset.columns).toEqual(['label', 'note']);
+    expect(rows).toEqual([['first', 'ab']]);
+    // The header and the cell were both rewritten, so the removal is reported rather than silent.
+    expect(dataset.sanitization.values).toBe(2);
+  });
+
+  it('keeps a quote that does not open the field', async () => {
+    // RFC 4180: a field is escaped only when its first character is a quote, so a later quote is data.
+    const path = await writeCsv('stray-quote.csv', 'a,b,c\n "x,y",2\n');
+
+    await expect(collect(path, 'csv')).resolves.toEqual({
+      columns: ['a', 'b', 'c'],
+      rows: [[' "x', 'y"', '2']],
+    });
+  });
+});
+
+describe('sanitizeText', () => {
+  it('removes U+0000 and a lone surrogate but keeps a valid astral pair', () => {
+    const sanitization = { values: 0 };
+
+    // A UTF-8 file decodes to U+FFFD instead, so a lone surrogate is guarded at the boundary only.
+    expect(sanitizeText('a\u0000b', sanitization)).toBe('ab');
+    expect(sanitizeText('a\uD800b', sanitization)).toBe('ab');
+    expect(sanitizeText('a\uDC00b', sanitization)).toBe('ab');
+    expect(sanitizeText('a\u{1F600}b', sanitization)).toBe('a\u{1F600}b');
+    expect(sanitizeText('přehled', sanitization)).toBe('přehled');
+    expect(sanitization.values).toBe(3);
   });
 });
 

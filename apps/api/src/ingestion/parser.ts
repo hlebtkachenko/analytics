@@ -15,12 +15,38 @@ const BYTE_ORDER_MARK = '\uFEFF';
 // Every XLSX file is a zip archive, so its first four bytes are the local file header signature.
 const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 
+// PostgreSQL stores neither U+0000 nor an unpaired surrogate in a jsonb or text column.
+// The u flag makes the range match lone surrogates only, so a valid astral pair is kept.
+// eslint-disable-next-line no-control-regex
+const UNSTORABLE_TEXT = /[\u0000\uD800-\uDFFF]/gu;
+
 // Messages are recorded in app.upload.error, so they carry positions only and never cell content.
 export class DatasetParseError extends Error {}
+
+// Counts the values the parser had to rewrite, so the removal is reported instead of silent.
+export interface DatasetSanitization {
+  values: number;
+}
 
 export interface ParsedDataset {
   columns: readonly string[];
   rows: AsyncIterable<readonly DatasetValue[]>;
+  // Final only once rows are fully consumed, because the parser streams.
+  sanitization: DatasetSanitization;
+}
+
+// Dropping the character keeps the rest of the file ingestable; the whole batch would fail otherwise.
+export function sanitizeText(
+  text: string,
+  sanitization: DatasetSanitization,
+): string {
+  const cleaned = text.replace(UNSTORABLE_TEXT, '');
+
+  if (cleaned.length !== text.length) {
+    sanitization.values += 1;
+  }
+
+  return cleaned;
 }
 
 export function resolveDatasetFormat(filename: string): DatasetFormat | null {
@@ -63,6 +89,7 @@ async function assertContentMatchesFormat(
 // A hand written state machine rather than the ExcelJS CSV reader, which materializes a worksheet.
 async function* readCsvRecords(
   filePath: string,
+  sanitization: DatasetSanitization,
 ): AsyncGenerator<readonly string[]> {
   const source = createReadStream(filePath, { encoding: 'utf8' });
   let record: string[] = [];
@@ -70,13 +97,14 @@ async function* readCsvRecords(
   let quoted = false;
   let quotePending = false;
   let started = false;
+  let lineFeedPending = false;
 
   const closeField = (): void => {
     if (field.length > MAX_VALUE_LENGTH) {
       throw new DatasetParseError('A value exceeds the supported length.');
     }
 
-    record.push(field);
+    record.push(sanitizeText(field, sanitization));
     field = '';
 
     if (record.length > MAX_COLUMNS) {
@@ -94,6 +122,15 @@ async function* readCsvRecords(
       }
 
       for (const character of text) {
+        if (lineFeedPending) {
+          lineFeedPending = false;
+
+          // CR LF is one terminator, so the LF that follows a record ending CR is consumed here.
+          if (character === '\n') {
+            continue;
+          }
+        }
+
         if (quoted && !quotePending) {
           if (character === '"') {
             quotePending = true;
@@ -114,11 +151,14 @@ async function* readCsvRecords(
           quoted = false;
         }
 
+        // RFC 4180: a field is escaped only when it opens with a quote, so a later quote is data.
         if (character === '"' && field.length === 0) {
           quoted = true;
         } else if (character === ',') {
           closeField();
-        } else if (character === '\n') {
+        } else if (character === '\n' || character === '\r') {
+          // LF, CR LF and a classic Mac bare CR all terminate exactly one record.
+          lineFeedPending = character === '\r';
           closeField();
 
           if (record.some((value) => value.length > 0)) {
@@ -126,7 +166,7 @@ async function* readCsvRecords(
           }
 
           record = [];
-        } else if (character !== '\r') {
+        } else {
           field += character;
         }
       }
@@ -148,7 +188,10 @@ async function* readCsvRecords(
   }
 }
 
-function toDatasetValue(cell: Cell): DatasetValue {
+function toDatasetValue(
+  cell: Cell,
+  sanitization: DatasetSanitization,
+): DatasetValue {
   const { value } = cell;
 
   if (value === null || value === undefined) {
@@ -169,12 +212,13 @@ function toDatasetValue(cell: Cell): DatasetValue {
     throw new DatasetParseError('A value exceeds the supported length.');
   }
 
-  return text;
+  return sanitizeText(text, sanitization);
 }
 
 // ExcelJS streams the sheet XML row by row; only the shared string table is held in memory.
 async function* readXlsxRecords(
   filePath: string,
+  sanitization: DatasetSanitization,
 ): AsyncGenerator<readonly DatasetValue[]> {
   const source = createReadStream(filePath);
 
@@ -198,7 +242,7 @@ async function* readXlsxRecords(
         const values: DatasetValue[] = [];
 
         for (let index = 1; index <= row.cellCount; index += 1) {
-          values.push(toDatasetValue(row.getCell(index)));
+          values.push(toDatasetValue(row.getCell(index), sanitization));
         }
 
         if (values.some((value) => value !== null && value !== '')) {
@@ -275,8 +319,11 @@ export async function openDataset(
   format: DatasetFormat,
 ): Promise<ParsedDataset> {
   await assertContentMatchesFormat(filePath, format);
+  const sanitization: DatasetSanitization = { values: 0 };
   const records: AsyncGenerator<readonly DatasetValue[]> =
-    format === 'csv' ? readCsvRecords(filePath) : readXlsxRecords(filePath);
+    format === 'csv'
+      ? readCsvRecords(filePath, sanitization)
+      : readXlsxRecords(filePath, sanitization);
   const header = await records.next();
 
   if (header.done === true) {
@@ -284,7 +331,7 @@ export async function openDataset(
   }
 
   const columns = normalizeColumnNames(header.value);
-  return { columns, rows: alignRows(records, columns.length) };
+  return { columns, rows: alignRows(records, columns.length), sanitization };
 }
 
 function classify(value: DatasetValue): InferredColumnType | null {

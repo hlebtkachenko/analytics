@@ -313,4 +313,50 @@ describe('dataset ingestion through the real queue', () => {
     expect(output).not.toContain(organizationId);
     expect(output).not.toContain(userId);
   });
+
+  it('ingests a file whose cell holds a character jsonb cannot store', async () => {
+    // Passed through, the U+0000 makes PostgreSQL reject the whole batch and the dataset dies.
+    const uploadId = await stageUpload(
+      'notes.csv',
+      'label,note\nfirst,a\u0000b\n',
+    );
+    const settled = awaitJob(uploadId);
+    await boss.send(
+      INGEST_DATASET_QUEUE,
+      { organizationId, uploadId, userId },
+      { retryLimit: 0 },
+    );
+
+    await expect(settled).resolves.toBeNull();
+
+    const stored = await asTenant(async (transaction) => {
+      const dataset = await transaction.query<{ id: string; status: string }>(
+        'select id, status from app.dataset where id = (select dataset_id from app.upload where id = $1)',
+        [uploadId],
+      );
+      const datasetId = dataset.rows[0]?.id;
+      const rows = await transaction.query<{ data: Record<string, unknown> }>(
+        'select data from app.dataset_row where dataset_id = $1 order by row_number',
+        [datasetId],
+      );
+      const audit = await transaction.query<{
+        metadata: Record<string, unknown>;
+      }>(
+        "select metadata from app.audit_log where action = 'dataset.ingested' and resource_id = $1",
+        [datasetId],
+      );
+      return { audit, dataset, rows };
+    });
+
+    expect(stored.dataset.rows[0]?.status).toBe('ready');
+    expect(stored.rows.rows).toEqual([
+      { data: { label: 'first', note: 'ab' } },
+    ]);
+    // A count, never the value, so the removal is auditable without quoting cell content.
+    expect(stored.audit.rows[0]?.metadata).toEqual({
+      columns: 2,
+      rows: 1,
+      sanitized_values: 1,
+    });
+  });
 });

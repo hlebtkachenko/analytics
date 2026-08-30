@@ -27,22 +27,49 @@ export class PgBossIngestionQueue
   }
 
   async onModuleDestroy(): Promise<void> {
-    if (this.clientPromise !== undefined) {
-      await (await this.clientPromise).stop({ graceful: true });
+    const started = this.clientPromise;
+
+    if (started === undefined) {
+      return;
     }
+
+    // A client that never started has nothing to stop, and its rejection must not fail shutdown.
+    const client = await started.catch(() => undefined);
+    await client?.stop({ graceful: true });
   }
 
   // Started on first use, like the membership pool, so the service still boots without the queue.
   private getClient(): Promise<PgBoss> {
-    this.clientPromise ??= loadDatabaseConfiguration(process.env, {
+    if (this.clientPromise === undefined) {
+      const started = this.startClient();
+      this.clientPromise = started;
+      // A failed start is dropped, so the next upload retries instead of replaying the rejection.
+      void started.catch(() => {
+        if (this.clientPromise === started) {
+          this.clientPromise = undefined;
+        }
+      });
+    }
+
+    return this.clientPromise;
+  }
+
+  private async startClient(): Promise<PgBoss> {
+    const configuration = await loadDatabaseConfiguration(process.env, {
       role: 'bap_api',
-    }).then(async (configuration) => {
-      const client = createQueueClientFromConfiguration(configuration);
-      client.on('error', () => undefined);
+    });
+    const client = createQueueClientFromConfiguration(configuration);
+    client.on('error', () => undefined);
+
+    try {
       await client.start();
       await createQueue(client, INGEST_DATASET_QUEUE);
-      return client;
-    });
-    return this.clientPromise;
+    } catch (error) {
+      // A retry builds a new client, so this one must not keep its connection pool open.
+      await client.stop({ graceful: false }).catch(() => undefined);
+      throw error;
+    }
+
+    return client;
   }
 }

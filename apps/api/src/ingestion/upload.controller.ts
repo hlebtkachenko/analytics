@@ -100,6 +100,8 @@ const multerOptions: MulterModuleOptions = {
   ): void => {
     callback(null, loadStagingDirectory(process.env));
   },
+  // Browsers send unencoded multipart filenames as UTF-8, but busboy defaults to latin1.
+  defParamCharset: 'utf8',
   // fields and files bound the shape exactly, so no separate part count is needed.
   limits: {
     fieldSize: 1_024,

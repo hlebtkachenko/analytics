@@ -171,6 +171,7 @@ async function completeDataset(
     columnCount: number;
     datasetId: string;
     rowCount: number;
+    sanitizedValues: number;
     uploadId: string;
   },
 ): Promise<void> {
@@ -183,11 +184,16 @@ async function completeDataset(
     [input.uploadId],
   );
   // Attribution is derived from the transaction context, so this must run inside it.
+  // sanitized_values is a count only, so the removal is auditable without quoting cell content.
   await transaction.query(
     "select app.record_audit('dataset.ingested', 'dataset', $1, $2::jsonb)",
     [
       input.datasetId,
-      JSON.stringify({ columns: input.columnCount, rows: input.rowCount }),
+      JSON.stringify({
+        columns: input.columnCount,
+        rows: input.rowCount,
+        sanitized_values: input.sanitizedValues,
+      }),
     ],
   );
 }
@@ -312,6 +318,7 @@ async function parseAndStore(
           columnCount: dataset.columns.length,
           datasetId,
           rowCount: total,
+          sanitizedValues: dataset.sanitization.values,
           uploadId: job.uploadId,
         }),
     });

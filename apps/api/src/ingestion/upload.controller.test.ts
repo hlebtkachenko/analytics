@@ -173,6 +173,16 @@ describe('application upload route', () => {
     expect(recorded[0]?.filename).toBe('passwd.csv');
   });
 
+  it('decodes a non-ASCII multipart filename as UTF-8 and stores it unchanged', async () => {
+    const filename = 'přehled-2026.csv';
+    const response = await upload(filename, 'label\nfirst\n', 'text/csv');
+
+    // Decoded as latin1 the same bytes carry U+0099, which SAFE_FILENAME rejects with a bare 400.
+    expect(response.status).toBe(201);
+    expect(recorded[0]?.filename).toBe(filename);
+    expect(enqueued).toHaveLength(1);
+  });
+
   it('rejects a filename carrying a bidirectional override', async () => {
     const before = await readdir(staging);
     const response = await upload(
