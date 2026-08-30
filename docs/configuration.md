@@ -5,13 +5,14 @@
 `config/compose.environment.example` is the complete non-secret Compose input
 template. Copy it to an ignored file for local development.
 
-| Variable            | Purpose                                    | Development default     |
-| ------------------- | ------------------------------------------ | ----------------------- |
-| `WEB_PORT`          | Caddy host port                            | `3000`                  |
-| `POSTGRES_PORT`     | Loopback PostgreSQL host port              | `5432`                  |
-| `POSTGRES_DB`       | Database name                              | `bap`                   |
-| `BAP_PUBLIC_HOST`   | Caddy site address                         | `http://localhost`      |
-| `BAP_PUBLIC_ORIGIN` | Exact Better Auth issuer and public origin | `http://localhost:3000` |
+| Variable            | Purpose                                    | Development default      |
+| ------------------- | ------------------------------------------ | ------------------------ |
+| `WEB_PORT`          | Caddy host port                            | `3000`                   |
+| `POSTGRES_PORT`     | Loopback PostgreSQL host port              | `5432`                   |
+| `POSTGRES_DB`       | Database name                              | `bap`                    |
+| `BAP_PUBLIC_HOST`   | Caddy site address                         | `http://localhost`       |
+| `BAP_PUBLIC_ORIGIN` | Exact Better Auth issuer and public origin | `http://localhost:3000`  |
+| `BAP_MAIL_SENDER`   | From address for transactional mail        | `no-reply@bap.localhost` |
 
 `BAP_PUBLIC_ORIGIN` must be an origin without a path. It is never a
 `NEXT_PUBLIC_*` value. Production accepts HTTPS origins, with plain HTTP
@@ -26,10 +27,14 @@ overlay sets the matching local origin from `WEB_PORT`.
 Compose provides service hosts, ports, database login names, and credential file
 paths. These are internal runtime values, not user configuration.
 
-- Web uses `BAP_DATABASE_*` and `BETTER_AUTH_SECRET_FILE`. Its two BFF targets
-  are fixed internal service origins, not deployment inputs.
+- Web uses `BAP_DATABASE_*`, `BETTER_AUTH_SECRET_FILE`, `BAP_MAIL_SENDER`,
+  `BAP_RESEND_API_KEY_FILE`, and `BAP_AI_PROVIDER_CONFIG_FILE`. Its two BFF
+  targets are fixed internal service origins, not deployment inputs.
 - Application and reporting APIs use `BAP_DATABASE_*`, `BAP_JWKS_URL`, and
   `BAP_PUBLIC_ORIGIN`.
+- The worker uses `BAP_DATABASE_*` as `bap_api` plus
+  `BAP_AI_PROVIDER_CONFIG_FILE`, and serves health, readiness, and metrics on
+  its own internal port.
 - Web listens on `PORT` with `HOSTNAME`; Nest services validate `PORT` and
   `HOST` at startup.
 - Caddy provides the only public application port and replaces client identity
@@ -41,8 +46,11 @@ Next.js telemetry is disabled in container builds and runtimes.
 
 Compose accepts paths, never literal passwords. The required local file names
 are the PostgreSQL administrator, migrator, auth, application, reporting,
-backup, Better Auth, and restic credential files listed in
-`config/compose.environment.example`. Create disposable local values with:
+backup, Better Auth, Resend, AI provider, and restic credential files listed in
+`config/compose.environment.example`. The Resend key and the AI provider
+document are seeded with the literal placeholder
+`local-development-placeholder`, which selects a log-only mail transport instead
+of a provider call. Create disposable local values with:
 
 ```sh
 pnpm secrets:local
