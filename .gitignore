@@ -76,3 +76,6 @@ Thumbs.db
 # Local scratch
 _junk/
 .context/
+
+# next dev and next build write different reference paths into this file.
+apps/web/next-env.d.ts
