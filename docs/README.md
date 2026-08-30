@@ -18,6 +18,7 @@ exist.
 - [Authentication and organization access](authentication.md)
 - [Backup and restore proof](backup-and-restore.md)
 - [Phase 5 SaaS foundation report](reports/phase-5-saas-foundation.md)
+- [Phase 6 platform batteries report](reports/phase-6-platform-batteries.md)
 - [Foundation research](foundation-research.md)
 - [Carbon integration](design-system/carbon.md)
 - [Carbon offline knowledge base](design-system/knowledge-base/README.md)
