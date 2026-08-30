@@ -31,8 +31,12 @@ Worker runtime: a second entrypoint in the application API image, running as
 worker cannot mint resource JWTs, reads tenant data only through
 `withTenantContext`, and re-resolves membership at dequeue.
 
-Transactional mail: use Resend, with the API key mounted as a credential file
-and a log-only transport whenever no key is configured.
+Transactional mail: use Resend, with the API key mounted as a credential file.
+The transport is selected explicitly rather than inferred from the key, because
+inferring it would let a deployment with a placeholder key drop every message
+while reporting success. `BAP_MAIL_TRANSPORT` names the transport, the
+development overlay opts into the log transport, and the Resend transport
+refuses to start without a real key.
 
 Model access: keep the provider choice out of the deployment topology. One
 `ai_provider_config` JSON credential file carries provider name, key, base URL,
