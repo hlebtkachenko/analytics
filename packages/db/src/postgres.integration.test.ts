@@ -149,6 +149,11 @@ beforeAll(async () => {
     insert into app.tenant_test (id, organization_id, value)
     values ('record-1', 'org-1', 'first'), ('record-2', 'org-2', 'second')
   `);
+  await rootPool.query(`
+    insert into app.data_grants (organization_id, user_id, resource_type, resource_id, scope)
+    values ('org-1', 'user-1', 'dataset', 'dataset-1', 'read'),
+           ('org-2', 'user-2', 'dataset', 'dataset-2', 'read')
+  `);
 });
 
 afterAll(async () => {
@@ -273,6 +278,194 @@ describe('PostgreSQL 18 isolation', () => {
     }
   });
 
+  it('isolates data grants for reads and rejects cross-tenant writes', async () => {
+    const client = await apiPool.connect();
+
+    try {
+      const visible = await withTenantContext(
+        client,
+        { organizationId: 'org-1', userId: 'user-1' },
+        async (transaction) => {
+          const result = await transaction.query<{ resource_id: string }>(
+            'select resource_id from app.data_grants order by resource_id',
+          );
+          return result.rows;
+        },
+      );
+
+      expect(visible).toEqual([{ resource_id: 'dataset-1' }]);
+      await expect(
+        withTenantContext(
+          client,
+          { organizationId: 'org-1', userId: 'user-1' },
+          async (transaction) =>
+            transaction.query(
+              "insert into app.data_grants (organization_id, user_id, resource_type, resource_id, scope) values ('org-2', 'user-2', 'dataset', 'dataset-3', 'read')",
+            ),
+        ),
+      ).rejects.toThrow(/row-level security/);
+      const inserted = await withTenantContext(
+        client,
+        { organizationId: 'org-1', userId: 'user-1' },
+        async (transaction) => {
+          const result = await transaction.query<{ resource_id: string }>(
+            "insert into app.data_grants (organization_id, user_id, resource_type, resource_id, scope) values ('org-1', 'user-1', 'dataset', 'dataset-4', 'read') returning resource_id",
+          );
+          return result.rows;
+        },
+      );
+
+      expect(inserted).toEqual([{ resource_id: 'dataset-4' }]);
+      await expect(
+        reportingPool.query(
+          "insert into app.data_grants (organization_id, user_id, resource_type, resource_id, scope) values ('org-1', 'user-1', 'dataset', 'dataset-5', 'read')",
+        ),
+      ).rejects.toThrow(/permission denied/);
+    } finally {
+      client.release();
+    }
+  });
+
+  it('keeps the audit log append only for the application role', async () => {
+    const client = await apiPool.connect();
+
+    try {
+      await withTenantContext(
+        client,
+        { organizationId: 'org-1', userId: 'user-1' },
+        async (transaction) =>
+          transaction.query(
+            "select app.record_audit('grant.created', 'data_grant', 'dataset-1')",
+          ),
+      );
+      await expect(
+        withTenantContext(
+          client,
+          { organizationId: 'org-1', userId: 'user-1' },
+          async (transaction) =>
+            transaction.query(
+              "insert into app.audit_log (organization_id, user_id, action, resource_type) values ('org-1', 'user-1', 'forged', 'data_grant')",
+            ),
+        ),
+      ).rejects.toThrow(/permission denied/);
+      await expect(
+        withTenantContext(
+          client,
+          { organizationId: 'org-1', userId: 'user-1' },
+          async (transaction) =>
+            transaction.query("update app.audit_log set action = 'edited'"),
+        ),
+      ).rejects.toThrow(/permission denied/);
+      await expect(
+        withTenantContext(
+          client,
+          { organizationId: 'org-1', userId: 'user-1' },
+          async (transaction) => transaction.query('delete from app.audit_log'),
+        ),
+      ).rejects.toThrow(/permission denied/);
+      const remaining = await withTenantContext(
+        client,
+        { organizationId: 'org-1', userId: 'user-1' },
+        async (transaction) => {
+          const result = await transaction.query<{ action: string }>(
+            'select action from app.audit_log order by created_at',
+          );
+          return result.rows;
+        },
+      );
+
+      expect(remaining).toEqual([{ action: 'grant.created' }]);
+    } finally {
+      client.release();
+    }
+  });
+
+  it('records audit entries for the tenant context and never for an argument', async () => {
+    const definition = await rootPool.query<{
+      arguments: string;
+      security_definer: boolean;
+      settings: string[] | null;
+    }>(`
+      select pg_get_function_arguments(routine.oid) as arguments,
+             routine.prosecdef as security_definer,
+             routine.proconfig as settings
+      from pg_proc as routine
+      inner join pg_namespace as namespace on namespace.oid = routine.pronamespace
+      where namespace.nspname = 'app' and routine.proname = 'record_audit'
+    `);
+
+    expect(definition.rows).toHaveLength(1);
+    expect(definition.rows[0]?.security_definer).toBe(true);
+    expect(definition.rows[0]?.settings?.[0]).toMatch(/^search_path=/);
+    // Security proof: no argument can carry a tenant or a subject into the log.
+    expect(definition.rows[0]?.arguments).not.toMatch(/organization|user/i);
+    const client = await apiPool.connect();
+
+    try {
+      const recordedId = await withTenantContext(
+        client,
+        { organizationId: 'org-1', userId: 'user-1' },
+        async (transaction) => {
+          const result = await transaction.query<{ id: string }>(
+            "select app.record_audit('dataset.read', 'dataset', 'dataset-1', jsonb_build_object('organization_id', 'org-2', 'user_id', 'user-2')) as id",
+          );
+          return result.rows[0]?.id;
+        },
+      );
+
+      expect(typeof recordedId).toBe('string');
+      const attribution = await withTenantContext(
+        client,
+        { organizationId: 'org-1', userId: 'user-1' },
+        async (transaction) => {
+          const result = await transaction.query<{
+            organization_id: string;
+            user_id: string;
+          }>(
+            'select organization_id, user_id from app.audit_log where id = $1',
+            [recordedId],
+          );
+          return result.rows;
+        },
+      );
+
+      // The organization id claimed in the payload never becomes the attribution.
+      expect(attribution).toEqual([
+        { organization_id: 'org-1', user_id: 'user-1' },
+      ]);
+      const otherTenantRows = await withTenantContext(
+        client,
+        { organizationId: 'org-2', userId: 'user-2' },
+        async (transaction) => {
+          const result = await transaction.query<{ id: string }>(
+            'select id from app.audit_log',
+          );
+          return result.rows;
+        },
+      );
+
+      // Nothing reached org-2, so the call is not a cross-tenant write primitive.
+      expect(otherTenantRows).toEqual([]);
+      await expect(
+        withTenantContext(
+          client,
+          { organizationId: 'org-1', userId: 'user-1' },
+          async (transaction) =>
+            transaction.query(
+              "select app.record_audit('dataset.read', 'dataset', 'dataset-1', '{}'::jsonb, 'org-2')",
+            ),
+        ),
+      ).rejects.toThrow(/does not exist/);
+      await expect(
+        apiPool.query(
+          "select app.record_audit('dataset.read', 'dataset', 'dataset-1')",
+        ),
+      ).rejects.toThrow(/tenant context/);
+    } finally {
+      client.release();
+    }
+  });
+
   it('permits dump-only backup access and rejects writes, schema changes, and role changes', async () => {
     await expect(
       backupPool.query('select count(*) from auth."user"'),
@@ -307,6 +500,18 @@ describe('PostgreSQL 18 isolation', () => {
       );
 
       expect(result.exitCode).toBe(0);
+      const contents = await container.exec([
+        'pg_restore',
+        '--list',
+        '/tmp/bap-backup-test.dump',
+      ]);
+
+      expect(contents.exitCode).toBe(0);
+      // The dump must carry every tenant table and its rows, not only the schema.
+      expect(contents.output).toContain('TABLE app data_grants');
+      expect(contents.output).toContain('TABLE DATA app data_grants');
+      expect(contents.output).toContain('TABLE app audit_log');
+      expect(contents.output).toContain('TABLE DATA app audit_log');
     } finally {
       await container.exec(['rm', '-f', '/tmp/bap-backup-test.dump']);
     }

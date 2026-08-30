@@ -67,5 +67,14 @@ closed. Production migrations never enumerate disposable RLS test fixtures.
 The PostgreSQL 18.6 integration suite proves concurrent migration locking,
 checksum behavior, exact grants, membership resolution, missing context,
 cross-organization forced RLS, transaction reset, Better Auth rate-limit access,
-full `pg_dump` as `bap_backup`, and denial of backup writes, schema changes, and
-owner role changes.
+pgvector availability, full `pg_dump` as `bap_backup`, and denial of backup
+writes, schema changes, and owner role changes.
+
+It also proves the phase 1 authorization tables: `app.data_grants` is readable
+only inside its own tenant context and rejects a cross-tenant write, and
+`app.audit_log` is append only, since no service role holds `INSERT`, `UPDATE`,
+or `DELETE` on it. `app.record_audit` is asserted to be `SECURITY DEFINER` with
+a fixed `search_path` and to take no organization or subject argument at all, so
+a caller cannot name the tenant it writes to; attribution comes from
+`current_setting`, and a payload claiming another organization still lands in
+the caller's own tenant.
