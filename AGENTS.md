@@ -63,7 +63,8 @@ financial, operational, or development data.
   checks
 - `pnpm check`: run formatting, linting, type checking, tests, and builds
 - `pnpm test:watch`: run workspace tests in watch mode
-- `pnpm test:integration`: verify PostgreSQL roles, migrations, and RLS
+- `pnpm test:integration`: verify PostgreSQL roles, migrations, RLS, and the
+  worker queue boundary
 - `pnpm secrets:local`: create disposable ignored local credential files
 - `pnpm compose:verify`: verify development, production, and operations topology
 - `pnpm compose:config:production`: validate production Compose with synthetic

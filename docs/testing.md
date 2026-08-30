@@ -51,6 +51,13 @@ platform-specific: `chromium-darwin` supports local development and
 pnpm test:integration
 ```
 
+Two Testcontainers suites run behind that command. The `@bap/db` suite proves
+role separation, idempotent migrations, tenant isolation, and that the backup
+role can dump the whole database. The `@bap/api` suite proves the worker queue
+boundary: a non-partitioned pg-boss queue, a job confined to the organization
+named in its payload, a rejected cross-tenant write, an aborted job for revoked
+membership, and refused object creation in the `pgboss` schema.
+
 The scheduled and manually runnable GitHub Actions operational proof creates a
 disposable local Compose stack, creates a gated synthetic account, completes a
 browser sign-in and organization-access check, then backs up and restores the

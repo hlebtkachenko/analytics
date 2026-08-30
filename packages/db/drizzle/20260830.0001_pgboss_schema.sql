@@ -2,6 +2,7 @@
 -- pg-boss self-migration stays disabled so this checksummed runner owns every change.
 -- Upgrading pg-boss means a new migration file plus a DATABASE_MIGRATION_COMPATIBILITY bump.
 -- The transaction wrapper the generator emits is removed because the runner owns the transaction.
+-- queue_stats partitions cover the migration day only, which is safe while persistQueueStats stays off.
 CREATE SCHEMA IF NOT EXISTS pgboss;
 
     CREATE TYPE pgboss.job_state AS ENUM (

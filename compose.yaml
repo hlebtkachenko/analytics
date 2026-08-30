@@ -41,12 +41,14 @@ services:
       context: .
       dockerfile: docker/web.Dockerfile
     environment:
+      BAP_AI_PROVIDER_CONFIG_FILE: /run/credentials/ai-provider-config
       BAP_DATABASE_HOST: database
       BAP_DATABASE_NAME: ${POSTGRES_DB:-bap}
       BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
       BAP_DATABASE_PORT: 5432
       BAP_DATABASE_USER: bap_auth
       BAP_PUBLIC_ORIGIN: ${BAP_PUBLIC_ORIGIN:-http://localhost:3000}
+      BAP_RESEND_API_KEY_FILE: /run/credentials/resend-api-key
       BETTER_AUTH_SECRET_FILE: /run/credentials/auth-secret
       HOSTNAME: 0.0.0.0
       NODE_ENV: production
@@ -83,6 +85,10 @@ services:
         target: /run/credentials/database-password
       - source: better_auth_secret
         target: /run/credentials/auth-secret
+      - source: resend_api_key
+        target: /run/credentials/resend-api-key
+      - source: ai_provider_config
+        target: /run/credentials/ai-provider-config
     cap_drop:
       - ALL
     security_opt:
@@ -207,6 +213,56 @@ services:
     secrets:
       - source: bap_reporting_password
         target: /run/credentials/database-password
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: ['node', 'dist/worker.js']
+    environment:
+      BAP_AI_PROVIDER_CONFIG_FILE: /run/credentials/ai-provider-config
+      BAP_DATABASE_HOST: database
+      BAP_DATABASE_NAME: ${POSTGRES_DB:-bap}
+      BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
+      BAP_DATABASE_PORT: 5432
+      BAP_DATABASE_USER: bap_api
+      HOST: 0.0.0.0
+      NODE_ENV: production
+      PORT: 3003
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    expose:
+      - '3003'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3003/ready').then((response)=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    init: true
+    # Egress attaches first and owns the default route out of this container.
+    networks:
+      internet-egress:
+        priority: 100
+        gw_priority: 100
+      data:
+        priority: 10
+    secrets:
+      - source: bap_api_password
+        target: /run/credentials/database-password
+      - source: ai_provider_config
+        target: /run/credentials/ai-provider-config
     cap_drop:
       - ALL
     security_opt:
@@ -511,6 +567,10 @@ secrets:
     file: ${BAP_BACKUP_PASSWORD_FILE:-.secrets/bap_backup_password}
   better_auth_secret:
     file: ${BETTER_AUTH_SECRET_FILE:-.secrets/better_auth_secret}
+  resend_api_key:
+    file: ${BAP_RESEND_API_KEY_FILE:-.secrets/resend_api_key}
+  ai_provider_config:
+    file: ${BAP_AI_PROVIDER_CONFIG_FILE:-.secrets/ai_provider_config}
   restic_password:
     file: ${RESTIC_PASSWORD_FILE:-.secrets/restic_password}
   restic_repository:

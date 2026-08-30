@@ -52,7 +52,9 @@ invariant(
   'The backup entrypoint must not execute generic credential input.',
 );
 
-for (const service of ['web', 'api', 'reporting-api']) {
+const applicationServices = ['web', 'api', 'reporting-api', 'worker'];
+
+for (const service of applicationServices) {
   invariant(
     configuration.services[service].healthcheck.test
       .join(' ')
@@ -88,7 +90,7 @@ const internetEgressMembers = Object.entries(configuration.services)
   .map(([name]) => name)
   .sort();
 invariant(
-  internetEgressMembers.join() === 'web',
+  internetEgressMembers.join() === 'web,worker',
   `Unexpected internet egress members: ${internetEgressMembers.join(',')}.`,
 );
 invariant(
@@ -104,23 +106,38 @@ for (const service of ['api', 'reporting-api']) {
     `${service} must not join the internet egress network.`,
   );
 }
-// Egress must attach first and own the default route out of the web container.
-const webNetworks = configuration.services.web.networks;
+// Egress must attach first and own the default route out of every member.
+for (const service of internetEgressMembers) {
+  const serviceNetworks = configuration.services[service].networks;
+  const egress = serviceNetworks['internet-egress'];
+  const internalNames = Object.keys(serviceNetworks).filter(
+    (name) => name !== 'internet-egress',
+  );
+  invariant(
+    internalNames.every(
+      (name) =>
+        egress.priority > (serviceNetworks[name].priority ?? 0) &&
+        egress.gw_priority > (serviceNetworks[name].gw_priority ?? 0),
+    ),
+    `${service} must attach internet egress first and take its default route from it.`,
+  );
+}
+
 invariant(
-  webNetworks['internet-egress'].priority >
-    Math.max(webNetworks.app?.priority ?? 0, webNetworks.data?.priority ?? 0) &&
-    webNetworks['internet-egress'].gw_priority >
-      Math.max(
-        webNetworks.app?.gw_priority ?? 0,
-        webNetworks.data?.gw_priority ?? 0,
-      ),
-  'Web must attach internet egress first and take its default route from it.',
+  networkNames('worker').join() === 'data,internet-egress',
+  'The worker must use only data and internet egress.',
 );
 
 expectSecrets('database', ['postgres_admin_password']);
-expectSecrets('web', ['bap_auth_password', 'better_auth_secret']);
+expectSecrets('web', [
+  'ai_provider_config',
+  'bap_auth_password',
+  'better_auth_secret',
+  'resend_api_key',
+]);
 expectSecrets('api', ['bap_api_password']);
 expectSecrets('reporting-api', ['bap_reporting_password']);
+expectSecrets('worker', ['ai_provider_config', 'bap_api_password']);
 expectSecrets('migrator', ['bap_migrator_password']);
 expectSecrets('role-bootstrap', [
   'bap_api_password',
@@ -149,6 +166,21 @@ if (mode === 'production') {
     configuration.networks.data.internal,
     'The data network must be internal.',
   );
+
+  for (const service of applicationServices) {
+    const model = configuration.services[service];
+    invariant(
+      model.read_only === true &&
+        model.cap_drop.join() === 'ALL' &&
+        model.security_opt.join() === 'no-new-privileges:true' &&
+        model.restart === 'unless-stopped',
+      `${service} must retain the production privilege boundary.`,
+    );
+    invariant(
+      model.tmpfs.includes('/tmp'),
+      `${service} must write only to ephemeral storage.`,
+    );
+  }
 }
 
 if (mode === 'development') {

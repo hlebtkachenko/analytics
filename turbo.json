@@ -24,6 +24,10 @@
     "test": {
       "dependsOn": ["^build"]
     },
+    "test:integration": {
+      "cache": false,
+      "dependsOn": ["^build"]
+    },
     "test:coverage": {
       "dependsOn": ["^build"],
       "outputs": ["coverage/**"]

@@ -24,7 +24,7 @@
     "lint": "turbo run lint",
     "secrets:local": "bash scripts/create-local-secrets.sh",
     "test": "turbo run test",
-    "test:integration": "pnpm --filter @bap/db test:integration",
+    "test:integration": "turbo run test:integration",
     "test:coverage": "turbo run test:coverage",
     "test:watch": "turbo run test:watch",
     "typecheck": "turbo run typecheck"
