@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { getOrganizationAccess } from './bff.js';
+import { getOrganizationAccess, postDatasetUpload } from './bff.js';
 import type { BffAuth } from './bff.js';
 
 const getSession = vi
@@ -191,5 +191,127 @@ describe('getOrganizationAccess', () => {
     expect(response.status).toBe(502);
     expect(response.headers.get('cache-control')).toBe('private, no-store');
     expect(await response.json()).toEqual({ error: 'service_unavailable' });
+  });
+});
+
+describe('postDatasetUpload', () => {
+  const multipart = (body: string | null = 'part') =>
+    new Request(
+      'https://bap.invalid/api/bff/application/organizations/org_1/uploads',
+      {
+        body,
+        headers: {
+          'content-type': 'multipart/form-data; boundary=boundary',
+          'x-bap-request-id': '123e4567-e89b-42d3-a456-426614174000',
+        },
+        method: 'POST',
+      },
+    );
+
+  it('streams the body to the fixed upload target with a freshly minted token', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/uploads',
+      );
+      expect(init?.method).toBe('POST');
+      expect(init?.headers).toEqual({
+        authorization: 'Bearer resource-token',
+        'content-type': 'multipart/form-data; boundary=boundary',
+        'x-bap-request-id': '123e4567-e89b-42d3-a456-426614174000',
+      });
+      // The body is forwarded as the incoming stream, never buffered into a string.
+      expect(init?.body).toBeInstanceOf(ReadableStream);
+      return Response.json(
+        {
+          status: 'accepted',
+          uploadId: '2f1c4a4e-6f0d-4f0a-9b3e-0d5b5c8a1e77',
+        },
+        { status: 201 },
+      );
+    });
+
+    const response = await postDatasetUpload(
+      auth,
+      multipart(),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(202);
+    const payload = await response.json();
+    expect(payload).toEqual({
+      status: 'accepted',
+      uploadId: '2f1c4a4e-6f0d-4f0a-9b3e-0d5b5c8a1e77',
+    });
+    expect(JSON.stringify(payload)).not.toContain('resource-token');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(
+      Object.keys(signJWT.mock.lastCall?.[0].body.payload ?? {}).sort(),
+    ).toEqual(['iat', 'sub']);
+    expect(signJWT.mock.lastCall?.[0].body.payload.sub).toBe('user_1');
+  });
+
+  it('rejects a forged selector, a non-multipart body and an unverified session', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>();
+
+    const forged = await postDatasetUpload(
+      auth,
+      multipart(),
+      '../forged',
+      fetchImplementation,
+    );
+    const plain = await postDatasetUpload(
+      auth,
+      new Request(
+        'https://bap.invalid/api/bff/application/organizations/org_1/uploads',
+        {
+          body: 'part',
+          headers: { 'content-type': 'application/json' },
+          method: 'POST',
+        },
+      ),
+      'org_1',
+      fetchImplementation,
+    );
+    const unverified = await postDatasetUpload(
+      {
+        ...auth,
+        getSession: async () => ({
+          user: { emailVerified: false, id: 'user_1' },
+        }),
+      },
+      multipart(),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect([forged.status, plain.status, unverified.status]).toEqual([
+      403, 400, 401,
+    ]);
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
+  it('returns a generic gateway error for an unexpected upload response', async () => {
+    const response = await postDatasetUpload(
+      auth,
+      multipart(),
+      'org_1',
+      async () => Response.json({ status: 'accepted', uploadId: 'not-a-uuid' }),
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: 'service_unavailable' });
+  });
+
+  it('passes an upstream rejection through without its detail', async () => {
+    const response = await postDatasetUpload(
+      auth,
+      multipart(),
+      'org_1',
+      async () => Response.json({ detail: 'private' }, { status: 413 }),
+    );
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: 'upload_rejected' });
   });
 });

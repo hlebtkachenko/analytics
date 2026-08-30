@@ -45,7 +45,11 @@ capabilities, then executes every networked restic and PostgreSQL client as UID
 only in a dedicated tmpfs. The read-only web container has an ephemeral writable
 Next.js cache. PostgreSQL 18 stores data under a named volume mounted at
 `/var/lib/postgresql`, which is the official image path for version 18 and
-newer.
+newer. The `upload_staging` volume is mounted read-write at
+`/var/lib/bap/uploads` into the application API and the worker and into no other
+service, which `scripts/verify-compose.mjs` asserts. Caddy caps a request body
+at 25MB, and the application API rejects an upload by the bytes it received
+rather than by any proxy or client claim.
 
 Use `docker compose stop` for routine shutdown. Never add `down -v` to a normal
 workflow because it removes the database volume.

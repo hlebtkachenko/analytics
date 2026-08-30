@@ -1,6 +1,15 @@
 import type { ResourcePrincipal } from '@bap/security';
 
+// The subset of the multer file record the upload route reads; every field is untrusted input.
+export interface ReceivedFile {
+  mimetype?: string;
+  originalname?: string;
+  path?: string;
+  size?: number;
+}
+
 export interface AuthenticatedRequest {
+  file?: ReceivedFile;
   headers: Record<string, string | string[] | undefined>;
   method: string;
   requestId?: string;

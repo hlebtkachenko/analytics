@@ -102,6 +102,14 @@ Copyright (c) 2023 Plus Five Five, Inc.
 - Source: <https://github.com/resend/resend-node>
 - License: [MIT](licenses/RESEND-MIT.txt)
 
+ExcelJS provides the streaming spreadsheet reader and writer under the MIT
+license. BAP overrides its pinned `uuid` dependency to a patched release.
+
+Copyright (c) 2014-2019 Guyon Roche.
+
+- Source: <https://github.com/exceljs/exceljs>
+- License: [MIT](licenses/EXCELJS-MIT.txt)
+
 ## Container foundation
 
 Caddy is licensed under Apache License 2.0. PostgreSQL is licensed under the

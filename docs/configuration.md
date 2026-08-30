@@ -33,14 +33,15 @@ paths. These are internal runtime values, not user configuration.
   `BAP_AI_PROVIDER_CONFIG_FILE`. Its two BFF targets are fixed internal service
   origins, not deployment inputs.
 - Application and reporting APIs use `BAP_DATABASE_*`, `BAP_JWKS_URL`, and
-  `BAP_PUBLIC_ORIGIN`.
+  `BAP_PUBLIC_ORIGIN`. The application API also uses `BAP_UPLOAD_STAGING_DIR`,
+  which must name the mounted upload staging volume.
 - Owner bootstrap runs the same web image and therefore builds the same auth
   instance, so it sets `BAP_MAIL_TRANSPORT` to `log`. It never sends mail and
   mounts no provider credential. `BAP_RESEND_API_KEY_FILE` is required only for
   the `resend` transport.
 - The worker uses `BAP_DATABASE_*` as `bap_api` plus
-  `BAP_AI_PROVIDER_CONFIG_FILE`, and serves health, readiness, and metrics on
-  its own internal port.
+  `BAP_AI_PROVIDER_CONFIG_FILE` and `BAP_UPLOAD_STAGING_DIR`, and serves health,
+  readiness, and metrics on its own internal port.
 - Web listens on `PORT` with `HOSTNAME`; Nest services validate `PORT` and
   `HOST` at startup.
 - Caddy provides the only public application port and replaces client identity

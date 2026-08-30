@@ -25,6 +25,7 @@
     "@nestjs/platform-express": "catalog:",
     "@nestjs/swagger": "catalog:",
     "@prometheus-io/client": "catalog:",
+    "exceljs": "catalog:",
     "helmet": "catalog:",
     "pg-boss": "catalog:",
     "pino": "catalog:",

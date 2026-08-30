@@ -7,7 +7,7 @@ import { z } from 'zod';
 
 // pgboss.job has no row level security and is readable across tenants by bap_api.
 // Job payloads therefore carry identifiers only, never PII, file contents or secrets.
-const subjectIdentifierSchema = z
+export const subjectIdentifierSchema = z
   .string()
   .trim()
   .min(1)

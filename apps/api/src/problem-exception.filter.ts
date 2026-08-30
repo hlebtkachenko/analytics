@@ -27,6 +27,11 @@ const problemDetails: Record<
     slug: 'not-found',
     title: 'Not found',
   },
+  [HttpStatus.PAYLOAD_TOO_LARGE]: {
+    detail: 'The request body exceeds the accepted size',
+    slug: 'payload-too-large',
+    title: 'Payload too large',
+  },
   [HttpStatus.TOO_MANY_REQUESTS]: {
     detail: 'Request rate limit exceeded',
     slug: 'rate-limited',

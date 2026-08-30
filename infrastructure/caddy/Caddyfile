@@ -6,6 +6,11 @@
 	@private path /ready /ready/* /metrics /metrics/*
 	respond @private 404
 
+	# 25MB is the upload ceiling; the block form is required, the one line form parses to no limit.
+	request_body {
+		max_size 25MB
+	}
+
 	header {
 		-Server
 		X-Content-Type-Options nosniff
