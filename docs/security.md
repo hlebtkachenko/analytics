@@ -29,6 +29,29 @@ then drops to UID/GID `999:999`; the backup backend refuses to run unless its
 effective capability mask is zero. Password values are never placed in process
 environments.
 
+## Dependency updates
+
+Dependabot opens grouped weekly pull requests for the npm, GitHub Actions, and
+Docker ecosystems, and CI audits the dependency tree on every push.
+
+The npm updater runs real pnpm against this workspace, so it inherits
+`strictPeerDependencies: true`. A bump whose peers the tree cannot satisfy
+therefore fails the install rather than producing a tree that only looks
+resolved, and the updater records it as `dependency_file_not_resolvable` and
+skips that one dependency. Three catalog entries sit in that position today:
+`eslint` and `@eslint/js`, because the plugins `eslint-config-next` brings in
+still declare ESLint 9 peers, and `typescript`, because `typescript-eslint`
+declares `>=4.8.4 <6.1.0`. Their major updates are ignored in
+`.github/dependabot.yml`, so the job reports the tree honestly instead of
+failing on an update that cannot land. That ignore covers version updates only:
+patch and minor releases, and every security update, still open pull requests.
+Remove the entries once upstream widens those peer ranges.
+
+The workspace `minimumReleaseAge` floor is not relaxed for automation.
+Dependabot supplies its own cooldown of three days, which is longer than the
+one-day workspace floor, and it bypasses that cooldown only for security
+updates.
+
 ## Runtime boundary
 
 Caddy is the sole public entry point. It blocks `/ready` and `/metrics` before
