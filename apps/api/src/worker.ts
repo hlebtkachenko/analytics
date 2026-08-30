@@ -18,6 +18,7 @@ import {
 import { ApplicationLogger } from './logger.js';
 import { backfillDatasetEmbeddings } from './worker/backfill-embeddings.js';
 import { ingestDataset } from './worker/ingest-dataset.js';
+import { curateJobFailure } from './worker/job-failure.js';
 import { summarizeDataset } from './worker/summarize-dataset.js';
 import { startObservabilityServer } from './worker/observability.js';
 import {
@@ -77,48 +78,68 @@ async function bootstrap(): Promise<void> {
   await createQueue(queue, INGEST_DATASET_QUEUE);
   await createQueue(queue, BACKFILL_EMBEDDINGS_QUEUE);
   await createQueue(queue, SUMMARIZE_DATASET_QUEUE);
+  // The real error is logged here; only the curated one reaches pgboss.job.output.
+  const runJob = async (work: () => Promise<void>): Promise<void> => {
+    try {
+      await work();
+    } catch (error) {
+      logger.error(
+        error instanceof Error ? error.message : 'Job failed',
+        error instanceof Error ? error.stack : undefined,
+        SERVICE_NAME,
+      );
+      throw curateJobFailure(error);
+    }
+  };
+
   await queue.work<unknown, void>(INGEST_DATASET_QUEUE, async (jobs) => {
     for (const job of jobs) {
-      const ingested = await ingestDataset({
-        data: job.data,
-        metrics,
-        pool,
-        stagingDirectory,
-      });
-
-      // A ready dataset is what makes the agents applicable, so ingestion is their trigger.
-      if (ingested !== undefined) {
-        await chainNext(async () => {
-          const summarizing = await enqueueDatasetSummary(chain, ingested);
-
-          // Without a summary the description will not change, so the backfill runs straight away.
-          return summarizing || enqueueEmbeddingBackfill(chain, ingested);
+      await runJob(async () => {
+        const ingested = await ingestDataset({
+          data: job.data,
+          metrics,
+          pool,
+          stagingDirectory,
         });
-      }
+
+        // A ready dataset is what makes the agents applicable, so ingestion is their trigger.
+        if (ingested !== undefined) {
+          await chainNext(async () => {
+            const summarizing = await enqueueDatasetSummary(chain, ingested);
+
+            // Without a summary the description will not change, so the backfill runs straight away.
+            return summarizing || enqueueEmbeddingBackfill(chain, ingested);
+          });
+        }
+      });
     }
   });
 
   await queue.work<unknown, void>(BACKFILL_EMBEDDINGS_QUEUE, async (jobs) => {
     for (const job of jobs) {
-      await backfillDatasetEmbeddings({
-        data: job.data,
-        metrics,
-        pool,
-        registry,
-      });
+      await runJob(() =>
+        backfillDatasetEmbeddings({
+          data: job.data,
+          metrics,
+          pool,
+          registry,
+        }),
+      );
     }
   });
   await queue.work<unknown, void>(SUMMARIZE_DATASET_QUEUE, async (jobs) => {
     for (const job of jobs) {
-      const summarized = await summarizeDataset({
-        data: job.data,
-        metrics,
-        pool,
-        registry,
-      });
+      await runJob(async () => {
+        const summarized = await summarizeDataset({
+          data: job.data,
+          metrics,
+          pool,
+          registry,
+        });
 
-      // The summary wrote the description the embedded document quotes, so the backfill follows it.
-      await chainNext(() => enqueueEmbeddingBackfill(chain, summarized));
+        // The summary wrote the description the embedded document quotes, so the backfill follows it.
+        await chainNext(() => enqueueEmbeddingBackfill(chain, summarized));
+      });
     }
   });
 

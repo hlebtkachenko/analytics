@@ -77,6 +77,18 @@ model for a role leaves that job off: the chain reads the credential first and
 enqueues nothing for a role the credential does not name, so an absent or
 placeholder credential produces no queued work at all rather than a failing job.
 
+The chat route requires a verified session and nothing more, which is sound only
+because it registers no tools and therefore reaches no tenant data. Registering
+the first tool changes that: the route must then also resolve organization
+membership and the `use_ai` capability before it calls a model, exactly as the
+BFF does today. Treat that as a precondition of the first tool rather than a
+later improvement.
+
+A failed background job stores only a curated error name. `pgboss.job` has no
+row level security and is readable across tenants by `bap_api`, while provider
+errors carry the request body and database errors carry the offending row, so
+the handler boundary replaces the error before pg-boss can serialize it.
+
 ## Background worker boundary
 
 The worker is a second entrypoint in the application API image and connects as
