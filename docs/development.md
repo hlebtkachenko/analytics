@@ -56,6 +56,33 @@ Use `docker compose ... logs --no-color` for stack diagnostics and
 `docker compose ... down` for normal shutdown. Do not use `down --volumes`
 outside disposable local or CI environments.
 
+## Conductor workspaces
+
+Each Conductor workspace is a separate git worktree, so everything the
+repository ignores starts missing: `node_modules`, build output, and the
+`.secrets` directory the Compose stack mounts all eleven of its secrets from.
+`.conductor/settings.toml` therefore runs `scripts/conductor-setup.sh` on
+creation, which asserts the running Node major against `.nvmrc`, installs with a
+frozen lockfile, and seeds the local secrets. Run that script by hand after a
+plain `git clone` to reach the same state.
+
+Archiving a workspace deletes its directory and nothing outside it, so
+`scripts/conductor-archive.sh` runs first and removes the Compose project the
+`stack` run script created. It is the one sanctioned use of `down --volumes`,
+because the workspace those volumes belong to is being destroyed in the same
+step. It names both the bootstrap and operations profiles, because `down`
+removes only the volumes its configuration declares. A missing Docker binary, a
+stopped daemon, and an unknown workspace identifier each report and exit
+successfully, so archiving is never blocked.
+
+The workbench Chromium runtime is deliberately not part of setup. Its cache is
+machine-global, so downloading it per workspace would spend network on something
+most workspaces never use. Use the `browser-install` run script, or
+`pnpm design-system:browser:install`, when a workspace needs it.
+
+Conductor reads `.conductor/settings.toml` from the repository default branch,
+so a change to these scripts affects new workspaces only after it merges.
+
 ## Port overrides
 
 Set `WEB_PORT` and `POSTGRES_PORT` for the development Compose overlay. The
