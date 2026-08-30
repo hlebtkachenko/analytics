@@ -51,6 +51,26 @@ describe('SignInPage', () => {
     await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/access'));
   });
 
+  it('routes to the challenge when a second factor is pending', async () => {
+    mocks.signIn.mockResolvedValue({
+      data: { twoFactorMethods: ['totp'], twoFactorRedirect: true },
+      error: null,
+    });
+    renderSignIn();
+    fireEvent.change(screen.getByLabelText('Email address'), {
+      target: { value: 'owner@bap.invalid' },
+    });
+    fireEvent.change(screen.getByLabelText('Password'), {
+      target: { value: 'test-only-password' },
+    });
+    fireEvent.submit(screen.getByRole('form', { name: 'Sign in to BAP' }));
+
+    await waitFor(() =>
+      expect(mocks.replace).toHaveBeenCalledWith('/sign-in/two-factor'),
+    );
+    expect(mocks.replace).not.toHaveBeenCalledWith('/access');
+  });
+
   it('shows the localized error and stays on the page after rejection', async () => {
     mocks.signIn.mockResolvedValue({
       data: null,

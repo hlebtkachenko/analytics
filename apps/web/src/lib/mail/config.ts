@@ -12,7 +12,7 @@ export type MailTransportKind = 'log' | 'resend';
 const mailEnvironmentSchema = z.object({
   BAP_MAIL_SENDER: z.email().default(defaultMailSender),
   BAP_MAIL_TRANSPORT: z.enum(['log', 'resend']).default('resend'),
-  BAP_RESEND_API_KEY_FILE: z.string().min(1),
+  BAP_RESEND_API_KEY_FILE: z.string().min(1).optional(),
 });
 
 export interface MailConfiguration {
@@ -58,7 +58,11 @@ export async function loadMailConfiguration(
   environment: NodeJS.ProcessEnv,
 ): Promise<MailConfiguration> {
   const parsed = mailEnvironmentSchema.parse(environment);
-  const apiKey = await readResendApiKeyFile(parsed.BAP_RESEND_API_KEY_FILE);
+  // The log transport needs no credential, so runtimes that never send mail configure nothing.
+  const apiKey =
+    parsed.BAP_RESEND_API_KEY_FILE === undefined
+      ? undefined
+      : await readResendApiKeyFile(parsed.BAP_RESEND_API_KEY_FILE);
 
   // The log transport is an explicit opt-in so a missing key can never silently drop mail.
   if (

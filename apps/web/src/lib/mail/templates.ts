@@ -8,6 +8,10 @@ export interface MailTemplateParams {
   url: string;
 }
 
+export interface MailInvitationTemplateParams extends MailTemplateParams {
+  organization: string;
+}
+
 function magicLinkTemplate(params: MailTemplateParams): MailTemplateResult {
   return {
     subject: 'Your BAP sign-in link',
@@ -22,9 +26,29 @@ function passwordResetTemplate(params: MailTemplateParams): MailTemplateResult {
   };
 }
 
-// Phase 1 selects a template by name when it wires Better Auth's email hooks.
+function emailVerificationTemplate(
+  params: MailTemplateParams,
+): MailTemplateResult {
+  return {
+    subject: 'Confirm your BAP email address',
+    text: `Hello ${params.to},\n\nUse this link to confirm your BAP email address:\n\n${params.url}\n\nIf you did not request this, ignore this email.`,
+  };
+}
+
+function organizationInvitationTemplate(
+  params: MailInvitationTemplateParams,
+): MailTemplateResult {
+  return {
+    subject: `You are invited to ${params.organization} on BAP`,
+    text: `Hello ${params.to},\n\nUse this link to review your invitation to ${params.organization} on BAP:\n\n${params.url}\n\nIf you did not expect this, ignore this email.`,
+  };
+}
+
+// Better Auth mail hooks select a template by name.
 export const mailTemplates = {
+  emailVerification: emailVerificationTemplate,
   magicLink: magicLinkTemplate,
+  organizationInvitation: organizationInvitationTemplate,
   passwordReset: passwordResetTemplate,
 } as const;
 

@@ -111,6 +111,8 @@ services:
       BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
       BAP_DATABASE_PORT: 5432
       BAP_DATABASE_USER: bap_auth
+      # Owner bootstrap never sends mail, so it mounts no provider credential.
+      BAP_MAIL_TRANSPORT: log
       BAP_PUBLIC_ORIGIN: ${BAP_PUBLIC_ORIGIN:-http://localhost:3000}
       BETTER_AUTH_SECRET_FILE: /run/credentials/auth-secret
       NODE_ENV: production

@@ -6,15 +6,20 @@ export const resources = {
   'en-US': {
     translation: {
       access: {
+        actions: 'Available actions',
         denied: 'You do not have access to this organization.',
         empty: 'No organizations are available for this account.',
         error: 'Organization access could not be checked.',
         loading: 'Checking organization access.',
+        manageGrants: 'Manage data grants',
+        manageMembers: 'Manage members',
         organization: 'Organization',
         reporting: 'Reporting API role',
         application: 'Application API role',
         selectOrganization: 'Select an organization',
         title: 'Organization access',
+        uploadData: 'Upload data',
+        useAi: 'Ask the assistant',
       },
       auth: {
         email: 'Email address',
@@ -26,8 +31,26 @@ export const resources = {
       common: {
         signOut: 'Sign out',
       },
+      invitation: {
+        accept: 'Accept invitation',
+        acceptFailed: 'The invitation could not be accepted.',
+        error: 'This invitation is no longer valid.',
+        loading: 'Checking the invitation.',
+        organization: 'Organization',
+        role: 'Role',
+        summary: 'You were invited to join an organization on BAP.',
+        title: 'Organization invitation',
+      },
       reference: {
         title: 'Carbon design system',
+      },
+      twoFactor: {
+        code: 'Verification code',
+        failed: 'Verification failed. Check the code and try again.',
+        summary:
+          'Enter the 6-digit verification code from your authenticator app.',
+        title: 'Two-step verification',
+        verify: 'Verify',
       },
     },
   },

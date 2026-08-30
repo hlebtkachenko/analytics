@@ -5,9 +5,7 @@ import { disabledAuthPaths, getAuth } from '../../../../lib/auth/server';
 
 function isDisabledPath(request: NextRequest): boolean {
   const pathname = request.nextUrl.pathname.replace('/api/auth', '');
-  return (
-    disabledAuthPaths.has(pathname) || pathname.startsWith('/reset-password/')
-  );
+  return disabledAuthPaths.has(pathname);
 }
 
 async function handle(request: NextRequest): Promise<Response> {

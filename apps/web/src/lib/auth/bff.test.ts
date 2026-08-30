@@ -22,6 +22,12 @@ describe('getOrganizationAccess', () => {
         'x-bap-request-id': '123e4567-e89b-42d3-a456-426614174000',
       });
       return Response.json({
+        capabilities: {
+          manageGrants: false,
+          manageMembers: false,
+          uploadData: true,
+          useAi: true,
+        },
         organizationId: 'org_1',
         role: 'member',
         service: 'application-api',
@@ -45,6 +51,12 @@ describe('getOrganizationAccess', () => {
 
     const payload = await response.json();
     expect(payload).toEqual({
+      capabilities: {
+        manageGrants: false,
+        manageMembers: false,
+        uploadData: true,
+        useAi: true,
+      },
       organizationId: 'org_1',
       role: 'member',
       service: 'application-api',
@@ -70,6 +82,12 @@ describe('getOrganizationAccess', () => {
         'http://reporting-api:3002/v1/organizations/org_1/access',
       );
       return Response.json({
+        capabilities: {
+          manageGrants: true,
+          manageMembers: true,
+          uploadData: true,
+          useAi: true,
+        },
         organizationId: 'org_1',
         role: 'owner',
         service: 'reporting-api',
@@ -123,8 +141,39 @@ describe('getOrganizationAccess', () => {
       'invalid service response',
       async () =>
         Response.json({
+          capabilities: {
+            manageGrants: false,
+            manageMembers: false,
+            uploadData: true,
+            useAi: true,
+          },
           organizationId: 'org_1',
           role: 'superuser',
+          service: 'application-api',
+        }),
+    ],
+    [
+      'a response without capabilities',
+      async () =>
+        Response.json({
+          organizationId: 'org_1',
+          role: 'member',
+          service: 'application-api',
+        }),
+    ],
+    [
+      'a response with an unknown capability',
+      async () =>
+        Response.json({
+          capabilities: {
+            exportEverything: true,
+            manageGrants: false,
+            manageMembers: false,
+            uploadData: true,
+            useAi: true,
+          },
+          organizationId: 'org_1',
+          role: 'member',
           service: 'application-api',
         }),
     ],

@@ -1,16 +1,30 @@
 import { betterAuth } from 'better-auth';
-import { admin, jwt, organization } from 'better-auth/plugins';
+import type { MagicLinkOptions } from 'better-auth/plugins';
+import {
+  admin,
+  jwt,
+  magicLink,
+  organization,
+  twoFactor,
+} from 'better-auth/plugins';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 import { readFile, stat } from 'node:fs/promises';
 import { z } from 'zod';
 
+import type { MailConfiguration } from '../mail/index.ts';
+import {
+  loadMailConfiguration,
+  mailTemplates,
+  sendMail,
+} from '../mail/index.ts';
 import { disabledAuthPaths, resourceJwtConfiguration } from './contract.ts';
 import {
   adminAuthSchema,
   coreAuthModels,
   jwtAuthSchema,
   organizationAuthSchema,
+  twoFactorAuthSchema,
 } from './models.ts';
 
 const authEnvironmentSchema = z.object({
@@ -62,13 +76,143 @@ export async function readAuthSecret(path: string): Promise<string> {
   return secret;
 }
 
+// The magic link lookup needs one parameterized query and nothing else from the pool.
+export type AuthUserLookup = Readonly<{
+  query: (
+    text: string,
+    values: readonly string[],
+  ) => Promise<{ rows: readonly { two_factor_enabled: boolean }[] }>;
+}>;
+
+// Mirrors the constant-time floor Better Auth applies to its own verification mail.
+const magicLinkResponseFloorMs = 500;
+
+// Better Auth lowercases the address before matching, so the lookup mirrors that.
+const magicLinkUserQuery =
+  'SELECT two_factor_enabled FROM auth."user" WHERE email = $1';
+
+// Without disableSignUp magic link is a self-signup bypass around emailAndPassword.disableSignUp.
+export function createMagicLinkOptions(
+  mail: MailConfiguration,
+  pool: AuthUserLookup,
+): MagicLinkOptions {
+  return {
+    disableSignUp: true,
+    sendMagicLink: async ({ email, url }) => {
+      // Better Auth sends before any user lookup, which would make this an open mail relay.
+      const found = await pool.query(magicLinkUserQuery, [email.toLowerCase()]);
+      const user = found.rows[0];
+      // A user who opted into a second factor must not keep a single-factor path back in.
+      const deliverable = user !== undefined && !user.two_factor_enabled;
+
+      if (deliverable) {
+        const message = mailTemplates.magicLink({ to: email, url });
+        // Detached so the response time never reveals whether a message was dispatched.
+        void sendMail(mail, {
+          subject: message.subject,
+          text: message.text,
+          to: email,
+        }).catch(() => undefined);
+      }
+
+      // Every branch waits the same floor, so latency cannot enumerate accounts either.
+      await new Promise((resolve) =>
+        setTimeout(resolve, magicLinkResponseFloorMs),
+      );
+    },
+  };
+}
+
+// Password reset delivery mirrors the magic link hook so mail leaves through one module.
+export function createPasswordResetSender(mail: MailConfiguration) {
+  return async (data: {
+    url: string;
+    user: { email: string };
+  }): Promise<void> => {
+    const message = mailTemplates.passwordReset({
+      to: data.user.email,
+      url: data.url,
+    });
+    await sendMail(mail, {
+      subject: message.subject,
+      text: message.text,
+      to: data.user.email,
+    });
+  };
+}
+
+// Verification mail uses the same module so no second transport is configured.
+export function createVerificationSender(mail: MailConfiguration) {
+  return async (data: {
+    url: string;
+    user: { email: string };
+  }): Promise<void> => {
+    const message = mailTemplates.emailVerification({
+      to: data.user.email,
+      url: data.url,
+    });
+    await sendMail(mail, {
+      subject: message.subject,
+      text: message.text,
+      to: data.user.email,
+    });
+  };
+}
+
+// Better Auth does not build invitation URLs, so the public origin owns the acceptance route.
+export function createInvitationSender(
+  mail: MailConfiguration,
+  publicOrigin: string,
+) {
+  return async (data: {
+    email: string;
+    id: string;
+    organization: { name: string };
+  }): Promise<void> => {
+    const url = new URL(
+      `/invitation/${encodeURIComponent(data.id)}`,
+      publicOrigin,
+    );
+    const message = mailTemplates.organizationInvitation({
+      organization: data.organization.name,
+      to: data.email,
+      url: url.toString(),
+    });
+    await sendMail(mail, {
+      subject: message.subject,
+      text: message.text,
+      to: data.email,
+    });
+  };
+}
+
+// Custom rules replace the built-in ones, so no entry may be more permissive than what it replaces.
+export const authRateLimitRules = {
+  '/magic-link/verify': { max: 5, window: 60 },
+  '/organization/invite-member': { max: 5, window: 60 },
+  '/request-password-reset': { max: 3, window: 60 },
+  '/sign-in/email': { max: 3, window: 60 },
+  '/sign-in/magic-link': { max: 3, window: 60 },
+  '/two-factor/disable': { max: 3, window: 60 },
+  '/two-factor/enable': { max: 3, window: 60 },
+  '/two-factor/generate-backup-codes': { max: 3, window: 60 },
+  '/two-factor/get-totp-uri': { max: 3, window: 60 },
+  '/two-factor/send-otp': { max: 3, window: 60 },
+  '/two-factor/verify-backup-code': { max: 3, window: 60 },
+  '/two-factor/verify-otp': { max: 3, window: 60 },
+  '/two-factor/verify-totp': { max: 3, window: 60 },
+} as const;
+
 async function createAuth() {
   const environment = loadAuthEnvironment(process.env);
   const configuration = await loadDatabaseConfiguration(process.env, {
     role: 'bap_auth',
   });
+  const mail = await loadMailConfiguration(process.env);
   const secret = await readAuthSecret(environment.BETTER_AUTH_SECRET_FILE);
-  authPool ??= createDatabasePool(configuration, { searchPath: 'auth' });
+  const pool = (authPool ??= createDatabasePool(configuration, {
+    searchPath: 'auth',
+  }));
 
   return betterAuth({
     advanced: {
@@ -86,17 +230,25 @@ async function createAuth() {
       trustedProxyHeaders: false,
     },
     baseURL: environment.BAP_PUBLIC_ORIGIN,
-    database: authPool,
+    database: pool,
     disabledPaths: [...disabledAuthPaths],
     emailAndPassword: {
       disableSignUp: true,
       enabled: true,
+      sendResetPassword: createPasswordResetSender(mail),
+    },
+    emailVerification: {
+      sendVerificationEmail: createVerificationSender(mail),
     },
     plugins: [
       admin({ schema: adminAuthSchema }),
       organization({
         allowUserToCreateOrganization: false,
         schema: organizationAuthSchema,
+        sendInvitationEmail: createInvitationSender(
+          mail,
+          environment.BAP_PUBLIC_ORIGIN,
+        ),
       }),
       jwt({
         disableSettingJwtHeader: true,
@@ -116,12 +268,16 @@ async function createAuth() {
         },
         schema: jwtAuthSchema,
       }),
+      magicLink(createMagicLinkOptions(mail, pool)),
+      // Strictly opt-in: only a user who enabled it is challenged after a password sign-in.
+      twoFactor({
+        issuer: 'BAP',
+        schema: twoFactorAuthSchema,
+      }),
     ],
     rateLimit: {
       ...coreAuthModels.rateLimit,
-      customRules: {
-        '/sign-in/email': { max: 5, window: 60 },
-      },
+      customRules: { ...authRateLimitRules },
       enabled: true,
       max: 100,
       storage: 'database',

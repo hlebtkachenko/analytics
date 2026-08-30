@@ -17,6 +17,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const memberCapabilities = {
+  manageGrants: false,
+  manageMembers: false,
+  uploadData: true,
+  useAi: true,
+};
+const ownerCapabilities = {
+  manageGrants: true,
+  manageMembers: true,
+  uploadData: true,
+  useAi: true,
+};
+
 function renderAccessPage() {
   return render(
     <I18nProvider>
@@ -35,12 +48,14 @@ describe('AccessPage', () => {
       }
       if (input.includes('/application/')) {
         return Response.json({
+          capabilities: memberCapabilities,
           organizationId: 'organization_1',
           role: 'member',
           service: 'application-api',
         });
       }
       return Response.json({
+        capabilities: memberCapabilities,
         organizationId: 'organization_1',
         role: 'member',
         service: 'reporting-api',
@@ -67,6 +82,53 @@ describe('AccessPage', () => {
         expect.any(Object),
       );
     });
+  });
+
+  it('hides administrative actions from a member and offers them to an owner', async () => {
+    const respondWithRole = (role: 'member' | 'owner') =>
+      vi.fn(async (input: string) => {
+        if (input === '/api/auth/organization/list') {
+          return Response.json([
+            { id: 'organization_1', name: 'Organization 1' },
+          ]);
+        }
+        return Response.json({
+          capabilities:
+            role === 'owner' ? ownerCapabilities : memberCapabilities,
+          organizationId: 'organization_1',
+          role,
+          service: input.includes('/application/')
+            ? 'application-api'
+            : 'reporting-api',
+        });
+      });
+
+    vi.stubGlobal('fetch', respondWithRole('member'));
+    renderAccessPage();
+
+    expect(
+      await screen.findByRole('button', { name: 'Upload data' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Ask the assistant' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Manage members' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Manage data grants' }),
+    ).not.toBeInTheDocument();
+
+    cleanup();
+    vi.stubGlobal('fetch', respondWithRole('owner'));
+    renderAccessPage();
+
+    expect(
+      await screen.findByRole('button', { name: 'Manage members' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Manage data grants' }),
+    ).toBeVisible();
   });
 
   it('shows an access error without presenting role results', async () => {

@@ -1,4 +1,4 @@
-// Phase 1 wires sendMail into Better Auth's email hooks; nothing here does that yet.
+// Better Auth's magic link, password reset, verification, and invitation hooks send through this module.
 
 export type { MailConfiguration, MailTransportKind } from './config.ts';
 export {
@@ -13,6 +13,7 @@ export { sendMail } from './send.ts';
 export type { MailSendResult } from './transport.ts';
 
 export type {
+  MailInvitationTemplateParams,
   MailTemplateName,
   MailTemplateParams,
   MailTemplateResult,

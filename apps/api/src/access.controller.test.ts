@@ -92,6 +92,12 @@ describe('application access route', () => {
       .expect(200);
 
     expect(first.body).toEqual({
+      capabilities: {
+        manageGrants: false,
+        manageMembers: false,
+        uploadData: true,
+        useAi: true,
+      },
       organizationId: 'organization_1',
       role: 'member',
       service: 'application-api',
