@@ -87,6 +87,8 @@ export async function bootstrapDatabaseRoles(
     await client.query(
       `GRANT CREATE ON DATABASE ${quoteIdentifier(name)} TO bap_owner`,
     );
+    // Only the superuser may install pgvector, so migrations cannot do it.
+    await client.query('CREATE EXTENSION IF NOT EXISTS vector');
     await client.query('commit');
   } catch (error) {
     await client.query('rollback');

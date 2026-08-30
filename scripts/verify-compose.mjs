@@ -17,6 +17,10 @@ const backupStageEntrypoint = readFileSync(
   'utf8',
 );
 
+// pgvector ships the pinned PostgreSQL 18.6 build plus the vector extension.
+const postgresImageDigest =
+  'sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a';
+
 function invariant(condition, message) {
   if (!condition) {
     throw new Error(message);
@@ -66,10 +70,8 @@ invariant(
   'Caddy must use only edge and app networks.',
 );
 invariant(
-  configuration.services.database.image.includes(
-    'sha256:1c59e2c3c818eaa0f0628f695b36e7c9e362d6b219b36a54a32df645cbd7e1af',
-  ),
-  'PostgreSQL image must use the accepted digest.',
+  configuration.services.database.image.includes(postgresImageDigest),
+  'PostgreSQL image must use the accepted pgvector digest.',
 );
 invariant(
   configuration.services.caddy.image.includes(
@@ -195,6 +197,12 @@ if (mode === 'operations') {
       `${service} must use only the data network.`,
     );
   }
+  invariant(
+    configuration.services['restore-database'].image.includes(
+      postgresImageDigest,
+    ),
+    'The restore database image must use the accepted pgvector digest.',
+  );
   const operationsMembers = Object.entries(configuration.services)
     .filter(([, service]) =>
       Object.hasOwn(service.networks ?? {}, 'operations-egress'),

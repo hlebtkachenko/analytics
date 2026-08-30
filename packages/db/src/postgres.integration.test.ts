@@ -1,3 +1,5 @@
+import { readdir } from 'node:fs/promises';
+
 import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
@@ -14,7 +16,7 @@ import {
 } from './index.js';
 
 const postgresImage =
-  'postgres:18.6-bookworm@sha256:1c59e2c3c818eaa0f0628f695b36e7c9e362d6b219b36a54a32df645cbd7e1af';
+  'pgvector/pgvector:pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a';
 const testPassword = 'test-only-database-credential';
 
 let apiPool: Pool;
@@ -25,6 +27,26 @@ let migratorPool: Pool;
 let reportingPool: Pool;
 let rootPool: Pool;
 let initialMigrationResults: Awaited<ReturnType<typeof runMigrations>>[];
+
+// Mirrors the runner: name sorted, id is the segment before the first underscore.
+async function readMigrationIds(): Promise<string[]> {
+  const directory = new URL('../drizzle/', import.meta.url);
+  const entries = await readdir(directory, { withFileTypes: true });
+
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.sql'))
+    .map((entry) => entry.name)
+    .sort()
+    .map((name) => {
+      const id = name.split('_')[0];
+
+      if (id === undefined || !/^\d{8}\.\d{4}$/.test(id)) {
+        throw new Error(`Invalid migration name: ${name}`);
+      }
+
+      return id;
+    });
+}
 
 function poolFor(user: string, password: string): Pool {
   return new Pool({
@@ -143,17 +165,30 @@ afterAll(async () => {
 
 describe('PostgreSQL 18 isolation', () => {
   it('runs idempotent migrations and exposes compatibility by a narrow function', async () => {
+    const migrationIds = await readMigrationIds();
     const result = await runMigrations(migratorPool);
     const compatibility = await checkMigrationCompatibility(apiPool);
 
+    expect(migrationIds.length).toBeGreaterThan(0);
     expect(result.applied).toEqual([]);
     expect(compatibility).toMatchObject({
       compatible: true,
-      version: '20260828.0001',
+      version: migrationIds.at(-1),
     });
-    expect(initialMigrationResults.flatMap(({ applied }) => applied)).toEqual([
-      '20260828.0001',
-    ]);
+    expect(initialMigrationResults.flatMap(({ applied }) => applied)).toEqual(
+      migrationIds,
+    );
+  });
+
+  it('provisions pgvector during role bootstrap and exposes it to services', async () => {
+    const extension = await rootPool.query<{ extname: string }>(
+      "select extname from pg_extension where extname = 'vector'",
+    );
+
+    expect(extension.rows).toEqual([{ extname: 'vector' }]);
+    await expect(
+      apiPool.query("select '[1,2,3]'::vector as embedding"),
+    ).resolves.toMatchObject({ rowCount: 1 });
   });
 
   it('resolves verified membership without auth table access', async () => {
