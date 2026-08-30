@@ -15,6 +15,10 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
+`scripts/conductor-setup.sh` performs that sequence and seeds the local secret
+files in one step. See
+[the Conductor workspace notes](development.md#conductor-workspaces).
+
 `engineStrict` is enabled, so `pnpm install` fails with
 `ERR_PNPM_UNSUPPORTED_ENGINE` when the active Node.js version is not 24.20.0.
 Run `nvm use` in the shell, or restart the editor or terminal application when
