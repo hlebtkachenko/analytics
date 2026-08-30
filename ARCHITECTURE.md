@@ -61,6 +61,7 @@ flowchart TD
   reporting[apps/reporting-api]
   workbench[apps/design-system-workbench]
   design[packages/design-system]
+  ai[packages/ai]
   db[packages/db]
   security[packages/security]
   eslint[packages/eslint-config]
@@ -85,7 +86,9 @@ flowchart TD
 
 Applications do not import one another. Packages cannot import applications.
 `@bap/db` is the only database boundary, `@bap/security` owns service-neutral
-JWT/access contracts, and `@bap/design-system` is the only UI library.
+JWT/access contracts, and `@bap/design-system` is the only UI library. `@bap/ai`
+owns the model-provider boundary and has no application consumer yet, so no
+application edge points at it.
 
 The design-system workbench is a development and static-reference application,
 not a production container. It consumes only public `@bap/design-system`

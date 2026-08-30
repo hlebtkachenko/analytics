@@ -110,6 +110,19 @@ Copyright (c) 2014-2019 Guyon Roche.
 - Source: <https://github.com/exceljs/exceljs>
 - License: [MIT](licenses/EXCELJS-MIT.txt)
 
+## AI SDK
+
+The AI SDK provides the provider-agnostic model plumbing in `@bap/ai`. `ai`,
+`@ai-sdk/anthropic`, and `@ai-sdk/openai` are licensed under Apache License 2.0.
+BAP reads the provider name, key, base URL, and model defaults from one mounted
+credential file and ships no tools, prompts, or model defaults of its own.
+
+Copyright 2023 Vercel, Inc.
+
+- Source: <https://github.com/vercel/ai>
+- Upstream notice: [Apache License 2.0](licenses/AI-SDK-APACHE-2.0.txt)
+- License: [Apache License 2.0](licenses/APACHE-2.0.txt)
+
 ## Container foundation
 
 Caddy is licensed under Apache License 2.0. PostgreSQL is licensed under the
