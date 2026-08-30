@@ -110,12 +110,14 @@ C4Deployment
 ```
 
 The production model has non-internal `edge`, internal `app`, internal `data`,
-and non-internal `operations-egress` networks. Caddy is the only published
-service. Only one-shot restic clients join `operations-egress`; backup and
-restore also join `data`. Each runtime mounts only its own credential files.
-Caddy certificate state and PostgreSQL data use named volumes. Backup
-scheduling, backend-specific credentials, and off-host durability require owner
-configuration.
+and non-internal `internet-egress` and `operations-egress` networks. Caddy is
+the only published service. Only the web application joins `internet-egress`,
+where it reaches mail and AI providers; the application API and the reporting
+API deliberately keep no outbound path. Only one-shot restic clients join
+`operations-egress`; backup and restore also join `data`. Each runtime mounts
+only its own credential files. Caddy certificate state and PostgreSQL data use
+named volumes. Backup scheduling, backend-specific credentials, and off-host
+durability require owner configuration.
 
 ## Operational map
 

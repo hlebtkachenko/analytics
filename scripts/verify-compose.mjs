@@ -80,6 +80,43 @@ invariant(
   'Caddy image must use the accepted digest.',
 );
 
+// Only services with a justified provider dependency may reach the internet.
+const internetEgressMembers = Object.entries(configuration.services)
+  .filter(([, service]) =>
+    Object.hasOwn(service.networks ?? {}, 'internet-egress'),
+  )
+  .map(([name]) => name)
+  .sort();
+invariant(
+  internetEgressMembers.join() === 'web',
+  `Unexpected internet egress members: ${internetEgressMembers.join(',')}.`,
+);
+invariant(
+  configuration.networks['internet-egress'].internal !== true,
+  'The internet egress network must permit outbound access.',
+);
+for (const service of ['api', 'reporting-api']) {
+  invariant(
+    !Object.hasOwn(
+      configuration.services[service].networks ?? {},
+      'internet-egress',
+    ),
+    `${service} must not join the internet egress network.`,
+  );
+}
+// Egress must attach first and own the default route out of the web container.
+const webNetworks = configuration.services.web.networks;
+invariant(
+  webNetworks['internet-egress'].priority >
+    Math.max(webNetworks.app?.priority ?? 0, webNetworks.data?.priority ?? 0) &&
+    webNetworks['internet-egress'].gw_priority >
+      Math.max(
+        webNetworks.app?.gw_priority ?? 0,
+        webNetworks.data?.gw_priority ?? 0,
+      ),
+  'Web must attach internet egress first and take its default route from it.',
+);
+
 expectSecrets('database', ['postgres_admin_password']);
 expectSecrets('web', ['bap_auth_password', 'better_auth_secret']);
 expectSecrets('api', ['bap_api_password']);

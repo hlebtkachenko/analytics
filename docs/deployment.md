@@ -24,10 +24,13 @@ docker compose --env-file /path/to/runtime.environment -f compose.yaml -f compos
 ```
 
 The delivered topology is Caddy on the public edge, with web on the internal
-application and data networks, and both Nest APIs on internal application and
-data networks. PostgreSQL joins only the internal data network. Caddy blocks
-`/ready` and `/metrics` before proxying and is the only published application
-entry point. Dedicated `operations-egress` access is limited to one-shot restic
+application and data networks plus the non-internal `internet-egress` network,
+and both Nest APIs on internal application and data networks only. PostgreSQL
+joins only the internal data network. Caddy blocks `/ready` and `/metrics`
+before proxying and is the only published application entry point. Web takes its
+default route from `internet-egress` so mail and AI provider calls leave the
+host; that access is unrestricted outbound connectivity, not a destination
+allowlist. Dedicated `operations-egress` access is limited to one-shot restic
 clients and is unrestricted outbound connectivity while they run, not a
 destination allowlist. Production Caddy enables TLS when the owner supplies a
 valid public host, origin, DNS, and ACME reachability.

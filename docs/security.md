@@ -37,6 +37,14 @@ application traffic. The web service, both APIs, and PostgreSQL communicate on
 internal Compose networks. Health is intentionally public; readiness and
 Prometheus metrics are operational-only routes.
 
+Outbound access is a separate boundary. Only services on the non-internal
+`internet-egress` network can reach external providers, and its member allowlist
+is exactly the web service, which owns mail and AI provider calls. The
+application API, the reporting API, and PostgreSQL stay internal-only and have
+no outbound path. `scripts/verify-compose.mjs` fails when any other service
+joins that network, and the container smoke job proves the web service still
+resolves and connects outward.
+
 Better Auth uses opaque secure cookies for browser identity. Resource JWTs are
 signed only inside the server-side BFF, expire after five minutes, and are never
 returned to browser code. The test-only synthetic-account CLI is explicitly

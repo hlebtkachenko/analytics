@@ -69,9 +69,15 @@ services:
       retries: 5
       start_period: 10s
     init: true
+    # Egress attaches first and owns the default route out of this container.
     networks:
-      - app
-      - data
+      internet-egress:
+        priority: 100
+        gw_priority: 100
+      app:
+        priority: 50
+      data:
+        priority: 10
     secrets:
       - source: bap_auth_password
         target: /run/credentials/database-password
@@ -487,6 +493,7 @@ networks:
     internal: true
   data:
     internal: true
+  internet-egress: {}
   operations-egress: {}
 
 secrets:
