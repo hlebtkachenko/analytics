@@ -15,6 +15,10 @@ export interface ResolveMembershipInput {
   subjectId: string;
 }
 
+// Exact match against the version recorded by the migration runner.
+// Bump it to the newest migration id in the same pull request as that migration.
+// Rollback consequence: application code rolled back after the migration is
+// applied makes /ready return 503 on every service until this is bumped again.
 export const DATABASE_MIGRATION_COMPATIBILITY = '20260828.0001';
 
 export async function resolveMembership(

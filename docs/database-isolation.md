@@ -30,6 +30,24 @@ Fresh local and CI databases run role bootstrap first, then the migrator.
 Production repeats those idempotent commands with administrator and migrator
 credential files mounted only to their one-shot services.
 
+## Adding a migration
+
+Only one branch at a time may add a migration file. Two branches that pick the
+same id merge cleanly in git and then break at runtime, because the runner
+applies the first file, records that id, and treats the second file as already
+applied. Land the open migration branch first, then rebase and rename the later
+file to the next free id.
+
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is compared
+for exact equality against the recorded version. Bump it to the newest migration
+id in the same pull request that adds the migration. Rolling application code
+back after that migration is applied leaves the constant behind the database,
+and `/ready` returns 503 on every service until the constant is bumped again.
+
+Every new schema must grant `USAGE` on the schema and `SELECT` on its tables and
+sequences to `bap_backup`, and must set matching default privileges for later
+objects. Without those grants the whole-database dump breaks.
+
 ## Tenant policy contract
 
 Every future tenant table must include:

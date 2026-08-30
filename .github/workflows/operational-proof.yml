@@ -1,6 +1,12 @@
 name: Operational proof
 
 on:
+  pull_request:
+    paths:
+      - 'packages/db/drizzle/**'
+      - 'compose*.yaml'
+      - 'docker/**'
+      - 'scripts/**'
   schedule:
     - cron: '47 3 * * 1'
   workflow_dispatch:
@@ -102,8 +108,17 @@ jobs:
           docker compose --profile operations -f compose.yaml -f compose.development.yaml run --rm --no-deps restore
           owner_memberships=$(printf '%s\n' "select count(*) from auth.member where organization_id = :'organization_id' and role = 'owner';" | docker compose exec -T -u postgres restore-database psql -U postgres -d bap_restore -v ON_ERROR_STOP=1 -v organization_id="$BAP_OPERATIONAL_ORGANIZATION_ID" -tA)
           test "$owner_memberships" = 1
-          migration_version=$(docker compose exec -T -u postgres restore-database psql -U postgres -d bap_restore -tAc "select id from bap_migrations.schema_migrations order by id desc limit 1")
-          test "$migration_version" = 20260828.0001
+          stack_migration_version=$(docker compose exec -T -u postgres database psql -U postgres -d "${POSTGRES_DB:-bap}" -v ON_ERROR_STOP=1 -tAc "select version from bap_migrations.current_migration_version()")
+          restored_migration_version=$(docker compose exec -T -u postgres restore-database psql -U postgres -d bap_restore -v ON_ERROR_STOP=1 -tAc "select version from bap_migrations.current_migration_version()")
+          printf 'stack migration version: %s\nrestored migration version: %s\n' "$stack_migration_version" "$restored_migration_version"
+          if [ -z "$stack_migration_version" ] || [ -z "$restored_migration_version" ]; then
+            echo 'Migration version is empty on the stack or the restored database' >&2
+            exit 1
+          fi
+          if [ "$stack_migration_version" != "$restored_migration_version" ]; then
+            echo 'Restored migration version does not match the stack migration version' >&2
+            exit 1
+          fi
 
       - name: Show failure logs
         if: failure()
