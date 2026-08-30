@@ -14,19 +14,21 @@ runtimes that never need it.
 ## Decision
 
 Add a dedicated non-internal `internet-egress` network and attach only services
-with a justified provider dependency. Today that allowlist is exactly `web`.
-`scripts/verify-compose.mjs` enforces the membership list, the non-internal
-network flag, and the explicit exclusion of `api` and `reporting-api` in every
-Compose mode, so any later attachment fails the contract check by name.
+with a justified provider dependency. Today that allowlist is exactly `web` and
+the background `worker`. `scripts/verify-compose.mjs` enforces the membership
+list, the non-internal network flag, and the explicit exclusion of `api` and
+`reporting-api` in every Compose mode, so any later attachment fails the
+contract check by name.
 
-Declare `web` network membership in mapping form with explicit priorities.
-Docker installs the default route from the network a container joins first, and
-Compose orders attachments by descending `priority` and then by name. Without a
-priority `app` would sort first, and its internal flag would leave `web` without
-a default route despite the new network. `internet-egress` therefore carries
-both the highest `priority` and the highest `gw_priority`, because attachment
-order alone does not decide the gateway when another attached network is also
-routable, as `data` is under the development overlay.
+Declare the network membership of every allowlisted service in mapping form with
+explicit priorities. Docker installs the default route from the network a
+container joins first, and Compose orders attachments by descending `priority`
+and then by name. Without a priority `app` would sort first, and its internal
+flag would leave the service without a default route despite the new network.
+`internet-egress` therefore carries both the highest `priority` and the highest
+`gw_priority`, because attachment order alone does not decide the gateway when
+another attached network is also routable, as `data` is under the development
+overlay.
 
 ## Consequences
 
