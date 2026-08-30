@@ -8,6 +8,7 @@ import {
   getOrganizationAccess,
 } from '../auth/bff.ts';
 import type { BffAuth } from '../auth/bff.ts';
+import { webLogger } from '../logger.ts';
 import type { ChatRateLimiter } from './rate-limit.ts';
 
 // The credential names one model per role, and this route asks for the chat role.
@@ -338,6 +339,10 @@ export async function handleChatRequest(
     modelId = registry.modelId(chatModelRole);
   } catch {
     // A credential problem names the provider and the file, so only the outcome is reported.
+    webLogger.error('chat model registry unavailable', {
+      organizationId: parsed.data.organizationId,
+      role: chatModelRole,
+    });
     return jsonResponse({ error: 'assistant_unavailable' }, 503);
   }
 

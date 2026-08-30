@@ -11,6 +11,7 @@ exist.
 
 - [Getting started](getting-started.md)
 - [Development workflow](development.md)
+- [Feature spec convention](../.ai/specs/README.md)
 - [Configuration](configuration.md)
 - [Testing](testing.md)
 - [Deployment](deployment.md)
@@ -25,6 +26,7 @@ exist.
 - [Carbon workbench plan and verification](planning/carbon-workbench.md)
 - [Platform batteries plan](planning/platform-batteries.md)
 - [Tenant data foundation plan](planning/tenant-data-foundation.md)
+- [MCP server plan](planning/mcp-server.md)
 - [Carbon patterns](design-system/patterns.md)
 - [Carbon accessibility](design-system/accessibility.md)
 - [Architecture](../ARCHITECTURE.md)

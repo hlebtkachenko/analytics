@@ -63,11 +63,28 @@ financial, operational, or development data.
   checks
 - `pnpm check`: run formatting, linting, type checking, tests, and builds
 - `pnpm test:watch`: run workspace tests in watch mode
+- `pnpm test:coverage`: run workspace unit tests with coverage reporting
 - `pnpm test:integration`: verify PostgreSQL roles, migrations, RLS, and the
   worker queue boundary
 - `pnpm secrets:local`: create disposable ignored local credential files
+- `pnpm compose:config`: validate development Compose without starting anything
 - `pnpm compose:verify`: verify development, production, and operations topology
 - `pnpm compose:config:production`: validate production Compose with synthetic
   non-routable host values
+
+`pnpm check` chains `check:node-pins`, `format:check`, `lint`, `typecheck`,
+`test`, and `build`, and stops at the first failure. Run one of them alone while
+iterating, then run the whole gate before pushing.
+
+- `pnpm check:node-pins`: verify every Node version pin agrees
+- `pnpm format`: rewrite the repository with Prettier
+- `pnpm format:check`: report Prettier differences without writing
+- `pnpm lint`: run ESLint in every workspace
+- `pnpm typecheck`: run TypeScript in every workspace
+- `pnpm test`: run workspace unit tests once
+- `pnpm build`: build every application and package
+
+Write a short dated spec in `.ai/specs/` before implementing a feature; see
+[the convention](.ai/specs/README.md) for when one is needed and when it is not.
 
 Read `docs/README.md` before changing infrastructure or workspace boundaries.

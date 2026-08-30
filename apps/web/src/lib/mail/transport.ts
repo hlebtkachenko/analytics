@@ -1,5 +1,6 @@
 import { Resend } from 'resend';
 
+import { webLogger } from '../logger.ts';
 import type { MailConfiguration, MailTransportKind } from './config.ts';
 
 export interface MailMessage {
@@ -27,7 +28,8 @@ export interface MailTransport {
 export const logTransport: MailTransport = {
   kind: 'log',
   async send(sender, message) {
-    console.info('mail: log transport recorded message', {
+    // The body and the recipient are the point of this transport, so they are named outside the redacted paths.
+    webLogger.info('mail log transport recorded message', {
       body: message.text,
       sender,
       subject: message.subject,
