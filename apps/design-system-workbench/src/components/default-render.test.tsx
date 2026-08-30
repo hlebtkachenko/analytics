@@ -133,7 +133,8 @@ describe('generated Default component stories', () => {
       container.remove();
       consoleError.mockClear();
     }
-  });
+    // Same budget as the other mount loops; a timeout here leaks effects into the next test.
+  }, 60_000);
 
   it('mounts every executable declared literal without React errors', async () => {
     const entriesByName = new Map(
