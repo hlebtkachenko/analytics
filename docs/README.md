@@ -11,6 +11,7 @@ exist.
 
 - [Getting started](getting-started.md)
 - [Development workflow](development.md)
+- [Feature spec convention](../.ai/specs/README.md)
 - [Configuration](configuration.md)
 - [Testing](testing.md)
 - [Deployment](deployment.md)

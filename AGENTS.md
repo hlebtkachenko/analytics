@@ -84,4 +84,7 @@ iterating, then run the whole gate before pushing.
 - `pnpm test`: run workspace unit tests once
 - `pnpm build`: build every application and package
 
+Write a short dated spec in `.ai/specs/` before implementing a feature; see
+[the convention](.ai/specs/README.md) for when one is needed and when it is not.
+
 Read `docs/README.md` before changing infrastructure or workspace boundaries.

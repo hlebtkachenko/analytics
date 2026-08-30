@@ -220,6 +220,11 @@ export async function getOrganizationAccess(
   }
 
   if (!response.ok) {
+    // An upstream fault would otherwise reach the browser labelled as a refusal with no trace.
+    if (response.status >= 500) {
+      return upstreamFailure('getOrganizationAccess', 'unreachable');
+    }
+
     return jsonResponse({ error: 'access_denied' }, response.status);
   }
 
@@ -398,6 +403,11 @@ export async function getDatasets(
   }
 
   if (!response.ok) {
+    // An upstream fault is not a refusal, so it is recorded rather than passed through silently.
+    if (response.status >= 500) {
+      return upstreamFailure('getDatasets', 'unreachable');
+    }
+
     return jsonResponse({ error: 'datasets_unavailable' }, response.status);
   }
 
@@ -471,6 +481,11 @@ export async function getDatasetRows(
   }
 
   if (!response.ok) {
+    // An upstream fault is not a refusal, so it is recorded rather than passed through silently.
+    if (response.status >= 500) {
+      return upstreamFailure('getDatasetRows', 'unreachable');
+    }
+
     return jsonResponse({ error: 'rows_unavailable' }, response.status);
   }
 
@@ -545,6 +560,11 @@ export async function getDatasetExport(
   }
 
   if (!response.ok) {
+    // An upstream fault is not a refusal, so it is recorded rather than passed through silently.
+    if (response.status >= 500) {
+      return upstreamFailure('getDatasetExport', 'unreachable');
+    }
+
     return jsonResponse({ error: 'export_rejected' }, response.status);
   }
 

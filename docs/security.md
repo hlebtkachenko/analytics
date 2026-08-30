@@ -43,9 +43,11 @@ skips that one dependency. Three catalog entries sit in that position today:
 still declare ESLint 9 peers, and `typescript`, because `typescript-eslint`
 declares `>=4.8.4 <6.1.0`. Their major updates are ignored in
 `.github/dependabot.yml`, so the job reports the tree honestly instead of
-failing on an update that cannot land. That ignore covers version updates only:
-patch and minor releases, and every security update, still open pull requests.
-Remove the entries once upstream widens those peer ranges.
+failing on an update that cannot land. TypeScript additionally ignores minor
+updates, because `<6.1.0` is a minor boundary rather than a major one, so a 6.1
+release would fail exactly the way a major would. That ignore covers version
+updates only: patch releases, and every security update, still open pull
+requests. Remove the entries once upstream widens those peer ranges.
 
 The workspace `minimumReleaseAge` floor is not relaxed for automation.
 Dependabot supplies its own cooldown of three days, which is longer than the
