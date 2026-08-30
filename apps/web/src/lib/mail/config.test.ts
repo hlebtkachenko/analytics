@@ -10,13 +10,13 @@ import {
 } from './config.ts';
 
 describe('loadMailConfiguration', () => {
-  it('rejects a missing key-file path', async () => {
+  it('rejects a missing key-file path for the resend transport', async () => {
     await expect(
       loadMailConfiguration({
         BAP_MAIL_SENDER: 'team@bap.invalid',
         NODE_ENV: 'test',
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow('requires a real API key');
   });
 
   it('rejects a world-readable key file', async () => {
@@ -87,6 +87,20 @@ describe('loadMailConfiguration', () => {
         BAP_MAIL_SENDER: 'team@bap.invalid',
         BAP_MAIL_TRANSPORT: 'log',
         BAP_RESEND_API_KEY_FILE: file,
+        NODE_ENV: 'test',
+      }),
+    ).resolves.toEqual({
+      apiKey: undefined,
+      sender: 'team@bap.invalid',
+      transport: 'log',
+    });
+  });
+
+  it('accepts the log transport with no key file configured', async () => {
+    await expect(
+      loadMailConfiguration({
+        BAP_MAIL_SENDER: 'team@bap.invalid',
+        BAP_MAIL_TRANSPORT: 'log',
         NODE_ENV: 'test',
       }),
     ).resolves.toEqual({

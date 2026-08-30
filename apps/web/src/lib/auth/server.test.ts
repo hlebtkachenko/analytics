@@ -2,10 +2,29 @@ import { chmod, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+const { sendMailMock } = vi.hoisted(() => ({ sendMailMock: vi.fn() }));
+
+vi.mock('../mail/index.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../mail/index.ts')>()),
+  sendMail: sendMailMock,
+}));
+
+import type { MailConfiguration } from '../mail/index.js';
 import { disabledAuthPaths, resourceJwtConfiguration } from './contract.js';
-import { loadAuthEnvironment, readAuthSecret } from './server.js';
+import {
+  authRateLimitRules,
+  createMagicLinkOptions,
+  loadAuthEnvironment,
+  readAuthSecret,
+} from './server.js';
+
+const mailConfiguration: MailConfiguration = {
+  apiKey: undefined,
+  sender: 'team@bap.invalid',
+  transport: 'log',
+};
 
 describe('Better Auth resource contract', () => {
   it('keeps token, signup, mail, and invitation paths disabled', () => {
@@ -79,5 +98,50 @@ describe('Better Auth resource contract', () => {
     await expect(readAuthSecret(file)).rejects.toThrow(
       'protected regular file',
     );
+  });
+});
+
+describe('Better Auth magic link', () => {
+  it('never signs a new user up', () => {
+    expect(createMagicLinkOptions(mailConfiguration).disableSignUp).toBe(true);
+  });
+
+  it('sends the link through the mail module', async () => {
+    sendMailMock.mockResolvedValueOnce({ ok: true, transport: 'log' });
+
+    await createMagicLinkOptions(mailConfiguration).sendMagicLink({
+      email: 'member@bap.invalid',
+      token: 'token-1',
+      url: 'https://bap.invalid/access?token=token-1',
+    });
+
+    expect(sendMailMock).toHaveBeenCalledWith(mailConfiguration, {
+      subject: 'Your BAP sign-in link',
+      text: expect.stringContaining('https://bap.invalid/access?token=token-1'),
+      to: 'member@bap.invalid',
+    });
+  });
+});
+
+describe('Better Auth rate limits', () => {
+  it('caps every credential, magic link, and two-factor path', () => {
+    expect(Object.keys(authRateLimitRules).sort()).toEqual(
+      [
+        '/magic-link/verify',
+        '/sign-in/email',
+        '/sign-in/magic-link',
+        '/two-factor/disable',
+        '/two-factor/enable',
+        '/two-factor/generate-backup-codes',
+        '/two-factor/get-totp-uri',
+        '/two-factor/send-otp',
+        '/two-factor/verify-backup-code',
+        '/two-factor/verify-otp',
+        '/two-factor/verify-totp',
+      ].sort(),
+    );
+    for (const rule of Object.values(authRateLimitRules)) {
+      expect(rule).toEqual({ max: 5, window: 60 });
+    }
   });
 });

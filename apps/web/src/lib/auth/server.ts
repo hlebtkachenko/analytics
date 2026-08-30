@@ -1,16 +1,30 @@
 import { betterAuth } from 'better-auth';
-import { admin, jwt, organization } from 'better-auth/plugins';
+import type { MagicLinkOptions } from 'better-auth/plugins';
+import {
+  admin,
+  jwt,
+  magicLink,
+  organization,
+  twoFactor,
+} from 'better-auth/plugins';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 import { readFile, stat } from 'node:fs/promises';
 import { z } from 'zod';
 
+import type { MailConfiguration } from '../mail/index.ts';
+import {
+  loadMailConfiguration,
+  mailTemplates,
+  sendMail,
+} from '../mail/index.ts';
 import { disabledAuthPaths, resourceJwtConfiguration } from './contract.ts';
 import {
   adminAuthSchema,
   coreAuthModels,
   jwtAuthSchema,
   organizationAuthSchema,
+  twoFactorAuthSchema,
 } from './models.ts';
 
 const authEnvironmentSchema = z.object({
@@ -62,11 +76,44 @@ export async function readAuthSecret(path: string): Promise<string> {
   return secret;
 }
 
+// Without disableSignUp magic link is a self-signup bypass around emailAndPassword.disableSignUp.
+export function createMagicLinkOptions(
+  mail: MailConfiguration,
+): MagicLinkOptions {
+  return {
+    disableSignUp: true,
+    sendMagicLink: async ({ email, url }) => {
+      const message = mailTemplates.magicLink({ to: email, url });
+      await sendMail(mail, {
+        subject: message.subject,
+        text: message.text,
+        to: email,
+      });
+    },
+  };
+}
+
+// Custom rules are matched by exact path, so every credential endpoint is listed.
+export const authRateLimitRules = {
+  '/magic-link/verify': { max: 5, window: 60 },
+  '/sign-in/email': { max: 5, window: 60 },
+  '/sign-in/magic-link': { max: 5, window: 60 },
+  '/two-factor/disable': { max: 5, window: 60 },
+  '/two-factor/enable': { max: 5, window: 60 },
+  '/two-factor/generate-backup-codes': { max: 5, window: 60 },
+  '/two-factor/get-totp-uri': { max: 5, window: 60 },
+  '/two-factor/send-otp': { max: 5, window: 60 },
+  '/two-factor/verify-backup-code': { max: 5, window: 60 },
+  '/two-factor/verify-otp': { max: 5, window: 60 },
+  '/two-factor/verify-totp': { max: 5, window: 60 },
+} as const;
+
 async function createAuth() {
   const environment = loadAuthEnvironment(process.env);
   const configuration = await loadDatabaseConfiguration(process.env, {
     role: 'bap_auth',
   });
+  const mail = await loadMailConfiguration(process.env);
   const secret = await readAuthSecret(environment.BETTER_AUTH_SECRET_FILE);
   authPool ??= createDatabasePool(configuration, { searchPath: 'auth' });
 
@@ -116,12 +163,16 @@ async function createAuth() {
         },
         schema: jwtAuthSchema,
       }),
+      magicLink(createMagicLinkOptions(mail)),
+      // Strictly opt-in: only a user who enabled it is challenged after a password sign-in.
+      twoFactor({
+        issuer: 'BAP',
+        schema: twoFactorAuthSchema,
+      }),
     ],
     rateLimit: {
       ...coreAuthModels.rateLimit,
-      customRules: {
-        '/sign-in/email': { max: 5, window: 60 },
-      },
+      customRules: { ...authRateLimitRules },
       enabled: true,
       max: 100,
       storage: 'database',

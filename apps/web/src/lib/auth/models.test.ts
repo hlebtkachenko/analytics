@@ -5,6 +5,7 @@ import {
   coreAuthModels,
   jwtAuthSchema,
   organizationAuthSchema,
+  twoFactorAuthSchema,
 } from './models.js';
 
 describe('Better Auth database mappings', () => {
@@ -108,6 +109,23 @@ describe('Better Auth database mappings', () => {
         },
         modelName: 'jwks',
       },
+    });
+  });
+
+  it('maps every two-factor field to the 20260830.0002 migration', () => {
+    expect(twoFactorAuthSchema).toEqual({
+      twoFactor: {
+        fields: {
+          backupCodes: 'backup_codes',
+          failedVerificationCount: 'failed_verification_count',
+          lockedUntil: 'locked_until',
+          secret: 'secret',
+          userId: 'user_id',
+          verified: 'verified',
+        },
+        modelName: 'two_factor',
+      },
+      user: { fields: { twoFactorEnabled: 'two_factor_enabled' } },
     });
   });
 });
