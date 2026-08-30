@@ -131,9 +131,8 @@ credentials, and off-host durability require owner configuration.
 
 ## Deliberately deferred
 
-Invitations, password-recovery delivery, MFA, SSO, distributed caches or limits,
-OpenTelemetry, PDF export, billing, uploads to object storage, HA, registry
-publishing, deployment automation, and product schemas require real owner or
-product requirements. See
+SSO, distributed caches or limits, OpenTelemetry, PDF export, billing, uploads
+to object storage, HA, registry publishing, deployment automation, and product
+schemas require real owner or product requirements. See
 [the approved SaaS foundation plan](docs/planning/saas-foundation.md) and
 [the platform batteries plan](docs/planning/platform-batteries.md).

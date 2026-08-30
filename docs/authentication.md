@@ -7,12 +7,15 @@ Production cookies are `HttpOnly`, `Secure`, and `SameSite=Lax`. The configured
 origin and trusted origin are exact values, never wildcards. Public email
 sign-up is disabled.
 
-The following public surfaces remain unavailable:
+Two public surfaces stay unavailable permanently:
 
-- `/api/auth/token`
-- email sign-up
-- password-reset and verification-mail delivery
-- invitation creation and acceptance
+- `/api/auth/token`, because resource JWTs exist only inside a BFF call
+- email sign-up, because membership is invite-only
+
+Password reset, verification mail, and organization invitations are enabled and
+deliver through the single mail module. Invitation mail links to
+`/invitation/:invitationId`, where an authenticated recipient reviews and
+accepts the invitation.
 
 The JWKS read endpoint remains public because private Nest services validate
 resource-token signatures against it.
@@ -75,10 +78,11 @@ replace the interactive owner bootstrap.
 Caddy replaces the dedicated `X-BAP-Client-IP` header. Better Auth reads only
 that single-value header, keeps proxy-origin inference disabled, and stores rate
 limit state in PostgreSQL. The baseline is 100 auth requests per minute and five
-email sign-in requests per minute for one client address.
+requests per minute for one client address on each credential, magic-link,
+two-factor, password-reset, and member-invitation path.
 
 ## Future identity work
 
-Mail, invitations, MFA, passkeys, social login, SSO/SAML, SCIM, API keys, and
-service identities require separate policy and provider decisions. A human
-session JWT must never be reused as service identity.
+Passkeys, social login, SSO/SAML, SCIM, API keys, and service identities require
+separate policy and provider decisions. A human session JWT must never be reused
+as service identity.

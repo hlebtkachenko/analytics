@@ -93,9 +93,74 @@ export function createMagicLinkOptions(
   };
 }
 
+// Password reset delivery mirrors the magic link hook so mail leaves through one module.
+export function createPasswordResetSender(mail: MailConfiguration) {
+  return async (data: {
+    url: string;
+    user: { email: string };
+  }): Promise<void> => {
+    const message = mailTemplates.passwordReset({
+      to: data.user.email,
+      url: data.url,
+    });
+    await sendMail(mail, {
+      subject: message.subject,
+      text: message.text,
+      to: data.user.email,
+    });
+  };
+}
+
+// Verification mail uses the same module so no second transport is configured.
+export function createVerificationSender(mail: MailConfiguration) {
+  return async (data: {
+    url: string;
+    user: { email: string };
+  }): Promise<void> => {
+    const message = mailTemplates.emailVerification({
+      to: data.user.email,
+      url: data.url,
+    });
+    await sendMail(mail, {
+      subject: message.subject,
+      text: message.text,
+      to: data.user.email,
+    });
+  };
+}
+
+// Better Auth does not build invitation URLs, so the public origin owns the acceptance route.
+export function createInvitationSender(
+  mail: MailConfiguration,
+  publicOrigin: string,
+) {
+  return async (data: {
+    email: string;
+    id: string;
+    organization: { name: string };
+  }): Promise<void> => {
+    const url = new URL(
+      `/invitation/${encodeURIComponent(data.id)}`,
+      publicOrigin,
+    );
+    const message = mailTemplates.organizationInvitation({
+      organization: data.organization.name,
+      to: data.email,
+      url: url.toString(),
+    });
+    await sendMail(mail, {
+      subject: message.subject,
+      text: message.text,
+      to: data.email,
+    });
+  };
+}
+
 // Custom rules are matched by exact path, so every credential endpoint is listed.
 export const authRateLimitRules = {
   '/magic-link/verify': { max: 5, window: 60 },
+  '/organization/invite-member': { max: 5, window: 60 },
+  '/request-password-reset': { max: 5, window: 60 },
   '/sign-in/email': { max: 5, window: 60 },
   '/sign-in/magic-link': { max: 5, window: 60 },
   '/two-factor/disable': { max: 5, window: 60 },
@@ -138,12 +203,20 @@ async function createAuth() {
     emailAndPassword: {
       disableSignUp: true,
       enabled: true,
+      sendResetPassword: createPasswordResetSender(mail),
+    },
+    emailVerification: {
+      sendVerificationEmail: createVerificationSender(mail),
     },
     plugins: [
       admin({ schema: adminAuthSchema }),
       organization({
         allowUserToCreateOrganization: false,
         schema: organizationAuthSchema,
+        sendInvitationEmail: createInvitationSender(
+          mail,
+          environment.BAP_PUBLIC_ORIGIN,
+        ),
       }),
       jwt({
         disableSettingJwtHeader: true,

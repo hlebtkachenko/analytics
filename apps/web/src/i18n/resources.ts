@@ -31,6 +31,16 @@ export const resources = {
       common: {
         signOut: 'Sign out',
       },
+      invitation: {
+        accept: 'Accept invitation',
+        acceptFailed: 'The invitation could not be accepted.',
+        error: 'This invitation is no longer valid.',
+        loading: 'Checking the invitation.',
+        organization: 'Organization',
+        role: 'Role',
+        summary: 'You were invited to join an organization on BAP.',
+        title: 'Organization invitation',
+      },
       reference: {
         title: 'Carbon design system',
       },

@@ -21,4 +21,21 @@ describe('mailTemplates', () => {
     expect(result.subject.length).toBeGreaterThan(0);
     expect(result.text).toContain(params.url);
   });
+
+  it('renders a non-empty verification mail containing the url', () => {
+    const result = mailTemplates.emailVerification(params);
+
+    expect(result.subject.length).toBeGreaterThan(0);
+    expect(result.text).toContain(params.url);
+  });
+
+  it('renders an invitation mail naming the organization and the url', () => {
+    const result = mailTemplates.organizationInvitation({
+      ...params,
+      organization: 'Organization 1',
+    });
+
+    expect(result.subject).toContain('Organization 1');
+    expect(result.text).toContain(params.url);
+  });
 });

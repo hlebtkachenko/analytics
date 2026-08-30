@@ -15,7 +15,10 @@ import type { MailConfiguration } from '../mail/index.js';
 import { disabledAuthPaths, resourceJwtConfiguration } from './contract.js';
 import {
   authRateLimitRules,
+  createInvitationSender,
   createMagicLinkOptions,
+  createPasswordResetSender,
+  createVerificationSender,
   loadAuthEnvironment,
   readAuthSecret,
 } from './server.js';
@@ -27,23 +30,9 @@ const mailConfiguration: MailConfiguration = {
 };
 
 describe('Better Auth resource contract', () => {
-  it('keeps token, signup, mail, and invitation paths disabled', () => {
+  it('keeps only browser token retrieval and public signup disabled', () => {
     expect([...disabledAuthPaths].sort()).toEqual(
-      [
-        '/organization/accept-invitation',
-        '/organization/cancel-invitation',
-        '/organization/get-invitation',
-        '/organization/invite-member',
-        '/organization/list-invitations',
-        '/organization/list-user-invitations',
-        '/organization/reject-invitation',
-        '/request-password-reset',
-        '/reset-password',
-        '/send-verification-email',
-        '/sign-up/email',
-        '/token',
-        '/verify-email',
-      ].sort(),
+      ['/sign-up/email', '/token'].sort(),
     );
   });
 
@@ -123,11 +112,70 @@ describe('Better Auth magic link', () => {
   });
 });
 
+describe('Better Auth mail hooks', () => {
+  it('sends the password reset through the mail module', async () => {
+    sendMailMock.mockResolvedValueOnce({ ok: true, transport: 'log' });
+
+    await createPasswordResetSender(mailConfiguration)({
+      url: 'https://bap.invalid/reset-password/reset-1',
+      user: { email: 'member@bap.invalid' },
+    });
+
+    expect(sendMailMock).toHaveBeenCalledWith(mailConfiguration, {
+      subject: 'Reset your BAP password',
+      text: expect.stringContaining(
+        'https://bap.invalid/reset-password/reset-1',
+      ),
+      to: 'member@bap.invalid',
+    });
+  });
+
+  it('sends the verification mail through the mail module', async () => {
+    sendMailMock.mockResolvedValueOnce({ ok: true, transport: 'log' });
+
+    await createVerificationSender(mailConfiguration)({
+      url: 'https://bap.invalid/verify-email/verify-1',
+      user: { email: 'member@bap.invalid' },
+    });
+
+    expect(sendMailMock).toHaveBeenCalledWith(mailConfiguration, {
+      subject: 'Confirm your BAP email address',
+      text: expect.stringContaining(
+        'https://bap.invalid/verify-email/verify-1',
+      ),
+      to: 'member@bap.invalid',
+    });
+  });
+
+  it('sends the invitation to the public acceptance route', async () => {
+    sendMailMock.mockResolvedValueOnce({ ok: true, transport: 'log' });
+
+    await createInvitationSender(
+      mailConfiguration,
+      'https://bap.invalid',
+    )({
+      email: 'invited@bap.invalid',
+      id: 'invitation_1',
+      organization: { name: 'Organization 1' },
+    });
+
+    expect(sendMailMock).toHaveBeenCalledWith(mailConfiguration, {
+      subject: 'You are invited to Organization 1 on BAP',
+      text: expect.stringContaining(
+        'https://bap.invalid/invitation/invitation_1',
+      ),
+      to: 'invited@bap.invalid',
+    });
+  });
+});
+
 describe('Better Auth rate limits', () => {
   it('caps every credential, magic link, and two-factor path', () => {
     expect(Object.keys(authRateLimitRules).sort()).toEqual(
       [
         '/magic-link/verify',
+        '/organization/invite-member',
+        '/request-password-reset',
         '/sign-in/email',
         '/sign-in/magic-link',
         '/two-factor/disable',
