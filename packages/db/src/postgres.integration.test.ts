@@ -714,17 +714,42 @@ describe('PostgreSQL 18 isolation', () => {
     expect(after.datasets).toEqual([{ id: sharedDatasetId }]);
     expect(after.rows).toEqual([{ dataset_id: sharedDatasetId }]);
     expect(after.columns).toEqual([{ name: 'column_b' }]);
-    await expect(
-      asTenant(
-        apiPool,
-        { organizationId: 'org-1', userId: 'user-1' },
-        async (transaction) =>
-          transaction.query('update app.dataset set name = $1 where id = $2', [
-            'renamed container',
-            sharedDatasetId,
-          ]),
-      ),
-    ).rejects.toThrow(/row-level security/);
+    // A read grant must not confer writing. The write policies match no row, so nothing changes.
+    const write = await asTenant(
+      apiPool,
+      { organizationId: 'org-1', userId: 'user-1' },
+      async (transaction) => {
+        const renamed = await transaction.query(
+          'update app.dataset set name = $1 where id = $2',
+          ['renamed container', sharedDatasetId],
+        );
+        const removedRows = await transaction.query(
+          'delete from app.dataset_row where dataset_id = $1',
+          [sharedDatasetId],
+        );
+        const removed = await transaction.query(
+          'delete from app.dataset where id = $1',
+          [sharedDatasetId],
+        );
+        const survivors = await transaction.query<{ name: string }>(
+          'select name from app.dataset where id = $1',
+          [sharedDatasetId],
+        );
+        return {
+          removed: removed.rowCount,
+          removedRows: removedRows.rowCount,
+          renamed: renamed.rowCount,
+          survivors: survivors.rows,
+        };
+      },
+    );
+
+    expect(write).toEqual({
+      removed: 0,
+      removedRows: 0,
+      renamed: 0,
+      survivors: [{ name: 'beta container' }],
+    });
   });
 
   it('ignores grants for another resource type and for another dataset', async () => {

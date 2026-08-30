@@ -121,7 +121,9 @@ ALTER TABLE app.upload FORCE ROW LEVEL SECURITY;
 
 -- Tenant context and per user visibility: the creator always, anyone else only through an explicit app.data_grants row.
 -- Grant scope is not interpreted yet; WITH CHECK still pins every written row to the acting subject.
-CREATE POLICY dataset_isolation ON app.dataset
+-- Split per command on purpose: one ALL policy would let its USING clause govern DELETE and UPDATE,
+-- so a read grant would confer deletion. A grant widens reading only; writing stays with the creator.
+CREATE POLICY dataset_select ON app.dataset FOR SELECT
   USING (
     organization_id = current_setting('bap.organization_id', true)
     AND (
@@ -135,22 +137,67 @@ CREATE POLICY dataset_isolation ON app.dataset
           AND granted.resource_id = dataset.id::text
       )
     )
+  );
+
+CREATE POLICY dataset_insert ON app.dataset FOR INSERT
+  WITH CHECK (
+    organization_id = current_setting('bap.organization_id', true)
+    AND created_by = current_setting('bap.user_id', true)
+  );
+
+CREATE POLICY dataset_update ON app.dataset FOR UPDATE
+  USING (
+    organization_id = current_setting('bap.organization_id', true)
+    AND created_by = current_setting('bap.user_id', true)
   )
   WITH CHECK (
     organization_id = current_setting('bap.organization_id', true)
     AND created_by = current_setting('bap.user_id', true)
   );
 
-CREATE POLICY dataset_column_isolation ON app.dataset_column
-  USING (app.dataset_is_readable(dataset_id))
+CREATE POLICY dataset_delete ON app.dataset FOR DELETE
+  USING (
+    organization_id = current_setting('bap.organization_id', true)
+    AND created_by = current_setting('bap.user_id', true)
+  );
+
+CREATE POLICY dataset_column_select ON app.dataset_column FOR SELECT
+  USING (app.dataset_is_readable(dataset_id));
+
+CREATE POLICY dataset_column_insert ON app.dataset_column FOR INSERT
   WITH CHECK (app.dataset_is_writable(dataset_id));
 
-CREATE POLICY dataset_row_isolation ON app.dataset_row
+CREATE POLICY dataset_column_update ON app.dataset_column FOR UPDATE
+  USING (app.dataset_is_writable(dataset_id))
+  WITH CHECK (app.dataset_is_writable(dataset_id));
+
+CREATE POLICY dataset_column_delete ON app.dataset_column FOR DELETE
+  USING (app.dataset_is_writable(dataset_id));
+
+CREATE POLICY dataset_row_select ON app.dataset_row FOR SELECT
   USING (
     organization_id = current_setting('bap.organization_id', true)
     AND app.dataset_is_readable(dataset_id)
+  );
+
+CREATE POLICY dataset_row_insert ON app.dataset_row FOR INSERT
+  WITH CHECK (
+    organization_id = current_setting('bap.organization_id', true)
+    AND app.dataset_is_writable(dataset_id)
+  );
+
+CREATE POLICY dataset_row_update ON app.dataset_row FOR UPDATE
+  USING (
+    organization_id = current_setting('bap.organization_id', true)
+    AND app.dataset_is_writable(dataset_id)
   )
   WITH CHECK (
+    organization_id = current_setting('bap.organization_id', true)
+    AND app.dataset_is_writable(dataset_id)
+  );
+
+CREATE POLICY dataset_row_delete ON app.dataset_row FOR DELETE
+  USING (
     organization_id = current_setting('bap.organization_id', true)
     AND app.dataset_is_writable(dataset_id)
   );
