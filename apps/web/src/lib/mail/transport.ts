@@ -1,7 +1,6 @@
 import { Resend } from 'resend';
 
-import { developmentPlaceholderApiKey } from './config.ts';
-import type { MailConfiguration } from './config.ts';
+import type { MailConfiguration, MailTransportKind } from './config.ts';
 
 export interface MailMessage {
   subject: string;
@@ -9,7 +8,7 @@ export interface MailMessage {
   to: string;
 }
 
-export type MailTransportKind = 'log' | 'resend';
+export type { MailTransportKind } from './config.ts';
 
 export interface MailSendResult {
   error?: string;
@@ -23,17 +22,17 @@ export interface MailTransport {
   send(sender: string, message: MailMessage): Promise<MailSendResult>;
 }
 
-// Records the message for local visibility instead of calling Resend; never throws, never reaches the network.
+// An explicit development opt-in, so it prints the link a developer has to follow.
+// Never select it where real recipients exist: the body reaches container stdout.
 export const logTransport: MailTransport = {
   kind: 'log',
   async send(sender, message) {
     console.info('mail: log transport recorded message', {
+      body: message.text,
       sender,
       subject: message.subject,
       to: message.to,
     });
-    // Body content stays out of info-level logs; debug is the redaction boundary here.
-    console.debug('mail: log transport body', { text: message.text });
     return { ok: true, transport: 'log' };
   },
 };
@@ -70,15 +69,17 @@ export function createResendTransport(apiKey: string): MailTransport {
   };
 }
 
-// Placeholder or absent key selects the log transport; any other value selects Resend.
+// The configured transport decides; loadMailConfiguration already rejected an unusable key.
 export function selectTransport(
   configuration: MailConfiguration,
 ): MailTransport {
-  if (
-    configuration.apiKey === undefined ||
-    configuration.apiKey === developmentPlaceholderApiKey
-  ) {
+  if (configuration.transport === 'log') {
     return logTransport;
   }
+
+  if (configuration.apiKey === undefined) {
+    throw new Error('The Resend transport requires an API key.');
+  }
+
   return createResendTransport(configuration.apiKey);
 }

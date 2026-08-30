@@ -5,14 +5,15 @@
 `config/compose.environment.example` is the complete non-secret Compose input
 template. Copy it to an ignored file for local development.
 
-| Variable            | Purpose                                    | Development default      |
-| ------------------- | ------------------------------------------ | ------------------------ |
-| `WEB_PORT`          | Caddy host port                            | `3000`                   |
-| `POSTGRES_PORT`     | Loopback PostgreSQL host port              | `5432`                   |
-| `POSTGRES_DB`       | Database name                              | `bap`                    |
-| `BAP_PUBLIC_HOST`   | Caddy site address                         | `http://localhost`       |
-| `BAP_PUBLIC_ORIGIN` | Exact Better Auth issuer and public origin | `http://localhost:3000`  |
-| `BAP_MAIL_SENDER`   | From address for transactional mail        | `no-reply@bap.localhost` |
+| Variable             | Purpose                                    | Development default      |
+| -------------------- | ------------------------------------------ | ------------------------ |
+| `WEB_PORT`           | Caddy host port                            | `3000`                   |
+| `POSTGRES_PORT`      | Loopback PostgreSQL host port              | `5432`                   |
+| `POSTGRES_DB`        | Database name                              | `bap`                    |
+| `BAP_PUBLIC_HOST`    | Caddy site address                         | `http://localhost`       |
+| `BAP_PUBLIC_ORIGIN`  | Exact Better Auth issuer and public origin | `http://localhost:3000`  |
+| `BAP_MAIL_SENDER`    | From address for transactional mail        | `no-reply@bap.localhost` |
+| `BAP_MAIL_TRANSPORT` | `resend` or the opt-in `log` transport     | `log` in development     |
 
 `BAP_PUBLIC_ORIGIN` must be an origin without a path. It is never a
 `NEXT_PUBLIC_*` value. Production accepts HTTPS origins, with plain HTTP
@@ -28,8 +29,9 @@ Compose provides service hosts, ports, database login names, and credential file
 paths. These are internal runtime values, not user configuration.
 
 - Web uses `BAP_DATABASE_*`, `BETTER_AUTH_SECRET_FILE`, `BAP_MAIL_SENDER`,
-  `BAP_RESEND_API_KEY_FILE`, and `BAP_AI_PROVIDER_CONFIG_FILE`. Its two BFF
-  targets are fixed internal service origins, not deployment inputs.
+  `BAP_MAIL_TRANSPORT`, `BAP_RESEND_API_KEY_FILE`, and
+  `BAP_AI_PROVIDER_CONFIG_FILE`. Its two BFF targets are fixed internal service
+  origins, not deployment inputs.
 - Application and reporting APIs use `BAP_DATABASE_*`, `BAP_JWKS_URL`, and
   `BAP_PUBLIC_ORIGIN`.
 - The worker uses `BAP_DATABASE_*` as `bap_api` plus
@@ -49,8 +51,11 @@ are the PostgreSQL administrator, migrator, auth, application, reporting,
 backup, Better Auth, Resend, AI provider, and restic credential files listed in
 `config/compose.environment.example`. The Resend key and the AI provider
 document are seeded with the literal placeholder
-`local-development-placeholder`, which selects a log-only mail transport instead
-of a provider call. Create disposable local values with:
+`local-development-placeholder`. The mail transport is never inferred from that
+value: `BAP_MAIL_TRANSPORT` selects it explicitly, the development overlay sets
+`log`, and the `resend` transport refuses to start with an absent or placeholder
+key so a misconfigured deployment fails loudly instead of dropping mail. Create
+disposable local values with:
 
 ```sh
 pnpm secrets:local

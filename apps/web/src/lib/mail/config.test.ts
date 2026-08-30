@@ -4,7 +4,10 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { loadMailConfiguration } from './config.ts';
+import {
+  developmentPlaceholderApiKey,
+  loadMailConfiguration,
+} from './config.ts';
 
 describe('loadMailConfiguration', () => {
   it('rejects a missing key-file path', async () => {
@@ -71,10 +74,29 @@ describe('loadMailConfiguration', () => {
     ).resolves.toEqual({
       apiKey: 'test-only-value',
       sender: 'team@bap.invalid',
+      transport: 'resend',
     });
   });
 
-  it('accepts an absent key file and reports no key', async () => {
+  it('accepts an absent key file for the opt-in log transport', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'bap-mail-'));
+    const file = join(directory, 'missing-resend-api-key');
+
+    await expect(
+      loadMailConfiguration({
+        BAP_MAIL_SENDER: 'team@bap.invalid',
+        BAP_MAIL_TRANSPORT: 'log',
+        BAP_RESEND_API_KEY_FILE: file,
+        NODE_ENV: 'test',
+      }),
+    ).resolves.toEqual({
+      apiKey: undefined,
+      sender: 'team@bap.invalid',
+      transport: 'log',
+    });
+  });
+
+  it('refuses the resend transport when the key file is absent', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'bap-mail-'));
     const file = join(directory, 'missing-resend-api-key');
 
@@ -84,7 +106,36 @@ describe('loadMailConfiguration', () => {
         BAP_RESEND_API_KEY_FILE: file,
         NODE_ENV: 'test',
       }),
-    ).resolves.toEqual({ apiKey: undefined, sender: 'team@bap.invalid' });
+    ).rejects.toThrow('requires a real API key');
+  });
+
+  it('refuses the resend transport for the development placeholder', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'bap-mail-'));
+    const file = join(directory, 'resend-api-key');
+    await writeFile(file, `${developmentPlaceholderApiKey}\n`, { mode: 0o600 });
+
+    await expect(
+      loadMailConfiguration({
+        BAP_MAIL_SENDER: 'team@bap.invalid',
+        BAP_RESEND_API_KEY_FILE: file,
+        NODE_ENV: 'test',
+      }),
+    ).rejects.toThrow('requires a real API key');
+  });
+
+  it('rejects an unknown transport name', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'bap-mail-'));
+    const file = join(directory, 'resend-api-key');
+    await writeFile(file, 'test-only-value\n', { mode: 0o600 });
+
+    await expect(
+      loadMailConfiguration({
+        BAP_MAIL_SENDER: 'team@bap.invalid',
+        BAP_MAIL_TRANSPORT: 'smtp',
+        BAP_RESEND_API_KEY_FILE: file,
+        NODE_ENV: 'test',
+      }),
+    ).rejects.toThrow();
   });
 
   it('applies the documented default sender', async () => {

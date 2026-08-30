@@ -23,6 +23,16 @@ async function bootstrap(): Promise<void> {
   });
   const queue = createQueueClientFromConfiguration(configuration);
 
+  // pg-boss re-emits every supervisor failure here; without a listener Node would exit.
+  queue.on('error', (error: unknown) => {
+    metrics.recordQueueError();
+    logger.error(
+      error instanceof Error ? error.message : 'Queue supervisor failed',
+      error instanceof Error ? error.stack : undefined,
+      SERVICE_NAME,
+    );
+  });
+
   await queue.start();
 
   // Phase 2 registers the first queue handler; the worker only supervises pg-boss for now.
@@ -37,17 +47,31 @@ async function bootstrap(): Promise<void> {
 
     stopping = true;
     logger.log('Worker shutting down', SERVICE_NAME);
-    await queue.stop({ graceful: true });
-    await observability.close();
-    await pool.end();
+
+    // Every step runs even when an earlier one fails, or the listener would keep the process alive.
+    for (const step of [
+      () => queue.stop({ graceful: true }),
+      () => observability.close(),
+      () => pool.end(),
+    ]) {
+      try {
+        await step();
+      } catch (error) {
+        process.exitCode = 1;
+        logger.error(
+          error instanceof Error
+            ? error.message
+            : 'Worker shutdown step failed',
+          error instanceof Error ? error.stack : undefined,
+          SERVICE_NAME,
+        );
+      }
+    }
   };
 
   for (const signal of SHUTDOWN_SIGNALS) {
     process.once(signal, () => {
-      shutdown().catch(() => {
-        logger.error('Worker shutdown failed', undefined, SERVICE_NAME);
-        process.exitCode = 1;
-      });
+      void shutdown();
     });
   }
 }

@@ -11,6 +11,7 @@ BAP_REPORTING_PASSWORD_FILE=.secrets/bap_reporting_password
 BAP_BACKUP_PASSWORD_FILE=.secrets/bap_backup_password
 BETTER_AUTH_SECRET_FILE=.secrets/better_auth_secret
 BAP_MAIL_SENDER=no-reply@bap.example.org
+BAP_MAIL_TRANSPORT=resend
 BAP_RESEND_API_KEY_FILE=.secrets/resend_api_key
 BAP_AI_PROVIDER_CONFIG_FILE=.secrets/ai_provider_config
 RESTIC_PASSWORD_FILE=.secrets/restic_password

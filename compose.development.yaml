@@ -5,6 +5,7 @@ services:
 
   web:
     environment:
+      BAP_MAIL_TRANSPORT: log
       BAP_PUBLIC_ORIGIN: http://localhost:${WEB_PORT:-3000}
 
   database:

@@ -8,12 +8,13 @@ vi.mock('resend', () => ({
   }),
 }));
 
-import { developmentPlaceholderApiKey } from './config.ts';
+import type { MailConfiguration } from './config.ts';
 import { sendMail } from './send.ts';
 
-const logConfiguration = {
-  apiKey: developmentPlaceholderApiKey,
+const logConfiguration: MailConfiguration = {
+  apiKey: undefined,
   sender: 'team@bap.invalid',
+  transport: 'log',
 };
 
 describe('sendMail', () => {
@@ -59,7 +60,11 @@ describe('sendMail', () => {
 
     await expect(
       sendMail(
-        { apiKey: 're_live_test_key', sender: 'team@bap.invalid' },
+        {
+          apiKey: 're_live_test_key',
+          sender: 'team@bap.invalid',
+          transport: 'resend',
+        },
         { subject: 'Subject', text: 'Body', to: 'user@bap.invalid' },
       ),
     ).resolves.toEqual({

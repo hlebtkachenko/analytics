@@ -8,7 +8,6 @@ vi.mock('resend', () => ({
   }),
 }));
 
-import { developmentPlaceholderApiKey } from './config.ts';
 import {
   createResendTransport,
   logTransport,
@@ -22,47 +21,49 @@ const message = {
 };
 
 describe('selectTransport', () => {
-  it('selects the log transport when the api key is absent', () => {
-    expect(
-      selectTransport({ apiKey: undefined, sender: 'team@bap.invalid' }).kind,
-    ).toBe('log');
-  });
-
-  it('selects the log transport for the development placeholder', () => {
+  it('selects the log transport when it is configured', () => {
     expect(
       selectTransport({
-        apiKey: developmentPlaceholderApiKey,
+        apiKey: undefined,
         sender: 'team@bap.invalid',
+        transport: 'log',
       }).kind,
     ).toBe('log');
   });
 
-  it('selects the resend transport for a real-looking key', () => {
+  it('selects the resend transport when it is configured', () => {
     expect(
       selectTransport({
         apiKey: 're_live_test_key',
         sender: 'team@bap.invalid',
+        transport: 'resend',
       }).kind,
     ).toBe('resend');
+  });
+
+  it('refuses the resend transport without a key', () => {
+    expect(() =>
+      selectTransport({
+        apiKey: undefined,
+        sender: 'team@bap.invalid',
+        transport: 'resend',
+      }),
+    ).toThrow('requires an API key');
   });
 });
 
 describe('logTransport', () => {
-  it('records the message without logging the body at info level', async () => {
+  it('records the message so a developer can follow the link', async () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
-    const debug = vi
-      .spyOn(console, 'debug')
-      .mockImplementation(() => undefined);
 
     await expect(
       logTransport.send('team@bap.invalid', message),
     ).resolves.toEqual({ ok: true, transport: 'log' });
 
-    expect(JSON.stringify(info.mock.calls)).not.toContain(message.text);
-    expect(JSON.stringify(debug.mock.calls)).toContain(message.text);
+    expect(JSON.stringify(info.mock.calls)).toContain(message.text);
+    expect(JSON.stringify(info.mock.calls)).toContain(message.to);
 
     info.mockRestore();
-    debug.mockRestore();
   });
 });
 

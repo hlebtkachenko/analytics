@@ -21,4 +21,15 @@ describe('WorkerMetrics', () => {
     expect(output).not.toContain('subject');
     expect(output).not.toContain('user');
   });
+
+  it('counts queue supervisor failures without labels', async () => {
+    const metrics = new WorkerMetrics();
+
+    metrics.recordQueueError();
+    metrics.recordQueueError();
+
+    await expect(metrics.render()).resolves.toContain(
+      'bap_worker_queue_errors_total 2',
+    );
+  });
 });

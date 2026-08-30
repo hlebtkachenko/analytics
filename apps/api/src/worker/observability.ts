@@ -123,6 +123,9 @@ export function startObservabilityServer(
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
+      // Startup rejection is done; later errors need a live listener or Node would throw.
+      server.removeListener('error', reject);
+      server.on('error', () => undefined);
       const address = server.address() as AddressInfo | null;
 
       resolve({

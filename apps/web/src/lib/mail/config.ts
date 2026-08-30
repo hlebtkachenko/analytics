@@ -1,21 +1,25 @@
 import { readFile, stat } from 'node:fs/promises';
 import { z } from 'zod';
 
-// scripts/create-local-secrets.sh seeds this exact value for local and CI runs.
+// scripts/create-local-secrets.sh seeds this exact value, which is never a usable key.
 export const developmentPlaceholderApiKey = 'local-development-placeholder';
 
 // Suitable only for local development; every other environment must set BAP_MAIL_SENDER.
 export const defaultMailSender = 'no-reply@bap.localhost';
 
+export type MailTransportKind = 'log' | 'resend';
+
 const mailEnvironmentSchema = z.object({
   BAP_MAIL_SENDER: z.email().default(defaultMailSender),
+  BAP_MAIL_TRANSPORT: z.enum(['log', 'resend']).default('resend'),
   BAP_RESEND_API_KEY_FILE: z.string().min(1),
 });
 
 export interface MailConfiguration {
-  // undefined when the key file is absent from disk; callers treat this like the placeholder.
+  // undefined when the key file is absent from disk; only the log transport tolerates that.
   apiKey: string | undefined;
   sender: string;
+  transport: MailTransportKind;
 }
 
 function isEnoentError(error: unknown): error is NodeJS.ErrnoException {
@@ -55,5 +59,20 @@ export async function loadMailConfiguration(
 ): Promise<MailConfiguration> {
   const parsed = mailEnvironmentSchema.parse(environment);
   const apiKey = await readResendApiKeyFile(parsed.BAP_RESEND_API_KEY_FILE);
-  return { apiKey, sender: parsed.BAP_MAIL_SENDER };
+
+  // The log transport is an explicit opt-in so a missing key can never silently drop mail.
+  if (
+    parsed.BAP_MAIL_TRANSPORT === 'resend' &&
+    (apiKey === undefined || apiKey === developmentPlaceholderApiKey)
+  ) {
+    throw new Error(
+      'The Resend transport requires a real API key. Set BAP_MAIL_TRANSPORT to log for local development.',
+    );
+  }
+
+  return {
+    apiKey,
+    sender: parsed.BAP_MAIL_SENDER,
+    transport: parsed.BAP_MAIL_TRANSPORT,
+  };
 }

@@ -29,8 +29,19 @@ export class WorkerMetrics {
     registers: [this.registry],
   });
 
+  // Supervisor failures are counted without a label so no queue name can leak a tenant hint.
+  private readonly queueErrors = new Counter({
+    help: 'Queue supervisor failures reported by pg-boss',
+    name: 'bap_worker_queue_errors_total',
+    registers: [this.registry],
+  });
+
   recordJob(queue: string, outcome: JobOutcome): void {
     this.jobs.inc({ outcome, queue });
+  }
+
+  recordQueueError(): void {
+    this.queueErrors.inc();
   }
 
   render(): Promise<string> {

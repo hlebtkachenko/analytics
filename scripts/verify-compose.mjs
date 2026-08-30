@@ -116,8 +116,8 @@ for (const service of internetEgressMembers) {
   invariant(
     internalNames.every(
       (name) =>
-        egress.priority > (serviceNetworks[name].priority ?? 0) &&
-        egress.gw_priority > (serviceNetworks[name].gw_priority ?? 0),
+        egress?.priority > (serviceNetworks[name]?.priority ?? 0) &&
+        egress?.gw_priority > (serviceNetworks[name]?.gw_priority ?? 0),
     ),
     `${service} must attach internet egress first and take its default route from it.`,
   );

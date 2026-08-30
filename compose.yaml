@@ -48,6 +48,7 @@ services:
       BAP_DATABASE_PORT: 5432
       BAP_DATABASE_USER: bap_auth
       BAP_MAIL_SENDER: ${BAP_MAIL_SENDER:-no-reply@bap.localhost}
+      BAP_MAIL_TRANSPORT: ${BAP_MAIL_TRANSPORT:-resend}
       BAP_PUBLIC_ORIGIN: ${BAP_PUBLIC_ORIGIN:-http://localhost:3000}
       BAP_RESEND_API_KEY_FILE: /run/credentials/resend-api-key
       BETTER_AUTH_SECRET_FILE: /run/credentials/auth-secret
