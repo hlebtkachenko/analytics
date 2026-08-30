@@ -146,6 +146,7 @@ services:
       BAP_DATABASE_USER: bap_api
       BAP_JWKS_URL: http://web:3000/api/auth/jwks
       BAP_PUBLIC_ORIGIN: ${BAP_PUBLIC_ORIGIN:-http://localhost:3000}
+      BAP_UPLOAD_STAGING_DIR: /var/lib/bap/uploads
       HOST: 0.0.0.0
       NODE_ENV: production
       PORT: 3001
@@ -173,6 +174,9 @@ services:
     secrets:
       - source: bap_api_password
         target: /run/credentials/database-password
+    # The only writable surface shared with the worker; no other service may mount it.
+    volumes:
+      - upload_staging:/var/lib/bap/uploads
     cap_drop:
       - ALL
     security_opt:
@@ -234,6 +238,7 @@ services:
       BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
       BAP_DATABASE_PORT: 5432
       BAP_DATABASE_USER: bap_api
+      BAP_UPLOAD_STAGING_DIR: /var/lib/bap/uploads
       HOST: 0.0.0.0
       NODE_ENV: production
       PORT: 3003
@@ -267,6 +272,9 @@ services:
         target: /run/credentials/database-password
       - source: ai_provider_config
         target: /run/credentials/ai-provider-config
+    # The staged file the API wrote; the worker parses it and deletes it.
+    volumes:
+      - upload_staging:/var/lib/bap/uploads
     cap_drop:
       - ALL
     security_opt:
@@ -586,3 +594,4 @@ volumes:
   postgres_data:
   restic_repository_data:
   restore_postgres_data:
+  upload_staging:

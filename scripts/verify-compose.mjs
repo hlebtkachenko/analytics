@@ -128,6 +128,39 @@ invariant(
   'The worker must use only data and internet egress.',
 );
 
+// Staged uploads are other tenants' raw files, so the volume's member set is a contract.
+const uploadStagingTarget = '/var/lib/bap/uploads';
+const uploadStagingMounts = Object.entries(configuration.services).flatMap(
+  ([name, service]) =>
+    (service.volumes ?? [])
+      .filter((mount) => mount.source === 'upload_staging')
+      .map((mount) => ({ mount, name })),
+);
+const uploadStagingMembers = uploadStagingMounts.map(({ name }) => name).sort();
+invariant(
+  uploadStagingMembers.join() === 'api,worker',
+  `Unexpected upload staging members: ${uploadStagingMembers.join(',')}.`,
+);
+for (const { mount, name } of uploadStagingMounts) {
+  invariant(
+    mount.type === 'volume' &&
+      mount.target === uploadStagingTarget &&
+      mount.read_only !== true,
+    `${name} must mount the upload staging volume read-write at ${uploadStagingTarget}.`,
+  );
+}
+invariant(
+  Object.hasOwn(configuration.volumes, 'upload_staging'),
+  'The upload staging volume must be declared.',
+);
+for (const service of ['api', 'worker']) {
+  invariant(
+    configuration.services[service].environment.BAP_UPLOAD_STAGING_DIR ===
+      uploadStagingTarget,
+    `${service} must read staged uploads from the mounted volume.`,
+  );
+}
+
 expectSecrets('database', ['postgres_admin_password']);
 expectSecrets('web', [
   'ai_provider_config',
@@ -179,6 +212,13 @@ if (mode === 'production') {
     invariant(
       model.tmpfs.includes('/tmp'),
       `${service} must write only to ephemeral storage.`,
+    );
+    // Staging is the one durable exception, and only the pair that parses uploads holds it.
+    const durable = (model.volumes ?? []).map((mount) => mount.source).sort();
+    invariant(
+      durable.join() ===
+        (service === 'api' || service === 'worker' ? 'upload_staging' : ''),
+      `${service} must keep the production durable mount set.`,
     );
   }
 }

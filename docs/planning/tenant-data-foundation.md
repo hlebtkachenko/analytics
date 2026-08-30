@@ -355,3 +355,27 @@ for each.
 6. `(dataset_id, row_number)` is unique, so a retried ingestion is idempotent.
    Dataset names are deliberately not unique per organization, because two
    uploads of the same file are a normal thing to do.
+
+## Known limitations
+
+Ingestion does not retry. The staged file is deleted on both the success and the
+failure path, so a retry would have nothing to read and would only produce a
+second, misleading failure. A transient database error during row insertion
+therefore fails the upload permanently and the uploader has to upload again.
+Making retries useful means keeping the staged file for infrastructure failures
+while still deleting it for parse failures, which is a distinction this phase
+does not draw. A crashed worker is different and already recovers: the delete
+never runs, the file survives, and the job discards the partial dataset and
+starts again.
+
+Membership is re-resolved once per batch rather than once per job, because a
+batch is its own short transaction. That costs one extra query per batch and
+buys revocation taking effect part way through a long ingestion.
+
+A cell containing a literal null byte fails the JSONB cast and surfaces as the
+generic ingestion failure rather than a specific message.
+
+ExcelJS holds the shared string table in memory by design, so a workbook whose
+bulk is unique strings has a memory floor that streaming the sheet body does not
+remove. Row streaming is otherwise flat: measured retained heap growth over
+300,000 rows is under a megabyte for both CSV and XLSX.

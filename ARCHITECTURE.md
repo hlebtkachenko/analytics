@@ -116,8 +116,11 @@ join `internet-egress`, where they reach mail and AI providers; the application
 API and the reporting API deliberately keep no outbound path. Only one-shot
 restic clients join `operations-egress`; backup and restore also join `data`.
 Each runtime mounts only its own credential files. Caddy certificate state and
-PostgreSQL data use named volumes. Backup scheduling, backend-specific
-credentials, and off-host durability require owner configuration.
+PostgreSQL data use named volumes. A third named volume stages uploaded files
+between the application API and the worker; it is mounted into that pair and
+into no other service, which `scripts/verify-compose.mjs` asserts. Backup
+scheduling, backend-specific credentials, and off-host durability require owner
+configuration.
 
 ## Operational map
 

@@ -56,7 +56,11 @@ role separation, idempotent migrations, tenant isolation, and that the backup
 role can dump the whole database. The `@bap/api` suite proves the worker queue
 boundary: a non-partitioned pg-boss queue, a job confined to the organization
 named in its payload, a rejected cross-tenant write, an aborted job for revoked
-membership, and refused object creation in the `pgboss` schema.
+membership, and refused object creation in the `pgboss` schema. It also ingests
+a CSV fixture through the real queue and proves that the queued payload carries
+identifiers only, that a declared format contradicting the file content fails
+the upload with a bounded message, and that the staged file is deleted on both
+the success and the failure path.
 
 The scheduled and manually runnable GitHub Actions operational proof creates a
 disposable local Compose stack, creates a gated synthetic account, completes a

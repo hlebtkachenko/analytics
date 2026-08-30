@@ -4,6 +4,15 @@ import { createResourceJwtVerifier, SubjectRateLimiter } from '@bap/security';
 import { AccessController } from './access.controller.js';
 import { DatabaseMembershipResolver } from './database-membership-resolver.js';
 import { HealthController } from './health.controller.js';
+import {
+  IngestionQueue,
+  PgBossIngestionQueue,
+} from './ingestion/ingestion-queue.js';
+import { UploadController } from './ingestion/upload.controller.js';
+import {
+  DatabaseUploadRepository,
+  UploadRepository,
+} from './ingestion/upload-repository.js';
 import { MembershipResolver } from './membership-resolver.js';
 import { MetricsController, ServiceMetrics } from './metrics.js';
 import { ReadyController } from './ready.controller.js';
@@ -23,12 +32,23 @@ import {
     HealthController,
     MetricsController,
     ReadyController,
+    UploadController,
   ],
   providers: [
     DatabaseMembershipResolver,
+    DatabaseUploadRepository,
+    PgBossIngestionQueue,
+    {
+      provide: IngestionQueue,
+      useExisting: PgBossIngestionQueue,
+    },
     {
       provide: MembershipResolver,
       useExisting: DatabaseMembershipResolver,
+    },
+    {
+      provide: UploadRepository,
+      useExisting: DatabaseUploadRepository,
     },
     {
       inject: [MembershipResolver],

@@ -24,6 +24,8 @@ ENV NODE_ENV=production
 ENV PORT=3001
 WORKDIR /app
 RUN groupadd --system --gid 1001 bap && useradd --system --uid 1001 --gid bap bap
+# A fresh named volume inherits this directory's ownership, so the staging mount stays writable.
+RUN install --directory --owner=bap --group=bap --mode=0750 /var/lib/bap/uploads
 COPY --from=build --chown=bap:bap /runtime ./
 COPY --chown=bap:bap THIRD_PARTY_NOTICES.md ./
 COPY --chown=bap:bap licenses ./licenses

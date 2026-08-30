@@ -36,6 +36,17 @@ export class WorkerMetrics {
     registers: [this.registry],
   });
 
+  // Unlabelled on purpose: a per dataset or per tenant label would publish tenant activity.
+  private readonly ingestedRows = new Counter({
+    help: 'Dataset rows written by the ingestion job',
+    name: 'bap_worker_ingested_rows_total',
+    registers: [this.registry],
+  });
+
+  recordIngestedRows(rows: number): void {
+    this.ingestedRows.inc(rows);
+  }
+
   recordJob(queue: string, outcome: JobOutcome): void {
     this.jobs.inc({ outcome, queue });
   }

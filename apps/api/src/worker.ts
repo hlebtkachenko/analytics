@@ -1,9 +1,18 @@
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 
+import { INGEST_DATASET_QUEUE } from './ingestion/contract.js';
+import {
+  createStagingDirectory,
+  loadStagingDirectory,
+} from './ingestion/staging.js';
 import { ApplicationLogger } from './logger.js';
+import { ingestDataset } from './worker/ingest-dataset.js';
 import { startObservabilityServer } from './worker/observability.js';
-import { createQueueClientFromConfiguration } from './worker/queue.js';
+import {
+  createQueue,
+  createQueueClientFromConfiguration,
+} from './worker/queue.js';
 import { WorkerMetrics } from './worker/worker-metrics.js';
 
 const SERVICE_NAME = 'worker';
@@ -35,7 +44,20 @@ async function bootstrap(): Promise<void> {
 
   await queue.start();
 
-  // Phase 2 registers the first queue handler; the worker only supervises pg-boss for now.
+  const stagingDirectory = loadStagingDirectory(process.env);
+  await createStagingDirectory(stagingDirectory);
+  await createQueue(queue, INGEST_DATASET_QUEUE);
+  await queue.work<unknown, void>(INGEST_DATASET_QUEUE, async (jobs) => {
+    for (const job of jobs) {
+      await ingestDataset({
+        data: job.data,
+        metrics,
+        pool,
+        stagingDirectory,
+      });
+    }
+  });
+
   logger.log('Worker started', SERVICE_NAME);
 
   let stopping = false;
