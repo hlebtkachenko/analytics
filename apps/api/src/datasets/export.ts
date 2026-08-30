@@ -22,7 +22,9 @@ const WORKSHEET_NAME = 'data';
 const BYTE_ORDER_MARK = '\uFEFF';
 
 const CSV_ROW_SEPARATOR = '\r\n';
-const CSV_NEEDS_QUOTING = /["\n\r,]/;
+// Semicolon is quoted too: a locale whose list separator is ';' would otherwise split an
+// unquoted cell and hand the next field an evaluable lead. Quoting is lossless, so this costs nothing.
+const CSV_NEEDS_QUOTING = /["\n\r,;]/;
 // A spreadsheet evaluates a cell opening with one of these, so an uploaded cell could run on a reader's machine.
 const CSV_FORMULA_LEAD = /^[=+\-@\t\r]/;
 

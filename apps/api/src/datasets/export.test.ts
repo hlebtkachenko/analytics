@@ -210,6 +210,21 @@ describe('datasetExportFilename', () => {
   });
 });
 
+describe('csv delimiter safety', () => {
+  it('quotes a semicolon so a semicolon locale cannot split a new lead', async () => {
+    const { chunks, target } = collector();
+    await writeDatasetCsv(target, {
+      batches: (async function* () {
+        yield [{ data: { note: 'safe;=1+1' }, rowNumber: 0 }];
+      })(),
+      columns: [{ inferredType: 'text', name: 'note', position: 0 }],
+    });
+
+    // Quoted, so a spreadsheet splitting on ';' still reads one field that opens with 's'.
+    expect(Buffer.concat(chunks).toString('utf8')).toContain('"safe;=1+1"');
+  });
+});
+
 describe('csv formula neutralization', () => {
   it('prefixes a text cell a spreadsheet would evaluate', async () => {
     const { chunks, target } = collector();
