@@ -78,9 +78,11 @@ export function DatasetView({
   }, [current, dataset.id, organizationId]);
 
   const nextCursor = page?.nextCursor ?? undefined;
+  // While a page is in flight the cursor on screen is the previous page's, so no control may act on it.
+  const paging = state === 'loading';
 
   function showNextPage(): void {
-    if (nextCursor === undefined) {
+    if (paging || nextCursor === undefined) {
       return;
     }
 
@@ -89,10 +91,12 @@ export function DatasetView({
   }
 
   function showPreviousPage(): void {
+    if (paging || requests.length === 1) {
+      return;
+    }
+
     setState('loading');
-    setRequests((previous) =>
-      previous.length > 1 ? previous.slice(0, -1) : previous,
-    );
+    setRequests((previous) => previous.slice(0, -1));
   }
 
   // The open dataset sits under the page heading, so every panel below it renders one level deeper.
@@ -128,7 +132,7 @@ export function DatasetView({
         {page !== undefined && page.rows.length > 0 ? (
           <Stack gap={3} orientation="horizontal">
             <Button
-              disabled={requests.length === 1}
+              disabled={paging || requests.length === 1}
               kind="tertiary"
               onClick={showPreviousPage}
               size="sm"
@@ -137,7 +141,7 @@ export function DatasetView({
               {t('datasets.previousPage')}
             </Button>
             <Button
-              disabled={nextCursor === undefined}
+              disabled={paging || nextCursor === undefined}
               kind="tertiary"
               onClick={showNextPage}
               size="sm"

@@ -211,38 +211,109 @@ describe('datasetExportFilename', () => {
 });
 
 describe('csv formula neutralization', () => {
-  it('prefixes a cell a spreadsheet would evaluate', async () => {
+  it('prefixes a text cell a spreadsheet would evaluate', async () => {
     const { chunks, target } = collector();
     await writeDatasetCsv(target, {
       batches: (async function* () {
         yield [
           {
             data: {
+              carriage: '\r=1+1',
               formula: '=1+1',
               hyphen: '-2+3',
               plain: 'value',
               plus: '+1',
               summons: '@SUM(A1)',
+              tabbed: '\t=1+1',
             },
             rowNumber: 0,
           },
         ];
       })(),
       columns: [
-        { inferredType: 'text', name: 'formula', position: 0 },
-        { inferredType: 'text', name: 'hyphen', position: 1 },
-        { inferredType: 'text', name: 'plain', position: 2 },
-        { inferredType: 'text', name: 'plus', position: 3 },
-        { inferredType: 'text', name: 'summons', position: 4 },
+        { inferredType: 'text', name: 'carriage', position: 0 },
+        { inferredType: 'text', name: 'formula', position: 1 },
+        { inferredType: 'text', name: 'hyphen', position: 2 },
+        { inferredType: 'text', name: 'plain', position: 3 },
+        { inferredType: 'text', name: 'plus', position: 4 },
+        { inferredType: 'text', name: 'summons', position: 5 },
+        { inferredType: 'text', name: 'tabbed', position: 6 },
       ],
     });
 
     const csv = Buffer.concat(chunks).toString('utf8');
     // Every dangerous lead is inert, the value stays readable, and a plain cell is untouched.
+    expect(csv).toContain('"\'\r=1+1"');
     expect(csv).toContain("'=1+1");
     expect(csv).toContain("'-2+3");
     expect(csv).toContain("'+1");
     expect(csv).toContain("'@SUM(A1)");
+    expect(csv).toContain("'\t=1+1");
     expect(csv).toMatch(/(^|,)value(,|\r\n)/m);
+  });
+
+  it('leaves a numeric cell alone and still guards a numeric-looking string', async () => {
+    const { chunks, target } = collector();
+    await writeDatasetCsv(target, {
+      batches: (async function* () {
+        yield [
+          {
+            data: { negative: -5, positive: 5, typed: '-5' },
+            rowNumber: 0,
+          },
+        ];
+      })(),
+      columns: [
+        { inferredType: 'number', name: 'negative', position: 0 },
+        { inferredType: 'number', name: 'positive', position: 1 },
+        { inferredType: 'text', name: 'typed', position: 2 },
+      ],
+    });
+
+    // A JSON number was never typed into a cell, so it survives verbatim; the string of the same shape is still text.
+    expect(Buffer.concat(chunks).toString('utf8')).toBe(
+      "\uFEFFnegative,positive,typed\r\n-5,5,'-5\r\n",
+    );
+  });
+
+  it('writes the same number into CSV and XLSX', async () => {
+    const numericColumns: DatasetColumnRecord[] = [
+      { inferredType: 'number', name: 'negative', position: 0 },
+      { inferredType: 'number', name: 'positive', position: 1 },
+    ];
+    const row: DatasetRowRecord = {
+      data: { negative: -5, positive: 5 },
+      rowNumber: 0,
+    };
+    const csvOutput = collector();
+    const xlsxOutput = collector();
+
+    await writeDatasetCsv(csvOutput.target, {
+      batches: (async function* () {
+        yield [row];
+      })(),
+      columns: numericColumns,
+    });
+    await writeDatasetXlsx(xlsxOutput.target, {
+      batches: (async function* () {
+        yield [row];
+      })(),
+      columns: numericColumns,
+    });
+    const workbook = new ExcelJS.Workbook();
+    // ExcelJS declares its own Buffer type, so the node Buffer crosses the boundary once, here.
+    await workbook.xlsx.load(
+      Buffer.concat(xlsxOutput.chunks) as unknown as ArrayBuffer,
+    );
+    const sheetRow = workbook.worksheets[0]?.getRow(2);
+    const csvFields = Buffer.concat(csvOutput.chunks)
+      .toString('utf8')
+      .split('\r\n')[1]
+      ?.split(',');
+
+    // One dataset must not read as two different numbers depending on the format asked for.
+    expect(sheetRow?.getCell(1).value).toBe(-5);
+    expect(sheetRow?.getCell(2).value).toBe(5);
+    expect(csvFields).toEqual(['-5', '5']);
   });
 });

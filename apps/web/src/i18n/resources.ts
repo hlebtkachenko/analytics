@@ -33,6 +33,7 @@ export const resources = {
         signOut: 'Sign out',
       },
       datasets: {
+        accessError: 'Organization access could not be checked.',
         chartDescription:
           'The first numeric column of the loaded page, up to 12 rows.',
         chartGraphic: 'Bar chart of the first numeric column.',
@@ -66,7 +67,6 @@ export const resources = {
         exportCsv: 'Download CSV',
         exportFailed: 'The download could not be prepared.',
         exportTitle: 'Download',
-        exportWaiting: 'Preparing the download.',
         exportXlsx: 'Download XLSX',
         listDescription:
           'Datasets this account can open in the selected organization.',

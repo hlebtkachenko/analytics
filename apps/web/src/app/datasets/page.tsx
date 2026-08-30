@@ -54,6 +54,7 @@ const statusLabels = {
 } as const;
 
 type Access = z.infer<typeof accessSchema>;
+type LoadState = 'error' | 'idle' | 'loading';
 type Organization = z.infer<typeof organizationsSchema>[number];
 
 export default function DatasetsPage() {
@@ -64,7 +65,11 @@ export default function DatasetsPage() {
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
   const [openDataset, setOpenDataset] = useState<DatasetSummary>();
   const [reloads, setReloads] = useState(0);
-  const [state, setState] = useState<'error' | 'idle' | 'loading'>('loading');
+  // One status per request, so a success can never repaint another request's failure as healthy.
+  const [organizationsState, setOrganizationsState] =
+    useState<LoadState>('loading');
+  const [accessState, setAccessState] = useState<LoadState>('loading');
+  const [datasetsState, setDatasetsState] = useState<LoadState>('loading');
   const [file, setFile] = useState<File>();
   const [uploadState, setUploadState] = useState<
     'accepted' | 'error' | 'idle' | 'uploading'
@@ -77,11 +82,11 @@ export default function DatasetsPage() {
       .then((items) => {
         setOrganizations(items);
         setOrganizationId(items[0]?.id ?? '');
-        setState(items.length > 0 ? 'loading' : 'idle');
+        setOrganizationsState('idle');
       })
       .catch((error: unknown) => {
         if (!isAbortError(error)) {
-          setState('error');
+          setOrganizationsState('error');
         }
       });
     return () => {
@@ -106,11 +111,12 @@ export default function DatasetsPage() {
         }
 
         setAccess(contract);
+        setAccessState('idle');
       })
       .catch((error: unknown) => {
         if (!isAbortError(error)) {
           setAccess(undefined);
-          setState('error');
+          setAccessState('error');
         }
       });
     return () => {
@@ -128,12 +134,12 @@ export default function DatasetsPage() {
       .then((payload) => datasetListSchema.parse(payload))
       .then((list) => {
         setDatasets(list.datasets);
-        setState('idle');
+        setDatasetsState('idle');
       })
       .catch((error: unknown) => {
         if (!isAbortError(error)) {
           setDatasets([]);
-          setState('error');
+          setDatasetsState('error');
         }
       });
     return () => {
@@ -143,11 +149,12 @@ export default function DatasetsPage() {
 
   function selectOrganization(id: string): void {
     setAccess(undefined);
+    setAccessState('loading');
     setDatasets([]);
+    setDatasetsState('loading');
     setFile(undefined);
     setOpenDataset(undefined);
     setOrganizationId(id);
-    setState('loading');
     setUploadState('idle');
   }
 
@@ -179,16 +186,32 @@ export default function DatasetsPage() {
     }
   }
 
-  const empty = state === 'idle' && datasets.length === 0;
+  // Access and the list are resolved separately, so each failure is reported on its own terms.
+  const resolving =
+    organizationsState === 'loading' ||
+    (organizationId.length > 0 &&
+      (accessState === 'loading' || datasetsState === 'loading'));
+  const listFailed =
+    organizationsState === 'error' || datasetsState === 'error';
+  const accessFailed = accessState === 'error';
+  const empty =
+    !resolving && !listFailed && !accessFailed && datasets.length === 0;
 
   return (
     <main>
       <Stack gap={7}>
         <h1>{t('datasets.title')}</h1>
-        {state === 'loading' ? (
+        {resolving ? (
           <InlineLoading description={t('datasets.loading')} />
         ) : null}
-        {state === 'error' ? (
+        {accessFailed ? (
+          <InlineNotification
+            kind="error"
+            lowContrast
+            title={t('datasets.accessError')}
+          />
+        ) : null}
+        {listFailed ? (
           <InlineNotification
             kind="error"
             lowContrast
@@ -323,6 +346,8 @@ export default function DatasetsPage() {
         {openDataset !== undefined && access !== undefined ? (
           <DatasetView
             dataset={openDataset}
+            // Keyed by dataset, so a newly opened one never inherits the cursor, rows or chat of the last.
+            key={openDataset.id}
             onClose={() => {
               setOpenDataset(undefined);
             }}

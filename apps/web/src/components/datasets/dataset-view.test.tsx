@@ -139,6 +139,49 @@ describe('DatasetView', () => {
     expect(screen.getByText('Page 1')).toBeVisible();
   });
 
+  it('ignores a second paging click while a page is still in flight', async () => {
+    let releaseNextPage: (() => void) | undefined;
+    const fetchMock = vi.fn(async (input: string) => {
+      if (input.includes('after=2')) {
+        await new Promise<void>((resolve) => {
+          releaseNextPage = resolve;
+        });
+        return Response.json(rowPage(2, null));
+      }
+
+      return Response.json(rowPage(0, 2));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderDatasetView();
+
+    expect(within(await findRowsTable()).getByText('label-1')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    // Both controls are inert while the request they would replace is still open.
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Previous page' }),
+    ).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Previous page' }));
+    releaseNextPage?.();
+
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole('table', { name: 'Dataset rows' })).getByText(
+          'label-3',
+        ),
+      ).toBeVisible();
+    });
+    // The cursor was requested exactly once, so no page is duplicated and the label still counts truly.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('Page 2')).toBeVisible();
+  });
+
   it('renders no element a nonce content security policy would block', async () => {
     vi.stubGlobal('fetch', pagedFetch());
 

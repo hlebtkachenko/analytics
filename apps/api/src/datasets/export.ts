@@ -31,9 +31,10 @@ function toCsvField(value: DatasetCellValue): string {
     return '';
   }
 
-  const text = typeof value === 'string' ? value : String(value);
+  // The guard is typed, not textual: only a string cell is text somebody typed, so a JSON number is never prefixed.
+  const evaluable = typeof value === 'string' && CSV_FORMULA_LEAD.test(value);
   // Prefixing keeps the value visible and inert. A dataset shared by grant is read by someone else.
-  const inert = CSV_FORMULA_LEAD.test(text) ? `'${text}` : text;
+  const inert = evaluable ? `'${value}` : String(value);
   return CSV_NEEDS_QUOTING.test(inert)
     ? `"${inert.replaceAll('"', '""')}"`
     : inert;

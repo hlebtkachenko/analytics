@@ -4,18 +4,21 @@ import { Download } from '@bap/design-system/icons';
 import {
   Button,
   Heading,
-  InlineLoading,
   InlineNotification,
   Section,
   Stack,
 } from '@bap/design-system/react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { z } from 'zod';
 
 import { datasetPath } from '../../lib/datasets/client';
 
 // CSV and XLSX only: ADR 0005 rejects PDF, so no third control exists.
 type ExportFormat = 'csv' | 'xlsx';
+
+// The saved name is built from a dataset identifier, never from stored text such as a dataset name.
+const datasetIdSchema = z.string().uuid();
 
 type DatasetExportProps = Readonly<{
   datasetId: string;
@@ -27,31 +30,24 @@ export function DatasetExport({
   organizationId,
 }: DatasetExportProps) {
   const { t } = useTranslation();
-  const [state, setState] = useState<'error' | 'idle' | 'loading'>('idle');
+  const [state, setState] = useState<'error' | 'idle'>('idle');
 
-  async function download(format: ExportFormat): Promise<void> {
-    setState('loading');
-    try {
-      const response = await fetch(
-        `${datasetPath(organizationId, datasetId)}/export?format=${format}`,
-        { cache: 'no-store' },
-      );
+  function download(format: ExportFormat): void {
+    const parsed = datasetIdSchema.safeParse(datasetId);
 
-      if (!response.ok) {
-        throw new Error('Export rejected.');
-      }
-
-      // The browser saves the body from an object URL, so no response header is rendered as page text.
-      const objectUrl = URL.createObjectURL(await response.blob());
-      const anchor = document.createElement('a');
-      anchor.download = `dataset-${datasetId}.${format}`;
-      anchor.href = objectUrl;
-      anchor.click();
-      URL.revokeObjectURL(objectUrl);
-      setState('idle');
-    } catch {
+    if (!parsed.success) {
       setState('error');
+      return;
     }
+
+    // The browser writes the attachment straight to disk, so the tab never holds the export at all.
+    const anchor = document.createElement('a');
+    anchor.download = `dataset-${parsed.data}.${format}`;
+    anchor.href = `${datasetPath(organizationId, parsed.data)}/export?format=${format}`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setState('idle');
   }
 
   // A section of its own, so the heading takes the level below whatever encloses the panel.
@@ -62,7 +58,9 @@ export function DatasetExport({
         <Stack gap={3} orientation="horizontal">
           <Button
             kind="tertiary"
-            onClick={() => void download('csv')}
+            onClick={() => {
+              download('csv');
+            }}
             renderIcon={Download}
             size="sm"
             type="button"
@@ -71,7 +69,9 @@ export function DatasetExport({
           </Button>
           <Button
             kind="tertiary"
-            onClick={() => void download('xlsx')}
+            onClick={() => {
+              download('xlsx');
+            }}
             renderIcon={Download}
             size="sm"
             type="button"
@@ -79,9 +79,6 @@ export function DatasetExport({
             {t('datasets.exportXlsx')}
           </Button>
         </Stack>
-        {state === 'loading' ? (
-          <InlineLoading description={t('datasets.exportWaiting')} />
-        ) : null}
         {state === 'error' ? (
           <InlineNotification
             kind="error"
