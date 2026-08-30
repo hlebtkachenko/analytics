@@ -1,5 +1,5 @@
 import { mkdir, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 
 import { z } from 'zod';
 
@@ -24,14 +24,46 @@ export function resolveStagedFilePath(
   directory: string,
   uploadId: string,
 ): string {
-  return join(directory, uploadIdentifierSchema.parse(uploadId));
+  const staged = join(directory, uploadIdentifierSchema.parse(uploadId));
+  const contained = relative(resolve(directory), resolve(staged));
+
+  // Belt and braces: the uuid already cannot escape, and the sink refuses anything that did.
+  if (contained.startsWith('..') || contained.includes('/')) {
+    throw new Error('Staged upload path escaped the staging directory.');
+  }
+
+  return staged;
 }
 
 export async function createStagingDirectory(directory: string): Promise<void> {
   await mkdir(directory, { mode: 0o750, recursive: true });
 }
 
+// Multer names its own temporary file, so this sink proves containment instead of trusting the caller.
+export async function deleteTemporaryUpload(
+  directory: string,
+  path: string,
+): Promise<void> {
+  const contained = relative(resolve(directory), resolve(path));
+
+  if (
+    contained === '' ||
+    contained.startsWith('..') ||
+    contained.includes('/')
+  ) {
+    return;
+  }
+
+  await unlink(join(directory, contained)).catch(() => undefined);
+}
+
+// Takes the id rather than a path so the only way to name the file is through the validated derivation.
 // Called on the success and the failure path; an already missing file is the intended end state.
-export async function deleteStagedFile(path: string): Promise<void> {
-  await unlink(path).catch(() => undefined);
+export async function deleteStagedFile(
+  directory: string,
+  uploadId: string,
+): Promise<void> {
+  await unlink(resolveStagedFilePath(directory, uploadId)).catch(
+    () => undefined,
+  );
 }

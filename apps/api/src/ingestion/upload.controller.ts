@@ -41,6 +41,7 @@ import { resolveDatasetFormat } from './parser.js';
 import type { DatasetFormat } from './parser.js';
 import {
   deleteStagedFile,
+  deleteTemporaryUpload,
   loadStagingDirectory,
   resolveStagedFilePath,
 } from './staging.js';
@@ -153,7 +154,9 @@ export class UploadController {
     }
 
     const received = request.file;
-    let cleanupPath = received?.path ?? null;
+    const stagingDirectory = loadStagingDirectory(process.env);
+    let cleanupTemporaryPath = received?.path ?? null;
+    let cleanupUploadId: string | null = null;
 
     try {
       const file = uploadedFileSchema.safeParse({
@@ -182,12 +185,13 @@ export class UploadController {
       }
 
       const uploadId = randomUUID();
-      const stagedPath = resolveStagedFilePath(
-        loadStagingDirectory(process.env),
-        uploadId,
+      await rename(
+        file.data.temporaryPath,
+        resolveStagedFilePath(stagingDirectory, uploadId),
       );
-      await rename(file.data.temporaryPath, stagedPath);
-      cleanupPath = stagedPath;
+      // The temporary name is gone once renamed, so only the staged file needs cleaning up.
+      cleanupTemporaryPath = null;
+      cleanupUploadId = uploadId;
 
       await this.uploads.record({
         byteSize: file.data.size,
@@ -212,11 +216,15 @@ export class UploadController {
         throw error;
       }
 
-      cleanupPath = null;
+      cleanupUploadId = null;
       return { status: 'accepted', uploadId };
     } finally {
-      if (cleanupPath !== null) {
-        await deleteStagedFile(cleanupPath);
+      if (cleanupTemporaryPath !== null) {
+        await deleteTemporaryUpload(stagingDirectory, cleanupTemporaryPath);
+      }
+
+      if (cleanupUploadId !== null) {
+        await deleteStagedFile(stagingDirectory, cleanupUploadId);
       }
     }
   }

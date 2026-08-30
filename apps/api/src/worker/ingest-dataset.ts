@@ -366,6 +366,6 @@ export async function ingestDataset(
     options.metrics.recordJob(INGEST_DATASET_QUEUE, 'failed');
     throw error;
   } finally {
-    await deleteStagedFile(stagedPath);
+    await deleteStagedFile(options.stagingDirectory, job.uploadId);
   }
 }
