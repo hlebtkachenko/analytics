@@ -1,6 +1,7 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createProviderRegistry, type ProviderRegistryProvider } from 'ai';
+import { aiProviderNames } from './config.js';
 import type { AiConfiguration, AiProviderName } from './config.js';
 
 // Models are addressed by their fully qualified `provider:model` identifier.
@@ -40,23 +41,36 @@ export interface AiRegistry {
   languageModel(id: AiModelId): AiLanguageModel;
   // Resolves a role named by the credential to a fully qualified model identifier.
   modelId(role: string): AiModelId;
-  readonly provider: AiProviderName;
+}
+
+// The registry separator is a colon, so the prefix of a model id is the provider that serves it.
+export function providerOfModelId(id: AiModelId): AiProviderName {
+  return id.slice(0, id.indexOf(':')) as AiProviderName;
 }
 
 export function createAiRegistry(
   configuration: AiConfiguration,
   options: AiRegistryOptions = {},
 ): AiRegistry {
-  const provider = providerFactories[configuration.provider]({
-    apiKey: configuration.apiKey,
-    ...(configuration.baseUrl === undefined
-      ? {}
-      : { baseURL: configuration.baseUrl }),
-    ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-  });
-  const registry = createProviderRegistry({
-    [configuration.provider]: provider,
-  });
+  const providers: Record<string, AiProvider> = {};
+
+  for (const name of aiProviderNames) {
+    const credential = configuration.providers[name];
+
+    if (credential === undefined) {
+      continue;
+    }
+
+    providers[name] = providerFactories[name]({
+      apiKey: credential.apiKey,
+      ...(credential.baseUrl === undefined
+        ? {}
+        : { baseURL: credential.baseUrl }),
+      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+    });
+  }
+
+  const registry = createProviderRegistry(providers);
 
   return {
     embeddingModel(id: AiModelId): AiEmbeddingModel {
@@ -68,15 +82,13 @@ export function createAiRegistry(
     },
 
     modelId(role: string): AiModelId {
-      const model = configuration.models[role];
+      const selection = configuration.models[role];
 
-      if (model === undefined) {
+      if (selection === undefined) {
         throw new Error(`The AI credential names no model for role ${role}.`);
       }
 
-      return `${configuration.provider}:${model}`;
+      return `${selection.provider}:${selection.model}`;
     },
-
-    provider: configuration.provider,
   };
 }

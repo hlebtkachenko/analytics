@@ -62,9 +62,20 @@ What is recorded is narrower still. Audit entries and metrics carry the model
 id, token counts, and the outcome, never prompt or completion text, because
 audit rows are readable by everyone in the organization.
 
+When those calls happen is bounded too. A completed ingestion is the only
+trigger: the worker chains `summarize_dataset` for the dataset it just made
+ready, and that job in turn chains `backfill_dataset_embeddings` for the same
+subject, so the embedded document quotes the description the summary wrote. When
+no summary model is named, ingestion chains the backfill directly. Nothing else
+enqueues either job, and neither runs on a schedule. Both chained payloads carry
+identifiers only, and both jobs re-resolve membership at dequeue like every
+other worker job.
+
 An operator who treats dataset and column names as sensitive should enable the
 embedding and summarization jobs deliberately rather than by default. Naming no
-model for those roles leaves them off.
+model for a role leaves that job off: the chain reads the credential first and
+enqueues nothing for a role the credential does not name, so an absent or
+placeholder credential produces no queued work at all rather than a failing job.
 
 ## Background worker boundary
 

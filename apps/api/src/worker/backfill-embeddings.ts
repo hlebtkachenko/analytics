@@ -10,6 +10,7 @@ import {
 } from '../agents/contract.js';
 import { hashDocument, renderDatasetDocument } from '../agents/document.js';
 import {
+  EMBEDDING_DIMENSIONS,
   FIRST_DATASET_CURSOR,
   loadEmbeddingCandidates,
   storeDatasetEmbeddings,
@@ -80,11 +81,11 @@ async function embedPending(
 ): Promise<StoredEmbedding[]> {
   try {
     const result = await embedTexts(registry, modelId, {
+      // The stored column is vector(1536), so the reduced width is requested, not assumed.
+      dimensions: EMBEDDING_DIMENSIONS,
       values: pending.map((entry) => entry.document),
     });
-    metrics.recordModelCall('success');
-
-    return pending.map((entry, index) => {
+    const stored = pending.map((entry, index) => {
       const embedding = result.embeddings[index];
 
       if (embedding === undefined) {
@@ -99,6 +100,10 @@ async function embedPending(
         embedding,
       };
     });
+    // Recorded once the answer is known to be usable, so a short answer counts as an error only.
+    metrics.recordModelCall('success');
+
+    return stored;
   } catch (error) {
     metrics.recordModelCall('error');
     throw error;

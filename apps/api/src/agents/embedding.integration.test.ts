@@ -23,6 +23,7 @@ import {
 } from '../worker/queue.js';
 import { summarizeDataset } from '../worker/summarize-dataset.js';
 import { WorkerMetrics } from '../worker/worker-metrics.js';
+import { enqueueEmbeddingBackfill } from './agent-queue.js';
 import { BACKFILL_EMBEDDINGS_QUEUE } from './contract.js';
 import {
   EMBEDDING_DIMENSIONS,
@@ -101,7 +102,6 @@ function testRegistry(): AiRegistry {
     languageModel: () => languageModel,
     modelId: (role: string) =>
       role === 'embedding' ? 'openai:mock-embedding' : 'openai:mock-model',
-    provider: 'openai',
   };
 }
 
@@ -219,11 +219,10 @@ afterAll(async () => {
 });
 
 describe('dataset embedding agents against PostgreSQL', () => {
-  it('carries identifiers only in the queued backfill payload', async () => {
-    await boss.send(
-      BACKFILL_EMBEDDINGS_QUEUE,
+  it('carries identifiers only in the chained backfill payload', async () => {
+    await enqueueEmbeddingBackfill(
+      { queue: boss, registry },
       { organizationId: alpha.organizationId, userId: alpha.userId },
-      { retryLimit: 0 },
     );
     const queued = await apiPool.query<{ data: Record<string, unknown> }>(
       'select data from pgboss.job where name = $1',

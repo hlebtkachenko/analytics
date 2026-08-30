@@ -21,7 +21,7 @@ describe('loadAiConfiguration', () => {
 
   it('rejects a world-readable credential file', async () => {
     const file = await writeCredential(
-      '{"provider":"anthropic","apiKey":"test-only-value"}\n',
+      '{"providers":{"anthropic":{"apiKey":"test-only-value"}}}\n',
     );
     await chmod(file, 0o644);
 
@@ -54,19 +54,27 @@ describe('loadAiConfiguration', () => {
     ).rejects.toThrow('not valid JSON');
   });
 
+  it('rejects a credential that configures no provider', async () => {
+    const file = await writeCredential('{"providers":{}}\n');
+
+    await expect(
+      loadAiConfiguration({ BAP_AI_PROVIDER_CONFIG_FILE: file }),
+    ).rejects.toThrow('is invalid: providers');
+  });
+
   it('rejects an unknown provider name', async () => {
     const file = await writeCredential(
-      '{"provider":"mistral","apiKey":"test-only-value"}\n',
+      '{"providers":{"mistral":{"apiKey":"test-only-value"}}}\n',
     );
 
     await expect(
       loadAiConfiguration({ BAP_AI_PROVIDER_CONFIG_FILE: file }),
-    ).rejects.toThrow('is invalid: provider');
+    ).rejects.toThrow('is invalid: providers');
   });
 
   it('rejects an unknown credential field', async () => {
     const file = await writeCredential(
-      '{"provider":"anthropic","apiKey":"test-only-value","organization":"bap"}\n',
+      '{"providers":{"anthropic":{"apiKey":"test-only-value"}},"organization":"bap"}\n',
     );
 
     await expect(
@@ -76,17 +84,27 @@ describe('loadAiConfiguration', () => {
 
   it('rejects a base URL that is not an http endpoint', async () => {
     const file = await writeCredential(
-      '{"provider":"anthropic","apiKey":"test-only-value","baseUrl":"ftp://ai.bap.invalid"}\n',
+      '{"providers":{"anthropic":{"apiKey":"test-only-value","baseUrl":"ftp://ai.bap.invalid"}}}\n',
     );
 
     await expect(
       loadAiConfiguration({ BAP_AI_PROVIDER_CONFIG_FILE: file }),
-    ).rejects.toThrow('is invalid: baseUrl');
+    ).rejects.toThrow('is invalid: providers.anthropic.baseUrl');
   });
 
-  it('refuses the development placeholder key', async () => {
+  it('rejects a model role that names no provider', async () => {
     const file = await writeCredential(
-      `{"provider":"anthropic","apiKey":"${developmentPlaceholderApiKey}"}\n`,
+      '{"providers":{"anthropic":{"apiKey":"test-only-value"}},"models":{"chat":"claude-test"}}\n',
+    );
+
+    await expect(
+      loadAiConfiguration({ BAP_AI_PROVIDER_CONFIG_FILE: file }),
+    ).rejects.toThrow('is invalid: models.chat');
+  });
+
+  it('refuses the development placeholder key on any provider', async () => {
+    const file = await writeCredential(
+      `{"providers":{"anthropic":{"apiKey":"test-only-value"},"openai":{"apiKey":"${developmentPlaceholderApiKey}"}}}\n`,
     );
 
     await expect(
@@ -94,45 +112,79 @@ describe('loadAiConfiguration', () => {
     ).rejects.toThrow('requires a real API key');
   });
 
-  it('never surfaces the API key in a validation error', async () => {
+  it('refuses a model role whose provider is not configured', async () => {
     const file = await writeCredential(
-      '{"provider":"anthropic","apiKey":"test-only-value","models":{"chat":""}}\n',
+      '{"providers":{"anthropic":{"apiKey":"test-only-value"}},"models":{"embedding":{"provider":"openai","model":"text-embedding-3-small"}}}\n',
     );
 
     await expect(
       loadAiConfiguration({ BAP_AI_PROVIDER_CONFIG_FILE: file }),
     ).rejects.toThrow(
-      /^AI provider credential file is invalid: models\.chat\.$/,
+      'names model role embedding on provider openai, which it does not configure',
     );
   });
 
-  it('accepts a minimal credential', async () => {
+  it('never surfaces the API key in a validation error', async () => {
     const file = await writeCredential(
-      '{"provider":"anthropic","apiKey":"test-only-value"}\n',
+      '{"providers":{"anthropic":{"apiKey":"test-only-value"}},"models":{"chat":{"provider":"anthropic","model":""}}}\n',
+    );
+
+    await expect(
+      loadAiConfiguration({ BAP_AI_PROVIDER_CONFIG_FILE: file }),
+    ).rejects.toThrow(
+      /^AI provider credential file is invalid: models\.chat\.model\.$/,
+    );
+  });
+
+  it('accepts a minimal single-provider credential', async () => {
+    const file = await writeCredential(
+      '{"providers":{"anthropic":{"apiKey":"test-only-value"}}}\n',
     );
 
     await expect(
       loadAiConfiguration({ BAP_AI_PROVIDER_CONFIG_FILE: file }),
     ).resolves.toEqual({
-      apiKey: 'test-only-value',
-      baseUrl: undefined,
       models: {},
-      provider: 'anthropic',
+      providers: {
+        anthropic: { apiKey: 'test-only-value', baseUrl: undefined },
+      },
     });
   });
 
   it('accepts a base URL and model defaults', async () => {
     const file = await writeCredential(
-      '{"provider":"openai","apiKey":"test-only-value","baseUrl":"https://ai.bap.invalid/v1","models":{"chat":"gpt-test"}}\n',
+      '{"providers":{"openai":{"apiKey":"test-only-value","baseUrl":"https://ai.bap.invalid/v1"}},"models":{"chat":{"provider":"openai","model":"gpt-test"}}}\n',
     );
 
     await expect(
       loadAiConfiguration({ BAP_AI_PROVIDER_CONFIG_FILE: file }),
     ).resolves.toEqual({
-      apiKey: 'test-only-value',
-      baseUrl: 'https://ai.bap.invalid/v1',
-      models: { chat: 'gpt-test' },
-      provider: 'openai',
+      models: { chat: { model: 'gpt-test', provider: 'openai' } },
+      providers: {
+        openai: {
+          apiKey: 'test-only-value',
+          baseUrl: 'https://ai.bap.invalid/v1',
+        },
+      },
+    });
+  });
+
+  it('accepts one provider for chat and another for embeddings', async () => {
+    const file = await writeCredential(
+      '{"providers":{"anthropic":{"apiKey":"anthropic-test-value"},"openai":{"apiKey":"openai-test-value"}},"models":{"chat":{"provider":"anthropic","model":"claude-test"},"embedding":{"provider":"openai","model":"text-embedding-3-small"}}}\n',
+    );
+
+    await expect(
+      loadAiConfiguration({ BAP_AI_PROVIDER_CONFIG_FILE: file }),
+    ).resolves.toEqual({
+      models: {
+        chat: { model: 'claude-test', provider: 'anthropic' },
+        embedding: { model: 'text-embedding-3-small', provider: 'openai' },
+      },
+      providers: {
+        anthropic: { apiKey: 'anthropic-test-value', baseUrl: undefined },
+        openai: { apiKey: 'openai-test-value', baseUrl: undefined },
+      },
     });
   });
 });

@@ -18,7 +18,6 @@ function mockRegistry(model: AiLanguageModel): AiRegistry {
     },
     languageModel: () => model,
     modelId: () => 'anthropic:mock-model',
-    provider: 'anthropic',
   };
 }
 

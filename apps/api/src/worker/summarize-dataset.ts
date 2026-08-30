@@ -122,6 +122,8 @@ async function requestSummary(
       prompt,
       system: SYSTEM_PROMPT,
     });
+    const summary = summarySchema.parse(result.text);
+    // Recorded once the answer is known to be usable, so a rejected answer counts as an error only.
     metrics.recordModelCall('success');
 
     return {
@@ -131,7 +133,7 @@ async function requestSummary(
         outcome: 'success',
         usage: result.usage,
       }),
-      summary: summarySchema.parse(result.text),
+      summary,
     };
   } catch (error) {
     metrics.recordModelCall('error');
@@ -139,9 +141,10 @@ async function requestSummary(
   }
 }
 
+// Returns the parsed payload, which is what the embedding backfill is chained from.
 export async function summarizeDataset(
   options: SummarizeDatasetOptions,
-): Promise<void> {
+): Promise<SummarizeDatasetJob> {
   const job: SummarizeDatasetJob = summarizeDatasetJobSchema.parse(
     options.data,
   );
@@ -172,6 +175,7 @@ export async function summarizeDataset(
         }),
     });
     options.metrics.recordJob(SUMMARIZE_DATASET_QUEUE, 'completed');
+    return job;
   } catch (error) {
     options.metrics.recordJob(SUMMARIZE_DATASET_QUEUE, 'failed');
     throw error;

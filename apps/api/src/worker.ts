@@ -1,6 +1,10 @@
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 
+import {
+  enqueueDatasetSummary,
+  enqueueEmbeddingBackfill,
+} from './agents/agent-queue.js';
 import { createLazyAiRegistry } from './agents/ai-registry.js';
 import {
   BACKFILL_EMBEDDINGS_QUEUE,
@@ -51,23 +55,49 @@ async function bootstrap(): Promise<void> {
 
   await queue.start();
 
+  // Resolved on first agent job, so a missing or placeholder AI credential cannot stop the worker booting.
+  const registry = createLazyAiRegistry(process.env);
+  const chain = { queue, registry };
+
+  // A completed job is never redone, so a queue failure while chaining must not fail it retroactively.
+  const chainNext = async (enqueue: () => Promise<boolean>): Promise<void> => {
+    try {
+      await enqueue();
+    } catch (error) {
+      logger.error(
+        error instanceof Error ? error.message : 'Chaining an agent failed',
+        error instanceof Error ? error.stack : undefined,
+        SERVICE_NAME,
+      );
+    }
+  };
+
   const stagingDirectory = loadStagingDirectory(process.env);
   await createStagingDirectory(stagingDirectory);
   await createQueue(queue, INGEST_DATASET_QUEUE);
+  await createQueue(queue, BACKFILL_EMBEDDINGS_QUEUE);
+  await createQueue(queue, SUMMARIZE_DATASET_QUEUE);
   await queue.work<unknown, void>(INGEST_DATASET_QUEUE, async (jobs) => {
     for (const job of jobs) {
-      await ingestDataset({
+      const ingested = await ingestDataset({
         data: job.data,
         metrics,
         pool,
         stagingDirectory,
       });
+
+      // A ready dataset is what makes the agents applicable, so ingestion is their trigger.
+      if (ingested !== undefined) {
+        await chainNext(async () => {
+          const summarizing = await enqueueDatasetSummary(chain, ingested);
+
+          // Without a summary the description will not change, so the backfill runs straight away.
+          return summarizing || enqueueEmbeddingBackfill(chain, ingested);
+        });
+      }
     }
   });
 
-  // Resolved on first agent job, so a missing or placeholder AI credential cannot stop the worker booting.
-  const registry = createLazyAiRegistry(process.env);
-  await createQueue(queue, BACKFILL_EMBEDDINGS_QUEUE);
   await queue.work<unknown, void>(BACKFILL_EMBEDDINGS_QUEUE, async (jobs) => {
     for (const job of jobs) {
       await backfillDatasetEmbeddings({
@@ -78,15 +108,17 @@ async function bootstrap(): Promise<void> {
       });
     }
   });
-  await createQueue(queue, SUMMARIZE_DATASET_QUEUE);
   await queue.work<unknown, void>(SUMMARIZE_DATASET_QUEUE, async (jobs) => {
     for (const job of jobs) {
-      await summarizeDataset({
+      const summarized = await summarizeDataset({
         data: job.data,
         metrics,
         pool,
         registry,
       });
+
+      // The summary wrote the description the embedded document quotes, so the backfill follows it.
+      await chainNext(() => enqueueEmbeddingBackfill(chain, summarized));
     }
   });
 

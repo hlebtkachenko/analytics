@@ -99,7 +99,7 @@ function candidate(overrides: Partial<CandidateRow> = {}): CandidateRow {
 function mockRegistry(
   trace: string[],
   openDepth: () => number,
-  behaviour: 'fail' | 'succeed' = 'succeed',
+  behaviour: 'fail' | 'short' | 'succeed' = 'succeed',
 ): AiRegistry {
   const model = new MockEmbeddingModelV4({
     doEmbed: ({ values }) => {
@@ -109,8 +109,11 @@ function mockRegistry(
         return Promise.reject(new Error('provider refused'));
       }
 
+      // A short answer is a bad answer the SDK accepts, so the job's own guard has to catch it.
+      const answered = behaviour === 'short' ? values.slice(1) : values;
+
       return Promise.resolve({
-        embeddings: values.map((_value, index) => embedding(index + 1)),
+        embeddings: answered.map((_value, index) => embedding(index + 1)),
         usage: { tokens: values.length },
         warnings: [],
       });
@@ -125,7 +128,6 @@ function mockRegistry(
       throw new Error('The backfill must not resolve a language model.');
     },
     modelId: () => modelId,
-    provider: 'openai',
   };
 }
 
@@ -299,6 +301,53 @@ describe('backfillDatasetEmbeddings', () => {
     );
     expect(output).not.toContain(organizationId);
     expect(output).not.toContain(userId);
+  });
+
+  it('counts a short model answer as one error and no success', async () => {
+    const rows = [
+      candidate(),
+      candidate({
+        dataset_id: '00000000-0000-4000-8000-000000000002',
+        name: 'beta container',
+      }),
+    ];
+    const fake = createTracingPool(membership, respondWith(rows));
+    const metrics = new WorkerMetrics();
+
+    await expect(
+      backfillDatasetEmbeddings({
+        data: { organizationId, userId },
+        metrics,
+        pool: fake.pool,
+        registry: () =>
+          Promise.resolve(mockRegistry(fake.trace, fake.openDepth, 'short')),
+      }),
+    ).rejects.toThrow('fewer vectors than sent');
+
+    const output = await metrics.render();
+
+    expect(output).toContain('bap_worker_model_calls_total{outcome="error"} 1');
+    expect(output).not.toContain('outcome="success"');
+  });
+
+  it('requests the stored column width from the provider', async () => {
+    const fake = createTracingPool(membership, respondWith([candidate()]));
+    const registry = mockRegistry(fake.trace, fake.openDepth);
+    const model = registry.embeddingModel(
+      modelId,
+    ) as unknown as MockEmbeddingModelV4;
+
+    await backfillDatasetEmbeddings({
+      data: { organizationId, userId },
+      metrics: new WorkerMetrics(),
+      pool: fake.pool,
+      registry: () => Promise.resolve(registry),
+    });
+
+    // vector(1536) is the store, so the job must ask the provider for exactly that width.
+    expect(model.doEmbedCalls[0]?.providerOptions).toEqual({
+      openai: { dimensions: EMBEDDING_DIMENSIONS },
+    });
   });
 
   it('exports agent counters without an identifier label', async () => {

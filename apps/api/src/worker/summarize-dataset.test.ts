@@ -106,7 +106,6 @@ function mockRegistry(
     },
     languageModel: () => model,
     modelId: () => 'anthropic:mock-model',
-    provider: 'anthropic',
   };
 }
 
@@ -284,6 +283,27 @@ describe('summarizeDataset', () => {
     });
     expect(JSON.stringify(metadata)).not.toContain('A placeholder summary.');
     expect(JSON.stringify(metadata)).not.toContain('alpha container');
+  });
+
+  it('counts a rejected model answer as one error and no success', async () => {
+    const fake = createTracingPool(membership, respondWith(1));
+    const metrics = new WorkerMetrics();
+
+    await expect(
+      summarizeDataset({
+        data: { datasetId, organizationId, userId },
+        metrics,
+        pool: fake.pool,
+        // Sanitizing leaves nothing, so the answer is rejected after the call returned.
+        registry: () =>
+          Promise.resolve(mockRegistry(fake.trace, fake.openDepth, '   ')),
+      }),
+    ).rejects.toThrow();
+
+    const output = await metrics.render();
+
+    expect(output).toContain('bap_worker_model_calls_total{outcome="error"} 1');
+    expect(output).not.toContain('outcome="success"');
   });
 
   it('refuses to finish when the update policy matches no row', async () => {

@@ -20,24 +20,49 @@ const baseUrlSchema = z.url().refine((value) => {
   return protocol === 'http:' || protocol === 'https:';
 });
 
-const credentialSchema = z
+const providerCredentialSchema = z
   .object({
     apiKey: z.string().min(1).max(512),
     baseUrl: baseUrlSchema.optional(),
-    models: z
-      .record(z.string().min(1).max(64), z.string().min(1).max(128))
-      .default({}),
+  })
+  .strict();
+
+// No provider serves every role, so a role names the provider that serves it as well as the model.
+const modelSelectionSchema = z
+  .object({
+    model: z.string().min(1).max(128),
     provider: z.enum(aiProviderNames),
   })
   .strict();
 
-export interface AiConfiguration {
+const credentialSchema = z
+  .object({
+    models: z
+      .record(z.string().min(1).max(64), modelSelectionSchema)
+      .default({}),
+    // At least one provider, so a credential that configures none fails here instead of at a call.
+    providers: z
+      .partialRecord(z.enum(aiProviderNames), providerCredentialSchema)
+      .refine((value) => Object.keys(value).length > 0),
+  })
+  .strict();
+
+export interface AiProviderCredential {
   apiKey: string;
   // undefined when the credential names no proxy or regional endpoint.
   baseUrl: string | undefined;
-  // Model names are provider-specific, so the credential names one per role.
-  models: Readonly<Record<string, string>>;
+}
+
+export interface AiModelSelection {
+  model: string;
   provider: AiProviderName;
+}
+
+export interface AiConfiguration {
+  // Model names are provider-specific, so the credential names one provider and model per role.
+  models: Readonly<Record<string, AiModelSelection>>;
+  // Only the providers the credential configures; a model role may name no other.
+  providers: Readonly<Partial<Record<AiProviderName, AiProviderCredential>>>;
 }
 
 type Environment = Record<string, string | undefined>;
@@ -90,17 +115,40 @@ export async function loadAiConfiguration(
     throw new Error(`AI provider credential file is invalid: ${fields}.`);
   }
 
-  // The seeded local placeholder is never usable, so it must not reach a provider.
-  if (credential.data.apiKey === developmentPlaceholderApiKey) {
-    throw new Error(
-      'The AI provider requires a real API key. Replace the local development placeholder in the credential file.',
-    );
+  const providers: Partial<Record<AiProviderName, AiProviderCredential>> = {};
+
+  for (const name of aiProviderNames) {
+    const configured = credential.data.providers[name];
+
+    if (configured === undefined) {
+      continue;
+    }
+
+    // The seeded local placeholder is never usable, so it must not reach a provider.
+    if (configured.apiKey === developmentPlaceholderApiKey) {
+      throw new Error(
+        'The AI provider requires a real API key. Replace the local development placeholder in the credential file.',
+      );
+    }
+
+    providers[name] = {
+      apiKey: configured.apiKey,
+      baseUrl: configured.baseUrl,
+    };
   }
 
-  return {
-    apiKey: credential.data.apiKey,
-    baseUrl: credential.data.baseUrl,
-    models: credential.data.models,
-    provider: credential.data.provider,
-  };
+  const models: Record<string, AiModelSelection> = {};
+
+  for (const [role, selection] of Object.entries(credential.data.models)) {
+    // A role pointing at a provider the credential omits must fail now, not at the first model call.
+    if (providers[selection.provider] === undefined) {
+      throw new Error(
+        `AI provider credential file names model role ${role} on provider ${selection.provider}, which it does not configure.`,
+      );
+    }
+
+    models[role] = { model: selection.model, provider: selection.provider };
+  }
+
+  return { models, providers };
 }

@@ -14,7 +14,6 @@ function mockRegistry(model: AiEmbeddingModel): AiRegistry {
       );
     },
     modelId: () => 'openai:mock-embedding',
-    provider: 'openai',
   };
 }
 
@@ -35,6 +34,7 @@ describe('embedTexts', () => {
       mockRegistry(model),
       'openai:mock-embedding',
       {
+        dimensions: 1_536,
         values: ['first placeholder', 'second placeholder'],
       },
     );
@@ -63,6 +63,7 @@ describe('embedTexts', () => {
       mockRegistry(model),
       'openai:mock-embedding',
       {
+        dimensions: 1_536,
         maxParallelCalls: 1,
         values: ['alpha placeholder', 'beta placeholder'],
       },
@@ -70,5 +71,54 @@ describe('embedTexts', () => {
 
     expect(result.embeddings).toHaveLength(2);
     expect(model.doEmbedCalls).toHaveLength(2);
+  });
+
+  it('requests the reduced width from the provider that serves the model', async () => {
+    const model = new MockEmbeddingModelV4({
+      doEmbed: ({ values }) =>
+        Promise.resolve({
+          embeddings: values.map(() => [1, 0, 0]),
+          usage: { tokens: values.length },
+          warnings: [],
+        }),
+      maxEmbeddingsPerCall: 8,
+      modelId: 'mock-embedding',
+    });
+
+    await embedTexts(mockRegistry(model), 'openai:mock-embedding', {
+      dimensions: 1_536,
+      values: ['first placeholder'],
+    });
+
+    // The provider reads its own namespace, so the width must arrive under the provider name.
+    expect(model.doEmbedCalls[0]?.providerOptions).toEqual({
+      openai: { dimensions: 1_536 },
+    });
+  });
+
+  it('keys the requested width by the provider the model id names', async () => {
+    const model = new MockEmbeddingModelV4({
+      doEmbed: ({ values }) =>
+        Promise.resolve({
+          embeddings: values.map(() => [1, 0, 0]),
+          usage: { tokens: values.length },
+          warnings: [],
+        }),
+      maxEmbeddingsPerCall: 8,
+      modelId: 'mock-embedding',
+    });
+    const registry: AiRegistry = {
+      ...mockRegistry(model),
+      modelId: () => 'anthropic:mock-embedding',
+    };
+
+    await embedTexts(registry, 'anthropic:mock-embedding', {
+      dimensions: 256,
+      values: ['first placeholder'],
+    });
+
+    expect(model.doEmbedCalls[0]?.providerOptions).toEqual({
+      anthropic: { dimensions: 256 },
+    });
   });
 });
