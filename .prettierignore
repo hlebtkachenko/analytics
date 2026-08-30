@@ -7,3 +7,7 @@ dist
 node_modules
 pnpm-lock.yaml
 storybook-static
+
+# next dev rewrites these unwrapped, so Prettier must not reflow them.
+apps/web/AGENTS.md
+apps/web/CLAUDE.md
