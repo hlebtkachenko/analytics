@@ -39,9 +39,10 @@ development overlay opts into the log transport, and the Resend transport
 refuses to start without a real key.
 
 Model access: keep the provider choice out of the deployment topology. One
-`ai_provider_config` JSON credential file carries provider name, key, base URL,
-and model defaults, validated by zod inside `@bap/ai`. Adding or swapping a
-provider changes the content of one secret, not the compose secret set.
+`ai_provider_config` JSON credential file carries the configured provider names
+with their keys and base URLs, plus the provider and model each role uses,
+validated by zod inside `@bap/ai`. Adding or swapping a provider changes the
+content of one secret, not the compose secret set.
 
 Vector search: the database image is the digest-pinned pgvector build of
 PostgreSQL 18.6, and the extension is created during role bootstrap, which is

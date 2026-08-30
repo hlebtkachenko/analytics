@@ -19,7 +19,7 @@ export interface ResolveMembershipInput {
 // Bump it to the newest migration id in the same pull request as that migration.
 // Rollback consequence: application code rolled back after the migration is
 // applied makes /ready return 503 on every service until this is bumped again.
-export const DATABASE_MIGRATION_COMPATIBILITY = '20260830.0004';
+export const DATABASE_MIGRATION_COMPATIBILITY = '20260830.0005';
 
 export async function resolveMembership(
   pool: DatabasePool,

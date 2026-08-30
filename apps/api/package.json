@@ -18,6 +18,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
+    "@bap/ai": "workspace:*",
     "@bap/db": "workspace:*",
     "@bap/security": "workspace:*",
     "@nestjs/common": "catalog:",
@@ -43,6 +44,7 @@
     "@types/pg": "catalog:",
     "@types/supertest": "catalog:",
     "@vitest/coverage-v8": "catalog:",
+    "ai": "catalog:",
     "supertest": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

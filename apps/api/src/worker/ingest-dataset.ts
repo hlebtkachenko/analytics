@@ -32,6 +32,13 @@ export interface IngestDatasetOptions {
   stagingDirectory: string;
 }
 
+// Identifiers of the dataset this run made ready, which is what the agent jobs are chained from.
+export interface IngestedDataset {
+  datasetId: string;
+  organizationId: string;
+  userId: string;
+}
+
 interface TenantIdentity {
   organizationId: string;
   userId: string;
@@ -237,7 +244,7 @@ async function parseAndStore(
   tenant: TenantIdentity,
   stagedPath: string,
   upload: ClaimedUpload,
-): Promise<number> {
+): Promise<{ datasetId: string; rows: number }> {
   const format = resolveDatasetFormat(upload.filename);
 
   if (format === null) {
@@ -322,15 +329,16 @@ async function parseAndStore(
           uploadId: job.uploadId,
         }),
     });
-    return total;
+    return { datasetId, rows: total };
   } finally {
     await iterator.return?.();
   }
 }
 
+// Returns undefined when the upload was already completed, so a retry chains no second agent run.
 export async function ingestDataset(
   options: IngestDatasetOptions,
-): Promise<void> {
+): Promise<IngestedDataset | undefined> {
   const job = ingestDatasetJobSchema.parse(options.data);
   const stagedPath = resolveStagedFilePath(
     options.stagingDirectory,
@@ -347,19 +355,26 @@ export async function ingestDataset(
       pool: options.pool,
       work: (transaction) => claimUpload(transaction, job.uploadId),
     });
+    let ingested: IngestedDataset | undefined;
 
     if (upload !== null) {
-      const rows = await parseAndStore(
+      const stored = await parseAndStore(
         options,
         job,
         tenant,
         stagedPath,
         upload,
       );
-      options.metrics.recordIngestedRows(rows);
+      options.metrics.recordIngestedRows(stored.rows);
+      ingested = {
+        datasetId: stored.datasetId,
+        organizationId: tenant.organizationId,
+        userId: tenant.userId,
+      };
     }
 
     options.metrics.recordJob(INGEST_DATASET_QUEUE, 'completed');
+    return ingested;
   } catch (error) {
     // Recording the failure needs the same tenant gate, which a revoked membership refuses.
     await recordFailure(options, job, tenant, error).catch(() => undefined);

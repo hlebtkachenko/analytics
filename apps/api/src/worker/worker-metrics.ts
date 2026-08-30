@@ -2,6 +2,8 @@ import { Counter, Gauge, Registry } from '@prometheus-io/client';
 
 export type JobOutcome = 'completed' | 'failed';
 
+export type ModelCallOutcome = 'error' | 'success';
+
 export interface PoolStatistics {
   idle: number;
   total: number;
@@ -43,12 +45,35 @@ export class WorkerMetrics {
     registers: [this.registry],
   });
 
+  // Unlabelled for the same reason: the count of embedded datasets must not become a tenant activity feed.
+  private readonly embeddedDatasets = new Counter({
+    help: 'Datasets embedded by the backfill job',
+    name: 'bap_worker_embedded_datasets_total',
+    registers: [this.registry],
+  });
+
+  // Labelled by outcome only, so no organization, subject, dataset or model name is exported.
+  private readonly modelCalls = new Counter({
+    help: 'AI provider calls made by the agent jobs by outcome',
+    labelNames: ['outcome'] as const,
+    name: 'bap_worker_model_calls_total',
+    registers: [this.registry],
+  });
+
+  recordEmbeddedDatasets(datasets: number): void {
+    this.embeddedDatasets.inc(datasets);
+  }
+
   recordIngestedRows(rows: number): void {
     this.ingestedRows.inc(rows);
   }
 
   recordJob(queue: string, outcome: JobOutcome): void {
     this.jobs.inc({ outcome, queue });
+  }
+
+  recordModelCall(outcome: ModelCallOutcome): void {
+    this.modelCalls.inc({ outcome });
   }
 
   recordQueueError(): void {

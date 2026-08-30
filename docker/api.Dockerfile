@@ -14,7 +14,10 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 FROM dependencies AS build
 COPY apps/api apps/api
 COPY packages packages
-RUN pnpm --filter @bap/db build && pnpm --filter @bap/security build && pnpm --filter @bap/api build
+RUN pnpm --filter @bap/db build \
+  && pnpm --filter @bap/security build \
+  && pnpm --filter @bap/ai build \
+  && pnpm --filter @bap/api build
 RUN pnpm --filter @bap/api --prod deploy /runtime --legacy
 
 FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime

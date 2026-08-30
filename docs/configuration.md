@@ -56,11 +56,12 @@ are the PostgreSQL administrator, migrator, auth, application, reporting,
 backup, Better Auth, Resend, AI provider, and restic credential files listed in
 `config/compose.environment.example`. The Resend key and the AI provider
 document are seeded with the literal placeholder
-`local-development-placeholder`. The mail transport is never inferred from that
-value: `BAP_MAIL_TRANSPORT` selects it explicitly, the development overlay sets
-`log`, and the `resend` transport refuses to start with an absent or placeholder
-key so a misconfigured deployment fails loudly instead of dropping mail. Create
-disposable local values with:
+`local-development-placeholder`, and the AI credential refuses it too, so no
+model call leaves a development machine by accident. The mail transport is never
+inferred from that value: `BAP_MAIL_TRANSPORT` selects it explicitly, the
+development overlay sets `log`, and the `resend` transport refuses to start with
+an absent or placeholder key so a misconfigured deployment fails loudly instead
+of dropping mail. Create disposable local values with:
 
 ```sh
 pnpm secrets:local
@@ -78,6 +79,45 @@ owner selects that backend. Generic credential files are not sourced or parsed.
 Do not introduce `NEXT_PUBLIC_*` variables for server credentials or internal
 service locations. Production secrets must be injected by the deployment
 environment and must never enter an image layer or Git.
+
+## AI provider credential
+
+The `ai_provider_config` document declares the providers a deployment may reach
+and the model each role uses. `providers` maps a supported provider name,
+`anthropic` or `openai`, to its own `apiKey` and optional `baseUrl`. `models`
+maps a role to the `provider` that serves it and the `model` name that provider
+knows. No provider serves every role, so the two maps are separate: a deployment
+that wants Claude for conversation still needs OpenAI for embeddings, because
+Anthropic publishes no embedding model.
+
+```json
+{
+  "providers": {
+    "anthropic": { "apiKey": "REPLACE_WITH_ANTHROPIC_KEY" },
+    "openai": { "apiKey": "REPLACE_WITH_OPENAI_KEY" }
+  },
+  "models": {
+    "chat": { "provider": "anthropic", "model": "claude-sonnet-5" },
+    "embedding": { "provider": "openai", "model": "text-embedding-3-small" },
+    "summary": { "provider": "anthropic", "model": "claude-sonnet-5" }
+  }
+}
+```
+
+Three roles are used today: `chat` for the streaming assistant, `embedding` for
+dataset embeddings, and `summary` for dataset summarization. A role the
+credential does not name leaves that one feature off and leaves the rest of the
+platform working. A role naming a provider that `providers` omits is rejected
+when the credential is loaded, not when the model is first called. At least one
+provider must be configured, unknown provider names and unknown fields are
+refused, and a `baseUrl` must be an `http` or `https` origin. Validation errors
+report field paths only, so no key value is ever echoed.
+
+Embedding width is not a credential input. `app.dataset_embedding.embedding` is
+`vector(1536)`, the job requests exactly that width from the provider, and a
+vector of any other width is rejected before it reaches PostgreSQL. Naming an
+embedding model that cannot produce 1536 components therefore fails the backfill
+rather than corrupting the store.
 
 ## Dependency policy
 

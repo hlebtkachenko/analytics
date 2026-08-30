@@ -26,7 +26,7 @@ chmod 0600 "$resend_path"
 
 ai_provider_path="$secret_directory/ai_provider_config"
 if [[ ! -f "$ai_provider_path" ]]; then
-  printf '%s\n' '{"provider":"anthropic","apiKey":"local-development-placeholder"}' > "$ai_provider_path"
+  printf '%s\n' '{"providers":{"anthropic":{"apiKey":"local-development-placeholder"},"openai":{"apiKey":"local-development-placeholder"}},"models":{"chat":{"provider":"anthropic","model":"claude-sonnet-5"},"embedding":{"provider":"openai","model":"text-embedding-3-small"},"summary":{"provider":"anthropic","model":"claude-sonnet-5"}}}' > "$ai_provider_path"
 fi
 chmod 0600 "$ai_provider_path"
 

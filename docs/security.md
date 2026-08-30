@@ -46,6 +46,49 @@ path. `scripts/verify-compose.mjs` fails when any other service joins that
 network, and the container smoke job proves the web service still resolves and
 connects outward.
 
+## Model provider boundary
+
+Model calls are the one place where tenant-derived text deliberately leaves the
+deployment. Only the web application and the worker can reach a provider at all,
+because they are the only members of the `internet-egress` network.
+
+What leaves is bounded. Dataset embedding and dataset summarization send dataset
+metadata only: the name, the description, and column names. Neither reads
+`app.dataset_row.data`, and a test asserts the summarization profile query never
+selects that column, so no stored cell value reaches a provider. Chat sends what
+the signed-in user typed.
+
+What is recorded is narrower still. Audit entries and metrics carry the model
+id, token counts, and the outcome, never prompt or completion text, because
+audit rows are readable by everyone in the organization.
+
+When those calls happen is bounded too. A completed ingestion is the only
+trigger: the worker chains `summarize_dataset` for the dataset it just made
+ready, and that job in turn chains `backfill_dataset_embeddings` for the same
+subject, so the embedded document quotes the description the summary wrote. When
+no summary model is named, ingestion chains the backfill directly. Nothing else
+enqueues either job, and neither runs on a schedule. Both chained payloads carry
+identifiers only, and both jobs re-resolve membership at dequeue like every
+other worker job.
+
+An operator who treats dataset and column names as sensitive should enable the
+embedding and summarization jobs deliberately rather than by default. Naming no
+model for a role leaves that job off: the chain reads the credential first and
+enqueues nothing for a role the credential does not name, so an absent or
+placeholder credential produces no queued work at all rather than a failing job.
+
+The chat route requires a verified session and nothing more, which is sound only
+because it registers no tools and therefore reaches no tenant data. Registering
+the first tool changes that: the route must then also resolve organization
+membership and the `use_ai` capability before it calls a model, exactly as the
+BFF does today. Treat that as a precondition of the first tool rather than a
+later improvement.
+
+A failed background job stores only a curated error name. `pgboss.job` has no
+row level security and is readable across tenants by `bap_api`, while provider
+errors carry the request body and database errors carry the offending row, so
+the handler boundary replaces the error before pg-boss can serialize it.
+
 ## Background worker boundary
 
 The worker is a second entrypoint in the application API image and connects as

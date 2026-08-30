@@ -16,6 +16,7 @@ FROM dependencies AS build
 COPY apps/web apps/web
 COPY packages packages
 RUN pnpm --filter @bap/db build \
+  && pnpm --filter @bap/ai build \
   && pnpm --filter @bap/web build \
   && pnpm --filter @bap/web build:cli
 

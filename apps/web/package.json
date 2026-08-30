@@ -17,6 +17,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@bap/ai": "workspace:*",
     "@bap/db": "workspace:*",
     "@bap/design-system": "workspace:*",
     "@prometheus-io/client": "catalog:",

@@ -56,6 +56,18 @@ async function readMigrationIds(): Promise<string[]> {
     });
 }
 
+// Mirrors app.dataset_embedding.embedding: the migration pins the width, so a fixture must too.
+const embeddingDimensions = 1536;
+
+function vectorLiteral(leading: readonly number[]): string {
+  const components = Array.from(
+    { length: embeddingDimensions },
+    (_value, index) => leading[index] ?? 0,
+  );
+
+  return `[${components.join(',')}]`;
+}
+
 function poolFor(user: string, password: string): Pool {
   return new Pool({
     database: container.getDatabase(),
@@ -917,6 +929,232 @@ describe('PostgreSQL 18 isolation', () => {
     await expect(backupPool.query('set role bap_owner')).rejects.toThrow();
   });
 
+  it('confines dataset embeddings to the tenant that owns the dataset', async () => {
+    // The foreign vector is identical to the owned one, so a leaking search would rank it first.
+    await rootPool.query(
+      `insert into app.dataset_embedding (organization_id, dataset_id, model, content_hash, embedding)
+       values ('org-1', $1, 'openai:test-embedding', $4, $6::vector),
+              ('org-1', $2, 'openai:test-embedding', $5, $7::vector),
+              ('org-2', $3, 'openai:test-embedding', $4, $6::vector)`,
+      [
+        ownedDatasetId,
+        sharedDatasetId,
+        foreignDatasetId,
+        'a'.repeat(64),
+        'b'.repeat(64),
+        vectorLiteral([1, 0, 0]),
+        vectorLiteral([0, 1, 0]),
+      ],
+    );
+    const first = await asTenant(
+      apiPool,
+      { organizationId: 'org-1', userId: 'user-1' },
+      async (transaction) => {
+        const result = await transaction.query<{ dataset_id: string }>(
+          'select dataset_id from app.dataset_embedding order by dataset_id',
+        );
+        return result.rows;
+      },
+    );
+    const second = await asTenant(
+      apiPool,
+      { organizationId: 'org-2', userId: 'user-2' },
+      async (transaction) => {
+        const result = await transaction.query<{ dataset_id: string }>(
+          'select dataset_id from app.dataset_embedding order by dataset_id',
+        );
+        return result.rows;
+      },
+    );
+
+    // user-1 created the first dataset and holds a read grant on the second, so both are visible.
+    expect(first).toEqual([
+      { dataset_id: ownedDatasetId },
+      { dataset_id: sharedDatasetId },
+    ]);
+    expect(second).toEqual([{ dataset_id: foreignDatasetId }]);
+    await expect(
+      asTenant(
+        apiPool,
+        { organizationId: 'org-1', userId: 'user-1' },
+        async (transaction) =>
+          transaction.query(
+            `insert into app.dataset_embedding (organization_id, dataset_id, model, content_hash, embedding)
+             values ('org-2', $1, 'openai:test-embedding', $2, $3::vector)`,
+            [foreignDatasetId, 'c'.repeat(64), vectorLiteral([1, 0, 0])],
+          ),
+      ),
+    ).rejects.toThrow(/row-level security/);
+  });
+
+  it('never returns another tenant row from a similarity query', async () => {
+    const probe = vectorLiteral([1, 0, 0]);
+    const owner = await asTenant(
+      apiPool,
+      { organizationId: 'org-1', userId: 'user-1' },
+      async (transaction) => {
+        // pgvector 0.8 introduced this setting; without it a filtered approximate scan can under-return.
+        const scan = await transaction.query<{ mode: string }>(
+          "select set_config('hnsw.iterative_scan', 'strict_order', true) as mode",
+        );
+
+        expect(scan.rows[0]?.mode).toBe('strict_order');
+        const result = await transaction.query<{
+          dataset_id: string;
+          distance: number;
+        }>(
+          `select e.dataset_id, (e.embedding <=> $1::vector)::float8 as distance
+           from app.dataset_embedding as e
+           join app.dataset as d on d.id = e.dataset_id
+           order by e.embedding <=> $1::vector
+           limit 10`,
+          [probe],
+        );
+        return result.rows;
+      },
+    );
+    const stranger = await asTenant(
+      apiPool,
+      { organizationId: 'org-2', userId: 'user-2' },
+      async (transaction) => {
+        const result = await transaction.query<{ dataset_id: string }>(
+          `select e.dataset_id
+           from app.dataset_embedding as e
+           order by e.embedding <=> $1::vector
+           limit 10`,
+          [probe],
+        );
+        return result.rows;
+      },
+    );
+
+    // org-2 holds an identical vector, so its absence here is the isolation proof.
+    expect(owner.map(({ dataset_id }) => dataset_id)).toEqual([
+      ownedDatasetId,
+      sharedDatasetId,
+    ]);
+    expect(Number(owner[0]?.distance)).toBeCloseTo(0);
+    expect(stranger).toEqual([{ dataset_id: foreignDatasetId }]);
+    const index = await rootPool.query<{ indexdef: string }>(
+      "select indexdef from pg_indexes where schemaname = 'app' and indexname = 'dataset_embedding_embedding_idx'",
+    );
+
+    expect(index.rows[0]?.indexdef).toMatch(/USING hnsw/);
+    expect(index.rows[0]?.indexdef).toMatch(/vector_cosine_ops/);
+    // An unknown dotted name would be accepted as a placeholder, so only a rejected value proves the setting is real.
+    await expect(
+      rootPool.query(
+        "select set_config('hnsw.iterative_scan', 'not_a_mode', false)",
+      ),
+    ).rejects.toThrow(/invalid value/i);
+    const extension = await rootPool.query<{ extversion: string }>(
+      "select extversion from pg_extension where extname = 'vector'",
+    );
+
+    expect(extension.rows[0]?.extversion).toMatch(/^0\.(8|9)\.|^[1-9]/);
+  });
+
+  it('lets a read grant read an embedding and never delete, update or replace it', async () => {
+    const write = await asTenant(
+      apiPool,
+      { organizationId: 'org-1', userId: 'user-1' },
+      async (transaction) => {
+        const removed = await transaction.query(
+          'delete from app.dataset_embedding where dataset_id = $1',
+          [sharedDatasetId],
+        );
+        const replaced = await transaction.query(
+          'update app.dataset_embedding set model = $2 where dataset_id = $1',
+          [sharedDatasetId, 'openai:hijacked-embedding'],
+        );
+        const survivors = await transaction.query<{ model: string }>(
+          'select model from app.dataset_embedding where dataset_id = $1',
+          [sharedDatasetId],
+        );
+        return {
+          removed: removed.rowCount,
+          replaced: replaced.rowCount,
+          survivors: survivors.rows,
+        };
+      },
+    );
+
+    // A read grant widens SELECT only, so the per command policies leave the row untouched.
+    expect(write).toEqual({
+      removed: 0,
+      replaced: 0,
+      survivors: [{ model: 'openai:test-embedding' }],
+    });
+    await expect(
+      asTenant(
+        apiPool,
+        { organizationId: 'org-1', userId: 'user-1' },
+        async (transaction) =>
+          transaction.query(
+            `insert into app.dataset_embedding (organization_id, dataset_id, model, content_hash, embedding)
+             values ('org-1', $1, 'openai:test-embedding', $2, $3::vector)
+             on conflict (dataset_id) do update set model = excluded.model`,
+            [sharedDatasetId, 'd'.repeat(64), vectorLiteral([0, 0, 1])],
+          ),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    // The creator of a dataset keeps every command on its embedding.
+    const creator = await asTenant(
+      apiPool,
+      { organizationId: 'org-1', userId: 'user-1' },
+      async (transaction) => {
+        const created = await transaction.query<{ id: string }>(
+          "insert into app.dataset (organization_id, name, status, created_by) values ('org-1', 'zeta container', 'ready', 'user-1') returning id",
+        );
+        const datasetId = created.rows[0]?.id;
+        await transaction.query(
+          `insert into app.dataset_embedding (organization_id, dataset_id, model, content_hash, embedding)
+           values ('org-1', $1, 'openai:test-embedding', $2, $3::vector)`,
+          [datasetId, 'e'.repeat(64), vectorLiteral([0, 0, 1])],
+        );
+        const updated = await transaction.query(
+          'update app.dataset_embedding set content_hash = $2 where dataset_id = $1',
+          [datasetId, 'f'.repeat(64)],
+        );
+        const removed = await transaction.query(
+          'delete from app.dataset_embedding where dataset_id = $1',
+          [datasetId],
+        );
+        await transaction.query('delete from app.dataset where id = $1', [
+          datasetId,
+        ]);
+        return { removed: removed.rowCount, updated: updated.rowCount };
+      },
+    );
+
+    expect(creator).toEqual({ removed: 1, updated: 1 });
+  });
+
+  it('grants embedding writes to the application role and reads to reporting and backup', async () => {
+    await expect(
+      reportingPool.query('select id from app.dataset_embedding'),
+    ).resolves.toMatchObject({ rows: [] });
+    await expect(
+      reportingPool.query(
+        `insert into app.dataset_embedding (organization_id, dataset_id, model, content_hash, embedding)
+         values ('org-1', $1, 'openai:test-embedding', $2, $3::vector)`,
+        [ownedDatasetId, 'a'.repeat(64), vectorLiteral([1, 0, 0])],
+      ),
+    ).rejects.toThrow(/permission denied/);
+    await expect(
+      reportingPool.query('delete from app.dataset_embedding'),
+    ).rejects.toThrow(/permission denied/);
+    const counted = await backupPool.query<{ total: number }>(
+      'select count(*)::int as total from app.dataset_embedding',
+    );
+
+    // bap_backup holds BYPASSRLS, so a dump sees every tenant's vectors.
+    expect(counted.rows[0]?.total).toBe(3);
+    await expect(
+      backupPool.query('delete from app.dataset_embedding'),
+    ).rejects.toThrow();
+  });
+
   it('runs a full pg_dump as the backup role', async () => {
     try {
       const result = await container.exec(
@@ -957,6 +1195,8 @@ describe('PostgreSQL 18 isolation', () => {
       expect(contents.output).toContain('TABLE DATA app dataset_row');
       expect(contents.output).toContain('TABLE app upload');
       expect(contents.output).toContain('TABLE DATA app upload');
+      expect(contents.output).toContain('TABLE app dataset_embedding');
+      expect(contents.output).toContain('TABLE DATA app dataset_embedding');
     } finally {
       await container.exec(['rm', '-f', '/tmp/bap-backup-test.dump']);
     }
