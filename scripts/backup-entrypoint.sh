@@ -48,7 +48,9 @@ case "$command_name" in
     ;;
   backup)
     require_database bap_backup
-    pg_dump --format=custom --no-owner --no-acl | env -u PGPASSFILE restic backup --stdin --stdin-filename bap.dump
+    # pgvector is untrusted, so only role bootstrap can install it and only the superuser owns it.
+    # Dumping it would make pg_restore try to comment on an extension bap_owner does not own.
+    pg_dump --format=custom --no-owner --no-acl --exclude-extension=vector | env -u PGPASSFILE restic backup --stdin --stdin-filename bap.dump
     ;;
   check)
     restic check

@@ -17,6 +17,10 @@ const backupStageEntrypoint = readFileSync(
   'utf8',
 );
 
+// pgvector ships the pinned PostgreSQL 18.6 build plus the vector extension.
+const postgresImageDigest =
+  'sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a';
+
 function invariant(condition, message) {
   if (!condition) {
     throw new Error(message);
@@ -48,7 +52,9 @@ invariant(
   'The backup entrypoint must not execute generic credential input.',
 );
 
-for (const service of ['web', 'api', 'reporting-api']) {
+const applicationServices = ['web', 'api', 'reporting-api', 'worker'];
+
+for (const service of applicationServices) {
   invariant(
     configuration.services[service].healthcheck.test
       .join(' ')
@@ -66,10 +72,8 @@ invariant(
   'Caddy must use only edge and app networks.',
 );
 invariant(
-  configuration.services.database.image.includes(
-    'sha256:1c59e2c3c818eaa0f0628f695b36e7c9e362d6b219b36a54a32df645cbd7e1af',
-  ),
-  'PostgreSQL image must use the accepted digest.',
+  configuration.services.database.image.includes(postgresImageDigest),
+  'PostgreSQL image must use the accepted pgvector digest.',
 );
 invariant(
   configuration.services.caddy.image.includes(
@@ -78,10 +82,62 @@ invariant(
   'Caddy image must use the accepted digest.',
 );
 
+// Only services with a justified provider dependency may reach the internet.
+const internetEgressMembers = Object.entries(configuration.services)
+  .filter(([, service]) =>
+    Object.hasOwn(service.networks ?? {}, 'internet-egress'),
+  )
+  .map(([name]) => name)
+  .sort();
+invariant(
+  internetEgressMembers.join() === 'web,worker',
+  `Unexpected internet egress members: ${internetEgressMembers.join(',')}.`,
+);
+invariant(
+  configuration.networks['internet-egress'].internal !== true,
+  'The internet egress network must permit outbound access.',
+);
+for (const service of ['api', 'reporting-api']) {
+  invariant(
+    !Object.hasOwn(
+      configuration.services[service].networks ?? {},
+      'internet-egress',
+    ),
+    `${service} must not join the internet egress network.`,
+  );
+}
+// Egress must attach first and own the default route out of every member.
+for (const service of internetEgressMembers) {
+  const serviceNetworks = configuration.services[service].networks;
+  const egress = serviceNetworks['internet-egress'];
+  const internalNames = Object.keys(serviceNetworks).filter(
+    (name) => name !== 'internet-egress',
+  );
+  invariant(
+    internalNames.every(
+      (name) =>
+        egress?.priority > (serviceNetworks[name]?.priority ?? 0) &&
+        egress?.gw_priority > (serviceNetworks[name]?.gw_priority ?? 0),
+    ),
+    `${service} must attach internet egress first and take its default route from it.`,
+  );
+}
+
+invariant(
+  networkNames('worker').join() === 'data,internet-egress',
+  'The worker must use only data and internet egress.',
+);
+
 expectSecrets('database', ['postgres_admin_password']);
-expectSecrets('web', ['bap_auth_password', 'better_auth_secret']);
+expectSecrets('web', [
+  'ai_provider_config',
+  'bap_auth_password',
+  'better_auth_secret',
+  'resend_api_key',
+]);
 expectSecrets('api', ['bap_api_password']);
 expectSecrets('reporting-api', ['bap_reporting_password']);
+expectSecrets('worker', ['ai_provider_config', 'bap_api_password']);
 expectSecrets('migrator', ['bap_migrator_password']);
 expectSecrets('role-bootstrap', [
   'bap_api_password',
@@ -110,6 +166,21 @@ if (mode === 'production') {
     configuration.networks.data.internal,
     'The data network must be internal.',
   );
+
+  for (const service of applicationServices) {
+    const model = configuration.services[service];
+    invariant(
+      model.read_only === true &&
+        model.cap_drop.join() === 'ALL' &&
+        model.security_opt.join() === 'no-new-privileges:true' &&
+        model.restart === 'unless-stopped',
+      `${service} must retain the production privilege boundary.`,
+    );
+    invariant(
+      model.tmpfs.includes('/tmp'),
+      `${service} must write only to ephemeral storage.`,
+    );
+  }
 }
 
 if (mode === 'development') {
@@ -195,6 +266,12 @@ if (mode === 'operations') {
       `${service} must use only the data network.`,
     );
   }
+  invariant(
+    configuration.services['restore-database'].image.includes(
+      postgresImageDigest,
+    ),
+    'The restore database image must use the accepted pgvector digest.',
+  );
   const operationsMembers = Object.entries(configuration.services)
     .filter(([, service]) =>
       Object.hasOwn(service.networks ?? {}, 'operations-egress'),

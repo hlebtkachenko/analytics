@@ -17,6 +17,19 @@ for secret_name in postgres_admin_password bap_migrator_password bap_auth_passwo
   chmod 0600 "$secret_path"
 done
 
+# Placeholder provider credentials keep the local stack in log-only transports.
+resend_path="$secret_directory/resend_api_key"
+if [[ ! -f "$resend_path" ]]; then
+  printf '%s\n' 'local-development-placeholder' > "$resend_path"
+fi
+chmod 0600 "$resend_path"
+
+ai_provider_path="$secret_directory/ai_provider_config"
+if [[ ! -f "$ai_provider_path" ]]; then
+  printf '%s\n' '{"provider":"anthropic","apiKey":"local-development-placeholder"}' > "$ai_provider_path"
+fi
+chmod 0600 "$ai_provider_path"
+
 repository_path="$secret_directory/restic_repository"
 if [[ ! -f "$repository_path" ]]; then
   printf '%s\n' 'local:/repository' > "$repository_path"

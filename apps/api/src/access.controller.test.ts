@@ -46,6 +46,7 @@ describe('application access route', () => {
   };
   const memberships: MembershipResolver = {
     checkReadiness: vi.fn(async () => true),
+    getPoolStatistics: vi.fn(() => ({ idle: 0, total: 0, waiting: 0 })),
     resolve: vi.fn(async (_subject, organizationId) =>
       organizationId === 'organization_1'
         ? { emailVerified: true, role: 'member' as const }

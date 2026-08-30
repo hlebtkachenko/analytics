@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.7-labs@sha256:b99fecfe00268a8b556fad7d9c37ee25d716ae08a5d7320e6d51c4dd83246894
 
 FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS base
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -9,16 +9,7 @@ RUN corepack enable && corepack prepare pnpm@11.24.0 --activate
 WORKDIR /workspace
 
 FROM base AS dependencies
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
-COPY apps/web/package.json apps/web/package.json
-COPY apps/api/package.json apps/api/package.json
-COPY apps/design-system-workbench/package.json apps/design-system-workbench/package.json
-COPY apps/reporting-api/package.json apps/reporting-api/package.json
-COPY packages/eslint-config/package.json packages/eslint-config/package.json
-COPY packages/typescript-config/package.json packages/typescript-config/package.json
-COPY packages/design-system/package.json packages/design-system/package.json
-COPY packages/db/package.json packages/db/package.json
-COPY packages/security/package.json packages/security/package.json
+COPY --parents package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json apps/*/package.json packages/*/package.json ./
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --filter @bap/web...
 
 FROM dependencies AS build

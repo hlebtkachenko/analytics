@@ -82,12 +82,35 @@ copyright 2011-present i18next.
 - Prometheus JavaScript client: <https://github.com/prometheus/client_js>
 - License: [Apache License 2.0](licenses/APACHE-2.0.txt)
 
+## Platform batteries
+
+pg-boss provides the PostgreSQL-backed job queue and cron scheduler under the
+MIT license. BAP pins its schema in a checksummed migration and keeps pg-boss
+self-migration disabled.
+
+Copyright (c) 2016 Tim Jones.
+
+- Source: <https://github.com/timgit/pg-boss>
+- License: [MIT](licenses/PG-BOSS-MIT.txt)
+
+Resend provides the transactional mail client under the MIT license. BAP reads
+its API key from a mounted credential file and falls back to a log-only
+transport when no key is configured.
+
+Copyright (c) 2023 Plus Five Five, Inc.
+
+- Source: <https://github.com/resend/resend-node>
+- License: [MIT](licenses/RESEND-MIT.txt)
+
 ## Container foundation
 
 Caddy is licensed under Apache License 2.0. PostgreSQL is licensed under the
-PostgreSQL License. Restic is licensed under the BSD 2-Clause License.
+PostgreSQL License. Restic is licensed under the BSD 2-Clause License. The
+database image is the pgvector build of PostgreSQL 18, and pgvector is licensed
+under the PostgreSQL License.
 
 - Caddy: <https://github.com/caddyserver/caddy>
 - PostgreSQL: <https://www.postgresql.org/about/licence/>
+- pgvector: <https://github.com/pgvector/pgvector>
 - Restic: <https://github.com/restic/restic>
 - Restic license: [BSD 2-Clause](licenses/RESTIC-BSD-2-CLAUSE.txt)

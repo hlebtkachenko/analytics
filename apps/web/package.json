@@ -29,6 +29,7 @@
     "react-dom": "catalog:",
     "react-i18next": "catalog:",
     "react-is": "catalog:",
+    "resend": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

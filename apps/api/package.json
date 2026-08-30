@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@bap/db": "workspace:*",
@@ -25,6 +26,7 @@
     "@nestjs/swagger": "catalog:",
     "@prometheus-io/client": "catalog:",
     "helmet": "catalog:",
+    "pg-boss": "catalog:",
     "pino": "catalog:",
     "reflect-metadata": "catalog:",
     "rxjs": "catalog:",
@@ -35,6 +37,7 @@
     "@bap/typescript-config": "workspace:*",
     "@nestjs/cli": "catalog:",
     "@nestjs/testing": "catalog:",
+    "@testcontainers/postgresql": "catalog:",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
     "@types/supertest": "catalog:",

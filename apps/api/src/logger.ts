@@ -30,9 +30,10 @@ const REDACTED_PATHS = [
 export class ApplicationLogger implements LoggerService {
   private readonly logger: Logger;
 
-  constructor(destination?: DestinationStream) {
+  // The worker entrypoint shares this logger and only overrides the service name.
+  constructor(destination?: DestinationStream, service = 'application-api') {
     const options: LoggerOptions = {
-      base: { service: 'application-api' },
+      base: { service },
       redact: { censor: '[Redacted]', paths: REDACTED_PATHS },
     };
     this.logger =

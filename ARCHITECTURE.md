@@ -110,12 +110,14 @@ C4Deployment
 ```
 
 The production model has non-internal `edge`, internal `app`, internal `data`,
-and non-internal `operations-egress` networks. Caddy is the only published
-service. Only one-shot restic clients join `operations-egress`; backup and
-restore also join `data`. Each runtime mounts only its own credential files.
-Caddy certificate state and PostgreSQL data use named volumes. Backup
-scheduling, backend-specific credentials, and off-host durability require owner
-configuration.
+and non-internal `internet-egress` and `operations-egress` networks. Caddy is
+the only published service. Only the web application and the background worker
+join `internet-egress`, where they reach mail and AI providers; the application
+API and the reporting API deliberately keep no outbound path. Only one-shot
+restic clients join `operations-egress`; backup and restore also join `data`.
+Each runtime mounts only its own credential files. Caddy certificate state and
+PostgreSQL data use named volumes. Backup scheduling, backend-specific
+credentials, and off-host durability require owner configuration.
 
 ## Operational map
 
@@ -129,8 +131,9 @@ configuration.
 
 ## Deliberately deferred
 
-Mail, invitations, password-recovery delivery, MFA, SSO, queues, distributed
-caches or limits, OpenTelemetry, billing, uploads, HA, registry publishing,
-deployment automation, and product schemas require real owner or product
-requirements. See
-[the approved SaaS foundation plan](docs/planning/saas-foundation.md).
+Invitations, password-recovery delivery, MFA, SSO, distributed caches or limits,
+OpenTelemetry, PDF export, billing, uploads to object storage, HA, registry
+publishing, deployment automation, and product schemas require real owner or
+product requirements. See
+[the approved SaaS foundation plan](docs/planning/saas-foundation.md) and
+[the platform batteries plan](docs/planning/platform-batteries.md).

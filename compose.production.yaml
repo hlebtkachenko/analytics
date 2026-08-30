@@ -33,5 +33,11 @@ services:
     tmpfs:
       - /tmp
 
+  worker:
+    read_only: true
+    restart: unless-stopped
+    tmpfs:
+      - /tmp
+
   database:
     restart: unless-stopped

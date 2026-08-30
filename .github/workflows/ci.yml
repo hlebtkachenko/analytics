@@ -265,6 +265,7 @@ jobs:
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://localhost:${WEB_PORT}/ready")" = 404
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://localhost:${WEB_PORT}/metrics")" = 404
           test "$(curl --header 'Host: unknown.invalid' --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${WEB_PORT}/health")" = 421
+          docker compose -f compose.yaml -f compose.development.yaml exec -T web node -e "fetch('https://example.org/',{method:'HEAD'}).then((response)=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))"
           elapsed_seconds=$(($(date +%s) - started_at))
           printf '### Container smoke\n\n- Duration: %ss\n' "$elapsed_seconds" >> "$GITHUB_STEP_SUMMARY"
 

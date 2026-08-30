@@ -18,9 +18,18 @@ docker compose --profile operations -f compose.yaml -f compose.development.yaml 
 Run `backup-prune` separately when an owner-defined retention policy is in
 place.
 
-`backup` streams `pg_dump --format=custom --no-owner --no-acl` directly into
-restic stdin as `bap.dump`. It connects only as `bap_backup`. Repository checks
-and retention pruning receive no database credential.
+`backup` streams
+`pg_dump --format=custom --no-owner --no-acl --exclude-extension=vector`
+directly into restic stdin as `bap.dump`. It connects only as `bap_backup`.
+Repository checks and retention pruning receive no database credential.
+
+pgvector is excluded from the dump on purpose. It is an untrusted extension, so
+only the superuser can install it and only the superuser owns it. A dumped
+extension makes `pg_restore` attempt `COMMENT ON EXTENSION`, which fails because
+the restoring role is `bap_owner`. Role bootstrap installs the extension on both
+the live and the restore database, so the restore target always has it before
+any data arrives. Restoring into a database that has not been through role
+bootstrap is therefore unsupported.
 
 Restore starts a separate PostgreSQL 18 database and runs isolated role
 bootstrap. It then streams the selected restic snapshot to `pg_restore` while

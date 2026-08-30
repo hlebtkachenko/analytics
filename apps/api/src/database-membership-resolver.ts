@@ -1,37 +1,37 @@
-import { Inject, Injectable, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable, type OnModuleDestroy } from '@nestjs/common';
 import { checkMigrationCompatibility, resolveMembership } from '@bap/db/access';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 import type { DatabasePool } from '@bap/db/pool';
 
 import { MembershipResolver } from './membership-resolver.js';
-import { ServiceMetrics } from './metrics.js';
 
 @Injectable()
 export class DatabaseMembershipResolver
   extends MembershipResolver
   implements OnModuleDestroy
 {
+  private pool: DatabasePool | undefined;
   private poolPromise: Promise<DatabasePool> | undefined;
-
-  constructor(
-    @Inject(ServiceMetrics)
-    private readonly metrics: ServiceMetrics,
-  ) {
-    super();
-  }
 
   async checkReadiness(): Promise<boolean> {
     try {
       const pool = await this.getPool();
       const compatibility = await checkMigrationCompatibility(pool);
-      this.metrics.setDatabasePoolState(pool);
-      this.metrics.setMigrationCompatible(compatibility.compatible);
       return compatibility.compatible;
     } catch {
-      this.metrics.setMigrationCompatible(false);
       return false;
     }
+  }
+
+  getPoolStatistics(): { idle: number; total: number; waiting: number } {
+    const pool = this.pool;
+
+    return {
+      idle: pool?.idleCount ?? 0,
+      total: pool?.totalCount ?? 0,
+      waiting: pool?.waitingCount ?? 0,
+    };
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -46,14 +46,17 @@ export class DatabaseMembershipResolver
       organizationId,
       subjectId,
     });
-    this.metrics.setDatabasePoolState(pool);
     return membership ?? { emailVerified: false, role: null };
   }
 
   private getPool(): Promise<DatabasePool> {
     this.poolPromise ??= loadDatabaseConfiguration(process.env, {
       role: 'bap_api',
-    }).then((configuration) => createDatabasePool(configuration));
+    }).then((configuration) => {
+      const pool = createDatabasePool(configuration);
+      this.pool = pool;
+      return pool;
+    });
     return this.poolPromise;
   }
 }
