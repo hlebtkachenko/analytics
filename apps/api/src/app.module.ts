@@ -25,11 +25,16 @@ import {
     ReadyController,
   ],
   providers: [
-    ServiceMetrics,
     DatabaseMembershipResolver,
     {
       provide: MembershipResolver,
       useExisting: DatabaseMembershipResolver,
+    },
+    {
+      inject: [MembershipResolver],
+      provide: ServiceMetrics,
+      useFactory: (memberships: MembershipResolver): ServiceMetrics =>
+        new ServiceMetrics(memberships),
     },
     {
       provide: RESOURCE_JWT_VERIFIER,
