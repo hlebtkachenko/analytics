@@ -82,6 +82,17 @@ copyright 2011-present i18next.
 - Prometheus JavaScript client: <https://github.com/prometheus/client_js>
 - License: [Apache License 2.0](licenses/APACHE-2.0.txt)
 
+## Platform batteries
+
+pg-boss provides the PostgreSQL-backed job queue and cron scheduler under the
+MIT license. BAP pins its schema in a checksummed migration and keeps pg-boss
+self-migration disabled.
+
+Copyright (c) 2016 Tim Jones.
+
+- Source: <https://github.com/timgit/pg-boss>
+- License: [MIT](licenses/PG-BOSS-MIT.txt)
+
 ## Container foundation
 
 Caddy is licensed under Apache License 2.0. PostgreSQL is licensed under the
