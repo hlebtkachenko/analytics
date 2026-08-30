@@ -32,6 +32,12 @@ describe('AccessController', () => {
         url: '/v1/organizations/organization_1/access',
       }),
     ).resolves.toEqual({
+      capabilities: {
+        manageGrants: false,
+        manageMembers: true,
+        uploadData: true,
+        useAi: true,
+      },
       organizationId: 'organization_1',
       role: 'admin',
       service: 'reporting-api',

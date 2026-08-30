@@ -41,11 +41,22 @@ export class AccessController {
     schema: {
       additionalProperties: false,
       properties: {
+        capabilities: {
+          additionalProperties: false,
+          properties: {
+            manageGrants: { type: 'boolean' },
+            manageMembers: { type: 'boolean' },
+            uploadData: { type: 'boolean' },
+            useAi: { type: 'boolean' },
+          },
+          required: ['manageGrants', 'manageMembers', 'uploadData', 'useAi'],
+          type: 'object',
+        },
         organizationId: { type: 'string' },
         role: { enum: ['owner', 'admin', 'member'], type: 'string' },
         service: { enum: ['application-api'], type: 'string' },
       },
-      required: ['service', 'organizationId', 'role'],
+      required: ['service', 'organizationId', 'role', 'capabilities'],
       type: 'object',
     },
   })

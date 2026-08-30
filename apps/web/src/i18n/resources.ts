@@ -6,15 +6,20 @@ export const resources = {
   'en-US': {
     translation: {
       access: {
+        actions: 'Available actions',
         denied: 'You do not have access to this organization.',
         empty: 'No organizations are available for this account.',
         error: 'Organization access could not be checked.',
         loading: 'Checking organization access.',
+        manageGrants: 'Manage data grants',
+        manageMembers: 'Manage members',
         organization: 'Organization',
         reporting: 'Reporting API role',
         application: 'Application API role',
         selectOrganization: 'Select an organization',
         title: 'Organization access',
+        uploadData: 'Upload data',
+        useAi: 'Ask the assistant',
       },
       auth: {
         email: 'Email address',

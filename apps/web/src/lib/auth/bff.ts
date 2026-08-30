@@ -5,7 +5,16 @@ const organizationIdSchema = z
   .min(1)
   .max(128)
   .regex(/^[A-Za-z0-9_-]+$/);
+// Mirrors the access contract in @bap/security, which apps/web must not import.
 const accessResponseSchema = z.object({
+  capabilities: z
+    .object({
+      manageGrants: z.boolean(),
+      manageMembers: z.boolean(),
+      uploadData: z.boolean(),
+      useAi: z.boolean(),
+    })
+    .strict(),
   organizationId: organizationIdSchema,
   role: z.enum(['owner', 'admin', 'member']),
   service: z.enum(['application-api', 'reporting-api']),

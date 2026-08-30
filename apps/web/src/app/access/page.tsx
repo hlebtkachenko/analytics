@@ -23,6 +23,12 @@ const organizationsSchema = z.array(
   }),
 );
 const accessSchema = z.object({
+  capabilities: z.object({
+    manageGrants: z.boolean(),
+    manageMembers: z.boolean(),
+    uploadData: z.boolean(),
+    useAi: z.boolean(),
+  }),
   organizationId: z.string().min(1),
   role: z.enum(['owner', 'admin', 'member']),
   service: z.enum(['application-api', 'reporting-api']),
@@ -167,6 +173,30 @@ export default function AccessPage() {
               <p>
                 {t('access.reporting')}: {reportingAccess.role}
               </p>
+              <h2>{t('access.actions')}</h2>
+              {/* Capabilities only choose which actions are offered, the database enforces access. */}
+              <Stack gap={3} orientation="horizontal">
+                {applicationAccess.capabilities.manageMembers ? (
+                  <Button kind="tertiary" size="sm" type="button">
+                    {t('access.manageMembers')}
+                  </Button>
+                ) : null}
+                {applicationAccess.capabilities.manageGrants ? (
+                  <Button kind="tertiary" size="sm" type="button">
+                    {t('access.manageGrants')}
+                  </Button>
+                ) : null}
+                {applicationAccess.capabilities.uploadData ? (
+                  <Button kind="tertiary" size="sm" type="button">
+                    {t('access.uploadData')}
+                  </Button>
+                ) : null}
+                {applicationAccess.capabilities.useAi ? (
+                  <Button kind="tertiary" size="sm" type="button">
+                    {t('access.useAi')}
+                  </Button>
+                ) : null}
+              </Stack>
             </Stack>
           </Tile>
         ) : null}
