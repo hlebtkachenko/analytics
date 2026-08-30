@@ -56,7 +56,15 @@ What leaves is bounded. Dataset embedding and dataset summarization send dataset
 metadata only: the name, the description, and column names. Neither reads
 `app.dataset_row.data`, and a test asserts the summarization profile query never
 selects that column, so no stored cell value reaches a provider. Chat sends what
-the signed-in user typed.
+the signed-in user typed, and, when the panel names the dataset it has open, the
+same metadata only: the name, the description, and the column names with their
+inferred types. It holds that line structurally. The route parses the row page
+it reads into a column list alone, so the response body loses its rows before
+anything assembles a prompt, and no stored cell has a path into the context. The
+context is capped as well as filtered: at most 40 columns are listed, with the
+remainder counted rather than named, and the name, the description, and every
+column entry are clipped, so a dataset with hundreds of wide columns still
+produces a prompt of a few thousand characters.
 
 What is recorded is narrower still. Audit entries and metrics carry the model
 id, token counts, and the outcome, never prompt or completion text, because
@@ -77,12 +85,22 @@ model for a role leaves that job off: the chain reads the credential first and
 enqueues nothing for a role the credential does not name, so an absent or
 placeholder credential produces no queued work at all rather than a failing job.
 
-The chat route requires a verified session and nothing more, which is sound only
-because it registers no tools and therefore reaches no tenant data. Registering
-the first tool changes that: the route must then also resolve organization
-membership and the `use_ai` capability before it calls a model, exactly as the
-BFF does today. Treat that as a precondition of the first tool rather than a
-later improvement.
+The chat route names an organization in its body and resolves membership through
+the same helper the BFF access route uses, so a caller who is not a member of
+that organization, and a member whose contract withholds `use_ai`, is refused
+before the provider credential is read and before a model is called. That
+capability is `true` for every role today, so the gate changes no behaviour yet.
+It exists because the route registers no tools: the first tool that reaches
+tenant data inherits an authorization boundary instead of needing one added
+alongside it.
+
+A named dataset is resolved at the same point, after membership and before the
+credential. The route never queries the database. It calls the same BFF helpers
+the dataset pages call, so each call mints its own resource credential and row
+level security decides what the caller may see. A dataset that policy hides is
+simply absent from the list the route reads, so naming one is refused with a
+missing dataset rather than answered ungrounded, and the provider is never
+reached at all.
 
 A failed background job stores only a curated error name. `pgboss.job` has no
 row level security and is readable across tenants by `bap_api`, while provider

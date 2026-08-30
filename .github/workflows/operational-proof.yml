@@ -6,7 +6,9 @@ on:
       - 'packages/db/drizzle/**'
       - 'compose*.yaml'
       - 'docker/**'
+      - 'playwright.operational.config.ts'
       - 'scripts/**'
+      - 'tests/operational/**'
   schedule:
     - cron: '47 3 * * 1'
   workflow_dispatch:

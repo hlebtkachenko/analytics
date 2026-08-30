@@ -4,6 +4,7 @@ import {
   Button,
   InlineLoading,
   InlineNotification,
+  Link,
   Select,
   SelectItem,
   Stack,
@@ -130,6 +131,7 @@ export default function AccessPage() {
         <Button kind="secondary" onClick={() => void signOut()} type="button">
           {t('common.signOut')}
         </Button>
+        <Link href="/datasets">{t('access.datasets')}</Link>
         {state === 'loading' ? (
           <InlineLoading description={t('access.loading')} />
         ) : null}
