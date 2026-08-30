@@ -84,6 +84,9 @@ export type AuthUserLookup = Readonly<{
   ) => Promise<{ rows: readonly { two_factor_enabled: boolean }[] }>;
 }>;
 
+// Mirrors the constant-time floor Better Auth applies to its own verification mail.
+const magicLinkResponseFloorMs = 500;
+
 // Better Auth lowercases the address before matching, so the lookup mirrors that.
 const magicLinkUserQuery =
   'SELECT two_factor_enabled FROM auth."user" WHERE email = $1';
@@ -99,20 +102,23 @@ export function createMagicLinkOptions(
       // Better Auth sends before any user lookup, which would make this an open mail relay.
       const found = await pool.query(magicLinkUserQuery, [email.toLowerCase()]);
       const user = found.rows[0];
-      // Both branches return normally so a caller cannot learn whether the address exists.
-      if (!user) {
-        return;
-      }
       // A user who opted into a second factor must not keep a single-factor path back in.
-      if (user.two_factor_enabled) {
-        return;
+      const deliverable = user !== undefined && !user.two_factor_enabled;
+
+      if (deliverable) {
+        const message = mailTemplates.magicLink({ to: email, url });
+        // Detached so the response time never reveals whether a message was dispatched.
+        void sendMail(mail, {
+          subject: message.subject,
+          text: message.text,
+          to: email,
+        }).catch(() => undefined);
       }
-      const message = mailTemplates.magicLink({ to: email, url });
-      await sendMail(mail, {
-        subject: message.subject,
-        text: message.text,
-        to: email,
-      });
+
+      // Every branch waits the same floor, so latency cannot enumerate accounts either.
+      await new Promise((resolve) =>
+        setTimeout(resolve, magicLinkResponseFloorMs),
+      );
     },
   };
 }

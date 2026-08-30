@@ -22,9 +22,14 @@ accepts the invitation.
 Magic-link sign-in resolves the account before sending. Better Auth generates
 the token and calls the send hook without looking the user up, so an unguarded
 hook would mail any address a caller supplied. The hook therefore queries
-`auth."user"` first and returns without sending when the address is unknown, and
-it returns the same way in both cases so the endpoint cannot be used to
-enumerate accounts.
+`auth."user"` first and sends nothing when the address is unknown.
+
+Silence alone is not enough, because the sending branch would otherwise wait for
+an external provider call while the skipping branch returned immediately, and
+that difference is measurable. The send is therefore dispatched without being
+awaited and every branch waits the same fixed floor, so neither the response
+body nor its latency reveals whether an account exists. Better Auth applies the
+same floor to its own verification mail.
 
 The same hook refuses to send when the account has two factor enabled, because
 Better Auth challenges the second factor only on `/sign-in/email`,

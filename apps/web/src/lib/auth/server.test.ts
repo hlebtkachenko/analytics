@@ -156,6 +156,44 @@ describe('Better Auth magic link', () => {
     expect(sendMailMock).not.toHaveBeenCalled();
   });
 
+  it('takes the same floor whether or not it sends', async () => {
+    sendMailMock.mockImplementation(
+      async () =>
+        await new Promise((resolve) =>
+          setTimeout(() => resolve({ ok: true, transport: 'log' }), 2_000),
+        ),
+    );
+    const known = createMagicLinkOptions(
+      mailConfiguration,
+      lookupReturning([{ two_factor_enabled: false }]),
+    );
+    const unknown = createMagicLinkOptions(
+      mailConfiguration,
+      lookupReturning([]),
+    );
+
+    const startedKnown = Date.now();
+    await known.sendMagicLink({
+      email: 'member@bap.invalid',
+      token: 'token-5',
+      url: 'https://bap.invalid/access?token=token-5',
+    });
+    const knownElapsed = Date.now() - startedKnown;
+    const startedUnknown = Date.now();
+    await unknown.sendMagicLink({
+      email: 'stranger@bap.invalid',
+      token: 'token-6',
+      url: 'https://bap.invalid/access?token=token-6',
+    });
+    const unknownElapsed = Date.now() - startedUnknown;
+
+    // Both branches wait the floor, and the known branch never waits for the slow provider.
+    expect(knownElapsed).toBeGreaterThanOrEqual(400);
+    expect(unknownElapsed).toBeGreaterThanOrEqual(400);
+    expect(knownElapsed).toBeLessThan(1_500);
+    sendMailMock.mockReset();
+  }, 20_000);
+
   it('parameterizes the address instead of interpolating it', async () => {
     const pool = lookupReturning([]);
 
