@@ -3,6 +3,11 @@ import { createResourceJwtVerifier, SubjectRateLimiter } from '@bap/security';
 
 import { AccessController } from './access.controller.js';
 import { DatabaseMembershipResolver } from './database-membership-resolver.js';
+import { DatasetController } from './datasets/dataset.controller.js';
+import {
+  DatabaseDatasetRepository,
+  DatasetRepository,
+} from './datasets/dataset-repository.js';
 import { HealthController } from './health.controller.js';
 import {
   IngestionQueue,
@@ -29,15 +34,21 @@ import {
 @Module({
   controllers: [
     AccessController,
+    DatasetController,
     HealthController,
     MetricsController,
     ReadyController,
     UploadController,
   ],
   providers: [
+    DatabaseDatasetRepository,
     DatabaseMembershipResolver,
     DatabaseUploadRepository,
     PgBossIngestionQueue,
+    {
+      provide: DatasetRepository,
+      useExisting: DatabaseDatasetRepository,
+    },
     {
       provide: IngestionQueue,
       useExisting: PgBossIngestionQueue,

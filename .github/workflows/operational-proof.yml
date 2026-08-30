@@ -6,7 +6,9 @@ on:
       - 'packages/db/drizzle/**'
       - 'compose*.yaml'
       - 'docker/**'
+      - 'playwright.operational.config.ts'
       - 'scripts/**'
+      - 'tests/operational/**'
   schedule:
     - cron: '47 3 * * 1'
   workflow_dispatch:
@@ -128,6 +130,8 @@ jobs:
 
       - name: Stop stack
         if: always()
-        run:
-          docker compose -f compose.yaml -f compose.development.yaml down
-          --volumes
+        # The operations profile owns the restic volume, so a plain down leaves it for the next run.
+        run: >-
+          docker compose --profile operations --profile bootstrap -f
+          compose.yaml -f compose.development.yaml down --volumes
+          --remove-orphans
