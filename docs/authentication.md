@@ -17,6 +17,30 @@ deliver through the single mail module. Invitation mail links to
 `/invitation/:invitationId`, where an authenticated recipient reviews and
 accepts the invitation.
 
+## Magic link and two factor
+
+Magic-link sign-in resolves the account before sending. Better Auth generates
+the token and calls the send hook without looking the user up, so an unguarded
+hook would mail any address a caller supplied. The hook therefore queries
+`auth."user"` first and returns without sending when the address is unknown, and
+it returns the same way in both cases so the endpoint cannot be used to
+enumerate accounts.
+
+The same hook refuses to send when the account has two factor enabled, because
+Better Auth challenges the second factor only on `/sign-in/email`,
+`/sign-in/username`, and `/sign-in/phone-number`. A magic link that reached a
+two-factor account would mint a full session and defeat the factor.
+
+Known limitation: that guard is on the send side. A link delivered while two
+factor was disabled stays usable for its five-minute lifetime even if the owner
+enables two factor in that window, and any future code path that mints a
+magic-link token without the send hook would reopen the bypass. Closing it
+properly needs a verification-side hook on `/magic-link/verify`.
+
+Two factor is opt-in TOTP. Sign-in returns a two-factor redirect instead of a
+session, and `/sign-in/two-factor` verifies the code before the real session
+cookie is issued.
+
 The JWKS read endpoint remains public because private Nest services validate
 resource-token signatures against it.
 
@@ -77,9 +101,12 @@ replace the interactive owner bootstrap.
 
 Caddy replaces the dedicated `X-BAP-Client-IP` header. Better Auth reads only
 that single-value header, keeps proxy-origin inference disabled, and stores rate
-limit state in PostgreSQL. The baseline is 100 auth requests per minute and five
-requests per minute for one client address on each credential, magic-link,
-two-factor, password-reset, and member-invitation path.
+limit state in PostgreSQL. The baseline is 100 auth requests per minute. Custom
+rules replace the Better Auth built-ins entirely rather than layering on them,
+so each credential, magic-link, two-factor, and password-reset path is pinned at
+three requests per minute, which is never weaker than the built-in it replaces
+on either the ten-second or the sixty-second horizon. Member invitation stays at
+five per minute, well below the global default it replaces.
 
 ## Future identity work
 

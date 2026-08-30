@@ -82,6 +82,56 @@ describe('InvitationPage', () => {
     });
   });
 
+  it('accepts a comma-joined multi-role invitation', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({ ...pendingInvitation, role: 'admin,member' }),
+      ),
+    );
+
+    renderInvitationPage();
+
+    expect(await screen.findByText('Role: admin, member')).toBeVisible();
+    expect(
+      screen.queryByText('This invitation is no longer valid.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('rejects a role list that contains an unknown role', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({ ...pendingInvitation, role: 'member,auditor' }),
+      ),
+    );
+
+    renderInvitationPage();
+
+    expect(
+      await screen.findByText('This invitation is no longer valid.'),
+    ).toBeVisible();
+  });
+
+  it('surfaces a rejected acceptance request instead of failing silently', async () => {
+    const fetchMock = vi.fn(async (input: string) => {
+      if (input.startsWith('/api/auth/organization/get-invitation')) {
+        return Response.json(pendingInvitation);
+      }
+      throw new TypeError('Failed to fetch');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderInvitationPage();
+
+    (await screen.findByRole('button', { name: 'Accept invitation' })).click();
+
+    expect(
+      await screen.findByText('The invitation could not be accepted.'),
+    ).toBeVisible();
+    expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
   it('reports an expired invitation without offering acceptance', async () => {
     vi.stubGlobal(
       'fetch',

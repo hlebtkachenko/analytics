@@ -13,6 +13,16 @@ import { useTranslation } from 'react-i18next';
 
 import { authClient } from '../../lib/auth/client';
 
+// Better Auth answers a two-factor account with this marker instead of a session.
+function requiresTwoFactor(data: unknown): boolean {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    'twoFactorRedirect' in data &&
+    data.twoFactorRedirect === true
+  );
+}
+
 export default function SignInPage() {
   const { t } = useTranslation();
   const router = useRouter();
@@ -26,6 +36,10 @@ export default function SignInPage() {
     });
     if (result.error) {
       setError(true);
+      return;
+    }
+    if (requiresTwoFactor(result.data)) {
+      router.replace('/sign-in/two-factor');
       return;
     }
     router.replace('/access');

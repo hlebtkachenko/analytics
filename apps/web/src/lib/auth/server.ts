@@ -76,13 +76,37 @@ export async function readAuthSecret(path: string): Promise<string> {
   return secret;
 }
 
+// The magic link lookup needs one parameterized query and nothing else from the pool.
+export type AuthUserLookup = Readonly<{
+  query: (
+    text: string,
+    values: readonly string[],
+  ) => Promise<{ rows: readonly { two_factor_enabled: boolean }[] }>;
+}>;
+
+// Better Auth lowercases the address before matching, so the lookup mirrors that.
+const magicLinkUserQuery =
+  'SELECT two_factor_enabled FROM auth."user" WHERE email = $1';
+
 // Without disableSignUp magic link is a self-signup bypass around emailAndPassword.disableSignUp.
 export function createMagicLinkOptions(
   mail: MailConfiguration,
+  pool: AuthUserLookup,
 ): MagicLinkOptions {
   return {
     disableSignUp: true,
     sendMagicLink: async ({ email, url }) => {
+      // Better Auth sends before any user lookup, which would make this an open mail relay.
+      const found = await pool.query(magicLinkUserQuery, [email.toLowerCase()]);
+      const user = found.rows[0];
+      // Both branches return normally so a caller cannot learn whether the address exists.
+      if (!user) {
+        return;
+      }
+      // A user who opted into a second factor must not keep a single-factor path back in.
+      if (user.two_factor_enabled) {
+        return;
+      }
       const message = mailTemplates.magicLink({ to: email, url });
       await sendMail(mail, {
         subject: message.subject,
@@ -156,21 +180,21 @@ export function createInvitationSender(
   };
 }
 
-// Custom rules are matched by exact path, so every credential endpoint is listed.
+// Custom rules replace the built-in ones, so no entry may be more permissive than what it replaces.
 export const authRateLimitRules = {
   '/magic-link/verify': { max: 5, window: 60 },
   '/organization/invite-member': { max: 5, window: 60 },
-  '/request-password-reset': { max: 5, window: 60 },
-  '/sign-in/email': { max: 5, window: 60 },
-  '/sign-in/magic-link': { max: 5, window: 60 },
-  '/two-factor/disable': { max: 5, window: 60 },
-  '/two-factor/enable': { max: 5, window: 60 },
-  '/two-factor/generate-backup-codes': { max: 5, window: 60 },
-  '/two-factor/get-totp-uri': { max: 5, window: 60 },
-  '/two-factor/send-otp': { max: 5, window: 60 },
-  '/two-factor/verify-backup-code': { max: 5, window: 60 },
-  '/two-factor/verify-otp': { max: 5, window: 60 },
-  '/two-factor/verify-totp': { max: 5, window: 60 },
+  '/request-password-reset': { max: 3, window: 60 },
+  '/sign-in/email': { max: 3, window: 60 },
+  '/sign-in/magic-link': { max: 3, window: 60 },
+  '/two-factor/disable': { max: 3, window: 60 },
+  '/two-factor/enable': { max: 3, window: 60 },
+  '/two-factor/generate-backup-codes': { max: 3, window: 60 },
+  '/two-factor/get-totp-uri': { max: 3, window: 60 },
+  '/two-factor/send-otp': { max: 3, window: 60 },
+  '/two-factor/verify-backup-code': { max: 3, window: 60 },
+  '/two-factor/verify-otp': { max: 3, window: 60 },
+  '/two-factor/verify-totp': { max: 3, window: 60 },
 } as const;
 
 async function createAuth() {
@@ -180,7 +204,9 @@ async function createAuth() {
   });
   const mail = await loadMailConfiguration(process.env);
   const secret = await readAuthSecret(environment.BETTER_AUTH_SECRET_FILE);
-  authPool ??= createDatabasePool(configuration, { searchPath: 'auth' });
+  const pool = (authPool ??= createDatabasePool(configuration, {
+    searchPath: 'auth',
+  }));
 
   return betterAuth({
     advanced: {
@@ -198,7 +224,7 @@ async function createAuth() {
       trustedProxyHeaders: false,
     },
     baseURL: environment.BAP_PUBLIC_ORIGIN,
-    database: authPool,
+    database: pool,
     disabledPaths: [...disabledAuthPaths],
     emailAndPassword: {
       disableSignUp: true,
@@ -236,7 +262,7 @@ async function createAuth() {
         },
         schema: jwtAuthSchema,
       }),
-      magicLink(createMagicLinkOptions(mail)),
+      magicLink(createMagicLinkOptions(mail, pool)),
       // Strictly opt-in: only a user who enabled it is challenged after a password sign-in.
       twoFactor({
         issuer: 'BAP',

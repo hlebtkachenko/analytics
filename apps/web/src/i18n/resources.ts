@@ -44,6 +44,14 @@ export const resources = {
       reference: {
         title: 'Carbon design system',
       },
+      twoFactor: {
+        code: 'Verification code',
+        failed: 'Verification failed. Check the code and try again.',
+        summary:
+          'Enter the 6-digit verification code from your authenticator app.',
+        title: 'Two-step verification',
+        verify: 'Verify',
+      },
     },
   },
 } as const;

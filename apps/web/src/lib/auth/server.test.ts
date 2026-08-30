@@ -2,7 +2,7 @@ import { chmod, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { sendMailMock } = vi.hoisted(() => ({ sendMailMock: vi.fn() }));
 
@@ -13,6 +13,7 @@ vi.mock('../mail/index.ts', async (importOriginal) => ({
 
 import type { MailConfiguration } from '../mail/index.js';
 import { disabledAuthPaths, resourceJwtConfiguration } from './contract.js';
+import type { AuthUserLookup } from './server.js';
 import {
   authRateLimitRules,
   createInvitationSender,
@@ -28,6 +29,15 @@ const mailConfiguration: MailConfiguration = {
   sender: 'team@bap.invalid',
   transport: 'log',
 };
+
+function lookupReturning(rows: { two_factor_enabled: boolean }[]) {
+  const query = vi.fn().mockResolvedValue({ rows });
+  return { query } satisfies AuthUserLookup;
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 describe('Better Auth resource contract', () => {
   it('keeps only browser token retrieval and public signup disabled', () => {
@@ -92,23 +102,73 @@ describe('Better Auth resource contract', () => {
 
 describe('Better Auth magic link', () => {
   it('never signs a new user up', () => {
-    expect(createMagicLinkOptions(mailConfiguration).disableSignUp).toBe(true);
+    expect(
+      createMagicLinkOptions(mailConfiguration, lookupReturning([]))
+        .disableSignUp,
+    ).toBe(true);
   });
 
   it('sends the link through the mail module', async () => {
     sendMailMock.mockResolvedValueOnce({ ok: true, transport: 'log' });
+    const pool = lookupReturning([{ two_factor_enabled: false }]);
 
-    await createMagicLinkOptions(mailConfiguration).sendMagicLink({
-      email: 'member@bap.invalid',
+    await createMagicLinkOptions(mailConfiguration, pool).sendMagicLink({
+      email: 'Member@BAP.invalid',
       token: 'token-1',
       url: 'https://bap.invalid/access?token=token-1',
     });
 
+    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [
+      'member@bap.invalid',
+    ]);
     expect(sendMailMock).toHaveBeenCalledWith(mailConfiguration, {
       subject: 'Your BAP sign-in link',
       text: expect.stringContaining('https://bap.invalid/access?token=token-1'),
-      to: 'member@bap.invalid',
+      to: 'Member@BAP.invalid',
     });
+  });
+
+  it('sends nothing for an unknown address and stays non-enumerable', async () => {
+    const pool = lookupReturning([]);
+
+    await expect(
+      createMagicLinkOptions(mailConfiguration, pool).sendMagicLink({
+        email: 'stranger@bap.invalid',
+        token: 'token-2',
+        url: 'https://bap.invalid/access?token=token-2',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(sendMailMock).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing to a user who enabled a second factor', async () => {
+    const pool = lookupReturning([{ two_factor_enabled: true }]);
+
+    await expect(
+      createMagicLinkOptions(mailConfiguration, pool).sendMagicLink({
+        email: 'protected@bap.invalid',
+        token: 'token-3',
+        url: 'https://bap.invalid/access?token=token-3',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(sendMailMock).not.toHaveBeenCalled();
+  });
+
+  it('parameterizes the address instead of interpolating it', async () => {
+    const pool = lookupReturning([]);
+
+    await createMagicLinkOptions(mailConfiguration, pool).sendMagicLink({
+      email: "injected@bap.invalid' OR '1'='1",
+      token: 'token-4',
+      url: 'https://bap.invalid/access?token=token-4',
+    });
+
+    const [text, values] = pool.query.mock.calls[0] as [string, string[]];
+    expect(text).toContain('$1');
+    expect(text).not.toContain('injected');
+    expect(values).toEqual(["injected@bap.invalid' or '1'='1"]);
   });
 });
 
@@ -189,7 +249,37 @@ describe('Better Auth rate limits', () => {
       ].sort(),
     );
     for (const rule of Object.values(authRateLimitRules)) {
-      expect(rule).toEqual({ max: 5, window: 60 });
+      expect(rule.window).toBe(60);
+      expect(rule.max).toBeLessThanOrEqual(5);
     }
+  });
+
+  it('is never more permissive than the built-in rule it replaces', () => {
+    // Built-in: /sign-in* is 3 per 10s, /request-password-reset is 3 per 60s, /two-factor/* is 3 per 10s.
+    for (const path of [
+      '/request-password-reset',
+      '/sign-in/email',
+      '/sign-in/magic-link',
+      '/two-factor/disable',
+      '/two-factor/enable',
+      '/two-factor/generate-backup-codes',
+      '/two-factor/get-totp-uri',
+      '/two-factor/send-otp',
+      '/two-factor/verify-backup-code',
+      '/two-factor/verify-otp',
+      '/two-factor/verify-totp',
+    ] as const) {
+      expect(authRateLimitRules[path]).toEqual({ max: 3, window: 60 });
+    }
+    // Built-in: the magic link plugin caps both of its paths at 5 per 60s.
+    expect(authRateLimitRules['/magic-link/verify']).toEqual({
+      max: 5,
+      window: 60,
+    });
+    // No built-in rule matches invitations, so this only tightens the global 100 per 60s.
+    expect(authRateLimitRules['/organization/invite-member']).toEqual({
+      max: 5,
+      window: 60,
+    });
   });
 });
