@@ -8,6 +8,7 @@ vi.mock('resend', () => ({
   }),
 }));
 
+import { webLogger } from '../logger.ts';
 import {
   createResendTransport,
   logTransport,
@@ -54,7 +55,9 @@ describe('selectTransport', () => {
 
 describe('logTransport', () => {
   it('records the message so a developer can follow the link', async () => {
-    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const info = vi
+      .spyOn(webLogger, 'info')
+      .mockImplementation(() => undefined);
 
     await expect(
       logTransport.send('team@bap.invalid', message),

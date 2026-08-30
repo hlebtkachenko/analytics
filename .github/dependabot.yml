@@ -22,6 +22,19 @@ updates:
         dependency-type: production
         patterns:
           - '*'
+    # eslint 10 and typescript 7 fall outside peers that eslint-config-next and typescript-eslint still declare.
+    # strictPeerDependencies makes that a hard install failure, so these majors cannot land until upstream widens.
+    # Version updates only: security updates and every patch and minor release are unaffected.
+    ignore:
+      - dependency-name: '@eslint/js'
+        update-types:
+          - version-update:semver-major
+      - dependency-name: eslint
+        update-types:
+          - version-update:semver-major
+      - dependency-name: typescript
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: docker
     directory: /docker

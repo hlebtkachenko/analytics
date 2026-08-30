@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { webLogger } from '../logger.ts';
+
 const organizationIdSchema = z
   .string()
   .min(1)
@@ -155,6 +157,16 @@ function jsonResponse(
   });
 }
 
+// A 502 reaches the browser as a bare error code, so the reason is recorded without the upstream body.
+function upstreamFailure(
+  operation: string,
+  reason:
+    'unreachable' | 'unreadable' | 'unexpected_shape' | 'unexpected_media_type',
+): Response {
+  webLogger.error('bff upstream call failed', { operation, reason });
+  return jsonResponse({ error: 'service_unavailable' }, 502);
+}
+
 export function parseOrganizationId(value: string): string {
   return organizationIdSchema.parse(value);
 }
@@ -204,7 +216,7 @@ export async function getOrganizationAccess(
       },
     );
   } catch {
-    return jsonResponse({ error: 'service_unavailable' }, 502);
+    return upstreamFailure('getOrganizationAccess', 'unreachable');
   }
 
   if (!response.ok) {
@@ -215,11 +227,11 @@ export async function getOrganizationAccess(
   try {
     responseBody = await response.json();
   } catch {
-    return jsonResponse({ error: 'service_unavailable' }, 502);
+    return upstreamFailure('getOrganizationAccess', 'unreadable');
   }
   const payload = accessResponseSchema.safeParse(responseBody);
   if (!payload.success) {
-    return jsonResponse({ error: 'service_unavailable' }, 502);
+    return upstreamFailure('getOrganizationAccess', 'unexpected_shape');
   }
   if (
     payload.data.organizationId !== selector ||
@@ -285,7 +297,7 @@ export async function postDatasetUpload(
       } as RequestInit & { duplex: 'half' },
     );
   } catch {
-    return jsonResponse({ error: 'service_unavailable' }, 502);
+    return upstreamFailure('postDatasetUpload', 'unreachable');
   }
 
   if (!response.ok) {
@@ -296,11 +308,11 @@ export async function postDatasetUpload(
   try {
     responseBody = await response.json();
   } catch {
-    return jsonResponse({ error: 'service_unavailable' }, 502);
+    return upstreamFailure('postDatasetUpload', 'unreadable');
   }
   const payload = uploadAcceptedSchema.safeParse(responseBody);
   if (!payload.success) {
-    return jsonResponse({ error: 'service_unavailable' }, 502);
+    return upstreamFailure('postDatasetUpload', 'unexpected_shape');
   }
 
   return jsonResponse(payload.data, 202, { 'x-request-id': requestId });
@@ -382,7 +394,7 @@ export async function getDatasets(
       },
     );
   } catch {
-    return jsonResponse({ error: 'service_unavailable' }, 502);
+    return upstreamFailure('getDatasets', 'unreachable');
   }
 
   if (!response.ok) {
@@ -393,11 +405,11 @@ export async function getDatasets(
   try {
     responseBody = await response.json();
   } catch {
-    return jsonResponse({ error: 'service_unavailable' }, 502);
+    return upstreamFailure('getDatasets', 'unreadable');
   }
   const payload = datasetListSchema.safeParse(responseBody);
   if (!payload.success) {
-    return jsonResponse({ error: 'service_unavailable' }, 502);
+    return upstreamFailure('getDatasets', 'unexpected_shape');
   }
 
   return jsonResponse(payload.data, 200, {
@@ -455,7 +467,7 @@ export async function getDatasetRows(
       },
     );
   } catch {
-    return jsonResponse({ error: 'service_unavailable' }, 502);
+    return upstreamFailure('getDatasetRows', 'unreachable');
   }
 
   if (!response.ok) {
@@ -466,11 +478,11 @@ export async function getDatasetRows(
   try {
     responseBody = await response.json();
   } catch {
-    return jsonResponse({ error: 'service_unavailable' }, 502);
+    return upstreamFailure('getDatasetRows', 'unreadable');
   }
   const payload = datasetRowPageSchema.safeParse(responseBody);
   if (!payload.success || payload.data.datasetId !== parsedDatasetId.data) {
-    return jsonResponse({ error: 'service_unavailable' }, 502);
+    return upstreamFailure('getDatasetRows', 'unexpected_shape');
   }
 
   return jsonResponse(payload.data, 200, {
@@ -527,7 +539,7 @@ export async function getDatasetExport(
       },
     );
   } catch {
-    return jsonResponse({ error: 'service_unavailable' }, 502);
+    return upstreamFailure('getDatasetExport', 'unreachable');
   } finally {
     clearTimeout(headerTimeout);
   }
@@ -542,7 +554,7 @@ export async function getDatasetExport(
     (response.headers.get('content-type') ?? '').toLowerCase() !== mediaType ||
     response.body === null
   ) {
-    return jsonResponse({ error: 'service_unavailable' }, 502);
+    return upstreamFailure('getDatasetExport', 'unexpected_media_type');
   }
 
   // The filename is minted here from the validated dataset id, so no upstream header reaches the browser.
