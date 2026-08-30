@@ -13,6 +13,9 @@ const usage = {
 // The registry seam is the only thing the wrappers touch, so a mock model satisfies it.
 function mockRegistry(model: AiLanguageModel): AiRegistry {
   return {
+    embeddingModel: () => {
+      throw new Error('The text wrappers must not resolve an embedding model.');
+    },
     languageModel: () => model,
     modelId: () => 'anthropic:mock-model',
     provider: 'anthropic',

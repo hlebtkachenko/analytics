@@ -58,6 +58,14 @@ Every future tenant table must include:
 - a `USING` policy for reads and changes;
 - a matching `WITH CHECK` policy for inserted or changed rows.
 
+Split the policies per command whenever a table is readable more widely than it
+is writable. A single `ALL` policy applies its `USING` clause to `DELETE` and to
+the row selection of `UPDATE`, so a read grant would silently confer deletion.
+`app.dataset`, `app.dataset_column`, `app.dataset_row`, and
+`app.dataset_embedding` therefore carry separate `SELECT`, `INSERT`, `UPDATE`,
+and `DELETE` policies: reading follows the dataset, writing stays with its
+creator.
+
 Tenant context is set with `SET LOCAL` inside one transaction. It cannot persist
 through pooled connections after commit or rollback. Missing context fails
 closed. Production migrations never enumerate disposable RLS test fixtures.
@@ -78,3 +86,14 @@ a fixed `search_path` and to take no organization or subject argument at all, so
 a caller cannot name the tenant it writes to; attribution comes from
 `current_setting`, and a payload claiming another organization still lands in
 the caller's own tenant.
+
+It also proves the phase 3 embedding table. `app.dataset_embedding` stores one
+`vector(1536)` per dataset, keyed to its parent by a composite foreign key that
+pins `organization_id` to the dataset's own value. The suite seeds a second
+tenant with a byte-identical vector and asserts that a nearest-neighbour query
+ordered by cosine distance still returns only the caller's rows, that a read
+grant confers neither `DELETE`, `UPDATE`, nor a conflicting `INSERT`, that
+`bap_reporting` may read but not write, that `bap_backup` sees every tenant's
+vectors and may not delete them, and that `pg_dump` carries both the table and
+its data. The dimension is fixed by the embedding model the AI credential names:
+adopting a model of another width needs a new migration and a full re-backfill.

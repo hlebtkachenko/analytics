@@ -1,13 +1,20 @@
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 
+import { createLazyAiRegistry } from './agents/ai-registry.js';
+import {
+  BACKFILL_EMBEDDINGS_QUEUE,
+  SUMMARIZE_DATASET_QUEUE,
+} from './agents/contract.js';
 import { INGEST_DATASET_QUEUE } from './ingestion/contract.js';
 import {
   createStagingDirectory,
   loadStagingDirectory,
 } from './ingestion/staging.js';
 import { ApplicationLogger } from './logger.js';
+import { backfillDatasetEmbeddings } from './worker/backfill-embeddings.js';
 import { ingestDataset } from './worker/ingest-dataset.js';
+import { summarizeDataset } from './worker/summarize-dataset.js';
 import { startObservabilityServer } from './worker/observability.js';
 import {
   createQueue,
@@ -54,6 +61,31 @@ async function bootstrap(): Promise<void> {
         metrics,
         pool,
         stagingDirectory,
+      });
+    }
+  });
+
+  // Resolved on first agent job, so a missing or placeholder AI credential cannot stop the worker booting.
+  const registry = createLazyAiRegistry(process.env);
+  await createQueue(queue, BACKFILL_EMBEDDINGS_QUEUE);
+  await queue.work<unknown, void>(BACKFILL_EMBEDDINGS_QUEUE, async (jobs) => {
+    for (const job of jobs) {
+      await backfillDatasetEmbeddings({
+        data: job.data,
+        metrics,
+        pool,
+        registry,
+      });
+    }
+  });
+  await createQueue(queue, SUMMARIZE_DATASET_QUEUE);
+  await queue.work<unknown, void>(SUMMARIZE_DATASET_QUEUE, async (jobs) => {
+    for (const job of jobs) {
+      await summarizeDataset({
+        data: job.data,
+        metrics,
+        pool,
+        registry,
       });
     }
   });

@@ -71,6 +71,7 @@ flowchart TD
   web --> typescript
   web --> design
   web --> db
+  web --> ai
   api --> eslint
   api --> typescript
   api --> db
@@ -87,8 +88,8 @@ flowchart TD
 Applications do not import one another. Packages cannot import applications.
 `@bap/db` is the only database boundary, `@bap/security` owns service-neutral
 JWT/access contracts, and `@bap/design-system` is the only UI library. `@bap/ai`
-owns the model-provider boundary and has no application consumer yet, so no
-application edge points at it.
+owns the model-provider boundary, and the web streaming chat route is its only
+application consumer.
 
 The design-system workbench is a development and static-reference application,
 not a production container. It consumes only public `@bap/design-system`

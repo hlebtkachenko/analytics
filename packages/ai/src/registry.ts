@@ -10,6 +10,10 @@ export type AiLanguageModel = ReturnType<
   ProviderRegistryProvider['languageModel']
 >;
 
+export type AiEmbeddingModel = ReturnType<
+  ProviderRegistryProvider['embeddingModel']
+>;
+
 type AiProvider = Parameters<typeof createProviderRegistry>[0][string];
 
 interface ProviderSettings {
@@ -32,6 +36,7 @@ export interface AiRegistryOptions {
 }
 
 export interface AiRegistry {
+  embeddingModel(id: AiModelId): AiEmbeddingModel;
   languageModel(id: AiModelId): AiLanguageModel;
   // Resolves a role named by the credential to a fully qualified model identifier.
   modelId(role: string): AiModelId;
@@ -54,6 +59,10 @@ export function createAiRegistry(
   });
 
   return {
+    embeddingModel(id: AiModelId): AiEmbeddingModel {
+      return registry.embeddingModel(id);
+    },
+
     languageModel(id: AiModelId): AiLanguageModel {
       return registry.languageModel(id);
     },

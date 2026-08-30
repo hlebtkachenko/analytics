@@ -46,6 +46,26 @@ path. `scripts/verify-compose.mjs` fails when any other service joins that
 network, and the container smoke job proves the web service still resolves and
 connects outward.
 
+## Model provider boundary
+
+Model calls are the one place where tenant-derived text deliberately leaves the
+deployment. Only the web application and the worker can reach a provider at all,
+because they are the only members of the `internet-egress` network.
+
+What leaves is bounded. Dataset embedding and dataset summarization send dataset
+metadata only: the name, the description, and column names. Neither reads
+`app.dataset_row.data`, and a test asserts the summarization profile query never
+selects that column, so no stored cell value reaches a provider. Chat sends what
+the signed-in user typed.
+
+What is recorded is narrower still. Audit entries and metrics carry the model
+id, token counts, and the outcome, never prompt or completion text, because
+audit rows are readable by everyone in the organization.
+
+An operator who treats dataset and column names as sensitive should enable the
+embedding and summarization jobs deliberately rather than by default. Naming no
+model for those roles leaves them off.
+
 ## Background worker boundary
 
 The worker is a second entrypoint in the application API image and connects as

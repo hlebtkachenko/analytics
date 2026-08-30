@@ -56,11 +56,16 @@ are the PostgreSQL administrator, migrator, auth, application, reporting,
 backup, Better Auth, Resend, AI provider, and restic credential files listed in
 `config/compose.environment.example`. The Resend key and the AI provider
 document are seeded with the literal placeholder
-`local-development-placeholder`. The mail transport is never inferred from that
-value: `BAP_MAIL_TRANSPORT` selects it explicitly, the development overlay sets
-`log`, and the `resend` transport refuses to start with an absent or placeholder
-key so a misconfigured deployment fails loudly instead of dropping mail. Create
-disposable local values with:
+`local-development-placeholder`, and the AI credential refuses it too, so no
+model call leaves a development machine by accident. The AI provider document
+also names one model per role. Three roles are used today: `chat` for the
+streaming assistant, `embedding` for dataset embeddings, and `summary` for
+dataset summarization. A role the credential does not name fails that one
+feature with a clear message and leaves the rest of the platform working. The
+mail transport is never inferred from that value: `BAP_MAIL_TRANSPORT` selects
+it explicitly, the development overlay sets `log`, and the `resend` transport
+refuses to start with an absent or placeholder key so a misconfigured deployment
+fails loudly instead of dropping mail. Create disposable local values with:
 
 ```sh
 pnpm secrets:local

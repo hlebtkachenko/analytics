@@ -10,6 +10,9 @@ const secretCompletion = 'Revenue fell by 12 percent.';
 
 function mockRegistry(model: AiLanguageModel): AiRegistry {
   return {
+    embeddingModel: () => {
+      throw new Error('The audit helper must not resolve an embedding model.');
+    },
     languageModel: () => model,
     modelId: () => 'anthropic:mock-model',
     provider: 'anthropic',
