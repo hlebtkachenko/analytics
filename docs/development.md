@@ -65,6 +65,16 @@ long-lived web container: web intentionally has no migrator credential. The
 synthetic command remains gated by `BAP_E2E_SETUP=true` and is not a general
 quota administration tool.
 
+Use the existing migrator one-shot for an explicit organization quota change:
+
+```sh
+docker compose -f compose.yaml -f compose.development.yaml run --rm --no-deps migrator node node_modules/@bap/db/dist/cli.js organization-quota --email member@example.test --total 2 --note 'operator-approved capacity'
+```
+
+All 3 named arguments are required. The command writes only through a local
+owner role inside its transaction and emits the resulting row as JSON. Do not
+run it in web or add the migrator credential to a long-lived service.
+
 ## Conductor workspaces
 
 Each Conductor workspace is a separate git worktree, so everything the

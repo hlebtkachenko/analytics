@@ -93,6 +93,23 @@ normalization, invalid legacy membership returning no access, and both setup
 entrypoints validating before user writes and closing their one-shot migrator
 pool before organization creation.
 
+Phase 8 focused auth coverage dispatches the configured Better Auth handler to
+prove quota exhaustion returns 403 before writes, raw slugs are normalized
+before framework side effects, invalid and reserved results are side-effect
+free, forged creator input is discarded, and the authenticated creator becomes
+an `owner`. Unit coverage pins the fail-closed `organizationLimit` polarity,
+explicit owner and 100-member settings, the 10 bindable active-organization
+guards, unconditional hook rejection of `get-active-member`, and all 3 public
+disabled organization routes plus normalized outer-route variants. A positive
+configured-handler control proves `get-active-member-role` resolves the supplied
+organization id rather than ambient session state. Coverage also pins the
+10-per-minute slug-check rule. The database CLI suite requires exactly
+`--email --total --note`, asserts its single owner-role transaction and
+parameter values, and proves rollback plus generic JSON failures. Integration
+also reads the resulting note and NULL auth grantor through the real role
+boundary. The existing advisory-lock race remains the authoritative concurrency
+proof; an application precheck is not treated as race enforcement.
+
 The scheduled and manually runnable GitHub Actions operational proof creates a
 disposable local Compose stack, creates a gated synthetic account, completes a
 browser sign-in and organization-access check, then backs up and restores the

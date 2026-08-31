@@ -55,6 +55,11 @@ paths. These are internal runtime values, not user configuration.
 - Caddy provides the only public application port and replaces client identity
   with `X-BAP-Client-IP`.
 
+The `organization-quota --email --total --note` operator command reuses the
+existing migrator service and credential. It introduces no environment variable
+or secret. Its required note is stored as quota provenance; `granted_by` remains
+NULL because a host operator is not an `auth.user`.
+
 Next.js telemetry is disabled in container builds and runtimes.
 
 ## Secret files

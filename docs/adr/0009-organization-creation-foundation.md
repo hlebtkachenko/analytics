@@ -27,8 +27,8 @@ grants remain owner-tier writes.
 
 `auth.organization.created_by` is nullable and references `auth.user` with
 `ON DELETE SET NULL`. NULL identifies an unattributed legacy or system-created
-organization and consumes no user's quota. Phase 7 does not yet enable the
-public creation path or inject creator attribution into Better Auth writes.
+organization and consumes no user's quota. The Phase 8 path described below
+injects creator attribution into ordinary Better Auth writes.
 
 A BEFORE INSERT trigger takes `pg_advisory_xact_lock(hashtext(created_by))`,
 reads the creator's quota, counts organizations with that exact creator, and
@@ -61,13 +61,39 @@ credential mounts. The operational synthetic command runs as a command override
 of that service. Long-lived web receives neither the migrator path nor its
 secret, and no quota-write function is executable by `bap_auth`.
 
+Phase 8 enables Better Auth creation and configures its function-form
+`organizationLimit` as a fail-closed precheck over creator-attributed rows. The
+global before-hook normalizes and validates slugs before Better Auth queries;
+the plugin hook validates again and injects the authenticated user id into a
+`createdBy` field declared `input: false`. The creator role is explicitly
+`owner`, and membership is capped at 100. The PostgreSQL trigger remains the
+real race-enforcement boundary.
+
+The installed Better Auth 1.7.2 source has 11 organization endpoints that use
+active-organization fallback, rather than the plan's earlier inventory of 8. The
+before-hook requires explicit `organizationId` input on the 10 endpoints that
+can bind one. `get-active-member` has no id input, so the hook always rejects it
+and the public router disables it. Better Auth creation and invitation
+acceptance may still update stored `activeOrganizationId`, but no supported BAP
+operation may consume it as an implicit selector. Public organization deletion
+and active-organization mutation are disabled. General quota grants run only
+through the existing migrator one-shot and require email, total, and note; the
+command sets `bap_owner` locally and records a NULL auth grantor plus the
+operator note.
+
 ## Consequences
 
 Creator-attributed inserts cannot race past quota, and accepting an invitation
 does not consume creation allowance. Existing and Phase 7 system-created
-organizations with NULL attribution count against no user. Phase 8 must inject
-`created_by`, enable the approved creation path, and add the general quota grant
-CLI; this decision does none of those tasks. Phase 9 routing remains separate.
+organizations with NULL attribution count against no user. The ordinary path is
+now quota gated and creator attributed, while Phase 9 routing and UI remain
+separate.
+
+The Better Auth precheck can race, so an insertion rejected by the trigger may
+surface as a generic server failure. Disabling auth-only organization deletion
+also leaves an interim ownership deadlock: a sole owner can delete neither the
+organization nor their account until ownership is delegated. A cross-schema
+operator purge workflow is a later milestone.
 
 The literal reserved list must advance with new route segments in the later
 routing phase. No confusable folding, `slug_key`, or reserved-slug table is

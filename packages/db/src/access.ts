@@ -165,6 +165,20 @@ export interface InitialOrganizationQuota {
   userId: string;
 }
 
+export interface OrganizationQuotaGrant {
+  grantedAt: Date;
+  grantedBy: string | null;
+  grantedTotal: number;
+  note: string | null;
+  userId: string;
+}
+
+export interface SetOrganizationQuotaInput {
+  email: string;
+  note: string;
+  total: number;
+}
+
 const initialOrganizationQuotaNote = 'system-bootstrap: initial organization';
 
 export async function ensureInitialOrganizationQuota(
@@ -236,6 +250,94 @@ export async function ensureInitialOrganizationQuota(
       grantedTotal: result.granted_total,
       note: result.note,
       userId: result.user_id,
+    };
+  } catch (error) {
+    if (transactionOpen) {
+      await client.query('rollback').catch(() => undefined);
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function organizationCreationLimitReached(
+  pool: DatabasePool,
+  userId: string,
+): Promise<boolean | null> {
+  const result = await pool.query<{ limit_reached: boolean }>(
+    `select quota.granted_total <= count(organization.id)::integer as limit_reached
+     from auth.organization_quota as quota
+     left join auth.organization as organization
+       on organization.created_by = quota.user_id
+     where quota.user_id = $1
+     group by quota.granted_total`,
+    [userId],
+  );
+  const limitReached = result.rows[0]?.limit_reached;
+
+  return typeof limitReached === 'boolean' ? limitReached : null;
+}
+
+export async function setOrganizationQuota(
+  pool: DatabasePool,
+  input: SetOrganizationQuotaInput,
+): Promise<OrganizationQuotaGrant> {
+  const client = await pool.connect();
+  let transactionOpen = false;
+
+  try {
+    await client.query('begin');
+    transactionOpen = true;
+    await client.query('set local role bap_owner');
+
+    const user = await client.query<{ id: string }>(
+      `select id
+       from auth."user"
+       where lower(email) = lower($1)`,
+      [input.email],
+    );
+    const userId = user.rows[0]?.id;
+    if (user.rows.length !== 1 || userId === undefined) {
+      throw new Error('Quota subject was not found.');
+    }
+
+    const result = await client.query<{
+      granted_at: Date;
+      granted_by: string | null;
+      granted_total: number;
+      note: string | null;
+      user_id: string;
+    }>(
+      `insert into auth.organization_quota (
+         user_id,
+         granted_total,
+         granted_by,
+         granted_at,
+         note
+       )
+       values ($1, $2, null, now(), $3)
+       on conflict (user_id) do update
+       set granted_total = excluded.granted_total,
+           granted_by = excluded.granted_by,
+           granted_at = excluded.granted_at,
+           note = excluded.note
+       returning user_id, granted_total, granted_by, granted_at, note`,
+      [userId, input.total, input.note],
+    );
+    const quota = result.rows[0];
+    if (quota === undefined) {
+      throw new Error('Organization quota was not updated.');
+    }
+
+    await client.query('commit');
+    transactionOpen = false;
+    return {
+      grantedAt: quota.granted_at,
+      grantedBy: quota.granted_by,
+      grantedTotal: quota.granted_total,
+      note: quota.note,
+      userId: quota.user_id,
     };
   } catch (error) {
     if (transactionOpen) {

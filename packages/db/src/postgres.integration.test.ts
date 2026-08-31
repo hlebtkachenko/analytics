@@ -13,11 +13,13 @@ import {
   countSoleOwnedOrganizations,
   consumePublicSignupEdgeRateLimit,
   ensureInitialOrganizationQuota,
+  organizationCreationLimitReached,
   publicSignupInvitationExists,
   publicSignupEnabled,
   recordUserErasureRequest,
   resolveMembership,
   runMigrations,
+  setOrganizationQuota,
   withTenantContext,
 } from './index.js';
 import type { TenantContext } from './index.js';
@@ -644,6 +646,7 @@ describe('PostgreSQL 18 isolation', () => {
           ('quota-race', 'Quota Race', 'quota-race@example.test', true),
           ('quota-zero', 'Quota Zero', 'quota-zero@example.test', true),
           ('quota-existing', 'Quota Existing', 'quota-existing@example.test', true),
+          ('quota-operator', 'Quota Operator', 'quota-operator@example.test', true),
           ('quota-grantor', 'Quota Grantor', 'quota-grantor@example.test', true)
       `);
       await client.query(`
@@ -658,6 +661,25 @@ describe('PostgreSQL 18 isolation', () => {
     });
 
     try {
+      await expect(
+        organizationCreationLimitReached(authPool, 'quota-none'),
+      ).resolves.toBeNull();
+      await expect(
+        setOrganizationQuota(migratorPool, {
+          email: 'quota-operator@example.test',
+          note: 'operator-approved: phase-8 integration',
+          total: 2,
+        }),
+      ).resolves.toMatchObject({
+        grantedBy: null,
+        grantedTotal: 2,
+        note: 'operator-approved: phase-8 integration',
+        userId: 'quota-operator',
+      });
+      await expect(
+        organizationCreationLimitReached(authPool, 'quota-operator'),
+      ).resolves.toBe(false);
+
       await expect(
         authPool.query(
           `insert into auth.organization (id, name, slug, created_by)
@@ -684,6 +706,9 @@ describe('PostgreSQL 18 isolation', () => {
            values ('quota-two-3', 'Quota Two Three', 'quota-two-three', 'quota-two')`,
         ),
       ).rejects.toThrow(/quota exceeded/);
+      await expect(
+        organizationCreationLimitReached(authPool, 'quota-two'),
+      ).resolves.toBe(true);
 
       const firstRaceClient = await authPool.connect();
       let firstTransactionOpen = false;

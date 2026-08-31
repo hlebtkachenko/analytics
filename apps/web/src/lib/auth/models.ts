@@ -99,6 +99,14 @@ export const organizationAuthSchema = {
     modelName: 'member',
   },
   organization: {
+    additionalFields: {
+      createdBy: {
+        fieldName: 'created_by',
+        input: false,
+        required: false,
+        type: 'string',
+      },
+    },
     fields: {
       createdAt: 'created_at',
       logo: 'logo',

@@ -63,8 +63,21 @@ Organization creation quota is durable auth-schema state separate from
 membership. A database trigger serializes non-NULL creator-attributed inserts
 with a transaction advisory lock and enforces count against quota atomically.
 NULL identifies an unattributed legacy or system organization and consumes no
-user quota. The web role can read quota but cannot grant it. Phase 7 keeps the
-ordinary creation path disabled; later creation work must supply the creator.
+user quota. The web role can read quota but cannot grant it. Better Auth's
+enabled creation path normalizes and validates the slug before framework side
+effects, injects the authenticated creator through a non-input field, and makes
+that creator an owner. Its fail-closed count is a usability precheck; the
+trigger remains authoritative for races.
+
+Ten installed organization endpoints that could otherwise fall back to session
+active-organization state require a bindable explicit organization id. The
+eleventh, `get-active-member`, cannot bind an id and is always rejected by the
+auth hook and public router. Better Auth creation and invitation acceptance may
+update stored active-organization state, but no supported BAP operation uses it
+as an implicit selector. Public active-organization mutation and organization
+deletion are disabled. A host operator can change quota only through the
+one-shot migrator CLI, which sets the owner role locally inside 1 transaction
+and records a required note.
 
 ## Workspace dependency rules
 
@@ -146,6 +159,10 @@ only to establish the minimum initial organization quota. The migrator pool is
 closed before the organization API call. The gated operational synthetic setup
 runs as a command override of this one-shot service. Long-lived web has neither
 the migrator environment path nor its secret mount.
+
+The general organization-quota command runs in the existing one-shot migrator
+service. It has no auth credential, web route, or long-lived process and returns
+only the resulting quota row as JSON.
 
 The separately selected development and operational-proof Mailpit overlay adds 1
 ephemeral sink on the `app` network. Web sends to its internal cleartext SMTP

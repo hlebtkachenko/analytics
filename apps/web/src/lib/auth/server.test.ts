@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DatabasePool } from '@bap/db/pool';
 import { betterAuth } from 'better-auth';
 import { memoryAdapter, type MemoryDB } from 'better-auth/adapters/memory';
-import { admin } from 'better-auth/plugins';
+import { admin, organization } from 'better-auth/plugins';
 
 const { sendMailMock } = vi.hoisted(() => ({ sendMailMock: vi.fn() }));
 
@@ -24,17 +24,27 @@ import {
   adminPluginOptions,
   authLoggerConfiguration,
   authRateLimitRules,
+  beforeCreateOrganization,
   createAccountDeletionBeforeHook,
+  createAuthBeforeHook,
   createPublicSignUpBeforeHook,
   createInvitationSender,
   createPasswordResetSender,
   createVerificationSender,
   customSyntheticUser,
+  invalidOrganizationSlugErrorCode,
   loadAuthEnvironment,
+  organizationCreationConfiguration,
+  organizationIdRequiredErrorCode,
+  organizationIdRequiredPaths,
+  organizationLimitReached,
   publicSignUpAllowed,
   publicSignUpErrorCode,
   readAuthSecret,
+  unsupportedActiveOrganizationEndpointErrorCode,
+  unsupportedActiveOrganizationPath,
 } from './server.js';
+import { organizationAuthSchema } from './models.js';
 
 const mailConfiguration: MailConfiguration = {
   apiKey: undefined,
@@ -149,6 +159,71 @@ async function expectControlledAdminIsAuthorized({
   await expect(response.json()).resolves.toMatchObject({ id: targetUserId });
 }
 
+async function createControlledOrganizationFixture(limitReached = false) {
+  const database = {
+    account: [],
+    invitation: [],
+    member: [] as Array<Record<string, unknown>>,
+    organization: [] as Array<Record<string, unknown>>,
+    session: [] as Array<Record<string, unknown>>,
+    user: [] as Array<Record<string, unknown>>,
+    verification: [],
+  } satisfies MemoryDB;
+  const query = vi.fn(async (statement: string) => {
+    if (statement.includes('from auth.invitation')) {
+      return { rows: [{ invited: true }] };
+    }
+    if (statement.includes('from auth.organization_quota')) {
+      return { rows: [{ limit_reached: limitReached }] };
+    }
+    throw new Error('Unexpected organization fixture query.');
+  });
+  const pool = { query } as unknown as DatabasePool;
+  const auth = betterAuth({
+    baseURL: 'https://bap.invalid',
+    database: memoryAdapter(database),
+    disabledPaths: [...disabledAuthPaths],
+    emailAndPassword: { enabled: true },
+    hooks: { before: createAuthBeforeHook(pool) },
+    plugins: [
+      organization({
+        ...organizationCreationConfiguration,
+        organizationHooks: { beforeCreateOrganization },
+        organizationLimit: (user) => organizationLimitReached(pool, user),
+        schema: organizationAuthSchema,
+      }),
+    ],
+    secret: 'test-only-secret-that-is-long-enough',
+  });
+  const signUpResponse = await auth.handler(
+    new Request('https://bap.invalid/api/auth/sign-up/email', {
+      body: JSON.stringify({
+        email: 'creator@example.test',
+        name: 'Controlled Creator',
+        password: 'test-only-creator-password',
+      }),
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    }),
+  );
+  const sessionCookie = signUpResponse.headers
+    .get('set-cookie')
+    ?.split(';', 1)[0];
+  const user = database.user[0];
+  expect(signUpResponse.status).toBe(200);
+  expect(sessionCookie).toBeTruthy();
+  expect(user).toBeTruthy();
+  query.mockClear();
+
+  return {
+    auth,
+    database,
+    query,
+    sessionCookie: sessionCookie ?? '',
+    user: user ?? {},
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -162,6 +237,9 @@ describe('Better Auth resource contract', () => {
         '/admin/stop-impersonating',
         '/change-email',
         '/delete-user/callback',
+        '/organization/delete',
+        '/organization/get-active-member',
+        '/organization/set-active',
         '/token',
       ].sort(),
     );
@@ -537,6 +615,427 @@ describe('public sign-up policy', () => {
   });
 });
 
+describe('organization creation policy', () => {
+  function poolWithQuery(query: ReturnType<typeof vi.fn>): DatabasePool {
+    return { query } as unknown as DatabasePool;
+  }
+
+  it('pins creation, ownership, membership, and deletion semantics', () => {
+    expect(organizationCreationConfiguration).toEqual({
+      allowUserToCreateOrganization: true,
+      creatorRole: 'owner',
+      disableOrganizationDeletion: true,
+      membershipLimit: 100,
+    });
+  });
+
+  it('normalizes a create slug before Better Auth side effects', async () => {
+    const query = vi.fn();
+    const hook = createAuthBeforeHook(poolWithQuery(query));
+    const body = {
+      createdBy: 'forged-user',
+      name: 'Example',
+      slug: ' Example  Org ',
+    };
+
+    await expect(
+      hook({ body, path: '/organization/create' }),
+    ).resolves.toBeUndefined();
+    expect(body).toEqual({
+      createdBy: 'forged-user',
+      name: 'Example',
+      slug: 'example-org',
+    });
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it.each(['API', '12345', '--'])(
+    'rejects invalid create slug %s before any database query',
+    async (slug) => {
+      const query = vi.fn();
+      const hook = createAuthBeforeHook(poolWithQuery(query));
+
+      await expect(
+        hook({ body: { name: 'Example', slug }, path: '/organization/create' }),
+      ).rejects.toMatchObject({
+        body: { code: invalidOrganizationSlugErrorCode },
+      });
+      expect(query).not.toHaveBeenCalled();
+    },
+  );
+
+  it('injects the authenticated creator and overwrites forged hook data', async () => {
+    await expect(
+      beforeCreateOrganization({
+        organization: {
+          createdBy: 'forged-user',
+          name: 'Example',
+          slug: 'example-org',
+        },
+        user: { id: 'authenticated-user' },
+      }),
+    ).resolves.toEqual({
+      data: {
+        createdBy: 'authenticated-user',
+        name: 'Example',
+        slug: 'example-org',
+      },
+    });
+
+    await expect(
+      beforeCreateOrganization({
+        organization: { name: 'Example', slug: 'API' },
+        user: { id: 'authenticated-user' },
+      }),
+    ).rejects.toMatchObject({
+      body: { code: invalidOrganizationSlugErrorCode },
+    });
+  });
+
+  it.each([
+    { queryResult: { rows: [{ limit_reached: false }] }, expected: false },
+    { queryResult: { rows: [{ limit_reached: true }] }, expected: true },
+    { queryResult: { rows: [] }, expected: true },
+  ])(
+    'maps the database decision to Better Auth limit polarity',
+    async ({ expected, queryResult }) => {
+      const query = vi.fn(async () => queryResult);
+
+      await expect(
+        organizationLimitReached(poolWithQuery(query), { id: 'user-1' }),
+      ).resolves.toBe(expected);
+    },
+  );
+
+  it('fails the organization limit closed on a database error', async () => {
+    const query = vi.fn().mockRejectedValue(new Error('private detail'));
+
+    await expect(
+      organizationLimitReached(poolWithQuery(query), { id: 'user-1' }),
+    ).resolves.toBe(true);
+  });
+
+  it('guards the exact installed bindable active-organization fallback inventory', async () => {
+    expect(organizationIdRequiredPaths).toEqual({
+      '/organization/get-active-member-role': 'query',
+      '/organization/get-full-organization': 'query',
+      '/organization/get-organization': 'query',
+      '/organization/has-permission': 'body',
+      '/organization/invite-member': 'body',
+      '/organization/list-invitations': 'query',
+      '/organization/list-members': 'query',
+      '/organization/remove-member': 'body',
+      '/organization/update': 'body',
+      '/organization/update-member-role': 'body',
+    });
+    const hook = createAuthBeforeHook(poolWithQuery(vi.fn()));
+
+    for (const [path, location] of Object.entries(
+      organizationIdRequiredPaths,
+    )) {
+      await expect(hook({ path })).rejects.toMatchObject({
+        body: { code: organizationIdRequiredErrorCode },
+      });
+      await expect(
+        hook({ [location]: { organizationId: 'organization-1' }, path }),
+      ).resolves.toBeUndefined();
+    }
+
+    for (const path of [
+      '/organization/create',
+      '/organization/check-slug',
+      '/organization/list',
+      '/organization/list-user-invitations',
+      '/organization/get-invitation',
+      '/organization/accept-invitation',
+      '/organization/reject-invitation',
+      '/organization/cancel-invitation',
+    ]) {
+      if (path !== '/organization/create') {
+        await expect(hook({ path })).resolves.toBeUndefined();
+      }
+    }
+
+    for (const input of [
+      { path: unsupportedActiveOrganizationPath },
+      {
+        path: unsupportedActiveOrganizationPath,
+        query: { organizationId: 'organization-1' },
+      },
+      {
+        body: { organizationId: 'organization-1' },
+        path: unsupportedActiveOrganizationPath,
+      },
+    ]) {
+      await expect(hook(input)).rejects.toMatchObject({
+        body: { code: unsupportedActiveOrganizationEndpointErrorCode },
+      });
+    }
+  });
+
+  it('creates with one normalized slug and one authoritative owner', async () => {
+    const { auth, database, sessionCookie, user } =
+      await createControlledOrganizationFixture();
+    const response = await auth.handler(
+      new Request('https://bap.invalid/api/auth/organization/create', {
+        body: JSON.stringify({
+          createdBy: 'forged-user',
+          created_by: 'forged-snake-user',
+          name: 'Example Organization',
+          slug: ' Example Organization ',
+        }),
+        headers: {
+          'content-type': 'application/json',
+          cookie: sessionCookie,
+          origin: 'https://bap.invalid',
+        },
+        method: 'POST',
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.clone().json()).resolves.toMatchObject({
+      createdBy: user.id,
+      slug: 'example-organization',
+    });
+    const created = database.organization[0];
+    expect(created).toMatchObject({
+      created_by: user.id,
+      name: 'Example Organization',
+      slug: 'example-organization',
+    });
+    expect(created?.created_by).not.toBe('forged-user');
+    expect(database.member).toHaveLength(1);
+    expect(database.member[0]).toMatchObject({
+      organization_id: created?.id,
+      role: 'owner',
+      user_id: user.id,
+    });
+  });
+
+  it('normalizes the trusted server-side create path before writing', async () => {
+    const { auth, database, user } =
+      await createControlledOrganizationFixture();
+
+    await expect(
+      auth.api.createOrganization({
+        body: {
+          name: 'System Organization',
+          slug: ' System Organization ',
+          userId: String(user.id),
+        },
+      }),
+    ).resolves.toMatchObject({
+      createdBy: user.id,
+      slug: 'system-organization',
+    });
+    expect(database.organization[0]).toMatchObject({
+      created_by: user.id,
+      slug: 'system-organization',
+    });
+  });
+
+  it('returns 403 before writes when quota is exhausted', async () => {
+    const { auth, database, sessionCookie } =
+      await createControlledOrganizationFixture(true);
+    const response = await auth.handler(
+      new Request('https://bap.invalid/api/auth/organization/create', {
+        body: JSON.stringify({ name: 'Example', slug: 'example-org' }),
+        headers: {
+          'content-type': 'application/json',
+          cookie: sessionCookie,
+          origin: 'https://bap.invalid',
+        },
+        method: 'POST',
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(database.organization).toEqual([]);
+    expect(database.member).toEqual([]);
+  });
+
+  it.each(['API', '12345', '--'])(
+    'rejects configured create slug %s without quota or identity writes',
+    async (slug) => {
+      const { auth, database, query, sessionCookie } =
+        await createControlledOrganizationFixture();
+      const response = await auth.handler(
+        new Request('https://bap.invalid/api/auth/organization/create', {
+          body: JSON.stringify({ name: 'Example', slug }),
+          headers: {
+            'content-type': 'application/json',
+            cookie: sessionCookie,
+            origin: 'https://bap.invalid',
+          },
+          method: 'POST',
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      expect(database.organization).toEqual([]);
+      expect(database.member).toEqual([]);
+      expect(query).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects configured active-organization fallback without an explicit id', async () => {
+    const { auth, sessionCookie } = await createControlledOrganizationFixture();
+    const response = await auth.handler(
+      new Request('https://bap.invalid/api/auth/organization/list-members', {
+        headers: {
+          cookie: sessionCookie,
+          origin: 'https://bap.invalid',
+        },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      code: organizationIdRequiredErrorCode,
+    });
+  });
+
+  it('disables the configured HTTP active-member endpoint without mutating session or membership state', async () => {
+    const { auth, database, sessionCookie, user } =
+      await createControlledOrganizationFixture();
+    const organization = await auth.api.createOrganization({
+      body: {
+        name: 'Retained Organization',
+        slug: 'retained-organization',
+        userId: String(user.id),
+      },
+    });
+    const originalSessions = structuredClone(database.session);
+    const originalMembers = structuredClone(database.member);
+
+    const response = await auth.handler(
+      new Request(
+        `https://bap.invalid/api/auth/organization/get-active-member?organizationId=${organization.id}`,
+        {
+          headers: {
+            cookie: sessionCookie,
+            origin: 'https://bap.invalid',
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expect(database.session).toEqual(originalSessions);
+    expect(database.member).toEqual(originalMembers);
+  });
+
+  it('rejects direct active-member API calls regardless of dummy input', async () => {
+    const { auth, database, sessionCookie } =
+      await createControlledOrganizationFixture();
+    const headers = new Headers({ cookie: sessionCookie });
+    const originalSessions = structuredClone(database.session);
+    const originalMembers = structuredClone(database.member);
+
+    for (const input of [
+      { headers },
+      { headers, query: { organizationId: 'organization-1' } },
+      { body: { organizationId: 'organization-1' }, headers },
+      {
+        body: { organizationId: 'organization-1' },
+        headers,
+        query: { organizationId: 'organization-1' },
+      },
+    ]) {
+      await expect(
+        auth.api.getActiveMember(input as never),
+      ).rejects.toMatchObject({
+        body: { code: unsupportedActiveOrganizationEndpointErrorCode },
+      });
+    }
+
+    expect(database.session).toEqual(originalSessions);
+    expect(database.member).toEqual(originalMembers);
+  });
+
+  it('uses an explicit organization for the supported active-member-role endpoint', async () => {
+    const { auth, database, sessionCookie, user } =
+      await createControlledOrganizationFixture();
+    const explicitOrganization = await auth.api.createOrganization({
+      body: {
+        name: 'Explicit Organization',
+        slug: 'explicit-organization',
+        userId: String(user.id),
+      },
+    });
+    const ambientOrganization = await auth.api.createOrganization({
+      body: {
+        name: 'Ambient Organization',
+        slug: 'ambient-organization',
+        userId: String(user.id),
+      },
+    });
+    const explicitMember = database.member.find(
+      (member) => member.organization_id === explicitOrganization.id,
+    );
+    const session = database.session[0];
+    if (!explicitMember || !session) {
+      throw new Error('Controlled organization fixture is incomplete.');
+    }
+    explicitMember.role = 'admin';
+    session.active_organization_id = ambientOrganization.id;
+
+    const response = await auth.handler(
+      new Request(
+        `https://bap.invalid/api/auth/organization/get-active-member-role?organizationId=${explicitOrganization.id}`,
+        {
+          headers: {
+            cookie: sessionCookie,
+            origin: 'https://bap.invalid',
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ role: 'admin' });
+    expect(session.active_organization_id).toBe(ambientOrganization.id);
+  });
+
+  it('keeps delete and set-active disabled in the configured dispatcher', async () => {
+    const { auth, database, sessionCookie, user } =
+      await createControlledOrganizationFixture();
+    const organization = await auth.api.createOrganization({
+      body: {
+        name: 'Retained Organization',
+        slug: 'retained-organization',
+        userId: String(user.id),
+      },
+    });
+    const originalSessionCount = database.session.length;
+
+    for (const [path, body] of [
+      ['/organization/delete', { organizationId: organization.id }],
+      ['/organization/set-active', { organizationId: organization.id }],
+    ] as const) {
+      const response = await auth.handler(
+        new Request(`https://bap.invalid/api/auth${path}`, {
+          body: JSON.stringify(body),
+          headers: {
+            'content-type': 'application/json',
+            cookie: sessionCookie,
+            origin: 'https://bap.invalid',
+          },
+          method: 'POST',
+        }),
+      );
+
+      expect(response.status).toBe(404);
+      expect(response.headers.get('set-cookie')).toBeNull();
+      expect(database.session).toHaveLength(originalSessionCount);
+      expect(database.organization).toHaveLength(1);
+      expect(database.organization[0]?.id).toBe(organization.id);
+    }
+  });
+});
+
 describe('Better Auth mail hooks', () => {
   const senderCases = [
     {
@@ -632,6 +1131,7 @@ describe('Better Auth rate limits', () => {
         '/admin/unban-user',
         '/admin/update-user',
         '/organization/invite-member',
+        '/organization/check-slug',
         '/request-password-reset',
         '/reset-password',
         '/reset-password/*',
@@ -651,7 +1151,7 @@ describe('Better Auth rate limits', () => {
     );
     for (const rule of Object.values(authRateLimitRules)) {
       expect(rule.window).toBe(60);
-      expect(rule.max).toBeLessThanOrEqual(5);
+      expect(rule.max).toBeLessThanOrEqual(10);
     }
   });
 
@@ -709,6 +1209,61 @@ describe('Better Auth rate limits', () => {
       '/verify-email',
     ] as const) {
       expect(authRateLimitRules[path]).toEqual({ max: 5, window: 60 });
+    }
+  });
+
+  it('limits authenticated organization slug checks to ten per minute', () => {
+    expect(authRateLimitRules['/organization/check-slug']).toEqual({
+      max: 10,
+      window: 60,
+    });
+  });
+
+  it('runs slug checks through the installed ten-per-minute limiter', async () => {
+    let attempts = 0;
+    const consume = vi.fn(
+      async (_key: string, rule: { max: number; window: number }) => {
+        attempts += 1;
+        return attempts <= rule.max
+          ? { allowed: true, retryAfter: null }
+          : { allowed: false, retryAfter: rule.window };
+      },
+    );
+    const auth = betterAuth({
+      advanced: {
+        ipAddress: { ipAddressHeaders: ['x-bap-client-ip'] },
+      },
+      baseURL: 'https://bap.invalid',
+      plugins: [organization()],
+      rateLimit: {
+        customRules: { ...authRateLimitRules },
+        customStorage: { consume },
+        enabled: true,
+        max: 100,
+        window: 60,
+      },
+      secret: 'test-only-secret-that-is-long-enough',
+    });
+    const statuses: number[] = [];
+
+    for (let attempt = 1; attempt <= 11; attempt += 1) {
+      const response = await auth.handler(
+        new Request('https://bap.invalid/api/auth/organization/check-slug', {
+          body: JSON.stringify({ slug: 'example-org' }),
+          headers: {
+            'content-type': 'application/json',
+            'x-bap-client-ip': '198.51.100.217',
+          },
+          method: 'POST',
+        }),
+      );
+      statuses.push(response.status);
+    }
+
+    expect(statuses).toEqual([...Array<number>(10).fill(401), 429]);
+    expect(consume).toHaveBeenCalledTimes(11);
+    for (const [, rule] of consume.mock.calls) {
+      expect(rule).toEqual({ max: 10, window: 60 });
     }
   });
 

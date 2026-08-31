@@ -1,12 +1,15 @@
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
+import { z } from 'zod';
+
 import {
   bootstrapDatabaseRoles,
   createDatabasePool,
   loadDatabaseConfiguration,
   loadRoleBootstrapPasswords,
   runMigrations,
+  setOrganizationQuota,
 } from './index.js';
 import type { DatabasePool } from './pool.js';
 
@@ -30,6 +33,31 @@ export interface EraseUserResult {
   tombstone: string | null;
 }
 
+export interface OrganizationQuotaCliDependencies {
+  loadPool: () => Promise<DatabasePool>;
+  stderr: CliOutput;
+  stdout: CliOutput;
+}
+
+export interface OrganizationQuotaArguments {
+  email: string;
+  note: string;
+  total: number;
+}
+
+const organizationQuotaArgumentsSchema = z.object({
+  email: z
+    .email()
+    .max(254)
+    .transform((value) => value.toLowerCase()),
+  note: z.string().trim().min(1),
+  total: z
+    .string()
+    .regex(/^(?:0|[1-9]\d*)$/)
+    .transform(Number)
+    .pipe(z.int().min(0).max(2_147_483_647)),
+});
+
 export function parseSignupAction(value: string | undefined): SignupAction {
   if (value === 'disable' || value === 'enable' || value === 'status') {
     return value;
@@ -52,6 +80,38 @@ export function parseEraseUserId(arguments_: readonly string[]): string {
   }
 
   return userId;
+}
+
+export function parseOrganizationQuotaArguments(
+  arguments_: readonly string[],
+): OrganizationQuotaArguments {
+  if (arguments_.length !== 6) {
+    throw new Error(
+      'Expected organization-quota --email <email> --total <total> --note <note>.',
+    );
+  }
+
+  const values: Partial<Record<'email' | 'note' | 'total', string>> = {};
+  for (let index = 0; index < arguments_.length; index += 2) {
+    const flag = arguments_[index];
+    const value = arguments_[index + 1];
+    const key =
+      flag === '--email'
+        ? 'email'
+        : flag === '--total'
+          ? 'total'
+          : flag === '--note'
+            ? 'note'
+            : undefined;
+    if (key === undefined || value === undefined || values[key] !== undefined) {
+      throw new Error(
+        'Expected organization-quota --email <email> --total <total> --note <note>.',
+      );
+    }
+    values[key] = value;
+  }
+
+  return organizationQuotaArgumentsSchema.parse(values);
 }
 
 async function bootstrapRoles(): Promise<void> {
@@ -252,6 +312,30 @@ export async function runEraseUserCli(
   }
 }
 
+export async function runOrganizationQuotaCli(
+  arguments_: readonly string[],
+  dependencies: OrganizationQuotaCliDependencies,
+): Promise<number> {
+  try {
+    const input = parseOrganizationQuotaArguments(arguments_);
+    const pool = await dependencies.loadPool();
+    let result: Awaited<ReturnType<typeof setOrganizationQuota>>;
+
+    try {
+      result = await setOrganizationQuota(pool, input);
+    } finally {
+      await pool.end();
+    }
+    dependencies.stdout.write(`${JSON.stringify(result)}\n`);
+    return 0;
+  } catch {
+    dependencies.stderr.write(
+      `${JSON.stringify({ code: 'ORGANIZATION_QUOTA_COMMAND_FAILED', status: 'error' })}\n`,
+    );
+    return 1;
+  }
+}
+
 async function loadSignupPool(): Promise<DatabasePool> {
   return createDatabasePool(
     await loadDatabaseConfiguration(process.env, { role: 'bap_migrator' }),
@@ -259,6 +343,12 @@ async function loadSignupPool(): Promise<DatabasePool> {
 }
 
 async function loadEraseUserPool(): Promise<DatabasePool> {
+  return createDatabasePool(
+    await loadDatabaseConfiguration(process.env, { role: 'bap_migrator' }),
+  );
+}
+
+async function loadOrganizationQuotaPool(): Promise<DatabasePool> {
   return createDatabasePool(
     await loadDatabaseConfiguration(process.env, { role: 'bap_migrator' }),
   );
@@ -285,9 +375,15 @@ export async function runDatabaseCli(
       stderr: process.stderr,
       stdout: process.stdout,
     });
+  } else if (command === 'organization-quota') {
+    process.exitCode = await runOrganizationQuotaCli(arguments_.slice(1), {
+      loadPool: loadOrganizationQuotaPool,
+      stderr: process.stderr,
+      stdout: process.stdout,
+    });
   } else {
     throw new Error(
-      'Expected bootstrap-roles, migrate, signup enable|disable|status, or erase-user <user-id>.',
+      'Expected bootstrap-roles, migrate, signup enable|disable|status, erase-user <user-id>, or organization-quota --email <email> --total <total> --note <note>.',
     );
   }
 }

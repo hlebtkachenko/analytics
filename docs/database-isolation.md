@@ -82,6 +82,15 @@ function can write it. The setup-only `@bap/db` accessor connects separately as
 an absent or zero row to the minimum 1. Existing positive grants and their
 provenance remain untouched.
 
+The web-accessible `@bap/db` reader joins that SELECT-only quota row to a count
+of `auth.organization.created_by` and returns a nullable limit decision. The
+auth configuration converts NULL, malformed state, and query errors to "limit
+reached". General grants use a separate database CLI accessor through
+`bap_migrator`; it opens 1 transaction, sets `bap_owner` locally, resolves the
+user by a parameterized email, and upserts `granted_total`, a NULL `granted_by`,
+the grant time, and the required operator note. No quota-write function or DML
+grant is added to `bap_auth`.
+
 `auth.organization.created_by` is a nullable user foreign key with
 `ON DELETE SET NULL`. NULL denotes an unattributed legacy or system organization
 and consumes no user's quota. For an attributed INSERT, the invoker-rights
@@ -154,10 +163,11 @@ foreign-key delete actions, trigger and function catalog state, direct table ACL
 and inherited default-privilege exception. It proves `bap_auth` has SELECT only,
 cannot write quota or disable the trigger, absence means zero, NULL attribution
 consumes no quota, positive quotas work, and two concurrent quota-1 inserts
-produce exactly 1 organization. A shared corpus proves that PostgreSQL and the
-web Zod validator agree on valid, malformed, overlong, numeric, and reserved
-slugs. It also verifies that invalid legacy membership is returned as no access
-instead of a server error.
+produce exactly 1 organization. It also exercises the nullable web precheck and
+the migrator-to-owner quota writer with its stored note and NULL auth grantor. A
+shared corpus proves that PostgreSQL and the web Zod validator agree on valid,
+malformed, overlong, numeric, and reserved slugs. It also verifies that invalid
+legacy membership is returned as no access instead of a server error.
 
 It also proves the phase 1 authorization tables: `app.data_grants` is readable
 only inside its own tenant context and rejects a cross-tenant write, and

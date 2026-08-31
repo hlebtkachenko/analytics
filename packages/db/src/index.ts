@@ -4,19 +4,23 @@ export {
   consumePublicSignupEdgeRateLimit,
   DATABASE_MIGRATION_COMPATIBILITY,
   ensureInitialOrganizationQuota,
+  organizationCreationLimitReached,
   PUBLIC_SIGNUP_EDGE_RATE_LIMIT,
   publicSignupInvitationExists,
   publicSignupEnabled,
   recordUserErasureRequest,
   resolveMembership,
+  setOrganizationQuota,
 } from './access.js';
 export type {
   MembershipResolution,
   MembershipRole,
   MigrationCompatibility,
   InitialOrganizationQuota,
+  OrganizationQuotaGrant,
   PublicSignupEdgeRateLimitDecision,
   ResolveMembershipInput,
+  SetOrganizationQuotaInput,
 } from './access.js';
 export {
   loadDatabaseConfiguration,

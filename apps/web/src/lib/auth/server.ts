@@ -1,5 +1,6 @@
 import {
   countSoleOwnedOrganizations,
+  organizationCreationLimitReached,
   publicSignupEnabled,
   publicSignupInvitationExists,
   recordUserErasureRequest,
@@ -27,6 +28,10 @@ import {
   organizationAuthSchema,
   twoFactorAuthSchema,
 } from './models.ts';
+import {
+  normalizeOrganizationSlug,
+  organizationSlugSchema,
+} from '../organizations/slug.ts';
 
 const authEnvironmentSchema = z.object({
   BAP_PUBLIC_ORIGIN: z.url().refine((value) => {
@@ -58,6 +63,37 @@ export const accountDeletionSoleOwnerErrorCode =
 export const accountDeletionUnavailableErrorCode =
   'ACCOUNT_DELETION_UNAVAILABLE';
 export const adminPluginOptions = { schema: adminAuthSchema } as const;
+export const invalidOrganizationSlugErrorCode = 'INVALID_ORGANIZATION_SLUG';
+export const organizationIdRequiredErrorCode = 'ORGANIZATION_ID_REQUIRED';
+export const unsupportedActiveOrganizationEndpointErrorCode =
+  'ACTIVE_ORGANIZATION_ENDPOINT_DISABLED';
+export const unsupportedActiveOrganizationPath =
+  '/organization/get-active-member';
+export const organizationCreationConfiguration = {
+  allowUserToCreateOrganization: true,
+  creatorRole: 'owner',
+  disableOrganizationDeletion: true,
+  membershipLimit: 100,
+} as const;
+
+export const organizationIdRequiredPaths = {
+  '/organization/get-active-member-role': 'query',
+  '/organization/get-full-organization': 'query',
+  '/organization/get-organization': 'query',
+  '/organization/has-permission': 'body',
+  '/organization/invite-member': 'body',
+  '/organization/list-invitations': 'query',
+  '/organization/list-members': 'query',
+  '/organization/remove-member': 'body',
+  '/organization/update': 'body',
+  '/organization/update-member-role': 'body',
+} as const;
+
+type AuthBeforeContext = {
+  body?: unknown;
+  path?: string;
+  query?: unknown;
+};
 
 type VerificationDeliveryBoundary = { failed: boolean };
 
@@ -114,6 +150,96 @@ export function createPublicSignUpBeforeHook(pool: DatabasePool) {
         message: 'Public sign-up is disabled.',
       });
     }
+  };
+}
+
+function objectInput(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+export function createAuthBeforeHook(pool: DatabasePool) {
+  const publicSignUpHook = createPublicSignUpBeforeHook(pool);
+
+  return async (context: AuthBeforeContext): Promise<undefined> => {
+    await publicSignUpHook(context);
+
+    if (context.path === unsupportedActiveOrganizationPath) {
+      throw APIError.from('BAD_REQUEST', {
+        code: unsupportedActiveOrganizationEndpointErrorCode,
+        message: 'This active-organization endpoint is disabled.',
+      });
+    }
+
+    if (context.path === '/organization/create') {
+      const body = objectInput(context.body);
+      const slug =
+        typeof body?.slug === 'string'
+          ? normalizeOrganizationSlug(body.slug)
+          : undefined;
+      const parsed = organizationSlugSchema.safeParse(slug);
+      if (!body || !parsed.success) {
+        throw APIError.from('BAD_REQUEST', {
+          code: invalidOrganizationSlugErrorCode,
+          message: 'Organization slug is invalid.',
+        });
+      }
+
+      body.slug = parsed.data;
+      return undefined;
+    }
+
+    const location =
+      context.path === undefined
+        ? undefined
+        : organizationIdRequiredPaths[
+            context.path as keyof typeof organizationIdRequiredPaths
+          ];
+    if (location !== undefined) {
+      const input = objectInput(context[location]);
+      if (
+        typeof input?.organizationId !== 'string' ||
+        input.organizationId.trim().length === 0
+      ) {
+        throw APIError.from('BAD_REQUEST', {
+          code: organizationIdRequiredErrorCode,
+          message: 'An explicit organization id is required.',
+        });
+      }
+    }
+
+    return undefined;
+  };
+}
+
+export async function organizationLimitReached(
+  pool: DatabasePool,
+  user: { id: string },
+): Promise<boolean> {
+  const result = await organizationCreationLimitReached(pool, user.id).catch(
+    () => null,
+  );
+  return result ?? true;
+}
+
+export async function beforeCreateOrganization({
+  organization: organizationInput,
+  user,
+}: {
+  organization: Record<string, unknown>;
+  user: { id: string };
+}): Promise<{ data: Record<string, unknown> }> {
+  const slug = organizationSlugSchema.safeParse(organizationInput.slug);
+  if (!slug.success) {
+    throw APIError.from('BAD_REQUEST', {
+      code: invalidOrganizationSlugErrorCode,
+      message: 'Organization slug is invalid.',
+    });
+  }
+
+  return {
+    data: { ...organizationInput, createdBy: user.id, slug: slug.data },
   };
 }
 
@@ -290,6 +416,7 @@ export const authRateLimitRules = {
   '/admin/unban-user': { max: 3, window: 60 },
   '/admin/update-user': { max: 3, window: 60 },
   '/organization/invite-member': { max: 5, window: 60 },
+  '/organization/check-slug': { max: 10, window: 60 },
   '/request-password-reset': { max: 3, window: 60 },
   '/reset-password': { max: 5, window: 60 },
   '/reset-password/*': { max: 5, window: 60 },
@@ -354,13 +481,15 @@ async function createAuth() {
       sendVerificationEmail: createVerificationSender(mail),
     },
     hooks: {
-      before: createPublicSignUpBeforeHook(pool),
+      before: createAuthBeforeHook(pool),
     },
     logger: authLoggerConfiguration,
     plugins: [
       admin(adminPluginOptions),
       organization({
-        allowUserToCreateOrganization: false,
+        ...organizationCreationConfiguration,
+        organizationHooks: { beforeCreateOrganization },
+        organizationLimit: (user) => organizationLimitReached(pool, user),
         schema: organizationAuthSchema,
         sendInvitationEmail: createInvitationSender(
           mail,
