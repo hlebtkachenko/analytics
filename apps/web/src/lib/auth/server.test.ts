@@ -21,6 +21,7 @@ import {
   accountDeletionSoleOwnerErrorCode,
   accountDeletionUnavailableErrorCode,
   accountSessionFreshAgeSeconds,
+  adminPluginOptions,
   authLoggerConfiguration,
   authRateLimitRules,
   createAccountDeletionBeforeHook,
@@ -51,6 +52,103 @@ function createDeferred<T>() {
   return { promise, reject, resolve };
 }
 
+async function createControlledAdminFixture() {
+  const createdAt = new Date('2026-08-31T12:00:00.000Z');
+  const targetUser = {
+    banExpires: null,
+    banned: false,
+    banReason: null,
+    createdAt,
+    email: 'target@bap.invalid',
+    emailVerified: true,
+    id: 'controlled-target',
+    image: null,
+    name: 'Controlled Target',
+    role: 'user',
+    updatedAt: createdAt,
+  };
+  const database = {
+    account: [],
+    session: [],
+    user: [] as Array<Record<string, unknown>>,
+    verification: [],
+  } satisfies MemoryDB;
+  const erasureRequests: string[] = [];
+  const auth = betterAuth({
+    baseURL: 'https://bap.invalid',
+    database: memoryAdapter(database),
+    disabledPaths: [...disabledAuthPaths],
+    emailAndPassword: { enabled: true },
+    plugins: [admin()],
+    secret: 'test-only-secret-that-is-long-enough',
+    user: {
+      deleteUser: {
+        beforeDelete: async (user) => {
+          erasureRequests.push(user.id);
+        },
+        enabled: true,
+      },
+    },
+  });
+  const signUpResponse = await auth.handler(
+    new Request('https://bap.invalid/api/auth/sign-up/email', {
+      body: JSON.stringify({
+        email: 'admin@bap.invalid',
+        name: 'Controlled Admin',
+        password: 'test-only-admin-password',
+      }),
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    }),
+  );
+  const seededAdmin = database.user[0];
+  if (!seededAdmin) {
+    throw new Error('Better Auth did not seed the controlled admin.');
+  }
+  seededAdmin.role = 'admin';
+  database.user.push(targetUser);
+  const sessionCookie = signUpResponse.headers
+    .get('set-cookie')
+    ?.split(';', 1)[0];
+
+  expect(signUpResponse.status).toBe(200);
+  expect(sessionCookie).toBeTruthy();
+
+  return {
+    auth,
+    database,
+    erasureRequests,
+    seededAdmin,
+    sessionCookie: sessionCookie ?? '',
+    targetUser,
+  };
+}
+
+async function expectControlledAdminIsAuthorized({
+  auth,
+  sessionCookie,
+  targetUserId,
+}: {
+  auth: Awaited<ReturnType<typeof createControlledAdminFixture>>['auth'];
+  sessionCookie: string;
+  targetUserId: string;
+}) {
+  const response = await auth.handler(
+    new Request(
+      `https://bap.invalid/api/auth/admin/get-user?id=${targetUserId}`,
+      {
+        headers: {
+          cookie: sessionCookie,
+          origin: 'https://bap.invalid',
+        },
+      },
+    ),
+  );
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toMatchObject({ id: targetUserId });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -59,7 +157,9 @@ describe('Better Auth resource contract', () => {
   it('keeps unsafe or BAP-owned identity paths disabled', () => {
     expect([...disabledAuthPaths].sort()).toEqual(
       [
+        '/admin/impersonate-user',
         '/admin/remove-user',
+        '/admin/stop-impersonating',
         '/change-email',
         '/delete-user/callback',
         '/token',
@@ -67,75 +167,34 @@ describe('Better Auth resource contract', () => {
     );
   });
 
-  it('refuses admin removal in the configured HTTP dispatcher without deleting or requesting erasure', async () => {
-    const createdAt = new Date('2026-08-31T12:00:00.000Z');
-    const adminPassword = 'test-only-admin-password';
-    const targetUser = {
-      banExpires: null,
-      banned: false,
-      banReason: null,
-      createdAt,
-      email: 'target@bap.invalid',
-      emailVerified: true,
-      id: 'controlled-target',
-      image: null,
-      name: 'Controlled Target',
-      role: 'user',
-      updatedAt: createdAt,
-    };
-    const database = {
-      account: [],
-      session: [],
-      user: [] as Array<Record<string, unknown>>,
-      verification: [],
-    } satisfies MemoryDB;
-    const erasureRequests: string[] = [];
-    const auth = betterAuth({
-      baseURL: 'https://bap.invalid',
-      database: memoryAdapter(database),
-      disabledPaths: [...disabledAuthPaths],
-      emailAndPassword: { enabled: true },
-      plugins: [admin()],
-      secret: 'test-only-secret-that-is-long-enough',
-      user: {
-        deleteUser: {
-          beforeDelete: async (user) => {
-            erasureRequests.push(user.id);
-          },
-          enabled: true,
-        },
-      },
-    });
-    const signUpResponse = await auth.handler(
-      new Request('https://bap.invalid/api/auth/sign-up/email', {
-        body: JSON.stringify({
-          email: 'admin@bap.invalid',
-          name: 'Controlled Admin',
-          password: adminPassword,
-        }),
-        headers: { 'content-type': 'application/json' },
-        method: 'POST',
-      }),
-    );
-    const seededAdmin = database.user[0];
-    if (!seededAdmin) {
-      throw new Error('Better Auth did not seed the controlled admin.');
-    }
-    seededAdmin.role = 'admin';
-    database.user.push(targetUser);
-    const sessionCookie = signUpResponse.headers
-      .get('set-cookie')
-      ?.split(';', 1)[0];
+  it('does not configure an id-based administrator bypass', () => {
+    expect(Object.keys(adminPluginOptions)).toEqual(['schema']);
+    expect('adminUserIds' in adminPluginOptions).toBe(false);
+  });
 
-    expect(signUpResponse.status).toBe(200);
-    expect(sessionCookie).toBeTruthy();
+  it('refuses admin removal in the configured HTTP dispatcher without deleting or requesting erasure', async () => {
+    const {
+      auth,
+      database,
+      erasureRequests,
+      seededAdmin,
+      sessionCookie,
+      targetUser,
+    } = await createControlledAdminFixture();
+
+    await expectControlledAdminIsAuthorized({
+      auth,
+      sessionCookie,
+      targetUserId: targetUser.id,
+    });
 
     const response = await auth.handler(
       new Request('https://bap.invalid/api/auth/admin/remove-user', {
         body: JSON.stringify({ userId: targetUser.id }),
         headers: {
           'content-type': 'application/json',
-          cookie: sessionCookie ?? '',
+          cookie: sessionCookie,
+          origin: 'https://bap.invalid',
         },
         method: 'POST',
       }),
@@ -144,6 +203,87 @@ describe('Better Auth resource contract', () => {
     expect(response.status).toBe(404);
     expect(database.user).toEqual([seededAdmin, targetUser]);
     expect(erasureRequests).toEqual([]);
+  });
+
+  it('refuses both impersonation routes and their normalized variants without minting a session', async () => {
+    const {
+      auth,
+      database,
+      erasureRequests,
+      seededAdmin,
+      sessionCookie,
+      targetUser,
+    } = await createControlledAdminFixture();
+    const initialSessionCount = database.session.length;
+
+    await expectControlledAdminIsAuthorized({
+      auth,
+      sessionCookie,
+      targetUserId: targetUser.id,
+    });
+
+    for (const path of [
+      '/admin/impersonate-user',
+      '/admin/impersonate-user///',
+      '/admin/stop-impersonating',
+      '/admin/stop-impersonating///',
+    ]) {
+      const response = await auth.handler(
+        new Request(`https://bap.invalid/api/auth${path}`, {
+          body: JSON.stringify({ userId: targetUser.id }),
+          headers: {
+            'content-type': 'application/json',
+            cookie: sessionCookie,
+            origin: 'https://bap.invalid',
+          },
+          method: 'POST',
+        }),
+      );
+
+      expect(response.status).toBe(404);
+      expect(response.headers.get('set-cookie')).toBeNull();
+      expect(database.session).toHaveLength(initialSessionCount);
+      expect(database.user).toEqual([seededAdmin, targetUser]);
+      expect(erasureRequests).toEqual([]);
+    }
+  });
+
+  it('keeps create-user server-only bypass available without exposing it over HTTP', async () => {
+    const database = {
+      account: [],
+      session: [],
+      user: [] as Array<Record<string, unknown>>,
+      verification: [],
+    } satisfies MemoryDB;
+    const auth = betterAuth({
+      baseURL: 'https://bap.invalid',
+      database: memoryAdapter(database),
+      disabledPaths: [...disabledAuthPaths],
+      emailAndPassword: { enabled: true },
+      plugins: [admin()],
+      secret: 'test-only-secret-that-is-long-enough',
+    });
+    const body = {
+      email: 'server-created@bap.invalid',
+      name: 'Server Created',
+      password: 'test-only-server-password',
+    };
+
+    const httpResponse = await auth.handler(
+      new Request('https://bap.invalid/api/auth/admin/create-user', {
+        body: JSON.stringify(body),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      }),
+    );
+
+    expect(httpResponse.status).toBe(401);
+    expect(database.user).toEqual([]);
+
+    const created = await auth.api.createUser({ body });
+
+    expect(created.user.email).toBe(body.email);
+    expect(database.user).toHaveLength(1);
   });
 
   it('uses a five-minute fresh-session window for sensitive account actions', () => {
@@ -480,9 +620,17 @@ describe('Better Auth mail hooks', () => {
 });
 
 describe('Better Auth rate limits', () => {
-  it('caps every configured credential and two-factor path', () => {
+  it('caps every configured mutation, credential, and two-factor path', () => {
     expect(Object.keys(authRateLimitRules).sort()).toEqual(
       [
+        '/admin/ban-user',
+        '/admin/create-user',
+        '/admin/revoke-user-session',
+        '/admin/revoke-user-sessions',
+        '/admin/set-role',
+        '/admin/set-user-password',
+        '/admin/unban-user',
+        '/admin/update-user',
         '/organization/invite-member',
         '/request-password-reset',
         '/reset-password',
@@ -504,6 +652,33 @@ describe('Better Auth rate limits', () => {
     for (const rule of Object.values(authRateLimitRules)) {
       expect(rule.window).toBe(60);
       expect(rule.max).toBeLessThanOrEqual(5);
+    }
+  });
+
+  it('pins every reachable mutating admin route at three per minute', () => {
+    for (const path of [
+      '/admin/ban-user',
+      '/admin/create-user',
+      '/admin/revoke-user-session',
+      '/admin/revoke-user-sessions',
+      '/admin/set-role',
+      '/admin/set-user-password',
+      '/admin/unban-user',
+      '/admin/update-user',
+    ] as const) {
+      expect(authRateLimitRules[path]).toEqual({ max: 3, window: 60 });
+    }
+
+    for (const path of [
+      '/admin/impersonate-user',
+      '/admin/remove-user',
+      '/admin/stop-impersonating',
+      '/admin/get-user',
+      '/admin/list-users',
+      '/admin/list-user-sessions',
+      '/admin/has-permission',
+    ]) {
+      expect(path in authRateLimitRules).toBe(false);
     }
   });
 
@@ -594,6 +769,62 @@ describe('Better Auth rate limits', () => {
     expect(consume).toHaveBeenCalledTimes(6);
     for (const [, rule] of consume.mock.calls) {
       expect(rule).toEqual({ max: 5, window: 60 });
+    }
+  });
+
+  it('preserves the installed change-password three-per-ten-second rule', async () => {
+    let attempts = 0;
+    const consume = vi.fn(
+      async (_key: string, rule: { max: number; window: number }) => {
+        attempts += 1;
+        return attempts <= rule.max
+          ? { allowed: true, retryAfter: null }
+          : { allowed: false, retryAfter: rule.window };
+      },
+    );
+    const auth = betterAuth({
+      advanced: {
+        ipAddress: { ipAddressHeaders: ['x-bap-client-ip'] },
+      },
+      baseURL: 'https://bap.invalid',
+      emailAndPassword: {
+        enabled: true,
+        maxPasswordLength: 128,
+        minPasswordLength: 14,
+      },
+      rateLimit: {
+        customRules: { ...authRateLimitRules },
+        customStorage: { consume },
+        enabled: true,
+        max: 100,
+        window: 60,
+      },
+      secret: 'test-only-secret-that-is-long-enough',
+    });
+    const statuses: number[] = [];
+
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      const response = await auth.handler(
+        new Request('https://bap.invalid/api/auth/change-password', {
+          body: JSON.stringify({
+            currentPassword: 'test-only-current-password',
+            newPassword: 'test-only-replacement-password',
+            revokeOtherSessions: true,
+          }),
+          headers: {
+            'content-type': 'application/json',
+            'x-bap-client-ip': '198.51.100.216',
+          },
+          method: 'POST',
+        }),
+      );
+      statuses.push(response.status);
+    }
+
+    expect(statuses).toEqual([401, 401, 401, 429]);
+    expect(consume).toHaveBeenCalledTimes(4);
+    for (const [, rule] of consume.mock.calls) {
+      expect(rule).toEqual({ max: 3, window: 10 });
     }
   });
 });

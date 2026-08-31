@@ -2,6 +2,7 @@
 
 ## Current specs
 
+- [Admin HTTP gating](2026-08-31-admin-gating.md)
 - [Account lifecycle](2026-08-31-account-lifecycle.md)
 - [Public sign-up and activation](2026-08-31-public-sign-up-and-activation.md)
 

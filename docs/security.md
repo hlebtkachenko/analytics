@@ -245,9 +245,10 @@ matching.
 
 Installed Better Auth 1.7.2 implements `/admin/remove-user` as a direct delete
 that does not call `user.deleteUser.beforeDelete`. BAP has no consumer, so both
-the auth configuration and public route gate disable that path. Phase 5 may
-inventory the remaining Admin-plugin surface; no global hook reproduces admin
-permission logic in this phase.
+the auth configuration and public route gate disable that path. The same gates
+disable `/admin/impersonate-user` and `/admin/stop-impersonating`, because BAP
+has no approved impersonation workflow. No global hook reproduces Admin-plugin
+permission logic.
 
 The hook records the explicit session user id in a pending-only auth-schema
 request before the framework deletes the identity. The request table revokes
@@ -276,6 +277,25 @@ remain unwritable until later ownership or delegation work.
 Identifiers can also remain in `auth.rate_limit`, `auth.verification`, and
 pg-boss job payloads. Access and portability are not implemented. This is a
 narrow erasure mechanism, not a claim of complete GDPR compliance.
+
+## Admin HTTP boundary
+
+The installed Better Auth 1.7.2 Admin plugin registers 15 HTTP endpoints. BAP
+has no admin UI or HTTP consumer. User removal and both impersonation endpoints
+are disabled in Better Auth and at the public catch-all before dispatch;
+trailing-slash variants are rejected too. The remaining 12 endpoints retain
+Better Auth's authoritative-session checks and each route's installed
+role-permission checks where defined. All 8 reachable mutations are explicitly
+limited to 3 attempts per 60 seconds, while read-only routes and disabled
+mutations add no custom rule. Other framework built-ins remain active.
+
+The Admin plugin is configured without `adminUserIds`; no id can short-circuit
+its role permissions. The disabled-path setting applies to HTTP routing only and
+does not remove server-side `auth.api` calls. In Better Auth 1.7.2,
+`auth.api.createUser` skips its session and permission checks only when invoked
+without request or headers. The interactive owner bootstrap and gated synthetic
+account operational-proof CLI intentionally use that trusted server-only form.
+Public HTTP always supplies request context and therefore cannot use the bypass.
 
 Do not publish a vulnerability report containing secrets or personal data. Use
 GitHub's enabled private vulnerability reporting channel.

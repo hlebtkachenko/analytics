@@ -141,6 +141,26 @@ describe('Better Auth route exposure', () => {
     expect(downstreamPostMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    '/admin/impersonate-user',
+    '/admin/impersonate-user///',
+    '/admin/stop-impersonating',
+    '/admin/stop-impersonating///',
+  ])('does not dispatch the public %s route', async (path) => {
+    const response = await POST(
+      new NextRequest(`https://bap.invalid/api/auth${path}`, {
+        body: JSON.stringify({ userId: 'controlled-target' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expect(getAuthMock).not.toHaveBeenCalled();
+    expect(downstreamPostMock).not.toHaveBeenCalled();
+  });
+
   it('denies through the actual POST route when public sign-up is off', async () => {
     const request = signUpRequest();
     const { pool, query } = poolWithState();

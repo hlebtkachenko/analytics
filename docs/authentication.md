@@ -8,7 +8,7 @@ origin and trusted origin are exact values, never wildcards. Email/password
 sign-up is available behind a default-off runtime switch. A pending, unexpired
 organization invitation for the submitted address bypasses that switch.
 
-Four authentication paths are disabled:
+Six authentication paths are disabled:
 
 - `/api/auth/token`, because resource JWTs exist only inside a BFF call
 - `/api/auth/change-email`, because email changes use BAP-owned flows
@@ -16,9 +16,14 @@ Four authentication paths are disabled:
   callback
 - `/api/auth/admin/remove-user`, because Better Auth 1.7.2 bypasses the BAP
   deletion hook and erasure request on that Admin-plugin path
+- `/api/auth/admin/impersonate-user`, because BAP has no approved
+  session-minting impersonation workflow
+- `/api/auth/admin/stop-impersonating`, because its paired impersonation entry
+  point is disabled
 
-BAP has no consumer of the disabled admin removal path. Phase 5 may inventory
-the remaining Admin-plugin surface; Phase 4 does not add an admin flow.
+BAP has no UI or HTTP consumer for any Admin-plugin path. The public route gate
+and Better Auth reject all 3 disabled admin paths, including trailing-slash
+variants, before endpoint dispatch.
 
 Password reset, verification mail, and organization invitations are enabled and
 deliver through the single mail module without waiting for the mail provider.
@@ -83,6 +88,45 @@ It has no Carbon components, style sheet, product header, or UI shell. It shows
 the session email and exposes sign-out, password change, and account deletion.
 Its Server Component redirects failed or absent session reads to `/sign-in` and
 passes only the email into the interactive client boundary.
+
+## Admin HTTP inventory
+
+Installed Better Auth 1.7.2 registers exactly 15 Admin-plugin endpoints. In the
+table below, paths are relative to `/api/auth`. A reachable HTTP endpoint still
+requires the named authoritative browser session and, where listed, permission.
+Requests are JSON unless a query is shown. There is no BAP admin UI or BAP HTTP
+consumer for any of them.
+
+| Method and path                    | Phase 5 exposure     | HTTP input                                                    | Installed HTTP authorization                                                                                                          |
+| ---------------------------------- | -------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /admin/set-role`             | Reachable, 3/60      | `{ userId, role }`                                            | Session plus `user:set-role`                                                                                                          |
+| `GET /admin/get-user`              | Reachable, read-only | `?id=USER_ID`                                                 | Session plus `user:get`                                                                                                               |
+| `POST /admin/create-user`          | Reachable, 3/60      | `{ email, name, password?, role?, data? }`                    | Session plus `user:create`; a requested role also needs `user:set-role`, and ban fields in `data` need `user:ban`                     |
+| `POST /admin/update-user`          | Reachable, 3/60      | `{ userId, data }`                                            | Session plus `user:update`; role fields also need `user:set-role`, ban fields need `user:ban`, and email fields need `user:set-email` |
+| `GET /admin/list-users`            | Reachable, read-only | Optional search, filter, sort, limit, and offset query fields | Session plus `user:list`                                                                                                              |
+| `POST /admin/list-user-sessions`   | Reachable, read-only | `{ userId }`                                                  | Session plus `session:list`                                                                                                           |
+| `POST /admin/unban-user`           | Reachable, 3/60      | `{ userId }`                                                  | Session plus `user:ban`                                                                                                               |
+| `POST /admin/ban-user`             | Reachable, 3/60      | `{ userId, banReason?, banExpiresIn? }`                       | Session plus `user:ban`; self-ban is rejected                                                                                         |
+| `POST /admin/impersonate-user`     | Disabled             | `{ userId }`                                                  | If enabled: session plus `user:impersonate`; an admin target additionally needs `user:impersonate-admins` unless explicitly allowed   |
+| `POST /admin/stop-impersonating`   | Disabled             | No body                                                       | If enabled: a live impersonated session and the signed original-admin session cookie; no separate role permission                     |
+| `POST /admin/revoke-user-session`  | Reachable, 3/60      | `{ sessionToken }`                                            | Session plus `session:revoke`                                                                                                         |
+| `POST /admin/revoke-user-sessions` | Reachable, 3/60      | `{ userId }`                                                  | Session plus `session:revoke`                                                                                                         |
+| `POST /admin/remove-user`          | Disabled by Phase 4  | `{ userId }`                                                  | If enabled: session plus `user:delete`; self-removal is rejected, but the BAP deletion hook is bypassed                               |
+| `POST /admin/set-user-password`    | Reachable, 3/60      | `{ userId, newPassword }`                                     | Session plus `user:set-password`                                                                                                      |
+| `POST /admin/has-permission`       | Reachable, read-only | `{ permissions }`                                             | Authoritative session; evaluates the current user's requested permissions and requires no additional permission                       |
+
+The Admin plugin configuration contains only BAP's schema mapping. It never sets
+`adminUserIds`, so no user id bypasses role permissions. Disabled paths are an
+HTTP-router control, not removal of the corresponding `auth.api` methods.
+
+One installed server-API edge is intentional and narrow. When
+`auth.api.createUser` is called without request or headers, Better Auth skips
+the HTTP session and permission checks. The interactive `bootstrap-owner` CLI
+uses that form to create the first admin, and the gated
+`create-synthetic-account` operational-proof CLI uses it for a disposable user.
+Both are trusted, server-side commands and intentionally pass neither request
+nor headers. An HTTP `/admin/create-user` request always has request context and
+cannot use this bypass; it requires the session and permissions in the table.
 
 ## Sign-up admission
 
@@ -279,8 +323,10 @@ other paths continue to apply. Password reset requests, sign-in, sign-up,
 verification-mail requests, and two-factor credential submissions are pinned at
 three requests per minute. Verification and password reset completion, including
 token-bearing reset paths, are five per minute. Member invitation stays at five
-per minute. Sign-up also consumes the independent 3-per-minute edge bucket
-before Better Auth runs, so an allowed request must pass both limits.
+per minute. Every reachable mutating admin path is pinned at three per minute;
+read-only and disabled admin paths have no custom rule. Sign-up also consumes
+the independent 3-per-minute edge bucket before Better Auth runs, so an allowed
+request must pass both limits.
 
 ## Future identity work
 

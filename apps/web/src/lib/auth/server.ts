@@ -56,6 +56,7 @@ export const accountDeletionSoleOwnerErrorCode =
   'ACCOUNT_HAS_SOLE_OWNED_ORGANIZATIONS';
 export const accountDeletionUnavailableErrorCode =
   'ACCOUNT_DELETION_UNAVAILABLE';
+export const adminPluginOptions = { schema: adminAuthSchema } as const;
 
 export async function publicSignUpAllowed(
   pool: DatabasePool,
@@ -238,6 +239,14 @@ export function createInvitationSender(
 
 // Custom rules apply to their named paths while Better Auth keeps its other built-ins.
 export const authRateLimitRules = {
+  '/admin/ban-user': { max: 3, window: 60 },
+  '/admin/create-user': { max: 3, window: 60 },
+  '/admin/revoke-user-session': { max: 3, window: 60 },
+  '/admin/revoke-user-sessions': { max: 3, window: 60 },
+  '/admin/set-role': { max: 3, window: 60 },
+  '/admin/set-user-password': { max: 3, window: 60 },
+  '/admin/unban-user': { max: 3, window: 60 },
+  '/admin/update-user': { max: 3, window: 60 },
   '/organization/invite-member': { max: 5, window: 60 },
   '/request-password-reset': { max: 3, window: 60 },
   '/reset-password': { max: 5, window: 60 },
@@ -307,7 +316,7 @@ async function createAuth() {
     },
     logger: authLoggerConfiguration,
     plugins: [
-      admin({ schema: adminAuthSchema }),
+      admin(adminPluginOptions),
       organization({
         allowUserToCreateOrganization: false,
         schema: organizationAuthSchema,
