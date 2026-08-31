@@ -1,0 +1,5 @@
+@use '@bap/design-system/tokens/spacing.scss' as spacing;
+
+.content {
+  padding-block: spacing.$spacing-09;
+}

@@ -386,4 +386,64 @@ describe('Better Auth rate limits', () => {
       expect(authRateLimitRules[path]).toEqual({ max: 5, window: 60 });
     }
   });
+
+  it('runs reset completion through the installed router limiter', async () => {
+    let attempts = 0;
+    const consume = vi.fn(
+      async (_key: string, rule: { max: number; window: number }) => {
+        attempts += 1;
+        return attempts <= rule.max
+          ? { allowed: true, retryAfter: null }
+          : { allowed: false, retryAfter: rule.window };
+      },
+    );
+    const auth = betterAuth({
+      advanced: {
+        ipAddress: { ipAddressHeaders: ['x-bap-client-ip'] },
+      },
+      baseURL: 'https://bap.invalid',
+      emailAndPassword: {
+        enabled: true,
+        maxPasswordLength: 128,
+        minPasswordLength: 14,
+      },
+      rateLimit: {
+        customRules: { ...authRateLimitRules },
+        customStorage: { consume },
+        enabled: true,
+        max: 100,
+        window: 60,
+      },
+      secret: 'test-only-secret-that-is-long-enough',
+    });
+    const statuses: number[] = [];
+    let finalBody = '';
+
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
+      const response = await auth.handler(
+        new Request('https://bap.invalid/api/auth/reset-password', {
+          body: JSON.stringify({
+            newPassword: 'replacement-password',
+            token: 'ResetSentinelTokenAbc123',
+          }),
+          headers: {
+            'content-type': 'application/json',
+            'x-bap-client-ip': '198.51.100.215',
+          },
+          method: 'POST',
+        }),
+      );
+      statuses.push(response.status);
+      if (attempt === 6) {
+        finalBody = await response.text();
+      }
+    }
+
+    expect(statuses).toEqual([400, 400, 400, 400, 400, 429]);
+    expect(finalBody).not.toContain('ResetSentinelTokenAbc123');
+    expect(consume).toHaveBeenCalledTimes(6);
+    for (const [, rule] of consume.mock.calls) {
+      expect(rule).toEqual({ max: 5, window: 60 });
+    }
+  });
 });

@@ -53,6 +53,7 @@ catalog:
   '@vitest/browser-playwright': 4.1.11
   '@vitest/coverage-v8': 4.1.11
   ai: 7.0.84
+  axe-core: 4.13.0
   better-auth: 1.7.2
   drizzle-kit: 0.31.10
   drizzle-orm: 0.45.2

@@ -3,6 +3,8 @@
 import {
   Button,
   Form,
+  InlineNotification,
+  Link,
   PasswordInput,
   Stack,
   TextInput,
@@ -11,7 +13,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { authClient } from '../../lib/auth/client';
+import { authClient } from '../../../lib/auth/client';
 
 // Better Auth answers a two-factor account with this marker instead of a session.
 function requiresTwoFactor(data: unknown): boolean {
@@ -30,19 +32,23 @@ export default function SignInPage() {
 
   async function submit(formData: FormData): Promise<void> {
     setError(false);
-    const result = await authClient.signIn.email({
-      email: String(formData.get('email') ?? ''),
-      password: String(formData.get('password') ?? ''),
-    });
-    if (result.error) {
+    try {
+      const result = await authClient.signIn.email({
+        email: String(formData.get('email') ?? ''),
+        password: String(formData.get('password') ?? ''),
+      });
+      if (result.error) {
+        setError(true);
+        return;
+      }
+      if (requiresTwoFactor(result.data)) {
+        router.replace('/sign-in/two-factor');
+        return;
+      }
+      router.replace('/access');
+    } catch {
       setError(true);
-      return;
     }
-    if (requiresTwoFactor(result.data)) {
-      router.replace('/sign-in/two-factor');
-      return;
-    }
-    router.replace('/access');
   }
 
   return (
@@ -59,12 +65,22 @@ export default function SignInPage() {
               required
             />
             <PasswordInput
+              autoComplete="current-password"
               id="password"
               labelText={t('auth.password')}
               name="password"
               required
             />
-            {error ? <p role="alert">{t('auth.signInFailed')}</p> : null}
+            <Link href="/forgot-password">{t('auth.forgotPassword')}</Link>
+            {error ? (
+              <InlineNotification
+                hideCloseButton
+                kind="error"
+                lowContrast
+                role="alert"
+                title={t('auth.signInFailed')}
+              />
+            ) : null}
             <Button type="submit">{t('auth.signIn')}</Button>
           </Stack>
         </Form>
