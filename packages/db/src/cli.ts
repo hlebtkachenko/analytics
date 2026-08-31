@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 import {
@@ -154,9 +155,26 @@ export async function runDatabaseCli(
   }
 }
 
-const invokedPath = process.argv[1];
+export function isDirectInvocation(
+  moduleUrl: string,
+  invokedPath: string | undefined,
+): boolean {
+  if (!invokedPath) {
+    return false;
+  }
 
-if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
+  if (moduleUrl === pathToFileURL(invokedPath).href) {
+    return true;
+  }
+
+  try {
+    return moduleUrl === pathToFileURL(realpathSync(invokedPath)).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectInvocation(import.meta.url, process.argv[1])) {
   void runDatabaseCli(process.argv.slice(2)).catch(() => {
     process.stderr.write(
       `${JSON.stringify({ code: 'DATABASE_COMMAND_FAILED', status: 'error' })}\n`,

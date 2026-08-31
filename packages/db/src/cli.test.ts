@@ -1,7 +1,12 @@
+import { mkdtemp, rm, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import type { DatabasePool } from './pool.js';
-import { runSignupCli } from './cli.js';
+import { isDirectInvocation, runSignupCli } from './cli.js';
 
 function createSignupHarness(
   initialValue: boolean,
@@ -167,5 +172,23 @@ describe('public sign-up database CLI', () => {
     expect(stderr.write).toHaveBeenCalledWith(
       '{"code":"PUBLIC_SIGNUP_COMMAND_FAILED","status":"error"}\n',
     );
+  });
+});
+
+describe('database CLI entrypoint', () => {
+  it('recognizes invocation through a symlink', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'bap-db-cli-'));
+    const modulePath = fileURLToPath(new URL('./cli.ts', import.meta.url));
+    const invokedPath = join(temporaryDirectory, 'cli.ts');
+
+    try {
+      await symlink(modulePath, invokedPath);
+
+      expect(
+        isDirectInvocation(pathToFileURL(modulePath).href, invokedPath),
+      ).toBe(true);
+    } finally {
+      await rm(temporaryDirectory, { force: true, recursive: true });
+    }
   });
 });
