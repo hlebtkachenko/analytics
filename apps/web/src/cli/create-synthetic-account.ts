@@ -3,22 +3,23 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
 import { getAuth } from '../lib/auth/server.js';
+import {
+  normalizeOrganizationSlug,
+  organizationSlugSchema,
+} from '../lib/organizations/slug.js';
+import { seedInitialOrganizationQuotaForCli } from './organization-quota.js';
 
-const syntheticAccountSchema = z
+const syntheticAccountInputSchema = z
   .object({
     email: z.email().max(254),
     name: z.string().trim().min(1).max(256),
     organizationName: z.string().trim().min(1).max(256),
-    organizationSlug: z
-      .string()
-      .min(1)
-      .max(64)
-      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+    organizationSlug: z.string().trim().min(1).max(256),
     password: z.string().min(14).max(128),
   })
   .strict();
 
-export type SyntheticAccountInput = z.infer<typeof syntheticAccountSchema>;
+export type SyntheticAccountInput = z.infer<typeof syntheticAccountInputSchema>;
 
 type SyntheticAuth = Readonly<{
   api: Readonly<{
@@ -61,10 +62,18 @@ export function parseSyntheticAccountInput(
   value: string,
 ): SyntheticAccountInput {
   try {
-    return syntheticAccountSchema.parse(JSON.parse(value));
+    return validateSyntheticAccountInput(JSON.parse(value));
   } catch {
     throw new Error('Invalid synthetic account input.');
   }
+}
+
+function validateSyntheticAccountInput(value: unknown): SyntheticAccountInput {
+  const parsed = syntheticAccountInputSchema.parse(value);
+  const organizationSlug = organizationSlugSchema.parse(
+    normalizeOrganizationSlug(parsed.organizationSlug),
+  );
+  return { ...parsed, organizationSlug };
 }
 
 export async function readSyntheticAccountInput(
@@ -83,19 +92,22 @@ export async function readSyntheticAccountInput(
 export async function createSyntheticAccount(
   input: SyntheticAccountInput,
   auth: SyntheticAuth,
+  seedQuota: (userId: string) => Promise<void>,
 ): Promise<SyntheticAccountResult> {
+  const validated = validateSyntheticAccountInput(input);
   const user = await auth.api.createUser({
     body: {
       data: { emailVerified: true },
-      email: input.email,
-      name: input.name,
-      password: input.password,
+      email: validated.email,
+      name: validated.name,
+      password: validated.password,
     },
   });
+  await seedQuota(user.user.id);
   const organization = await auth.api.createOrganization({
     body: {
-      name: input.organizationName,
-      slug: input.organizationSlug,
+      name: validated.organizationName,
+      slug: validated.organizationSlug,
       userId: user.user.id,
     },
   });
@@ -113,10 +125,17 @@ export async function runSyntheticAccountCli(
   output: SyntheticCliOutput,
   environment: Readonly<Record<string, string | undefined>> = process.env,
   loadAuth: () => Promise<SyntheticAuth> = getAuth,
+  seedQuota: (
+    userId: string,
+  ) => Promise<void> = seedInitialOrganizationQuotaForCli,
 ): Promise<void> {
   assertSyntheticSetupEnabled(environment);
   const account = await readSyntheticAccountInput(input);
-  const result = await createSyntheticAccount(account, await loadAuth());
+  const result = await createSyntheticAccount(
+    account,
+    await loadAuth(),
+    seedQuota,
+  );
   output.write(formatSyntheticAccountResult(result));
 }
 

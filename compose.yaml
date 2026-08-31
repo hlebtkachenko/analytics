@@ -111,6 +111,7 @@ services:
       BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
       BAP_DATABASE_PORT: 5432
       BAP_DATABASE_USER: bap_auth
+      BAP_MIGRATOR_PASSWORD_FILE: /run/credentials/migrator-password
       # Owner bootstrap never sends mail, so it mounts no provider credential.
       BAP_MAIL_TRANSPORT: log
       BAP_PUBLIC_ORIGIN: ${BAP_PUBLIC_ORIGIN:-http://localhost:3000}
@@ -127,6 +128,8 @@ services:
     secrets:
       - source: bap_auth_password
         target: /run/credentials/database-password
+      - source: bap_migrator_password
+        target: /run/credentials/migrator-password
       - source: better_auth_secret
         target: /run/credentials/auth-secret
     cap_drop:

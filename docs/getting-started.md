@@ -53,9 +53,14 @@ docker compose --env-file .env --profile bootstrap -f compose.yaml -f compose.de
 ```
 
 Bootstrap deliberately omits `compose.mailpit.yaml`: it sends no mail and must
-not receive the sink services, SMTP variables, network, or loopback port.
+not receive the sink services, SMTP variables, network, or loopback port. The
+profiled one-shot mounts separate `bap_auth` and `bap_migrator` credentials;
+long-lived web never receives the migrator mount.
 
 The command asks for an owner email, display name, organization name, and a
 hidden 14-128 character password. Do not use it in automation. All example
 values are synthetic, and shared or production environments require
-owner-provided secret files and origins.
+owner-provided secret files and origins. The organization name must normalize to
+a non-reserved 3-20 character slug. Validation happens before user creation; the
+command then establishes an initial quota of 1 through the one-shot migrator
+boundary and closes that pool before creating the organization.

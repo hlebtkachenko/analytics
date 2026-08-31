@@ -119,6 +119,9 @@ export const organizations = authSchema.table(
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
+    createdBy: text('created_by').references(() => users.id, {
+      onDelete: 'set null',
+    }),
     id: text('id').primaryKey(),
     logo: text('logo'),
     metadata: text('metadata'),

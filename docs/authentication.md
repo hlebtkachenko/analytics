@@ -322,6 +322,38 @@ function returns only verified-email state and one of `owner`, `admin`, or
 `member`. It is owned by `bap_owner`, uses a fixed safe search path, and is the
 only auth read surface granted to the API roles.
 
+New or changed member and invitation rows accept only the scalar roles `owner`,
+`admin`, and `member`. The migration leaves its role checks `NOT VALID` so a
+historical composed or otherwise invalid value does not block deployment. The
+resolver treats such a legacy value as no membership instead of throwing.
+
+## Organization creation foundation
+
+`auth.organization.created_by` attributes a created organization independently
+of membership. It references the user with `ON DELETE SET NULL`. NULL means an
+unattributed legacy or system-created organization and counts against no user's
+quota. Phase 7 setup organizations still use that NULL system path; the Phase 8
+creation hook will inject attribution for the approved user-facing flow.
+
+`auth.organization_quota` stores a non-negative total per user; no row means
+zero. `bap_auth` may SELECT the table for Better Auth policy checks but cannot
+insert, update, or delete a grant. A BEFORE INSERT trigger is the atomic
+enforcement point for non-NULL creators. It serializes each creator with
+`pg_advisory_xact_lock(hashtext(created_by))`, counts only organizations
+attributed to that creator, and rejects an insert at or above quota. Joining or
+accepting invitations does not consume creation quota.
+
+Organization slugs are 3 through 20 lowercase ASCII letters or digits separated
+by single hyphens, cannot be all digits, and cannot be one of `access`, `api`,
+`datasets`, `design-system`, `health`, `invitation`, `metrics`, `ready`,
+`sign-in`, `sign-up`, `forgot-password`, `reset-password`, `activate`,
+`welcome`, or `account`. The shared web validator and database constraints use
+the same literal contract. The normalizer is deterministic and never silently
+renames a reserved, numeric, empty, or too-short result.
+
+Phase 7 does not enable ordinary organization creation, add the general quota
+grant CLI, or add slug routing. Those remain Phase 8 and Phase 9 work.
+
 ## First owner
 
 The initial owner is created with the image-local `bootstrap-owner` command. It
@@ -329,14 +361,26 @@ requires a TTY, confirms the exact identity out of band, hides the 14-128
 character password during input, and holds a PostgreSQL advisory lock. It uses
 the supported Better Auth Admin and Organization server APIs.
 
+Before any user write, the command normalizes the organization name into the
+shared slug contract and refuses an invalid result. After the user exists, it
+uses a separate one-shot `bap_migrator` pool to establish only the minimum
+initial quota of 1 under `SET LOCAL ROLE bap_owner`. An absent or zero row gains
+`system-bootstrap` provenance; an existing quota of 1 or more and its provenance
+are preserved. The migrator pool closes before the organization API call. The
+long-lived web service never receives that migrator credential.
+
 The command resumes only one safe partial state: a verified global admin with no
 membership and no existing organization owner. All other partial states abort
-with a recovery instruction. The command reports only generated IDs and status.
+with a recovery instruction. Existing-owner detection remains comma-token-aware
+for historical composed roles even though new writes are scalar. The command
+reports only generated IDs and status.
 
 The separate `create-synthetic-account` CLI exists only for disposable
 operational proof. It requires `BAP_E2E_SETUP=true`, accepts one validated JSON
 object from standard input, and emits only status and generated IDs. It does not
-replace the interactive owner bootstrap.
+replace the interactive owner bootstrap. Operational proof invokes it as a
+command override of the same profiled one-shot service so it can follow the same
+validate, user, initial-quota, close-migrator-pool, organization order.
 
 ## Rate limiting and client identity
 

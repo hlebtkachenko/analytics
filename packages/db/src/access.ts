@@ -21,7 +21,7 @@ export interface ResolveMembershipInput {
 // Bump it to the newest migration id in the same pull request as that migration.
 // Rollback consequence: application code rolled back after the migration is
 // applied makes /ready return 503 on every service until this is bumped again.
-export const DATABASE_MIGRATION_COMPATIBILITY = '20260831.0002';
+export const DATABASE_MIGRATION_COMPATIBILITY = '20260831.0003';
 
 export const PUBLIC_SIGNUP_EDGE_RATE_LIMIT = {
   max: 3,
@@ -157,6 +157,96 @@ export async function recordUserErasureRequest(
   await pool.query('select auth.request_user_erasure($1)', [userId]);
 }
 
+export interface InitialOrganizationQuota {
+  grantedAt: Date;
+  grantedBy: string | null;
+  grantedTotal: number;
+  note: string | null;
+  userId: string;
+}
+
+const initialOrganizationQuotaNote = 'system-bootstrap: initial organization';
+
+export async function ensureInitialOrganizationQuota(
+  pool: DatabasePool,
+  userId: string,
+): Promise<InitialOrganizationQuota> {
+  if (userId.length === 0) {
+    throw new Error('Initial organization quota requires a user id.');
+  }
+
+  const client = await pool.connect();
+  let transactionOpen = false;
+
+  try {
+    await client.query('begin');
+    transactionOpen = true;
+    await client.query('set local role bap_owner');
+
+    const seeded = await client.query<{
+      granted_at: Date;
+      granted_by: string | null;
+      granted_total: number;
+      note: string | null;
+      user_id: string;
+    }>(
+      `insert into auth.organization_quota (
+         user_id,
+         granted_total,
+         granted_by,
+         granted_at,
+         note
+       )
+       values ($1, 1, null, now(), $2)
+       on conflict (user_id) do update
+       set granted_total = 1,
+           granted_by = null,
+           granted_at = excluded.granted_at,
+           note = excluded.note
+       where auth.organization_quota.granted_total = 0
+       returning user_id, granted_total, granted_by, granted_at, note`,
+      [userId, initialOrganizationQuotaNote],
+    );
+    const result =
+      seeded.rows[0] ??
+      (
+        await client.query<{
+          granted_at: Date;
+          granted_by: string | null;
+          granted_total: number;
+          note: string | null;
+          user_id: string;
+        }>(
+          `select user_id, granted_total, granted_by, granted_at, note
+           from auth.organization_quota
+           where user_id = $1`,
+          [userId],
+        )
+      ).rows[0];
+
+    if (result === undefined || result.granted_total < 1) {
+      throw new Error('Initial organization quota was not established.');
+    }
+
+    await client.query('commit');
+    transactionOpen = false;
+    return {
+      grantedAt: result.granted_at,
+      grantedBy: result.granted_by,
+      grantedTotal: result.granted_total,
+      note: result.note,
+      userId: result.user_id,
+    };
+  } catch (error) {
+    if (transactionOpen) {
+      await client.query('rollback').catch(() => undefined);
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function resolveMembership(
   pool: DatabasePool,
   input: ResolveMembershipInput,
@@ -174,10 +264,12 @@ export async function resolveMembership(
     return null;
   }
 
-  return {
-    emailVerified: row.email_verified,
-    role: membershipRoleSchema.parse(row.role),
-  };
+  const role = membershipRoleSchema.safeParse(row.role);
+  if (!role.success) {
+    return null;
+  }
+
+  return { emailVerified: row.email_verified, role: role.data };
 }
 
 export interface MigrationCompatibility {

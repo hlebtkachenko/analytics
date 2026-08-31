@@ -73,6 +73,24 @@ execute `auth.request_user_erasure(text)`, which records a currently live user.
 deletes the request in the same transaction as app anonymization, so no
 completed raw-id mapping is retained.
 
+`auth.organization_quota` is another intentional exception to the inherited
+auth-table DML. An absent row means zero allowance. Its migration revokes every
+direct `bap_auth` privilege and returns SELECT only; `bap_backup` retains SELECT
+for dumps, and API and reporting roles have no access. No runtime-executable
+function can write it. The setup-only `@bap/db` accessor connects separately as
+`bap_migrator`, opens 1 transaction, sets `bap_owner` locally, and changes only
+an absent or zero row to the minimum 1. Existing positive grants and their
+provenance remain untouched.
+
+`auth.organization.created_by` is a nullable user foreign key with
+`ON DELETE SET NULL`. NULL denotes an unattributed legacy or system organization
+and consumes no user's quota. For an attributed INSERT, the invoker-rights
+BEFORE trigger takes `pg_advisory_xact_lock(hashtext(created_by))`, reads the
+quota, and counts organizations attributed to that creator. The advisory lock
+serializes concurrent creates without requiring `bap_auth` to update the quota
+row. Its function is owned by `bap_owner`, has a fixed search path, and grants
+no direct execution to runtime roles.
+
 `app.erase_user(text)` is an invoker-rights, fixed-search-path function. The
 eraser role has schema usage, function execution, and SELECT/UPDATE on only
 `audit_log.user_id`, `data_grants.user_id`, and `dataset.created_by`. It has no
@@ -130,6 +148,16 @@ search paths, and the 6 column privileges needed by the erasure function. It
 proves sole-owned and co-owned counts, all identity cascades, live and
 unrequested refusal, one opaque tombstone across all 3 app columns, request
 consumption, and idempotent stored state.
+
+Organization-creation coverage asserts the exact quota columns, named checks,
+foreign-key delete actions, trigger and function catalog state, direct table ACL
+and inherited default-privilege exception. It proves `bap_auth` has SELECT only,
+cannot write quota or disable the trigger, absence means zero, NULL attribution
+consumes no quota, positive quotas work, and two concurrent quota-1 inserts
+produce exactly 1 organization. A shared corpus proves that PostgreSQL and the
+web Zod validator agree on valid, malformed, overlong, numeric, and reserved
+slugs. It also verifies that invalid legacy membership is returned as no access
+instead of a server error.
 
 It also proves the phase 1 authorization tables: `app.data_grants` is readable
 only inside its own tenant context and rejects a cross-tenant write, and

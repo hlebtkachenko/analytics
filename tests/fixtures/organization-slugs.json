@@ -1,0 +1,18 @@
+[
+  { "slug": "abc", "valid": true },
+  { "slug": "alpha", "valid": true },
+  { "slug": "alpha-beta", "valid": true },
+  { "slug": "abc123", "valid": true },
+  { "slug": "abcdefghijklmnopqrst", "valid": true },
+  { "slug": "ab", "valid": false },
+  { "slug": "abcdefghijklmnopqrstu", "valid": false },
+  { "slug": "Alpha", "valid": false },
+  { "slug": "alpha_beta", "valid": false },
+  { "slug": "-alpha", "valid": false },
+  { "slug": "alpha-", "valid": false },
+  { "slug": "alpha--beta", "valid": false },
+  { "slug": "123", "valid": false },
+  { "slug": "api", "valid": false },
+  { "slug": "design-system", "valid": false },
+  { "slug": "account", "valid": false }
+]
