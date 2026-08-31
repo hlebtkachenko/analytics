@@ -37,8 +37,9 @@ live subject.
 Disable `/admin/remove-user` in Better Auth and the public route gate. Installed
 Better Auth 1.7.2 implements that Admin-plugin endpoint as a direct target-user
 delete and does not call `user.deleteUser.beforeDelete`. BAP has no consumer for
-it. Phase 5 may inventory the remaining Admin-plugin surface; this decision does
-not add an admin flow or duplicate admin permission logic in a global hook.
+it. Phase 5's inventory preserves this disable and separately disables both
+impersonation paths; this decision does not add an admin flow or duplicate admin
+permission logic in a global hook.
 
 Create `bap_eraser` as NOLOGIN, passwordless, NOINHERIT, and BYPASSRLS, with no
 database CONNECT. `bap_owner` may SET the role but does not inherit it. No

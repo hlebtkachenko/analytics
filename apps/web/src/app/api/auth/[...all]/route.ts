@@ -16,7 +16,9 @@ import {
 import { normalizePublicSignUpClientIdentity } from '../../../../lib/auth/public-sign-up-edge';
 
 function isDisabledPath(request: NextRequest): boolean {
-  const pathname = request.nextUrl.pathname.replace('/api/auth', '');
+  const pathname = request.nextUrl.pathname
+    .slice('/api/auth'.length)
+    .replace(/\/+$/, '');
   return disabledAuthPaths.has(pathname);
 }
 

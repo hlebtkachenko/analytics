@@ -39,8 +39,9 @@ refuses while that identity remains live.
 
 Installed Admin-plugin `/admin/remove-user` deletes a target directly without
 calling `user.deleteUser.beforeDelete`. BAP has no consumer, so the path is
-disabled in both the configured auth handler and public route gate. Phase 5 may
-inventory the remaining Admin-plugin surface; this phase adds no admin flow.
+disabled in both the configured auth handler and public route gate. Phase 5's
+inventory preserves that disable and separately disables both impersonation
+paths; this phase adds no admin flow.
 
 `bap_eraser` is a NOLOGIN, passwordless, NOINHERIT, BYPASSRLS role with no
 database CONNECT. Only `bap_owner` can SET it, without inherited privileges.

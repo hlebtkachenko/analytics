@@ -71,10 +71,14 @@ attributes and memberships, no login or CONNECT leakage, exact request and
 function ACLs, column-only app grants, comma-composed sole-owner versus co-owner
 counts, and the session/account/member/invitation/two-factor cascades. Web tests
 also dispatch the configured and public HTTP handlers to prove Admin-plugin user
-removal is disabled. Explicit-id erasure must use 1 opaque tombstone across all
-3 documented app columns, consume its pending request transactionally, leave an
-unrelated missing-auth fixture untouched, reject live and unrequested ids, and
-leave stored state unchanged on a direct repeat. Unit coverage drives CLI role
+removal and both impersonation paths are disabled, including normalized path
+variants, without minting a session. The same focused coverage asserts the
+absence of `adminUserIds`, all 8 reachable admin mutation limits, preservation
+of the built-in change-password limit, and the server-only create-user behavior.
+Explicit-id erasure must use 1 opaque tombstone across all 3 documented app
+columns, consume its pending request transactionally, leave an unrelated
+missing-auth fixture untouched, reject live and unrequested ids, and leave
+stored state unchanged on a direct repeat. Unit coverage drives CLI role
 transitions, rollback, JSON-only output, and redacted errors.
 
 The scheduled and manually runnable GitHub Actions operational proof creates a
