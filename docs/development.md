@@ -49,7 +49,7 @@ Compose stack for integrated work:
 
 ```sh
 pnpm secrets:local
-docker compose -f compose.yaml -f compose.development.yaml up --build --detach --wait
+docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml up --build --detach --wait
 ```
 
 Use `docker compose ... logs --no-color` for stack diagnostics and
@@ -85,10 +85,14 @@ so a change to these scripts affects new workspaces only after it merges.
 
 ## Port overrides
 
-Set `WEB_PORT` and `POSTGRES_PORT` for the development Compose overlay. The
-defaults are 3000 and 5432. The APIs are internal Compose services and are not
-published by the development overlay. `PORT`, `HOST`, and `HOSTNAME` are
-container runtime settings, not public browser configuration.
+Set `WEB_PORT` and `POSTGRES_PORT` for `compose.development.yaml`, then select
+`compose.mailpit.yaml` and set `MAILPIT_HTTP_PORT` when synthetic mail
+inspection is needed. The defaults are 3000, 5432, and 8025, and every published
+host port must be unique. Mailpit SMTP remains internal to Docker. Its loopback
+companion accepts only GET `/readyz` and GET `/api/v1/search`; the UI, every
+other path, and non-GET methods return 404. The application APIs remain internal
+Compose services. `PORT`, `HOST`, and `HOSTNAME` are container runtime settings,
+not public browser configuration.
 
 ## Adding code
 

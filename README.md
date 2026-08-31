@@ -31,7 +31,7 @@ pnpm install --frozen-lockfile
 
 ```sh
 pnpm secrets:local
-docker compose -f compose.yaml -f compose.development.yaml up --build --wait
+docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml up --build --wait
 ```
 
 Open <http://localhost:3000>. Caddy is the browser entrypoint. PostgreSQL is

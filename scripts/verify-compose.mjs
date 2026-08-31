@@ -16,10 +16,24 @@ const backupStageEntrypoint = readFileSync(
   new URL('./backup-stage-entrypoint.sh', import.meta.url),
   'utf8',
 );
+const caddyfile = readFileSync(
+  new URL('../infrastructure/caddy/Caddyfile', import.meta.url),
+  'utf8',
+);
+const mailpitCaddyfile = readFileSync(
+  new URL('../infrastructure/caddy/MailpitApi.Caddyfile', import.meta.url),
+  'utf8',
+);
+const developmentCompose = readFileSync(
+  new URL('../compose.development.yaml', import.meta.url),
+  'utf8',
+);
 
 // pgvector ships the pinned PostgreSQL 18.6 build plus the vector extension.
 const postgresImageDigest =
   'sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a';
+const mailpitImageDigest =
+  'sha256:7f33095f80e901f6ad08028f06ca284aa58fe84942be5496008d041d3b9f4d4d';
 
 function invariant(condition, message) {
   if (!condition) {
@@ -50,6 +64,25 @@ invariant(
     !backupStageEntrypoint.includes('RESTIC_BACKEND_CREDENTIALS') &&
     !backupEntrypoint.includes('RESTIC_BACKEND_CREDENTIALS'),
   'The backup entrypoint must not execute generic credential input.',
+);
+invariant(
+  !/mailpit/i.test(caddyfile),
+  'Caddy must not expose the development mail sink.',
+);
+invariant(
+  mailpitCaddyfile.replace(/\s+/g, ' ').trim() ===
+    '{ admin off auto_https off } :8025 { @allowed { method GET path /readyz /api/v1/search } handle @allowed { reverse_proxy mailpit:8025 } respond 404 }',
+  'The Mailpit API proxy must retain its exact GET-only allowlist.',
+);
+invariant(
+  !/mailpit|BAP_MAIL_SMTP_|BAP_MAIL_TRANSPORT:\s*smtp/i.test(
+    developmentCompose,
+  ),
+  'The development overlay must not contain the optional mail sink.',
+);
+invariant(
+  ['development', 'production', 'operations', 'bootstrap'].includes(mode),
+  'Unknown Compose verification mode.',
 );
 
 const applicationServices = ['web', 'api', 'reporting-api', 'worker'];
@@ -186,6 +219,45 @@ const published = Object.entries(configuration.services)
   .map(([name]) => name)
   .sort();
 
+const publishedHostPorts = new Map();
+for (const [serviceName, service] of Object.entries(configuration.services)) {
+  for (const port of service.ports ?? []) {
+    const hostPort = Number(port.published);
+    const protocol = port.protocol ?? 'tcp';
+    invariant(
+      Number.isInteger(hostPort) && hostPort >= 1 && hostPort <= 65_535,
+      `${serviceName} must publish a valid host port.`,
+    );
+    const key = `${protocol}:${hostPort}`;
+    const existingService = publishedHostPorts.get(key);
+    invariant(
+      existingService === undefined,
+      `Published ${protocol.toUpperCase()} host port ${hostPort} is reused by ${existingService} and ${serviceName}.`,
+    );
+    publishedHostPorts.set(key, serviceName);
+  }
+}
+
+function expectMailpitAbsent(label) {
+  invariant(
+    !Object.hasOwn(configuration.services, 'mailpit') &&
+      !Object.hasOwn(configuration.services, 'mailpit-api-proxy') &&
+      !Object.hasOwn(configuration.networks, 'mailpit-loopback') &&
+      configuration.services.web.environment.BAP_MAIL_TRANSPORT !== 'smtp' &&
+      !Object.keys(configuration.services.web.environment).some((name) =>
+        name.startsWith('BAP_MAIL_SMTP_'),
+      ) &&
+      !Object.values(configuration.services).some((service) =>
+        (service.ports ?? []).some((port) => port.target === 8025),
+      ),
+    `${label} must exclude the Mailpit overlay and SMTP configuration.`,
+  );
+}
+
+if (['production', 'operations', 'bootstrap'].includes(mode)) {
+  expectMailpitAbsent(mode);
+}
+
 if (mode === 'production') {
   invariant(
     published.join() === 'caddy',
@@ -225,8 +297,99 @@ if (mode === 'production') {
 
 if (mode === 'development') {
   invariant(
-    published.join() === 'caddy,database',
-    'Development may publish only Caddy and PostgreSQL.',
+    published.join() === 'caddy,database,mailpit-api-proxy',
+    'Development may publish only Caddy, PostgreSQL, and the Mailpit API proxy.',
+  );
+  const mailpit = configuration.services.mailpit;
+  invariant(
+    mailpit.image.includes(mailpitImageDigest),
+    'Mailpit must use the accepted image digest.',
+  );
+  invariant(
+    networkNames('mailpit').join() === 'app',
+    'Mailpit must use only the app network.',
+  );
+  invariant(
+    mailpit.expose.join() === '1025' && (mailpit.ports?.length ?? 0) === 0,
+    'Mailpit SMTP must remain internal to Docker.',
+  );
+  invariant(
+    mailpit.healthcheck.test.join(' ').includes('/readyz'),
+    'Mailpit must use its readiness endpoint.',
+  );
+  invariant(
+    mailpit.read_only === true &&
+      mailpit.user === '10001:10001' &&
+      mailpit.cap_drop.join() === 'ALL' &&
+      (mailpit.cap_add?.length ?? 0) === 0 &&
+      mailpit.security_opt.join() === 'no-new-privileges:true' &&
+      mailpit.tmpfs.length === 1,
+    'Mailpit must retain the development sink privilege boundary.',
+  );
+  const mailpitApiProxy = configuration.services['mailpit-api-proxy'];
+  const [mailpitApiPort] = mailpitApiProxy.ports;
+  const mailpitApiConfigMount = mailpitApiProxy.volumes.find(
+    (mount) => mount.target === '/etc/caddy/Caddyfile',
+  );
+  invariant(
+    mailpitApiProxy.image.includes(
+      'sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648',
+    ) &&
+      networkNames('mailpit-api-proxy').join() === 'app,mailpit-loopback' &&
+      mailpitApiProxy.ports.length === 1 &&
+      mailpitApiPort.host_ip === '127.0.0.1' &&
+      mailpitApiPort.target === 8025 &&
+      mailpitApiPort.protocol === 'tcp' &&
+      mailpitApiProxy.depends_on.mailpit.condition === 'service_healthy',
+    'The Mailpit HTTP proxy must be loopback-only and wait for the sink.',
+  );
+  invariant(
+    JSON.stringify(mailpitApiProxy.command) ===
+      JSON.stringify([
+        '/bin/sh',
+        '-eu',
+        '-c',
+        'cp /usr/bin/caddy /run/caddy/caddy && exec /run/caddy/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile',
+      ]) &&
+      mailpitApiConfigMount?.type === 'bind' &&
+      mailpitApiConfigMount.read_only === true &&
+      mailpitApiConfigMount.source.endsWith(
+        '/infrastructure/caddy/MailpitApi.Caddyfile',
+      ),
+    'The Mailpit HTTP proxy must run only the mounted allowlist configuration.',
+  );
+  invariant(
+    mailpitApiProxy.healthcheck.test.join(' ').includes('/readyz'),
+    'The Mailpit HTTP proxy must verify the sink readiness path.',
+  );
+  invariant(
+    mailpitApiProxy.read_only === true &&
+      mailpitApiProxy.user === '10001:10001' &&
+      mailpitApiProxy.cap_drop.join() === 'ALL' &&
+      (mailpitApiProxy.cap_add?.length ?? 0) === 0 &&
+      mailpitApiProxy.security_opt.join() === 'no-new-privileges:true' &&
+      mailpitApiProxy.tmpfs.length === 2 &&
+      mailpitApiProxy.tmpfs.some(
+        (mount) =>
+          mount.startsWith('/run/caddy:') &&
+          mount.includes('exec') &&
+          mount.includes('nosuid') &&
+          mount.includes('nodev') &&
+          mount.includes('size=64m'),
+      ),
+    'The Mailpit HTTP proxy must retain its development privilege boundary.',
+  );
+  invariant(
+    configuration.networks['mailpit-loopback'].internal !== true,
+    'The Mailpit HTTP proxy network must permit host loopback publishing.',
+  );
+  invariant(
+    configuration.services.web.environment.BAP_MAIL_TRANSPORT === 'smtp' &&
+      configuration.services.web.environment.BAP_MAIL_SMTP_HOST === 'mailpit' &&
+      configuration.services.web.environment.BAP_MAIL_SMTP_PORT === '1025' &&
+      configuration.services.web.depends_on.mailpit.condition ===
+        'service_healthy',
+    'Development web must wait for and use the internal Mailpit SMTP sink.',
   );
 }
 

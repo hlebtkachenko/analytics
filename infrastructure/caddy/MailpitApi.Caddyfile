@@ -1,0 +1,17 @@
+{
+	admin off
+	auto_https off
+}
+
+:8025 {
+	@allowed {
+		method GET
+		path /readyz /api/v1/search
+	}
+
+	handle @allowed {
+		reverse_proxy mailpit:8025
+	}
+
+	respond 404
+}

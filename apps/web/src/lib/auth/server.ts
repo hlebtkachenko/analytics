@@ -8,6 +8,7 @@ import { admin, jwt, organization, twoFactor } from 'better-auth/plugins';
 import { APIError, betterAuth } from 'better-auth';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { DatabasePool } from '@bap/db/pool';
 import { readFile, stat } from 'node:fs/promises';
 import { z } from 'zod';
@@ -57,6 +58,29 @@ export const accountDeletionSoleOwnerErrorCode =
 export const accountDeletionUnavailableErrorCode =
   'ACCOUNT_DELETION_UNAVAILABLE';
 export const adminPluginOptions = { schema: adminAuthSchema } as const;
+
+type VerificationDeliveryBoundary = { failed: boolean };
+
+const verificationDeliveryBoundary =
+  new AsyncLocalStorage<VerificationDeliveryBoundary>();
+
+export class VerificationDeliveryUnavailableError extends Error {
+  constructor() {
+    super('Verification delivery is unavailable.');
+    this.name = 'VerificationDeliveryUnavailableError';
+  }
+}
+
+export async function runWithVerificationDeliveryBoundary<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  const boundary: VerificationDeliveryBoundary = { failed: false };
+  const result = await verificationDeliveryBoundary.run(boundary, operation);
+  if (boundary.failed) {
+    throw new VerificationDeliveryUnavailableError();
+  }
+  return result;
+}
 
 export async function publicSignUpAllowed(
   pool: DatabasePool,
@@ -202,11 +226,29 @@ export function createVerificationSender(mail: MailConfiguration) {
       to: data.user.email,
       url: data.url,
     });
-    void sendMail(mail, {
+    const delivery = sendMail(mail, {
       subject: message.subject,
       text: message.text,
       to: data.user.email,
-    }).catch(() => undefined);
+    });
+
+    if (mail.transport !== 'smtp') {
+      void delivery.catch(() => undefined);
+      return;
+    }
+
+    try {
+      const result = await delivery;
+      if (!result.ok) {
+        throw new VerificationDeliveryUnavailableError();
+      }
+    } catch {
+      const boundary = verificationDeliveryBoundary.getStore();
+      if (boundary) {
+        boundary.failed = true;
+      }
+      throw new VerificationDeliveryUnavailableError();
+    }
   };
 }
 

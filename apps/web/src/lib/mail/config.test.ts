@@ -145,12 +145,67 @@ describe('loadMailConfiguration', () => {
     await expect(
       loadMailConfiguration({
         BAP_MAIL_SENDER: 'team@bap.invalid',
-        BAP_MAIL_TRANSPORT: 'smtp',
+        BAP_MAIL_TRANSPORT: 'ses',
         BAP_RESEND_API_KEY_FILE: file,
         NODE_ENV: 'test',
       }),
     ).rejects.toThrow();
   });
+
+  it('accepts only the explicit isolated SMTP sink', async () => {
+    await expect(
+      loadMailConfiguration({
+        BAP_MAIL_SENDER: 'team@bap.invalid',
+        BAP_MAIL_SMTP_HOST: 'mailpit',
+        BAP_MAIL_SMTP_PORT: '1025',
+        BAP_MAIL_TRANSPORT: 'smtp',
+        NODE_ENV: 'test',
+      }),
+    ).resolves.toEqual({
+      apiKey: undefined,
+      sender: 'team@bap.invalid',
+      smtpHost: 'mailpit',
+      smtpPort: 1025,
+      transport: 'smtp',
+    });
+  });
+
+  it.each([
+    {
+      description: 'missing port',
+      environment: { BAP_MAIL_SMTP_HOST: 'mailpit' },
+    },
+    {
+      description: 'missing host',
+      environment: { BAP_MAIL_SMTP_PORT: '1025' },
+    },
+    {
+      description: 'non-Mailpit host',
+      environment: {
+        BAP_MAIL_SMTP_HOST: 'smtp.example.test',
+        BAP_MAIL_SMTP_PORT: '1025',
+      },
+    },
+    {
+      description: 'non-Mailpit port',
+      environment: {
+        BAP_MAIL_SMTP_HOST: 'mailpit',
+        BAP_MAIL_SMTP_PORT: '2525',
+      },
+    },
+  ])(
+    'rejects an SMTP configuration with a $description',
+    async ({ environment: smtpEnvironment }) => {
+      await expect(
+        loadMailConfiguration({
+          BAP_MAIL_SENDER: 'team@bap.invalid',
+          BAP_MAIL_TRANSPORT: 'smtp',
+          NODE_ENV: 'test',
+          ...smtpEnvironment,
+        }),
+      ).rejects.toThrow('isolated mailpit:1025 development sink');
+    },
+  );
 
   it('applies the documented default sender', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'bap-mail-'));

@@ -12,7 +12,7 @@ const mailMessageSchema = z.object({
 
 export type MailMessageInput = z.infer<typeof mailMessageSchema>;
 
-// Phase 1 wires this into Better Auth's email hooks; nothing here does that yet.
+// Better Auth hooks call this boundary; transport selection remains config-owned.
 export async function sendMail(
   configuration: MailConfiguration,
   message: MailMessageInput,

@@ -12,6 +12,8 @@ import {
   getAuthPool,
   publicSignUpAllowed,
   publicSignUpErrorCode,
+  runWithVerificationDeliveryBoundary,
+  VerificationDeliveryUnavailableError,
 } from '../../../../lib/auth/server';
 import { normalizePublicSignUpClientIdentity } from '../../../../lib/auth/public-sign-up-edge';
 
@@ -48,6 +50,10 @@ function publicSignUpRateLimited(retryAfterSeconds: number): Response {
       status: 429,
     },
   );
+}
+
+function authenticationUnavailable(): Response {
+  return Response.json({ code: 'AUTHENTICATION_UNAVAILABLE' }, { status: 503 });
 }
 
 function publicSignUpClientIdentity(request: NextRequest): string {
@@ -113,9 +119,16 @@ async function handle(request: NextRequest): Promise<Response> {
     return publicSignUpGate;
   }
   const handler = toNextJsHandler(await getAuth());
-  return request.method === 'GET'
-    ? handler.GET(request)
-    : handler.POST(request);
+  try {
+    return await runWithVerificationDeliveryBoundary(() =>
+      request.method === 'GET' ? handler.GET(request) : handler.POST(request),
+    );
+  } catch (error) {
+    if (error instanceof VerificationDeliveryUnavailableError) {
+      return authenticationUnavailable();
+    }
+    throw error;
+  }
 }
 
 export const GET = handle;

@@ -27,5 +27,6 @@ docker compose \
   --profile operations \
   --file compose.yaml \
   --file compose.development.yaml \
+  --file compose.mailpit.yaml \
   --project-name "bap-$CONDUCTOR_WORKSPACE_ID" \
   down --volumes --remove-orphans || true

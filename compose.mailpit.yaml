@@ -1,0 +1,96 @@
+services:
+  web:
+    depends_on:
+      mailpit:
+        condition: service_healthy
+    environment:
+      BAP_MAIL_SMTP_HOST: mailpit
+      BAP_MAIL_SMTP_PORT: 1025
+      BAP_MAIL_TRANSPORT: smtp
+
+  mailpit:
+    image: axllent/mailpit:v1.30.6@sha256:7f33095f80e901f6ad08028f06ca284aa58fe84942be5496008d041d3b9f4d4d
+    environment:
+      MP_DATABASE: /tmp/mailpit.db
+      MP_DISABLE_VERSION_CHECK: 'true'
+      MP_MAX_MESSAGES: '100'
+      MP_SMTP_BIND_ADDR: 0.0.0.0:1025
+      MP_SMTP_DISABLE_RDNS: 'true'
+      MP_UI_BIND_ADDR: 0.0.0.0:8025
+    expose:
+      - '1025'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--quiet',
+          '--tries=1',
+          '--spider',
+          'http://127.0.0.1:8025/readyz',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    init: true
+    networks:
+      - app
+    read_only: true
+    tmpfs:
+      - /tmp:uid=10001,gid=10001,mode=0700
+    user: '10001:10001'
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  mailpit-api-proxy:
+    image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    command:
+      - /bin/sh
+      - -eu
+      - -c
+      - cp /usr/bin/caddy /run/caddy/caddy && exec /run/caddy/caddy run --config
+        /etc/caddy/Caddyfile --adapter caddyfile
+    depends_on:
+      mailpit:
+        condition: service_healthy
+    environment:
+      XDG_CONFIG_HOME: /tmp/config
+      XDG_DATA_HOME: /tmp/data
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--quiet',
+          '--tries=1',
+          '--spider',
+          'http://127.0.0.1:8025/readyz',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    init: true
+    networks:
+      - app
+      - mailpit-loopback
+    ports:
+      - '127.0.0.1:${MAILPIT_HTTP_PORT:-8025}:8025'
+    read_only: true
+    tmpfs:
+      - /tmp:uid=10001,gid=10001,mode=0700
+      - /run/caddy:rw,exec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700
+    user: '10001:10001'
+    volumes:
+      - ./infrastructure/caddy/MailpitApi.Caddyfile:/etc/caddy/Caddyfile:ro
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  mailpit-loopback:
+    internal: false

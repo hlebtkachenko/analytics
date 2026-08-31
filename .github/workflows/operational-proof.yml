@@ -3,9 +3,15 @@ name: Operational proof
 on:
   pull_request:
     paths:
+      - '.github/workflows/operational-proof.yml'
+      - 'apps/web/**'
       - 'packages/db/drizzle/**'
       - 'compose*.yaml'
+      - 'config/compose.environment.example'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - 'docker/**'
+      - 'infrastructure/caddy/**'
       - 'playwright.operational.config.ts'
       - 'scripts/**'
       - 'tests/operational/**'
@@ -36,9 +42,11 @@ jobs:
     env:
       BAP_OPERATIONAL_BASE_URL: http://localhost:39100
       BAP_OPERATIONAL_EMAIL: owner@bap.invalid
+      BAP_OPERATIONAL_MAILPIT_URL: http://127.0.0.1:39825
       BAP_PUBLIC_HOST: http://localhost
       BAP_PUBLIC_ORIGIN: http://localhost:39100
       POSTGRES_PORT: '39432'
+      MAILPIT_HTTP_PORT: '39825'
       WEB_PORT: '39100'
     steps:
       - name: Check out repository
@@ -73,7 +81,7 @@ jobs:
         shell: bash
         run: |
           started_at=$(date +%s)
-          docker compose -f compose.yaml -f compose.development.yaml up --build --detach --wait --wait-timeout 90
+          docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml up --build --detach --wait --wait-timeout 90
           curl --fail --silent --show-error "$BAP_OPERATIONAL_BASE_URL/health"
           elapsed_seconds=$(($(date +%s) - started_at))
           printf '### Stack startup\n\n- Duration: %ss\n' "$elapsed_seconds" >> "$GITHUB_STEP_SUMMARY"
@@ -87,31 +95,50 @@ jobs:
             --arg organization_name 'BAP Operational' \
             --arg organization_slug 'bap-operational' \
             '{email: $email, password: env.BAP_OPERATIONAL_PASSWORD, name: $name, organizationName: $organization_name, organizationSlug: $organization_slug}')
-          result=$(printf '%s' "$input" | docker compose exec -T -e BAP_E2E_SETUP=true web node apps/web/dist-cli/cli/create-synthetic-account.js)
+          result=$(printf '%s' "$input" | docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml exec -T -e BAP_E2E_SETUP=true web node apps/web/dist-cli/cli/create-synthetic-account.js)
           organization_id=$(printf '%s' "$result" | jq -er 'select(.status == "created") | .organizationId | select(type == "string" and test("^[A-Za-z0-9_-]{1,128}$"))')
           printf 'BAP_OPERATIONAL_ORGANIZATION_ID=%s\n' "$organization_id" >> "$GITHUB_ENV"
+
+      - name: Enable public sign-up
+        shell: bash
+        run: |
+          result=$(docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm --no-deps migrator node node_modules/@bap/db/dist/cli.js signup enable)
+          printf '%s' "$result" | jq -e '.publicSignupEnabled == true' >/dev/null
+
+      - name: Run public sign-up proof
+        shell: bash
+        run: >-
+          pnpm exec playwright test --config playwright.operational.config.ts
+          tests/operational/sign-up.spec.ts
+
+      - name: Restore public sign-up default
+        if: always() && steps.stack.outcome == 'success'
+        shell: bash
+        run: |
+          result=$(docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm --no-deps migrator node node_modules/@bap/db/dist/cli.js signup disable)
+          printf '%s' "$result" | jq -e '.publicSignupEnabled == false' >/dev/null
 
       - name: Run browser proof
         shell: bash
         run: |
-          pnpm exec playwright test --config playwright.operational.config.ts
-          if docker compose logs --no-color web | grep -Fq 'could not determine a client IP'; then
+          pnpm exec playwright test --config playwright.operational.config.ts tests/operational/access.spec.ts tests/operational/identity.spec.ts tests/operational/slice.spec.ts
+          if docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml logs --no-color web | grep -Fq 'could not determine a client IP'; then
             exit 1
           fi
 
       - name: Prove backup, check, and restore
         shell: bash
         run: |
-          docker compose --profile operations -f compose.yaml -f compose.development.yaml run --rm backup-init
-          docker compose --profile operations -f compose.yaml -f compose.development.yaml run --rm backup
-          docker compose --profile operations -f compose.yaml -f compose.development.yaml run --rm backup-check
-          docker compose --profile operations -f compose.yaml -f compose.development.yaml up --detach --wait restore-database
-          docker compose --profile operations -f compose.yaml -f compose.development.yaml run --rm restore-role-bootstrap
-          docker compose --profile operations -f compose.yaml -f compose.development.yaml run --rm --no-deps restore
-          owner_memberships=$(printf '%s\n' "select count(*) from auth.member where organization_id = :'organization_id' and role = 'owner';" | docker compose exec -T -u postgres restore-database psql -U postgres -d bap_restore -v ON_ERROR_STOP=1 -v organization_id="$BAP_OPERATIONAL_ORGANIZATION_ID" -tA)
+          docker compose --profile operations -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm backup-init
+          docker compose --profile operations -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm backup
+          docker compose --profile operations -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm backup-check
+          docker compose --profile operations -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml up --detach --wait restore-database
+          docker compose --profile operations -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm restore-role-bootstrap
+          docker compose --profile operations -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm --no-deps restore
+          owner_memberships=$(printf '%s\n' "select count(*) from auth.member where organization_id = :'organization_id' and role = 'owner';" | docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml exec -T -u postgres restore-database psql -U postgres -d bap_restore -v ON_ERROR_STOP=1 -v organization_id="$BAP_OPERATIONAL_ORGANIZATION_ID" -tA)
           test "$owner_memberships" = 1
-          stack_migration_version=$(docker compose exec -T -u postgres database psql -U postgres -d "${POSTGRES_DB:-bap}" -v ON_ERROR_STOP=1 -tAc "select version from bap_migrations.current_migration_version()")
-          restored_migration_version=$(docker compose exec -T -u postgres restore-database psql -U postgres -d bap_restore -v ON_ERROR_STOP=1 -tAc "select version from bap_migrations.current_migration_version()")
+          stack_migration_version=$(docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml exec -T -u postgres database psql -U postgres -d "${POSTGRES_DB:-bap}" -v ON_ERROR_STOP=1 -tAc "select version from bap_migrations.current_migration_version()")
+          restored_migration_version=$(docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml exec -T -u postgres restore-database psql -U postgres -d bap_restore -v ON_ERROR_STOP=1 -tAc "select version from bap_migrations.current_migration_version()")
           printf 'stack migration version: %s\nrestored migration version: %s\n' "$stack_migration_version" "$restored_migration_version"
           if [ -z "$stack_migration_version" ] || [ -z "$restored_migration_version" ]; then
             echo 'Migration version is empty on the stack or the restored database' >&2
@@ -125,13 +152,13 @@ jobs:
       - name: Show failure logs
         if: failure()
         run: >-
-          docker compose -f compose.yaml -f compose.development.yaml logs
-          --no-color || true
+          docker compose -f compose.yaml -f compose.development.yaml -f
+          compose.mailpit.yaml logs --no-color || true
 
       - name: Stop stack
         if: always()
         # The operations profile owns the restic volume, so a plain down leaves it for the next run.
         run: >-
           docker compose --profile operations --profile bootstrap -f
-          compose.yaml -f compose.development.yaml down --volumes
-          --remove-orphans
+          compose.yaml -f compose.development.yaml -f compose.mailpit.yaml down
+          --volumes --remove-orphans

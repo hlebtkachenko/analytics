@@ -34,7 +34,7 @@ pnpm design-system:browser:install
 ```sh
 cp config/compose.environment.example .env
 pnpm secrets:local
-BAP_PUBLIC_HOST=http://localhost docker compose --env-file .env -f compose.yaml -f compose.development.yaml up --build --detach --wait
+BAP_PUBLIC_HOST=http://localhost docker compose --env-file .env -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml up --build --detach --wait
 ```
 
 `pnpm check` is the repository quality gate. The public local endpoint is
@@ -51,6 +51,9 @@ healthy:
 ```sh
 docker compose --env-file .env --profile bootstrap -f compose.yaml -f compose.development.yaml run --rm bootstrap-owner
 ```
+
+Bootstrap deliberately omits `compose.mailpit.yaml`: it sends no mail and must
+not receive the sink services, SMTP variables, network, or loopback port.
 
 The command asks for an owner email, display name, organization name, and a
 hidden 14-128 character password. Do not use it in automation. All example

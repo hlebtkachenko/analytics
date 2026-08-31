@@ -94,3 +94,13 @@ Rolling application code back while leaving the migration applied creates the
 accepted compatibility gap: readiness returns 503 until compatible code is
 deployed again or its expected migration version is deliberately updated. The
 schema migration is not reversed as part of an application rollback.
+
+The operational workflow exercises the policy through Caddy with the switch both
+OFF and ON. It proves the OFF request still consumes the first edge-rate
+attempt, fresh and duplicate responses are equivalent and sessionless, an
+unverified account cannot sign in, attempt 4 is limited, and only the fresh
+request reaches the recipient-filtered development mail sink. Cleanup restores
+the default-off switch even when the proof fails. Development SMTP acceptance is
+part of the fresh auth response boundary. Recipient sets are checked immediately
+and finally over a short Mailpit API-consistency window after the duplicate and
+limited responses; that window does not bound SMTP work.
