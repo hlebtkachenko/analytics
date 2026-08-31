@@ -1,7 +1,12 @@
-import { betterAuth } from 'better-auth';
+import {
+  publicSignupEnabled,
+  publicSignupInvitationExists,
+} from '@bap/db/access';
 import { admin, jwt, organization, twoFactor } from 'better-auth/plugins';
+import { APIError, betterAuth } from 'better-auth';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
+import type { DatabasePool } from '@bap/db/pool';
 import { readFile, stat } from 'node:fs/promises';
 import { z } from 'zod';
 
@@ -39,6 +44,74 @@ const authEnvironmentSchema = z.object({
 
 let authInstance: ReturnType<typeof createAuth> | undefined;
 let authPool: ReturnType<typeof createDatabasePool> | undefined;
+
+const signUpEmailBodySchema = z.object({ email: z.email().max(254) });
+
+export const publicSignUpErrorCode = 'PUBLIC_SIGN_UP_DISABLED';
+export const authLoggerConfiguration = { level: 'warn' } as const;
+
+export async function publicSignUpAllowed(
+  pool: DatabasePool,
+  body: unknown,
+): Promise<boolean> {
+  const parsed = signUpEmailBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return false;
+  }
+
+  try {
+    if (await publicSignupInvitationExists(pool, parsed.data.email)) {
+      return true;
+    }
+
+    return await publicSignupEnabled(pool);
+  } catch {
+    return false;
+  }
+}
+
+export function createPublicSignUpBeforeHook(pool: DatabasePool) {
+  return async (context: { body?: unknown; path?: string }): Promise<void> => {
+    if (context.path !== '/sign-up/email') {
+      return;
+    }
+
+    if (!(await publicSignUpAllowed(pool, context.body))) {
+      throw APIError.from('FORBIDDEN', {
+        code: publicSignUpErrorCode,
+        message: 'Public sign-up is disabled.',
+      });
+    }
+  };
+}
+
+export function customSyntheticUser({
+  additionalFields,
+  coreFields,
+  id,
+}: {
+  additionalFields: Record<string, unknown>;
+  coreFields: {
+    createdAt: Date;
+    email: string;
+    emailVerified: boolean;
+    image: string | null;
+    name: string;
+    updatedAt: Date;
+  };
+  id: string;
+}): Record<string, unknown> {
+  return {
+    ...coreFields,
+    ...additionalFields,
+    id,
+    role: 'user',
+    banned: false,
+    banReason: null,
+    banExpires: null,
+    twoFactorEnabled: false,
+  };
+}
 
 export function loadAuthEnvironment(environment: NodeJS.ProcessEnv) {
   const parsed = authEnvironmentSchema.parse(environment);
@@ -136,7 +209,11 @@ export function createInvitationSender(
 export const authRateLimitRules = {
   '/organization/invite-member': { max: 5, window: 60 },
   '/request-password-reset': { max: 3, window: 60 },
+  '/reset-password': { max: 5, window: 60 },
+  '/reset-password/*': { max: 5, window: 60 },
+  '/send-verification-email': { max: 3, window: 60 },
   '/sign-in/email': { max: 3, window: 60 },
+  '/sign-up/email': { max: 3, window: 60 },
   '/two-factor/disable': { max: 3, window: 60 },
   '/two-factor/enable': { max: 3, window: 60 },
   '/two-factor/generate-backup-codes': { max: 3, window: 60 },
@@ -145,6 +222,7 @@ export const authRateLimitRules = {
   '/two-factor/verify-backup-code': { max: 3, window: 60 },
   '/two-factor/verify-otp': { max: 3, window: 60 },
   '/two-factor/verify-totp': { max: 3, window: 60 },
+  '/verify-email': { max: 5, window: 60 },
 } as const;
 
 async function createAuth() {
@@ -178,7 +256,8 @@ async function createAuth() {
     disabledPaths: [...disabledAuthPaths],
     emailAndPassword: {
       autoSignIn: false,
-      disableSignUp: true,
+      customSyntheticUser,
+      disableSignUp: false,
       enabled: true,
       maxPasswordLength: 128,
       minPasswordLength: 14,
@@ -192,6 +271,10 @@ async function createAuth() {
       sendOnSignUp: true,
       sendVerificationEmail: createVerificationSender(mail),
     },
+    hooks: {
+      before: createPublicSignUpBeforeHook(pool),
+    },
+    logger: authLoggerConfiguration,
     plugins: [
       admin({ schema: adminAuthSchema }),
       organization({

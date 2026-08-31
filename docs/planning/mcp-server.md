@@ -203,15 +203,17 @@ and grants `SELECT` to `bap_backup` or the backup drill fails.
 The plugin's routes are public the moment it loads. It mounts paths under the
 existing `/api/auth` prefix, and Caddy proxies that prefix already. The change
 therefore decides explicitly which of those paths are reachable and adds the
-rest to `disabledPaths` beside `/token` and `/sign-up/email`, rather than
-inheriting whatever the plugin ships. Adding a plugin is adding public surface.
+rest to `disabledPaths` beside `/token` and `/change-email`, rather than
+inheriting whatever the plugin ships. Email sign-up remains reachable behind the
+default-off admission policy, the pre-parse edge limiter, and Better Auth's
+independent limiter. Adding a plugin is adding public surface.
 
 ## Caddy and topology
 
 Caddy proxies `web:3000` and nothing else, and the Compose contract check
 asserts Caddy's network membership by name. Publishing an MCP endpoint is
 therefore an architecture decision, not a configuration tweak, and it needs its
-own ADR taking the next free id after [ADR 0006](../adr/0006-upload-staging.md).
+own ADR taking the next free id after [ADR 0007](../adr/0007-public-sign-up.md).
 That ADR has to decide four things.
 
 **Whether MCP is a new container or a route on an existing one.** A route in

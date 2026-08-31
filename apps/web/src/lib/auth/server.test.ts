@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DatabasePool } from '@bap/db/pool';
+import { betterAuth } from 'better-auth';
 
 const { sendMailMock } = vi.hoisted(() => ({ sendMailMock: vi.fn() }));
 
@@ -14,11 +16,16 @@ vi.mock('../mail/index.ts', async (importOriginal) => ({
 import type { MailConfiguration } from '../mail/index.js';
 import { disabledAuthPaths, resourceJwtConfiguration } from './contract.js';
 import {
+  authLoggerConfiguration,
   authRateLimitRules,
+  createPublicSignUpBeforeHook,
   createInvitationSender,
   createPasswordResetSender,
   createVerificationSender,
+  customSyntheticUser,
   loadAuthEnvironment,
+  publicSignUpAllowed,
+  publicSignUpErrorCode,
   readAuthSecret,
 } from './server.js';
 
@@ -43,9 +50,9 @@ beforeEach(() => {
 });
 
 describe('Better Auth resource contract', () => {
-  it('keeps browser token retrieval, public signup, and email changes disabled', () => {
+  it('keeps browser token retrieval and email changes disabled', () => {
     expect([...disabledAuthPaths].sort()).toEqual(
-      ['/change-email', '/sign-up/email', '/token'].sort(),
+      ['/change-email', '/token'].sort(),
     );
   });
 
@@ -100,6 +107,143 @@ describe('Better Auth resource contract', () => {
     await expect(readAuthSecret(file)).rejects.toThrow(
       'protected regular file',
     );
+  });
+});
+
+describe('public sign-up policy', () => {
+  function poolWithQuery(query: ReturnType<typeof vi.fn>): DatabasePool {
+    return { query } as unknown as DatabasePool;
+  }
+
+  it('denies sign-up when the switch is off and allows it when on', async () => {
+    const disabledQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ invited: false }] })
+      .mockResolvedValueOnce({ rows: [{ enabled: false }] });
+    const enabledQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ invited: false }] })
+      .mockResolvedValueOnce({ rows: [{ enabled: true }] });
+
+    await expect(
+      publicSignUpAllowed(poolWithQuery(disabledQuery), {
+        email: 'member@bap.invalid',
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      publicSignUpAllowed(poolWithQuery(enabledQuery), {
+        email: 'member@bap.invalid',
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it('allows a pending unexpired invitation before reading the switch', async () => {
+    const query = vi.fn().mockResolvedValueOnce({ rows: [{ invited: true }] });
+
+    await expect(
+      publicSignUpAllowed(poolWithQuery(query), {
+        email: 'Invited@bap.invalid',
+      }),
+    ).resolves.toBe(true);
+    expect(query).toHaveBeenCalledOnce();
+    expect(query.mock.calls[0]?.[0]).toContain('lower(email) = lower($1)');
+    expect(query.mock.calls[0]?.[0]).not.toContain('Invited@bap.invalid');
+    expect(query.mock.calls[0]?.[1]).toEqual(['Invited@bap.invalid']);
+  });
+
+  it('fails closed on invalid input or any database read error', async () => {
+    const query = vi.fn().mockRejectedValue(new Error('Database unavailable'));
+
+    await expect(
+      publicSignUpAllowed(poolWithQuery(query), {
+        email: 'member@bap.invalid',
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      publicSignUpAllowed(poolWithQuery(query), { email: 'invalid' }),
+    ).resolves.toBe(false);
+  });
+
+  it('enforces the policy only on the exact Better Auth sign-up path', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ invited: false }] })
+      .mockResolvedValueOnce({ rows: [{ enabled: false }] });
+    const hook = createPublicSignUpBeforeHook(poolWithQuery(query));
+
+    await expect(
+      hook({ path: '/sign-in/email', body: { email: 'member@bap.invalid' } }),
+    ).resolves.toBeUndefined();
+    await expect(
+      hook({ path: '/sign-up/email', body: { email: 'member@bap.invalid' } }),
+    ).rejects.toMatchObject({ body: { code: publicSignUpErrorCode } });
+  });
+
+  it('denies a direct Better Auth API dispatch when the edge route is bypassed', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ invited: false }] })
+      .mockResolvedValueOnce({ rows: [{ enabled: false }] });
+    const auth = betterAuth({
+      baseURL: 'https://bap.invalid',
+      emailAndPassword: {
+        enabled: true,
+        minPasswordLength: 14,
+      },
+      hooks: {
+        before: createPublicSignUpBeforeHook(poolWithQuery(query)),
+      },
+      secret: 'test-only-secret-that-is-long-enough',
+    });
+
+    await expect(
+      auth.api.signUpEmail({
+        body: {
+          email: 'member@bap.invalid',
+          name: 'Member',
+          password: 'test-only-password',
+        },
+      }),
+    ).rejects.toMatchObject({ body: { code: publicSignUpErrorCode } });
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it('builds a complete synthetic user for duplicate sign-up responses', () => {
+    const createdAt = new Date('2026-08-31T10:00:00.000Z');
+    const updatedAt = new Date('2026-08-31T10:01:00.000Z');
+
+    expect(
+      customSyntheticUser({
+        additionalFields: { locale: 'en' },
+        coreFields: {
+          createdAt,
+          email: 'member@bap.invalid',
+          emailVerified: false,
+          image: null,
+          name: 'Member',
+          updatedAt,
+        },
+        id: 'synthetic-user',
+      }),
+    ).toEqual({
+      banExpires: null,
+      banned: false,
+      banReason: null,
+      createdAt,
+      email: 'member@bap.invalid',
+      emailVerified: false,
+      id: 'synthetic-user',
+      image: null,
+      locale: 'en',
+      name: 'Member',
+      role: 'user',
+      twoFactorEnabled: false,
+      updatedAt,
+    });
+  });
+
+  it('suppresses Better Auth duplicate-address info logs', () => {
+    expect(authLoggerConfiguration).toEqual({ level: 'warn' });
   });
 });
 
@@ -191,7 +335,11 @@ describe('Better Auth rate limits', () => {
       [
         '/organization/invite-member',
         '/request-password-reset',
+        '/reset-password',
+        '/reset-password/*',
+        '/send-verification-email',
         '/sign-in/email',
+        '/sign-up/email',
         '/two-factor/disable',
         '/two-factor/enable',
         '/two-factor/generate-backup-codes',
@@ -200,6 +348,7 @@ describe('Better Auth rate limits', () => {
         '/two-factor/verify-backup-code',
         '/two-factor/verify-otp',
         '/two-factor/verify-totp',
+        '/verify-email',
       ].sort(),
     );
     for (const rule of Object.values(authRateLimitRules)) {
@@ -208,10 +357,12 @@ describe('Better Auth rate limits', () => {
     }
   });
 
-  it('keeps configured paths at three per minute except invitations', () => {
+  it('keeps credential submission and mail requests at three per minute', () => {
     for (const path of [
       '/request-password-reset',
+      '/send-verification-email',
       '/sign-in/email',
+      '/sign-up/email',
       '/two-factor/disable',
       '/two-factor/enable',
       '/two-factor/generate-backup-codes',
@@ -223,9 +374,16 @@ describe('Better Auth rate limits', () => {
     ] as const) {
       expect(authRateLimitRules[path]).toEqual({ max: 3, window: 60 });
     }
-    expect(authRateLimitRules['/organization/invite-member']).toEqual({
-      max: 5,
-      window: 60,
-    });
+  });
+
+  it('keeps invitation, verification, and reset completion at five per minute', () => {
+    for (const path of [
+      '/organization/invite-member',
+      '/reset-password',
+      '/reset-password/*',
+      '/verify-email',
+    ] as const) {
+      expect(authRateLimitRules[path]).toEqual({ max: 5, window: 60 });
+    }
   });
 });

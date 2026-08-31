@@ -29,8 +29,10 @@ foundation only. It does not define analytics behavior or visual design.
 - Better Auth 1.7.2 is integrated directly instead of through an unsupported or
   beta Nest wrapper.
 - Admin, Organization, and JWT/JWKS plugins are server-only.
-- Public sign-up, resource-token retrieval, password-recovery mail, verification
-  mail, and invitation mutation/acceptance routes are disabled.
+- At initial foundation delivery, public sign-up, resource-token retrieval,
+  password-recovery mail, verification mail, and invitation mutation/acceptance
+  routes were disabled. Later identity phases replaced this initial state;
+  [authentication](../authentication.md) is authoritative.
 - The browser receives no resource JWT. A BFF verifies the opaque session,
   creates one in-memory token, calls one compile-time service URL, and returns
   an allow-listed access response.

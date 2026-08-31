@@ -161,5 +161,46 @@ signed only inside the server-side BFF, expire after five minutes, and are never
 returned to browser code. The test-only synthetic-account CLI is explicitly
 gated by `BAP_E2E_SETUP=true`; do not set that variable in a normal runtime.
 
+## Public sign-up boundary
+
+Email/password sign-up is enabled at the framework endpoint but admitted by a
+default-off runtime switch. A pending, unexpired organization invitation for a
+case-insensitive address match bypasses the switch. Before parsing the body or
+reading that policy, the Next.js route atomically consumes a 3-per-60-second
+edge bucket. It accepts only a valid IP from Caddy's replaced `x-bap-client-ip`;
+scoped IPv6, absent, and malformed values use one shared fallback bucket. IPv4
+remains /32 and IPv6 is canonicalized to /64 before hashing. The edge namespace
+is separate from Better Auth's limiter. A full bucket returns 429 with retry
+metadata, caps its count, and performs no conflict update until its window
+expires. Every consume prunes expired rows from only that edge namespace through
+a partial `last_request` index. Unsupported media types and malformed JSON
+consume an attempt and fail closed.
+
+Caddy overwrites the header for public requests. Direct internal service access
+can still supply a valid spoofed prefix, so network isolation remains part of
+the trust boundary.
+
+After the edge check, the Next.js route checks policy before framework dispatch,
+and a Better Auth before-hook checks it again on exactly `/sign-up/email`. A
+malformed request or any rate-limit, invitation, or setting read failure is
+denied with `PUBLIC_SIGN_UP_DISABLED`; policy code uses query parameters and
+never logs the submitted address.
+
+The switch table is deliberately outside Better Auth's runtime authority. Tables
+created in `auth` inherit SELECT, INSERT, UPDATE, and DELETE for `bap_auth`, so
+the migration explicitly revokes that default grant on `auth.platform_setting`.
+`bap_auth` can execute only the stable, security-definer
+`auth.public_signup_enabled()` function, which returns false when the row is
+absent. `bap_api` and `bap_reporting` can neither call the function nor read the
+table. `bap_backup` keeps SELECT for complete dumps.
+
+Only a host-shell operator with the migrator credential may run the database CLI
+that reads or changes the switch. Writes use a transaction and
+`SET LOCAL ROLE bap_owner`; no application endpoint can change admission policy.
+The command emits JSON only, and failures use a generic code without database
+details. Better Auth returns a complete synthetic user shape for duplicate
+addresses, including Admin and Two Factor fields, so plugin fields do not weaken
+its anti-enumeration response.
+
 Do not publish a vulnerability report containing secrets or personal data. Use
 GitHub's enabled private vulnerability reporting channel.

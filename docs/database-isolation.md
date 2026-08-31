@@ -48,6 +48,25 @@ Every new schema must grant `USAGE` on the schema and `SELECT` on its tables and
 sequences to `bap_backup`, and must set matching default privileges for later
 objects. Without those grants the whole-database dump breaks.
 
+The `auth` schema has a separate default privilege for Better Auth: a table
+created by `bap_owner` inherits SELECT, INSERT, UPDATE, and DELETE for
+`bap_auth`. `auth.platform_setting` is an intentional exception. Its migration
+revokes the inherited grant, leaves dump-only SELECT with `bap_backup`, and
+exposes the default-off public sign-up value to `bap_auth` only through
+`auth.public_signup_enabled()`. A missing setting row returns false. Only a
+host-shell operator with the `bap_migrator` credential can use the database
+CLI's `signup enable|disable|status` commands; switch writes assume `bap_owner`
+with `SET LOCAL` inside a transaction.
+
+The public sign-up edge limiter also stays behind `@bap/db`. One statement
+inserts or atomically advances a hashed, namespaced `auth.rate_limit` key before
+the web route parses the request. IPv4 identities remain /32 and IPv6 identities
+are canonicalized to /64 before hashing. Its conflict update runs only while the
+count is below 3 or the 60-second window has expired. Once full, the statement
+returns no row and performs no write until expiry. The same data-modifying CTE
+prunes expired rows from only the edge namespace on every consume. A partial
+`last_request` index supports that cleanup; Better Auth's own keys are retained.
+
 ## Tenant policy contract
 
 Every future tenant table must include:
@@ -75,8 +94,11 @@ closed. Production migrations never enumerate disposable RLS test fixtures.
 The PostgreSQL 18.6 integration suite proves concurrent migration locking,
 checksum behavior, exact grants, membership resolution, missing context,
 cross-organization forced RLS, transaction reset, Better Auth rate-limit access,
-pgvector availability, full `pg_dump` as `bap_backup`, and denial of backup
-writes, schema changes, and owner role changes.
+the public sign-up accessor and its default-privilege exception, invitation
+states, exactly 3 successful concurrent edge-limit consumes, and cleanup that
+removes expired edge identities while retaining fresh edge and non-edge rows. It
+also proves pgvector availability, full `pg_dump` as `bap_backup`, and denial of
+backup writes, schema changes, and owner role changes.
 
 It also proves the phase 1 authorization tables: `app.data_grants` is readable
 only inside its own tenant context and rejects a cross-tenant write, and

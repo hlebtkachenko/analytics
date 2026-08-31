@@ -39,6 +39,7 @@ exist.
 - [ADR 0004: controlled internet egress](adr/0004-controlled-internet-egress.md)
 - [ADR 0005: platform batteries](adr/0005-platform-batteries.md)
 - [ADR 0006: upload staging](adr/0006-upload-staging.md)
+- [ADR 0007: public sign-up](adr/0007-public-sign-up.md)
 
 Documentation must stay synchronized with commands, runtime behavior, and
 architecture decisions in the same change.
