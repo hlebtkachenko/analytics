@@ -5,46 +5,38 @@
 Better Auth owns host-only opaque session cookies in the Next.js application.
 Production cookies are `HttpOnly`, `Secure`, and `SameSite=Lax`. The configured
 origin and trusted origin are exact values, never wildcards. Public email
-sign-up is disabled.
+sign-up remains disabled for Phase 1.
 
-Two public surfaces stay unavailable permanently:
+Three authentication paths are disabled:
 
 - `/api/auth/token`, because resource JWTs exist only inside a BFF call
-- email sign-up, because membership is invite-only
+- email sign-up, because membership is invite-only during Phase 1
+- `/api/auth/change-email`, because email changes use BAP-owned flows
 
 Password reset, verification mail, and organization invitations are enabled and
-deliver through the single mail module. Invitation mail links to
-`/invitation/:invitationId`, where an authenticated recipient reviews and
-accepts the invitation.
+deliver through the single mail module without waiting for the mail provider.
+Invitation mail links to `/invitation/:invitationId`, where an authenticated
+recipient reviews and accepts the invitation.
 
-## Magic link and two factor
+## Password and email verification
 
-Magic-link sign-in resolves the account before sending. Better Auth generates
-the token and calls the send hook without looking the user up, so an unguarded
-hook would mail any address a caller supplied. The hook therefore queries
-`auth."user"` first and sends nothing when the address is unknown.
-
-Silence alone is not enough, because the sending branch would otherwise wait for
-an external provider call while the skipping branch returned immediately, and
-that difference is measurable. The send is therefore dispatched without being
-awaited and every branch waits the same fixed floor, so neither the response
-body nor its latency reveals whether an account exists. Better Auth applies the
-same floor to its own verification mail.
-
-The same hook refuses to send when the account has two factor enabled, because
-Better Auth challenges the second factor only on `/sign-in/email`,
-`/sign-in/username`, and `/sign-in/phone-number`. A magic link that reached a
-two-factor account would mint a full session and defeat the factor.
-
-Known limitation: that guard is on the send side. A link delivered while two
-factor was disabled stays usable for its five-minute lifetime even if the owner
-enables two factor in that window, and any future code path that mints a
-magic-link token without the send hook would reopen the bypass. Closing it
-properly needs a verification-side hook on `/magic-link/verify`.
+Password sign-in is enabled and requires verified email. Passwords must contain
+14-128 characters, and a completed reset revokes the user's existing sessions.
+Verification mail is sent at sign-up and expires after 30 minutes. Successful
+verification automatically creates a browser session.
 
 Two factor is opt-in TOTP. Sign-in returns a two-factor redirect instead of a
 session, and `/sign-in/two-factor` verifies the code before the real session
 cookie is issued.
+
+`autoSignInAfterVerification` creates a session without a two-factor challenge.
+`/two-factor/enable` is live but requires an authenticated session and password;
+there is no supported enrollment UI. Ordinary unverified users cannot get that
+session because email/password sign-up does not sign them in and password
+sign-in requires verified email. Already-verified users return early from email
+verification. Before any flow can leave an authenticated, two-factor-enabled
+account unverified, set `autoSignInAfterVerification` to `false` or enforce two
+factor during verification.
 
 The JWKS read endpoint remains public because private Nest services validate
 resource-token signatures against it.
@@ -107,11 +99,10 @@ replace the interactive owner bootstrap.
 Caddy replaces the dedicated `X-BAP-Client-IP` header. Better Auth reads only
 that single-value header, keeps proxy-origin inference disabled, and stores rate
 limit state in PostgreSQL. The baseline is 100 auth requests per minute. Custom
-rules replace the Better Auth built-ins entirely rather than layering on them,
-so each credential, magic-link, two-factor, and password-reset path is pinned at
-three requests per minute, which is never weaker than the built-in it replaces
-on either the ten-second or the sixty-second horizon. Member invitation stays at
-five per minute, well below the global default it replaces.
+rules layer over Better Auth built-ins on their named paths; built-in rules for
+other paths continue to apply. Password reset, email sign-in, and two-factor
+paths are pinned at three requests per minute. Member invitation stays at five
+per minute.
 
 ## Future identity work
 

@@ -1,4 +1,4 @@
-// Better Auth's magic link, password reset, verification, and invitation hooks send through this module.
+// Better Auth's password reset, verification, and invitation hooks send through this module.
 
 export type { MailConfiguration, MailTransportKind } from './config.ts';
 export {

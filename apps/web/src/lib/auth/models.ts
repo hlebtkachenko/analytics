@@ -128,7 +128,6 @@ export const jwtAuthSchema = {
   },
 } as const;
 
-// Magic link stores its tokens in auth.verification, so it adds no model here.
 export const twoFactorAuthSchema = {
   twoFactor: {
     fields: {

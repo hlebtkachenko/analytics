@@ -1,12 +1,5 @@
 import { betterAuth } from 'better-auth';
-import type { MagicLinkOptions } from 'better-auth/plugins';
-import {
-  admin,
-  jwt,
-  magicLink,
-  organization,
-  twoFactor,
-} from 'better-auth/plugins';
+import { admin, jwt, organization, twoFactor } from 'better-auth/plugins';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 import { readFile, stat } from 'node:fs/promises';
@@ -76,54 +69,7 @@ export async function readAuthSecret(path: string): Promise<string> {
   return secret;
 }
 
-// The magic link lookup needs one parameterized query and nothing else from the pool.
-export type AuthUserLookup = Readonly<{
-  query: (
-    text: string,
-    values: readonly string[],
-  ) => Promise<{ rows: readonly { two_factor_enabled: boolean }[] }>;
-}>;
-
-// Mirrors the constant-time floor Better Auth applies to its own verification mail.
-const magicLinkResponseFloorMs = 500;
-
-// Better Auth lowercases the address before matching, so the lookup mirrors that.
-const magicLinkUserQuery =
-  'SELECT two_factor_enabled FROM auth."user" WHERE email = $1';
-
-// Without disableSignUp magic link is a self-signup bypass around emailAndPassword.disableSignUp.
-export function createMagicLinkOptions(
-  mail: MailConfiguration,
-  pool: AuthUserLookup,
-): MagicLinkOptions {
-  return {
-    disableSignUp: true,
-    sendMagicLink: async ({ email, url }) => {
-      // Better Auth sends before any user lookup, which would make this an open mail relay.
-      const found = await pool.query(magicLinkUserQuery, [email.toLowerCase()]);
-      const user = found.rows[0];
-      // A user who opted into a second factor must not keep a single-factor path back in.
-      const deliverable = user !== undefined && !user.two_factor_enabled;
-
-      if (deliverable) {
-        const message = mailTemplates.magicLink({ to: email, url });
-        // Detached so the response time never reveals whether a message was dispatched.
-        void sendMail(mail, {
-          subject: message.subject,
-          text: message.text,
-          to: email,
-        }).catch(() => undefined);
-      }
-
-      // Every branch waits the same floor, so latency cannot enumerate accounts either.
-      await new Promise((resolve) =>
-        setTimeout(resolve, magicLinkResponseFloorMs),
-      );
-    },
-  };
-}
-
-// Password reset delivery mirrors the magic link hook so mail leaves through one module.
+// Password reset delivery uses the shared mail module.
 export function createPasswordResetSender(mail: MailConfiguration) {
   return async (data: {
     url: string;
@@ -133,11 +79,11 @@ export function createPasswordResetSender(mail: MailConfiguration) {
       to: data.user.email,
       url: data.url,
     });
-    await sendMail(mail, {
+    void sendMail(mail, {
       subject: message.subject,
       text: message.text,
       to: data.user.email,
-    });
+    }).catch(() => undefined);
   };
 }
 
@@ -151,11 +97,11 @@ export function createVerificationSender(mail: MailConfiguration) {
       to: data.user.email,
       url: data.url,
     });
-    await sendMail(mail, {
+    void sendMail(mail, {
       subject: message.subject,
       text: message.text,
       to: data.user.email,
-    });
+    }).catch(() => undefined);
   };
 }
 
@@ -178,21 +124,19 @@ export function createInvitationSender(
       to: data.email,
       url: url.toString(),
     });
-    await sendMail(mail, {
+    void sendMail(mail, {
       subject: message.subject,
       text: message.text,
       to: data.email,
-    });
+    }).catch(() => undefined);
   };
 }
 
-// Custom rules replace the built-in ones, so no entry may be more permissive than what it replaces.
+// Custom rules apply to their named paths while Better Auth keeps its other built-ins.
 export const authRateLimitRules = {
-  '/magic-link/verify': { max: 5, window: 60 },
   '/organization/invite-member': { max: 5, window: 60 },
   '/request-password-reset': { max: 3, window: 60 },
   '/sign-in/email': { max: 3, window: 60 },
-  '/sign-in/magic-link': { max: 3, window: 60 },
   '/two-factor/disable': { max: 3, window: 60 },
   '/two-factor/enable': { max: 3, window: 60 },
   '/two-factor/generate-backup-codes': { max: 3, window: 60 },
@@ -233,11 +177,19 @@ async function createAuth() {
     database: pool,
     disabledPaths: [...disabledAuthPaths],
     emailAndPassword: {
+      autoSignIn: false,
       disableSignUp: true,
       enabled: true,
+      maxPasswordLength: 128,
+      minPasswordLength: 14,
+      requireEmailVerification: true,
+      revokeSessionsOnPasswordReset: true,
       sendResetPassword: createPasswordResetSender(mail),
     },
     emailVerification: {
+      autoSignInAfterVerification: true,
+      expiresIn: 1800,
+      sendOnSignUp: true,
       sendVerificationEmail: createVerificationSender(mail),
     },
     plugins: [
@@ -268,7 +220,6 @@ async function createAuth() {
         },
         schema: jwtAuthSchema,
       }),
-      magicLink(createMagicLinkOptions(mail, pool)),
       // Strictly opt-in: only a user who enabled it is challenged after a password sign-in.
       twoFactor({
         issuer: 'BAP',

@@ -1,5 +1,9 @@
-// These two stay disabled forever: resource JWTs are BFF-only and membership is invite-only.
-export const disabledAuthPaths = new Set(['/token', '/sign-up/email']);
+// Resource JWTs are BFF-only, membership is invite-only, and email changes are disabled.
+export const disabledAuthPaths = new Set([
+  '/change-email',
+  '/sign-up/email',
+  '/token',
+]);
 
 export const resourceJwtConfiguration = {
   audience: 'bap-internal-services',

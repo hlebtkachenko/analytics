@@ -13,9 +13,9 @@ digest-pinned pgvector image, introduced the controlled egress network, and
 added the pg-boss queue with its worker, the Resend mail module, and the
 provider-agnostic AI credential.
 
-Phase 1 completed authentication: magic link, TOTP second factor, password
-reset, invitations, capability flags in the access contract, and the data grant
-and audit tables.
+Phase 1 completed authentication: password sign-in, email verification, TOTP
+second factor, password reset, invitations, capability flags in the access
+contract, and the data grant and audit tables.
 
 Phase 2 added the generic tenant data foundation: the dataset tables with their
 row level security policies, and the upload and ingestion pipeline.
@@ -60,9 +60,9 @@ A local backup drill reported success while its restore step had failed, because
 `set -e` inside a brace group under zsh does not abort. Every later drill uses a
 script with `set -euo pipefail` and explicit per-step markers.
 
-The magic link endpoint was described as immune to account enumeration. It was
-not: response latency differed between a known and an unknown address. It now
-sends detached and returns after a fixed floor.
+The earlier email-link endpoint was removed during identity hardening. Password
+reset, verification, and invitation delivery now send detached so mail-provider
+latency and failures do not delay authentication responses.
 
 A formula-injection guard on CSV export was applied to the stringified value, so
 a negative number was exported as text and disagreed with the XLSX output. The
@@ -78,8 +78,13 @@ Dataset names reach the model as prompt context. The chat route registers no
 tools and the context carries only metadata the caller can already see, so the
 impact is bounded. Revisit if untrusted parties can ever name a dataset.
 
-The second factor is enforced when a magic link is sent, not when it is
-verified, because the plugin matcher covers only the password sign-in paths.
+Automatic sign-in after email verification bypasses a two-factor challenge.
+`/two-factor/enable` is live but requires an authenticated session and password,
+so ordinary unverified users cannot use it: sign-up does not sign them in and
+password sign-in requires verified email. Already-verified users return early
+from email verification. Before any flow can leave an authenticated,
+two-factor-enabled account unverified, automatic sign-in must be disabled or
+verification must enforce two factor.
 
 ## Open by choice
 
