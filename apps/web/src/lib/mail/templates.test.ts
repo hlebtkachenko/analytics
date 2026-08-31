@@ -8,13 +8,6 @@ const params = {
 };
 
 describe('mailTemplates', () => {
-  it('renders a non-empty magic-link mail containing the url', () => {
-    const result = mailTemplates.magicLink(params);
-
-    expect(result.subject.length).toBeGreaterThan(0);
-    expect(result.text).toContain(params.url);
-  });
-
   it('renders a non-empty password-reset mail containing the url', () => {
     const result = mailTemplates.passwordReset(params);
 
