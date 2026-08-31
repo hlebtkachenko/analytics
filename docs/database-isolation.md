@@ -91,6 +91,15 @@ user by a parameterized email, and upserts `granted_total`, a NULL `granted_by`,
 the grant time, and the required operator note. No quota-write function or DML
 grant is added to `bap_auth`.
 
+The web organization-route accessor also stays behind `@bap/db`. Through the
+existing `bap_auth` pool it performs 1 parameterized join of `auth.organization`
+and `auth.member`, keyed by validated slug and authenticated subject id. It
+returns only organization id, name, slug, and a safely parsed membership role. A
+missing membership or invalid legacy role returns no route. API and reporting
+roles continue to use only the fixed
+`auth.resolve_membership(subject_id, organization_id)` function and gain no slug
+lookup.
+
 `auth.organization.created_by` is a nullable user foreign key with
 `ON DELETE SET NULL`. NULL denotes an unattributed legacy or system organization
 and consumes no user's quota. For an attributed INSERT, the invoker-rights
@@ -168,6 +177,11 @@ the migrator-to-owner quota writer with its stored note and NULL auth grantor. A
 shared corpus proves that PostgreSQL and the web Zod validator agree on valid,
 malformed, overlong, numeric, and reserved slugs. It also verifies that invalid
 legacy membership is returned as no access instead of a server error.
+
+Organization-routing coverage performs the real join through `bap_auth` and
+proves member success plus nonmember and unknown-slug absence. It separately
+passes the valid stored slug as an `organization_id` to the API role's resolver
+and proves no row is returned, preserving the id-only service boundary.
 
 It also proves the phase 1 authorization tables: `app.data_grants` is readable
 only inside its own tenant context and rejects a cross-tenant write, and

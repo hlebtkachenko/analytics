@@ -79,5 +79,5 @@ scoped Prettier, stale documentation scans, and `git diff --check`.
 
 ## Open questions
 
-None. Phase 9 owns product UI and organization routing; a later operational
-phase must define organization purge or ownership transfer.
+None. Phase 9 owns organization routing, Phase 10 owns product UI, and a later
+operational phase must define organization purge or ownership transfer.

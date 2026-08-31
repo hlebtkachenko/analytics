@@ -42,6 +42,7 @@ exist.
 - [ADR 0007: public sign-up](adr/0007-public-sign-up.md)
 - [ADR 0008: operator-tier account erasure](adr/0008-account-erasure.md)
 - [ADR 0009: organization creation foundation](adr/0009-organization-creation-foundation.md)
+- [ADR 0010: organization route resolution](adr/0010-organization-route-resolution.md)
 
 Documentation must stay synchronized with commands, runtime behavior, and
 architecture decisions in the same change.

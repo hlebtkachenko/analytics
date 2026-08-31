@@ -86,8 +86,8 @@ operator note.
 Creator-attributed inserts cannot race past quota, and accepting an invitation
 does not consume creation allowance. Existing and Phase 7 system-created
 organizations with NULL attribution count against no user. The ordinary path is
-now quota gated and creator attributed, while Phase 9 routing and UI remain
-separate.
+now quota gated and creator attributed. Phase 9 adds the member-gated routing
+boundary; organization UI remains a separate Phase 10 concern.
 
 The Better Auth precheck can race, so an insertion rejected by the trigger may
 surface as a generic server failure. Disabling auth-only organization deletion
@@ -95,9 +95,9 @@ also leaves an interim ownership deadlock: a sole owner can delete neither the
 organization nor their account until ownership is delegated. A cross-schema
 operator purge workflow is a later milestone.
 
-The literal reserved list must advance with new route segments in the later
-routing phase. No confusable folding, `slug_key`, or reserved-slug table is
-introduced here.
+The literal reserved list advances in the same pull request as every new
+top-level application route. No confusable folding, `slug_key`, or reserved-slug
+table is introduced here.
 
 Migration compatibility advances to `20260831.0003`. There is no down migration.
 Rolling application code back while leaving this migration applied makes every

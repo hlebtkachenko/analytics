@@ -4,6 +4,7 @@ import {
   ensureInitialOrganizationQuota,
   organizationCreationLimitReached,
   resolveMembership,
+  resolveOrganizationRoute,
   setOrganizationQuota,
 } from './access.js';
 import type { DatabasePool } from './pool.js';
@@ -261,5 +262,63 @@ describe('organization accessors', () => {
         subjectId: 'user-1',
       }),
     ).resolves.toEqual({ emailVerified: true, role: 'admin' });
+  });
+
+  it('resolves an organization route through one membership join', async () => {
+    const query = vi.fn(async () => ({
+      rows: [
+        {
+          id: 'organization-1',
+          name: 'Organization One',
+          role: 'admin',
+          slug: 'organization-one',
+        },
+      ],
+    }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(
+      resolveOrganizationRoute(pool, {
+        organizationSlug: 'organization-one',
+        subjectId: 'user-1',
+      }),
+    ).resolves.toEqual({
+      id: 'organization-1',
+      name: 'Organization One',
+      role: 'admin',
+      slug: 'organization-one',
+    });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /from auth\.organization as organization\s+inner join auth\.member as membership/,
+      ),
+      ['organization-one', 'user-1'],
+    );
+  });
+
+  it.each([
+    { rows: [], name: 'a missing membership' },
+    {
+      rows: [
+        {
+          id: 'organization-1',
+          name: 'Organization One',
+          role: 'legacy-role',
+          slug: 'organization-one',
+        },
+      ],
+      name: 'an invalid legacy role',
+    },
+  ])('returns null for $name', async ({ rows }) => {
+    const pool = {
+      query: vi.fn(async () => ({ rows })),
+    } as unknown as DatabasePool;
+
+    await expect(
+      resolveOrganizationRoute(pool, {
+        organizationSlug: 'organization-one',
+        subjectId: 'user-1',
+      }),
+    ).resolves.toBeNull();
   });
 });

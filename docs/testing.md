@@ -110,6 +110,18 @@ also reads the resulting note and NULL auth grantor through the real role
 boundary. The existing advisory-lock race remains the authoritative concurrency
 proof; an application precheck is not treated as race enforcement.
 
+Phase 9 coverage proves the exact parameterized organization/member join,
+approved role parsing, and real member, nonmember, and unknown-slug outcomes
+through `bap_auth`. Web tests prove malformed slugs reach neither session nor
+database work, unauthenticated and unverified requests fail closed, resolver
+errors disclose nothing, and the layout uses the same not-found path for every
+negative result. The root redirect is pinned to `/organizations`. Separate BFF
+and PostgreSQL assertions prove a valid slug-shaped selector can cross the web's
+syntax check but cannot resolve as an id at the service membership boundary.
+Phase 9 adds no descendant dynamic page, so live browser checks cover the root
+redirect and transitional 404 only; member rendering becomes a live route in
+Phase 10.
+
 The scheduled and manually runnable GitHub Actions operational proof creates a
 disposable local Compose stack, creates a gated synthetic account, completes a
 browser sign-in and organization-access check, then backs up and restores the

@@ -34,6 +34,8 @@ financial, operational, or development data.
 - Add a shared package only when at least 2 real consumers justify it.
 - Keep product logic out of operational health routes and infrastructure code.
 - Keep visual implementation aligned with `DESIGN.md`.
+- Adding a top-level application route must add its segment to the reserved
+  organization slug contract in the same pull request.
 
 ## Development
 

@@ -370,8 +370,9 @@ by single hyphens, cannot be all digits, and cannot be one of `access`, `api`,
 `sign-in`, `sign-up`, `forgot-password`, `reset-password`, `activate`,
 `welcome`, or `account`. The shared web validator and database constraints use
 the same literal contract. The normalizer is deterministic and never silently
-renames a reserved, numeric, empty, or too-short result. Organization routing
-and creation UI remain Phase 9 work.
+renames a reserved, numeric, empty, or too-short result. Phase 9 supplies the
+routing boundary; organization list, creation, settings, and member-management
+UI remain Phase 10 work.
 
 Installed Better Auth 1.7.2 has 11 endpoints that otherwise fall back to
 `session.activeOrganizationId`. BAP's before-hook requires a non-empty explicit
@@ -407,6 +408,37 @@ Organization deletion remains intentionally unavailable. Combined with the
 account-deletion sole-owner guard, a sole owner can delete neither the
 organization nor their account until ownership is delegated. Cross-schema
 operator purge is a later milestone, not part of this phase.
+
+## Organization routing
+
+`/[orgSlug]` is gated once in its Next.js layout. The route resolver validates
+the shared slug contract before reading a session or opening the database
+boundary, requires an authenticated user with verified email, and runs one
+parameterized `auth.organization INNER JOIN auth.member` lookup through the
+existing `bap_auth` pool. React `cache` wraps the complete session and
+membership operation for same-request deduplication only. Slug-to-id results are
+never cached across requests because slugs are mutable.
+
+Malformed, unknown, unauthenticated, unverified, nonmember, invalid-role, and
+database-error outcomes all render the same 404. This prevents the route from
+confirming that another organization exists. Better Auth's slug resolver is not
+used because its installed endpoint can fall back to ambient active-organization
+state. Creation and invitation acceptance may update that stored state, but no
+supported BAP route reads it as an implicit selector.
+
+The slug ends at the web tier. BFF and service calls continue to carry the
+resolved organization id only, and `auth.resolve_membership` has no
+slug-accepting sibling. A slug-shaped value forwarded by mistake can pass the
+BFF syntax check, but resolves no id membership and is refused with 403 by the
+service boundary.
+
+`/` redirects unconditionally to `/organizations`, not to a last-visited
+organization. Phase 9 adds no descendant page beneath `[orgSlug]` and no
+`/organizations` page, so Next.js does not yet expose a member organization URL
+and the redirect target currently resolves to 404. Phase 10 will add those
+pages. Literal top-level routes take precedence over the dynamic segment. Adding
+one must reserve its segment in the organization-slug contract in the same pull
+request.
 
 ## First owner
 

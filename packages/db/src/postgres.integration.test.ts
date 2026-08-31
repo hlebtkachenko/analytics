@@ -18,6 +18,7 @@ import {
   publicSignupEnabled,
   recordUserErasureRequest,
   resolveMembership,
+  resolveOrganizationRoute,
   runMigrations,
   setOrganizationQuota,
   withTenantContext,
@@ -315,6 +316,38 @@ describe('PostgreSQL 18 isolation', () => {
     await expect(
       resolveMembership(apiPool, {
         organizationId: 'org-2',
+        subjectId: 'user-1',
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      resolveMembership(apiPool, {
+        organizationId: 'one',
+        subjectId: 'user-1',
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('resolves an organization slug only for its member through bap_auth', async () => {
+    await expect(
+      resolveOrganizationRoute(authPool, {
+        organizationSlug: 'one',
+        subjectId: 'user-1',
+      }),
+    ).resolves.toEqual({
+      id: 'org-1',
+      name: 'One',
+      role: 'owner',
+      slug: 'one',
+    });
+    await expect(
+      resolveOrganizationRoute(authPool, {
+        organizationSlug: 'two',
+        subjectId: 'user-1',
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      resolveOrganizationRoute(authPool, {
+        organizationSlug: 'unknown-organization',
         subjectId: 'user-1',
       }),
     ).resolves.toBeNull();

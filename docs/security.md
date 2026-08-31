@@ -325,6 +325,28 @@ would strand cross-schema data. With the sole-owner account deletion guard, this
 means a sole owner cannot delete either object until ownership is delegated. A
 later operator purge workflow must solve that gap.
 
+## Organization routing boundary
+
+The mutable organization slug is a web routing key, never a service
+authorization key. The `[orgSlug]` layout validates it before session or
+database work. A verified session then reaches a single parameterized join of
+`auth.organization` and `auth.member` through the existing `bap_auth` pool,
+keyed by the slug and exact session user id. The query returns a route only when
+the membership exists and its role parses as an approved scalar value.
+
+Malformed, unknown, unauthenticated, unverified, nonmember, invalid-role, and
+lookup-error states share one 404 response. This avoids an organization
+existence oracle. React `cache` covers the entire operation inside one server
+request; no mutable slug-to-id result crosses request boundaries. Better Auth's
+ambient `activeOrganizationId` is not consulted even though creation and
+invitation acceptance may update it.
+
+The web BFF and both services remain id-only. A slug-shaped selector can satisfy
+the BFF syntax check, but `auth.resolve_membership(subject_id, organization_id)`
+finds no row and the service returns 403. Adding a literal top-level web route
+must add the matching reserved slug in the same pull request so a future route
+cannot silently shadow an existing organization URL.
+
 ## Account erasure boundary
 
 Account deletion uses Better Auth's hard-delete path with a 5-minute fresh
