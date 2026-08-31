@@ -262,6 +262,39 @@ Better Auth failures are neither rendered nor logged. Session reads for
 activation and welcome stay on the server and fail closed. Every visible auth
 failure uses the same Carbon alert semantics.
 
+## Organization creation boundary
+
+Creation allowance is stored separately from membership in
+`auth.organization_quota`, so joining another organization never consumes a
+user's create quota. An absent row means zero. Although new tables in `auth`
+normally inherit Better Auth DML, this table explicitly revokes all direct
+`bap_auth` privileges and returns SELECT only. API and reporting roles receive
+no access, and no `bap_auth`-executable quota writer exists.
+
+Creator-attributed inserts are enforced inside PostgreSQL, not by an application
+count followed by a write. A BEFORE trigger takes a transaction-scoped advisory
+lock derived from the exact `created_by` user id, reads the grant, counts rows
+with that creator, and rejects the insert at quota. The fixed-search-path
+trigger function is invoker-rights and not directly executable by runtime roles.
+A NULL creator is explicitly an unattributed legacy or system organization and
+consumes no user's quota. Phase 7 does not yet enable the ordinary creation path
+or inject attribution; those are Phase 8 responsibilities.
+
+The interactive bootstrap and gated operational synthetic-account command need
+one initial grant. They validate the normalized slug before any user or quota
+write, then use a distinct `bap_migrator` pool to raise only an absent or zero
+row to 1 under `SET LOCAL ROLE bap_owner`. Existing positive grant provenance is
+preserved, and the migrator pool closes before organization creation. Both
+commands run in the profiled one-shot bootstrap service. That service alone has
+the auth and migrator mounts together; long-lived web has no migrator path or
+secret. Errors disclose no credential, provider, or database detail.
+
+Slugs are constrained identically in TypeScript and PostgreSQL: 3 through 20
+lowercase ASCII letters or digits with single internal hyphens, not all digits,
+and not any of the 15 literal route reservations. New member and invitation
+writes accept only scalar `owner`, `admin`, or `member`. Historical invalid role
+values are denied as no membership rather than throwing.
+
 ## Account erasure boundary
 
 Account deletion uses Better Auth's hard-delete path with a 5-minute fresh

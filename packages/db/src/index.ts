@@ -3,6 +3,7 @@ export {
   countSoleOwnedOrganizations,
   consumePublicSignupEdgeRateLimit,
   DATABASE_MIGRATION_COMPATIBILITY,
+  ensureInitialOrganizationQuota,
   PUBLIC_SIGNUP_EDGE_RATE_LIMIT,
   publicSignupInvitationExists,
   publicSignupEnabled,
@@ -13,6 +14,7 @@ export type {
   MembershipResolution,
   MembershipRole,
   MigrationCompatibility,
+  InitialOrganizationQuota,
   PublicSignupEdgeRateLimitDecision,
   ResolveMembershipInput,
 } from './access.js';

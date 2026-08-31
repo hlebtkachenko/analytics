@@ -2,8 +2,15 @@ import { createInterface } from 'node:readline/promises';
 import { stdin, stderr, stdout } from 'node:process';
 import { pathToFileURL } from 'node:url';
 
+import type { DatabasePool } from '@bap/db';
+
 import { getAuth, getAuthPool } from '../lib/auth/server.js';
 import { resolveBootstrapState } from '../lib/auth/bootstrap-owner.js';
+import {
+  normalizeOrganizationSlug,
+  organizationSlugSchema,
+} from '../lib/organizations/slug.js';
+import { seedInitialOrganizationQuotaForCli } from './organization-quota.js';
 
 type BootstrapRow = Readonly<{
   email_verified: boolean;
@@ -12,12 +19,35 @@ type BootstrapRow = Readonly<{
   role: string;
 }>;
 
-function toSlug(name: string): string {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '');
+type BootstrapOwnerInput = Readonly<{
+  email: string;
+  name: string;
+  organizationName: string;
+  password: string;
+}>;
+
+type BootstrapAuth = Readonly<{
+  api: Readonly<{
+    createOrganization: (input: {
+      body: { name: string; slug: string; userId: string };
+    }) => Promise<{ id: string }>;
+    createUser: (input: {
+      body: {
+        data: { emailVerified: true };
+        email: string;
+        name: string;
+        password: string;
+        role: 'admin';
+      };
+    }) => Promise<{ user: { id: string } }>;
+  }>;
+}>;
+
+export interface BootstrapOwnerDependencies {
+  getAuth: () => Promise<BootstrapAuth>;
+  getAuthPool: () => Promise<DatabasePool>;
+  readInput: () => Promise<BootstrapOwnerInput>;
+  seedQuota: (userId: string) => Promise<void>;
 }
 
 async function promptPassword(): Promise<string> {
@@ -58,9 +88,7 @@ async function promptPassword(): Promise<string> {
   });
 }
 
-export async function bootstrapOwner(): Promise<
-  Readonly<{ organizationId: string; userId: string }>
-> {
+async function readBootstrapOwnerInput(): Promise<BootstrapOwnerInput> {
   if (!stdin.isTTY || !stdout.isTTY) {
     throw new Error('bootstrap-owner requires an interactive TTY.');
   }
@@ -72,12 +100,32 @@ export async function bootstrapOwner(): Promise<
   ).trim();
   terminal.close();
   const password = await promptPassword();
-  const slug = toSlug(organizationName);
+  return { email, name, organizationName, password };
+}
+
+const defaultDependencies: BootstrapOwnerDependencies = {
+  getAuth,
+  getAuthPool,
+  readInput: readBootstrapOwnerInput,
+  seedQuota: seedInitialOrganizationQuotaForCli,
+};
+
+export async function bootstrapOwner(
+  dependencies: BootstrapOwnerDependencies = defaultDependencies,
+): Promise<Readonly<{ organizationId: string; userId: string }>> {
+  const input = await dependencies.readInput();
+  const email = input.email.trim();
+  const name = input.name.trim();
+  const organizationName = input.organizationName.trim();
+  const password = input.password;
+  const slug = normalizeOrganizationSlug(organizationName);
+  const validSlug = organizationSlugSchema.safeParse(slug);
 
   if (
     !email ||
     !name ||
-    !slug ||
+    !organizationName ||
+    !validSlug.success ||
     password.length < 14 ||
     password.length > 128
   ) {
@@ -86,7 +134,7 @@ export async function bootstrapOwner(): Promise<
     );
   }
 
-  const pool = await getAuthPool();
+  const pool = await dependencies.getAuthPool();
   const client = await pool.connect();
   let locked = false;
   try {
@@ -95,7 +143,7 @@ export async function bootstrapOwner(): Promise<
     );
     locked = true;
     const owner = await client.query<{ has_owner: boolean }>(
-      "SELECT EXISTS (SELECT 1 FROM auth.member WHERE role = 'owner') AS has_owner",
+      "SELECT EXISTS (SELECT 1 FROM auth.member WHERE 'owner' = ANY(string_to_array(role, ','))) AS has_owner",
     );
     const user = await client.query<BootstrapRow>(
       'SELECT u.id, u.role, u.email_verified, EXISTS (SELECT 1 FROM auth.member m WHERE m.user_id = u.id) AS has_membership FROM auth."user" u WHERE u.email = $1',
@@ -119,7 +167,7 @@ export async function bootstrapOwner(): Promise<
       );
     }
 
-    const auth = await getAuth();
+    const auth = await dependencies.getAuth();
     const userId =
       current?.id ??
       (
@@ -133,8 +181,9 @@ export async function bootstrapOwner(): Promise<
           },
         })
       ).user.id;
+    await dependencies.seedQuota(userId);
     const organization = await auth.api.createOrganization({
-      body: { name: organizationName, slug, userId },
+      body: { name: organizationName, slug: validSlug.data, userId },
     });
     return { organizationId: organization.id, userId };
   } finally {

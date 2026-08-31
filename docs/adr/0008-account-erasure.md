@@ -81,7 +81,9 @@ This is GDPR-shaped erasure, not complete GDPR compliance. User ids can remain
 inside `app.audit_log.metadata`, `auth.rate_limit`, `auth.verification`, and
 pg-boss job payloads. Access and portability workflows are also absent.
 
-Migration compatibility advances to `20260831.0002`. There is no down migration.
-Rolling application code back while leaving this migration applied makes every
-service readiness route return 503 until code expecting that exact version is
-deployed again or the expected version is deliberately updated.
+This decision introduced migration `20260831.0002`; the current compatibility
+identifier is `20260831.0003` after the organization-creation foundation. There
+is no down migration. Rolling application code back while leaving a newer
+migration applied makes every service readiness route return 503 until code
+expecting that exact version is deployed again or the expected version is
+deliberately updated.

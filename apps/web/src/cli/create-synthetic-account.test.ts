@@ -13,7 +13,7 @@ const validInput = {
   email: 'synthetic@example.test',
   name: 'Synthetic User',
   organizationName: 'Synthetic Organization',
-  organizationSlug: 'synthetic-organization',
+  organizationSlug: 'synthetic-organizati',
   password: 'test-only-password',
 };
 
@@ -46,16 +46,34 @@ describe('create-synthetic-account CLI', () => {
     await expect(readSyntheticAccountInput(input('{invalid'))).rejects.toThrow(
       'Invalid synthetic account input.',
     );
+    expect(
+      parseSyntheticAccountInput(
+        JSON.stringify({
+          ...validInput,
+          organizationSlug: '  Synthetic Organization  ',
+        }),
+      ).organizationSlug,
+    ).toBe('synthetic-organizati');
+    expect(() =>
+      parseSyntheticAccountInput(
+        JSON.stringify({ ...validInput, organizationSlug: 'api' }),
+      ),
+    ).toThrow('Invalid synthetic account input.');
   });
 
-  it('creates a verified user before its organization membership', async () => {
+  it('creates a verified user, seeds quota, then creates the organization', async () => {
     const createOrganization = vi.fn(async () => ({ id: 'organization_1' }));
     const createUser = vi.fn(async () => ({ user: { id: 'user_1' } }));
+    const seedQuota = vi.fn(async () => undefined);
 
     await expect(
-      createSyntheticAccount(validInput, {
-        api: { createOrganization, createUser },
-      }),
+      createSyntheticAccount(
+        validInput,
+        {
+          api: { createOrganization, createUser },
+        },
+        seedQuota,
+      ),
     ).resolves.toEqual({ organizationId: 'organization_1', userId: 'user_1' });
     expect(createUser).toHaveBeenCalledWith({
       body: {
@@ -72,10 +90,31 @@ describe('create-synthetic-account CLI', () => {
         userId: 'user_1',
       },
     });
+    expect(seedQuota).toHaveBeenCalledWith('user_1');
     expect(createUser.mock.invocationCallOrder[0]).toBeLessThan(
+      seedQuota.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(seedQuota.mock.invocationCallOrder[0]).toBeLessThan(
       createOrganization.mock.invocationCallOrder[0] ??
         Number.POSITIVE_INFINITY,
     );
+  });
+
+  it('validates a reserved slug before user or quota side effects', async () => {
+    const createOrganization = vi.fn(async () => ({ id: 'organization_1' }));
+    const createUser = vi.fn(async () => ({ user: { id: 'user_1' } }));
+    const seedQuota = vi.fn(async () => undefined);
+
+    await expect(
+      createSyntheticAccount(
+        { ...validInput, organizationSlug: 'api' },
+        { api: { createOrganization, createUser } },
+        seedQuota,
+      ),
+    ).rejects.toThrow();
+    expect(createUser).not.toHaveBeenCalled();
+    expect(seedQuota).not.toHaveBeenCalled();
+    expect(createOrganization).not.toHaveBeenCalled();
   });
 
   it('writes only status and identifiers after successful setup', async () => {
@@ -90,6 +129,7 @@ describe('create-synthetic-account CLI', () => {
           createUser: async () => ({ user: { id: 'user_1' } }),
         },
       }),
+      async () => undefined,
     );
 
     expect(write).toHaveBeenCalledWith(

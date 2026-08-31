@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/operational-proof.yml'
       - 'apps/web/**'
+      - 'packages/db/**'
       - 'packages/db/drizzle/**'
       - 'compose*.yaml'
       - 'config/compose.environment.example'
@@ -15,6 +16,7 @@ on:
       - 'playwright.operational.config.ts'
       - 'scripts/**'
       - 'tests/operational/**'
+      - 'tests/fixtures/organization-slugs.json'
   schedule:
     - cron: '47 3 * * 1'
   workflow_dispatch:
@@ -89,15 +91,18 @@ jobs:
       - name: Create synthetic owner and organization
         shell: bash
         run: |
+          docker compose --profile bootstrap -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml build bootstrap-owner
           input=$(jq -cn \
             --arg email "$BAP_OPERATIONAL_EMAIL" \
             --arg name 'Operational Owner' \
             --arg organization_name 'BAP Operational' \
             --arg organization_slug 'bap-operational' \
             '{email: $email, password: env.BAP_OPERATIONAL_PASSWORD, name: $name, organizationName: $organization_name, organizationSlug: $organization_slug}')
-          result=$(printf '%s' "$input" | docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml exec -T -e BAP_E2E_SETUP=true web node apps/web/dist-cli/cli/create-synthetic-account.js)
+          result=$(printf '%s' "$input" | docker compose --profile bootstrap -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm --no-deps -T -e BAP_E2E_SETUP=true bootstrap-owner node apps/web/dist-cli/cli/create-synthetic-account.js)
           organization_id=$(printf '%s' "$result" | jq -er 'select(.status == "created") | .organizationId | select(type == "string" and test("^[A-Za-z0-9_-]{1,128}$"))')
+          user_id=$(printf '%s' "$result" | jq -er 'select(.status == "created") | .userId | select(type == "string" and test("^[A-Za-z0-9_-]{1,128}$"))')
           printf 'BAP_OPERATIONAL_ORGANIZATION_ID=%s\n' "$organization_id" >> "$GITHUB_ENV"
+          printf 'BAP_OPERATIONAL_USER_ID=%s\n' "$user_id" >> "$GITHUB_ENV"
 
       - name: Enable public sign-up
         shell: bash
@@ -137,6 +142,8 @@ jobs:
           docker compose --profile operations -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm --no-deps restore
           owner_memberships=$(printf '%s\n' "select count(*) from auth.member where organization_id = :'organization_id' and role = 'owner';" | docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml exec -T -u postgres restore-database psql -U postgres -d bap_restore -v ON_ERROR_STOP=1 -v organization_id="$BAP_OPERATIONAL_ORGANIZATION_ID" -tA)
           test "$owner_memberships" = 1
+          initial_quota=$(printf '%s\n' "select count(*) from auth.organization_quota where user_id = :'user_id' and granted_total >= 1;" | docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml exec -T -u postgres restore-database psql -U postgres -d bap_restore -v ON_ERROR_STOP=1 -v user_id="$BAP_OPERATIONAL_USER_ID" -tA)
+          test "$initial_quota" = 1
           stack_migration_version=$(docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml exec -T -u postgres database psql -U postgres -d "${POSTGRES_DB:-bap}" -v ON_ERROR_STOP=1 -tAc "select version from bap_migrations.current_migration_version()")
           restored_migration_version=$(docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml exec -T -u postgres restore-database psql -U postgres -d bap_restore -v ON_ERROR_STOP=1 -tAc "select version from bap_migrations.current_migration_version()")
           printf 'stack migration version: %s\nrestored migration version: %s\n' "$stack_migration_version" "$restored_migration_version"

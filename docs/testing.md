@@ -81,12 +81,31 @@ missing-auth fixture untouched, reject live and unrequested ids, and leave
 stored state unchanged on a direct repeat. Unit coverage drives CLI role
 transitions, rollback, JSON-only output, and redacted errors.
 
+Phase 7 database coverage pins organization-quota columns, named constraints,
+foreign-key delete actions, direct and default ACLs, trigger identity, function
+owner, invoker rights, fixed search path, and revoked execution. It proves an
+absent quota rejects attributed creation, NULL attribution consumes no quota,
+positive quotas work, `bap_auth` is SELECT-only and cannot disable enforcement,
+and two real concurrent inserts at quota 1 produce exactly 1 success. A shared
+table-driven corpus covers malformed, overlong, numeric, reserved, and valid
+slugs in both PostgreSQL and Zod. Unit tests also prove deterministic
+normalization, invalid legacy membership returning no access, and both setup
+entrypoints validating before user writes and closing their one-shot migrator
+pool before organization creation.
+
 The scheduled and manually runnable GitHub Actions operational proof creates a
 disposable local Compose stack, creates a gated synthetic account, completes a
 browser sign-in and organization-access check, then backs up and restores the
 database into a separate service. Before the existing identity suite, it enables
 public sign-up through the migrator CLI and runs a serial Caddy-path proof that
 returns the switch OFF in both test and workflow cleanup.
+
+Synthetic account creation is a command override of the profiled
+`bootstrap-owner` one-shot, not an exec inside long-lived web. The rendered
+Compose tests prove only that one-shot combines the auth and migrator credential
+boundaries, while web has neither the migrator environment path nor secret
+mount. The created quota row is included in the normal backup and restore
+surface.
 
 That sign-up proof checks the closed page and a 403 POST while OFF. Because the
 edge limiter runs before policy, that denial is attempt 1; fresh sign-up is
@@ -105,14 +124,14 @@ link, or token. It also proves the loopback inspection proxy permits only GET
 `/readyz` and GET `/api/v1/search`, returning 404 for the UI, other paths, and
 non-GET methods.
 
-The workflow then validates the restored owner membership and current migration
-identifier. It does not exercise production data, a real recipient, external
-mail delivery, or production infrastructure. The production Compose contract is
-separately verified to contain no Mailpit service, route, SMTP port, or SMTP
-transport configuration, and no loopback API proxy or proxy network. The same
-model probe verifies bootstrap and operations absence, accepts a valid Mailpit
-port override, and rejects collisions with web or PostgreSQL without starting
-services.
+The workflow then validates the restored owner membership, minimum initial
+quota, and current migration identifier. It does not exercise production data, a
+real recipient, external mail delivery, or production infrastructure. The
+production Compose contract is separately verified to contain no Mailpit
+service, route, SMTP port, or SMTP transport configuration, and no loopback API
+proxy or proxy network. The same model probe verifies bootstrap and operations
+absence, accepts a valid Mailpit port override, and rejects collisions with web
+or PostgreSQL without starting services.
 
 The focused identity browser regression runs against a production Compose stack:
 

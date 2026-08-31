@@ -201,6 +201,16 @@ expectSecrets('web', [
   'better_auth_secret',
   'resend_api_key',
 ]);
+invariant(
+  !Object.hasOwn(
+    configuration.services.web.environment,
+    'BAP_MIGRATOR_PASSWORD_FILE',
+  ) &&
+    !(configuration.services.web.secrets ?? []).some(
+      (secret) => secret.source === 'bap_migrator_password',
+    ),
+  'Long-lived web must not receive the migrator credential.',
+);
 expectSecrets('api', ['bap_api_password']);
 expectSecrets('reporting-api', ['bap_reporting_password']);
 expectSecrets('worker', ['ai_provider_config', 'bap_api_password']);
@@ -495,7 +505,35 @@ if (mode === 'operations') {
 }
 
 if (mode === 'bootstrap') {
-  expectSecrets('bootstrap-owner', ['bap_auth_password', 'better_auth_secret']);
+  expectSecrets('bootstrap-owner', [
+    'bap_auth_password',
+    'bap_migrator_password',
+    'better_auth_secret',
+  ]);
+  invariant(
+    configuration.services['bootstrap-owner'].environment.BAP_DATABASE_USER ===
+      'bap_auth' &&
+      configuration.services['bootstrap-owner'].environment
+        .BAP_DATABASE_PASSWORD_FILE === '/run/credentials/database-password' &&
+      configuration.services['bootstrap-owner'].environment
+        .BAP_MIGRATOR_PASSWORD_FILE === '/run/credentials/migrator-password',
+    'Owner bootstrap must keep separate auth and migrator credential boundaries.',
+  );
+  const authServicesWithMigrator = Object.entries(configuration.services)
+    .filter(([, service]) => {
+      return (
+        service.environment?.BAP_DATABASE_USER === 'bap_auth' &&
+        (service.secrets ?? []).some(
+          (secret) => secret.source === 'bap_migrator_password',
+        )
+      );
+    })
+    .map(([name]) => name)
+    .sort();
+  invariant(
+    authServicesWithMigrator.join() === 'bootstrap-owner',
+    'Only the profiled owner bootstrap may combine auth and migrator boundaries.',
+  );
   invariant(
     Object.keys(configuration.services['bootstrap-owner'].networks).join() ===
       'data',

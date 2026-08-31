@@ -59,6 +59,13 @@ crosses into schema `app`. A one-shot operator command later assumes the NOLOGIN
 columns behind forced RLS, consumes the request, and retains no raw-id mapping.
 It refuses live and unrequested identities.
 
+Organization creation quota is durable auth-schema state separate from
+membership. A database trigger serializes non-NULL creator-attributed inserts
+with a transaction advisory lock and enforces count against quota atomically.
+NULL identifies an unattributed legacy or system organization and consumes no
+user quota. The web role can read quota but cannot grant it. Phase 7 keeps the
+ordinary creation path disabled; later creation work must supply the creator.
+
 ## Workspace dependency rules
 
 ```mermaid
@@ -132,6 +139,13 @@ between the application API and the worker; it is mounted into that pair and
 into no other service, which `scripts/verify-compose.mjs` asserts. Backup
 scheduling, backend-specific credentials, and off-host durability require owner
 configuration.
+
+The profiled owner-bootstrap service is the only dual-tier exception: it mounts
+the auth credential used by Better Auth and a separate migrator credential used
+only to establish the minimum initial organization quota. The migrator pool is
+closed before the organization API call. The gated operational synthetic setup
+runs as a command override of this one-shot service. Long-lived web has neither
+the migrator environment path nor its secret mount.
 
 The separately selected development and operational-proof Mailpit overlay adds 1
 ephemeral sink on the `app` network. Web sends to its internal cleartext SMTP

@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 
 import {
   PostgreSqlContainer,
@@ -12,6 +12,7 @@ import {
   checkMigrationCompatibility,
   countSoleOwnedOrganizations,
   consumePublicSignupEdgeRateLimit,
+  ensureInitialOrganizationQuota,
   publicSignupInvitationExists,
   publicSignupEnabled,
   recordUserErasureRequest,
@@ -60,6 +61,20 @@ async function readMigrationIds(): Promise<string[]> {
 
       return id;
     });
+}
+
+type OrganizationSlugCase = Readonly<{ slug: string; valid: boolean }>;
+
+async function readOrganizationSlugCorpus(): Promise<OrganizationSlugCase[]> {
+  return JSON.parse(
+    await readFile(
+      new URL(
+        '../../../tests/fixtures/organization-slugs.json',
+        import.meta.url,
+      ),
+      'utf8',
+    ),
+  ) as OrganizationSlugCase[];
 }
 
 // Mirrors app.dataset_embedding.embedding: the migration pins the width, so a fixture must too.
@@ -301,6 +316,605 @@ describe('PostgreSQL 18 isolation', () => {
         subjectId: 'user-1',
       }),
     ).resolves.toBeNull();
+  });
+
+  it('pins the organization schema, quota ACL, trigger, and function exactly', async () => {
+    const columns = await rootPool.query<{
+      column_default: string | null;
+      column_name: string;
+      data_type: string;
+      is_nullable: 'NO' | 'YES';
+    }>(`select column_name, data_type, is_nullable, column_default
+       from information_schema.columns
+       where table_schema = 'auth'
+         and table_name = 'organization_quota'
+       order by ordinal_position`);
+    expect(columns.rows).toEqual([
+      {
+        column_default: null,
+        column_name: 'user_id',
+        data_type: 'text',
+        is_nullable: 'NO',
+      },
+      {
+        column_default: '0',
+        column_name: 'granted_total',
+        data_type: 'integer',
+        is_nullable: 'NO',
+      },
+      {
+        column_default: null,
+        column_name: 'granted_by',
+        data_type: 'text',
+        is_nullable: 'YES',
+      },
+      {
+        column_default: 'now()',
+        column_name: 'granted_at',
+        data_type: 'timestamp with time zone',
+        is_nullable: 'NO',
+      },
+      {
+        column_default: null,
+        column_name: 'note',
+        data_type: 'text',
+        is_nullable: 'YES',
+      },
+    ]);
+
+    const constraints = await rootPool.query<{
+      conname: string;
+      convalidated: boolean;
+      definition: string;
+      table_name: string;
+    }>(`select relation.relname as table_name,
+              catalog_constraint.conname,
+              catalog_constraint.convalidated,
+              pg_get_constraintdef(catalog_constraint.oid) as definition
+       from pg_constraint as catalog_constraint
+       inner join pg_class as relation on relation.oid = catalog_constraint.conrelid
+       inner join pg_namespace as namespace on namespace.oid = relation.relnamespace
+       where namespace.nspname = 'auth'
+         and catalog_constraint.conname in (
+           'organization_created_by_fkey',
+           'organization_slug_format_check',
+           'organization_slug_length_check',
+           'organization_slug_not_numeric_check',
+           'organization_slug_reserved_check',
+           'organization_quota_pkey',
+           'organization_quota_user_id_fkey',
+           'organization_quota_granted_by_fkey',
+           'organization_quota_granted_total_check',
+           'member_role_check',
+           'invitation_role_check'
+         )
+       order by catalog_constraint.conname`);
+    expect(constraints.rows).toEqual([
+      {
+        conname: 'invitation_role_check',
+        convalidated: false,
+        definition:
+          "CHECK ((role = ANY (ARRAY['owner'::text, 'admin'::text, 'member'::text]))) NOT VALID",
+        table_name: 'invitation',
+      },
+      {
+        conname: 'member_role_check',
+        convalidated: false,
+        definition:
+          "CHECK ((role = ANY (ARRAY['owner'::text, 'admin'::text, 'member'::text]))) NOT VALID",
+        table_name: 'member',
+      },
+      {
+        conname: 'organization_created_by_fkey',
+        convalidated: true,
+        definition:
+          'FOREIGN KEY (created_by) REFERENCES auth."user"(id) ON DELETE SET NULL',
+        table_name: 'organization',
+      },
+      {
+        conname: 'organization_quota_granted_by_fkey',
+        convalidated: true,
+        definition:
+          'FOREIGN KEY (granted_by) REFERENCES auth."user"(id) ON DELETE SET NULL',
+        table_name: 'organization_quota',
+      },
+      {
+        conname: 'organization_quota_granted_total_check',
+        convalidated: true,
+        definition: 'CHECK ((granted_total >= 0))',
+        table_name: 'organization_quota',
+      },
+      {
+        conname: 'organization_quota_pkey',
+        convalidated: true,
+        definition: 'PRIMARY KEY (user_id)',
+        table_name: 'organization_quota',
+      },
+      {
+        conname: 'organization_quota_user_id_fkey',
+        convalidated: true,
+        definition:
+          'FOREIGN KEY (user_id) REFERENCES auth."user"(id) ON DELETE CASCADE',
+        table_name: 'organization_quota',
+      },
+      {
+        conname: 'organization_slug_format_check',
+        convalidated: true,
+        definition: "CHECK ((slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'::text))",
+        table_name: 'organization',
+      },
+      {
+        conname: 'organization_slug_length_check',
+        convalidated: true,
+        definition:
+          'CHECK (((char_length(slug) >= 3) AND (char_length(slug) <= 20)))',
+        table_name: 'organization',
+      },
+      {
+        conname: 'organization_slug_not_numeric_check',
+        convalidated: true,
+        definition: "CHECK ((slug !~ '^[0-9]+$'::text))",
+        table_name: 'organization',
+      },
+      {
+        conname: 'organization_slug_reserved_check',
+        convalidated: true,
+        definition:
+          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text])))",
+        table_name: 'organization',
+      },
+    ]);
+
+    const foreignKeys = await rootPool.query<{
+      confdeltype: string;
+      conname: string;
+    }>(`select conname, confdeltype
+       from pg_constraint
+       where conname in (
+         'organization_created_by_fkey',
+         'organization_quota_user_id_fkey',
+         'organization_quota_granted_by_fkey'
+       )
+       order by conname`);
+    expect(foreignKeys.rows).toEqual([
+      { confdeltype: 'n', conname: 'organization_created_by_fkey' },
+      { confdeltype: 'n', conname: 'organization_quota_granted_by_fkey' },
+      { confdeltype: 'c', conname: 'organization_quota_user_id_fkey' },
+    ]);
+
+    const tableAcl = await rootPool.query<{
+      grantee: string;
+      privilege_type: string;
+    }>(`select grantee, privilege_type
+       from information_schema.table_privileges
+       where table_schema = 'auth'
+         and table_name = 'organization_quota'
+       order by grantee, privilege_type`);
+    expect(tableAcl.rows).toEqual([
+      { grantee: 'bap_auth', privilege_type: 'SELECT' },
+      { grantee: 'bap_backup', privilege_type: 'SELECT' },
+      { grantee: 'bap_owner', privilege_type: 'DELETE' },
+      { grantee: 'bap_owner', privilege_type: 'INSERT' },
+      { grantee: 'bap_owner', privilege_type: 'REFERENCES' },
+      { grantee: 'bap_owner', privilege_type: 'SELECT' },
+      { grantee: 'bap_owner', privilege_type: 'TRIGGER' },
+      { grantee: 'bap_owner', privilege_type: 'TRUNCATE' },
+      { grantee: 'bap_owner', privilege_type: 'UPDATE' },
+    ]);
+
+    const defaultTableAcl = await rootPool.query<{
+      grantee: string;
+      privilege_type: string;
+    }>(`select role.rolname as grantee, privilege.privilege_type
+       from pg_default_acl as default_acl
+       cross join lateral aclexplode(default_acl.defaclacl) as privilege
+       inner join pg_roles as role on role.oid = privilege.grantee
+       where default_acl.defaclrole = 'bap_owner'::regrole
+         and default_acl.defaclnamespace = 'auth'::regnamespace
+         and default_acl.defaclobjtype = 'r'
+       order by grantee, privilege_type`);
+    expect(defaultTableAcl.rows).toEqual([
+      { grantee: 'bap_auth', privilege_type: 'DELETE' },
+      { grantee: 'bap_auth', privilege_type: 'INSERT' },
+      { grantee: 'bap_auth', privilege_type: 'SELECT' },
+      { grantee: 'bap_auth', privilege_type: 'UPDATE' },
+      { grantee: 'bap_backup', privilege_type: 'SELECT' },
+    ]);
+
+    const functionProperties = await rootPool.query<{
+      owner: string;
+      proconfig: string[];
+      prosecdef: boolean;
+    }>(`select pg_get_userbyid(proowner) as owner, proconfig, prosecdef
+       from pg_proc
+       where oid = 'auth.enforce_organization_creation_quota()'::regprocedure`);
+    expect(functionProperties.rows).toEqual([
+      {
+        owner: 'bap_owner',
+        proconfig: ['search_path=pg_catalog, auth'],
+        prosecdef: false,
+      },
+    ]);
+    const functionDefinition = await rootPool.query<{ definition: string }>(
+      `select pg_get_functiondef(
+         'auth.enforce_organization_creation_quota()'::regprocedure
+       ) as definition`,
+    );
+    expect(functionDefinition.rows[0]?.definition).toContain(
+      'PERFORM pg_advisory_xact_lock(hashtext(NEW.created_by));',
+    );
+    expect(functionDefinition.rows[0]?.definition).not.toContain('FOR UPDATE');
+
+    const functionAcl = await rootPool.query<{
+      grantee: string;
+      privilege_type: string;
+    }>(`select coalesce(grantee_role.rolname, 'PUBLIC') as grantee,
+              privilege.privilege_type
+       from pg_proc as function
+       cross join lateral aclexplode(
+         coalesce(function.proacl, acldefault('f', function.proowner))
+       ) as privilege
+       left join pg_roles as grantee_role on grantee_role.oid = privilege.grantee
+       where function.oid = 'auth.enforce_organization_creation_quota()'::regprocedure
+       order by grantee, privilege_type`);
+    expect(functionAcl.rows).toEqual([
+      { grantee: 'bap_owner', privilege_type: 'EXECUTE' },
+    ]);
+
+    const trigger = await rootPool.query<{
+      function_name: string;
+      tgenabled: string;
+      tgname: string;
+    }>(`select trigger.tgname,
+              trigger.tgenabled,
+              trigger.tgfoid::regprocedure::text as function_name
+       from pg_trigger as trigger
+       where trigger.tgrelid = 'auth.organization'::regclass
+         and not trigger.tgisinternal`);
+    expect(trigger.rows).toEqual([
+      {
+        function_name: 'auth.enforce_organization_creation_quota()',
+        tgenabled: 'O',
+        tgname: 'organization_creation_quota_trigger',
+      },
+    ]);
+
+    await expect(
+      authPool.query('select user_id from auth.organization_quota'),
+    ).resolves.toBeDefined();
+    for (const statement of [
+      `insert into auth.organization_quota (user_id, granted_total) values ('user-1', 1)`,
+      `update auth.organization_quota set granted_total = 99 where user_id = 'user-1'`,
+      `delete from auth.organization_quota where user_id = 'user-1'`,
+    ]) {
+      await expect(authPool.query(statement)).rejects.toThrow(
+        /permission denied/,
+      );
+    }
+    await expect(
+      authPool.query('select auth.enforce_organization_creation_quota()'),
+    ).rejects.toThrow(/permission denied/);
+    await expect(
+      authPool.query(
+        'alter table auth.organization disable trigger organization_creation_quota_trigger',
+      ),
+    ).rejects.toThrow(/must be owner|permission denied/);
+    await expect(
+      authPool.query("set session_replication_role = 'replica'"),
+    ).rejects.toThrow(/permission denied/);
+    for (const pool of [apiPool, reportingPool]) {
+      await expect(
+        pool.query('select user_id from auth.organization_quota'),
+      ).rejects.toThrow(/permission denied/);
+    }
+  });
+
+  it('keeps the database slug rules in parity with the shared corpus', async () => {
+    const corpus = await readOrganizationSlugCorpus();
+
+    for (const [index, testCase] of corpus.entries()) {
+      const insertion = asOwner((client) =>
+        client.query(
+          `insert into auth.organization (id, name, slug)
+           values ($1, 'Slug parity fixture', $2)`,
+          [`slug-parity-${index}`, testCase.slug],
+        ),
+      );
+      if (testCase.valid) {
+        await expect(insertion, testCase.slug).resolves.toBeDefined();
+      } else {
+        await expect(insertion, testCase.slug).rejects.toThrow();
+      }
+    }
+
+    await asOwner((client) =>
+      client.query(
+        "delete from auth.organization where id like 'slug-parity-%'",
+      ),
+    );
+  });
+
+  it('enforces attributed quota atomically and preserves initial-seed provenance', async () => {
+    await asOwner(async (client) => {
+      await client.query(`
+        insert into auth."user" (id, name, email, email_verified)
+        values
+          ('quota-none', 'Quota None', 'quota-none@example.test', true),
+          ('quota-two', 'Quota Two', 'quota-two@example.test', true),
+          ('quota-race', 'Quota Race', 'quota-race@example.test', true),
+          ('quota-zero', 'Quota Zero', 'quota-zero@example.test', true),
+          ('quota-existing', 'Quota Existing', 'quota-existing@example.test', true),
+          ('quota-grantor', 'Quota Grantor', 'quota-grantor@example.test', true)
+      `);
+      await client.query(`
+        insert into auth.organization_quota (
+          user_id, granted_total, granted_by, granted_at, note
+        ) values
+          ('quota-two', 2, 'quota-grantor', '2026-08-30T12:00:00Z', 'two approved'),
+          ('quota-race', 1, 'quota-grantor', '2026-08-30T12:00:00Z', 'one approved'),
+          ('quota-zero', 0, 'quota-grantor', '2026-08-30T12:00:00Z', 'zero approved'),
+          ('quota-existing', 4, 'quota-grantor', '2026-08-30T12:00:00Z', 'four approved')
+      `);
+    });
+
+    try {
+      await expect(
+        authPool.query(
+          `insert into auth.organization (id, name, slug, created_by)
+           values ('quota-denied', 'Quota Denied', 'quota-denied', 'quota-none')`,
+        ),
+      ).rejects.toThrow(/quota exceeded/);
+      await expect(
+        authPool.query(
+          `insert into auth.organization (id, name, slug, created_by)
+           values ('quota-null', 'Quota Null', 'quota-null', null)`,
+        ),
+      ).resolves.toBeDefined();
+      await expect(
+        authPool.query(
+          `insert into auth.organization (id, name, slug, created_by)
+           values
+             ('quota-two-1', 'Quota Two One', 'quota-two-one', 'quota-two'),
+             ('quota-two-2', 'Quota Two Two', 'quota-two-two', 'quota-two')`,
+        ),
+      ).resolves.toBeDefined();
+      await expect(
+        authPool.query(
+          `insert into auth.organization (id, name, slug, created_by)
+           values ('quota-two-3', 'Quota Two Three', 'quota-two-three', 'quota-two')`,
+        ),
+      ).rejects.toThrow(/quota exceeded/);
+
+      const firstRaceClient = await authPool.connect();
+      let firstTransactionOpen = false;
+
+      try {
+        const secondRaceClient = await authPool.connect();
+        let secondTransactionOpen = false;
+        let secondInsertOutcome:
+          | Promise<
+              | Readonly<{ status: 'fulfilled' }>
+              | Readonly<{ error: unknown; status: 'rejected' }>
+            >
+          | undefined;
+
+        try {
+          await firstRaceClient.query('begin');
+          firstTransactionOpen = true;
+          await secondRaceClient.query('begin');
+          secondTransactionOpen = true;
+          const firstPid = await firstRaceClient.query<{ pid: number }>(
+            'select pg_backend_pid() as pid',
+          );
+          const secondPid = await secondRaceClient.query<{ pid: number }>(
+            'select pg_backend_pid() as pid',
+          );
+          const firstBackendPid = firstPid.rows[0]?.pid;
+          const secondBackendPid = secondPid.rows[0]?.pid;
+          expect(firstBackendPid).toBeTypeOf('number');
+          expect(secondBackendPid).toBeTypeOf('number');
+          expect(secondBackendPid).not.toBe(firstBackendPid);
+
+          await firstRaceClient.query(
+            `insert into auth.organization (id, name, slug, created_by)
+             values ('quota-race-1', 'Quota Race One', 'quota-race-one', 'quota-race')`,
+          );
+          secondInsertOutcome = secondRaceClient
+            .query(
+              `insert into auth.organization (id, name, slug, created_by)
+               values ('quota-race-2', 'Quota Race Two', 'quota-race-two', 'quota-race')`,
+            )
+            .then<Readonly<{ status: 'fulfilled' }>>(() => ({
+              status: 'fulfilled',
+            }))
+            .catch<Readonly<{ error: unknown; status: 'rejected' }>>(
+              (error) => ({
+                error,
+                status: 'rejected',
+              }),
+            );
+
+          let observedAdvisoryWait = false;
+          for (let attempt = 0; attempt < 1_000; attempt += 1) {
+            const locks = await rootPool.query<{
+              holder_granted: boolean;
+              waiter_waiting: boolean;
+            }>(
+              `select
+                 exists (
+                   select 1
+                   from pg_locks
+                   where locktype = 'advisory'
+                     and mode = 'ExclusiveLock'
+                     and pid = $1
+                     and granted
+                 ) as holder_granted,
+                 exists (
+                   select 1
+                   from pg_locks
+                   where locktype = 'advisory'
+                     and mode = 'ExclusiveLock'
+                     and pid = $2
+                     and not granted
+                 ) as waiter_waiting`,
+              [firstBackendPid, secondBackendPid],
+            );
+            const lockState = locks.rows[0];
+            if (lockState?.holder_granted && lockState.waiter_waiting) {
+              observedAdvisoryWait = true;
+              break;
+            }
+          }
+          expect(observedAdvisoryWait).toBe(true);
+
+          await firstRaceClient.query('commit');
+          firstTransactionOpen = false;
+          const secondResult = await secondInsertOutcome;
+          expect(secondResult.status).toBe('rejected');
+          if (secondResult.status === 'rejected') {
+            expect(secondResult.error).toMatchObject({
+              code: '23514',
+              constraint: 'organization_creation_quota_check',
+              message: 'Organization creation quota exceeded',
+            });
+          }
+          await secondRaceClient.query('rollback');
+          secondTransactionOpen = false;
+
+          await expect(
+            rootPool.query<{ total: number }>(
+              `select count(*)::integer as total
+               from auth.organization
+               where created_by = 'quota-race'`,
+            ),
+          ).resolves.toMatchObject({ rows: [{ total: 1 }] });
+        } finally {
+          if (firstTransactionOpen) {
+            await firstRaceClient.query('rollback').catch(() => undefined);
+            firstTransactionOpen = false;
+          }
+          if (secondInsertOutcome !== undefined) {
+            await secondInsertOutcome;
+          }
+          if (secondTransactionOpen) {
+            await secondRaceClient.query('rollback').catch(() => undefined);
+          }
+          secondRaceClient.release();
+        }
+      } finally {
+        if (firstTransactionOpen) {
+          await firstRaceClient.query('rollback').catch(() => undefined);
+        }
+        firstRaceClient.release();
+      }
+
+      await expect(
+        ensureInitialOrganizationQuota(migratorPool, 'quota-none'),
+      ).resolves.toMatchObject({
+        grantedBy: null,
+        grantedTotal: 1,
+        note: 'system-bootstrap: initial organization',
+      });
+      await expect(
+        ensureInitialOrganizationQuota(migratorPool, 'quota-zero'),
+      ).resolves.toMatchObject({
+        grantedBy: null,
+        grantedTotal: 1,
+        note: 'system-bootstrap: initial organization',
+      });
+      await expect(
+        ensureInitialOrganizationQuota(migratorPool, 'quota-existing'),
+      ).resolves.toMatchObject({
+        grantedAt: new Date('2026-08-30T12:00:00.000Z'),
+        grantedBy: 'quota-grantor',
+        grantedTotal: 4,
+        note: 'four approved',
+      });
+    } finally {
+      await asOwner(async (client) => {
+        await client.query(
+          "delete from auth.organization where id like 'quota-%'",
+        );
+        await client.query('delete from auth."user" where id like \'quota-%\'');
+      });
+    }
+  });
+
+  it('applies creator and quota foreign-key deletion policies and scalar role checks', async () => {
+    await asOwner(async (client) => {
+      await client.query(`
+        insert into auth."user" (id, name, email, email_verified)
+        values
+          ('schema-subject', 'Schema Subject', 'schema-subject@example.test', true),
+          ('schema-grantor', 'Schema Grantor', 'schema-grantor@example.test', true)
+      `);
+      await client.query(`
+        insert into auth.organization_quota (user_id, granted_total, granted_by, note)
+        values ('schema-subject', 1, 'schema-grantor', 'schema test')
+      `);
+      await client.query(`
+        insert into auth.organization (id, name, slug, created_by)
+        values ('schema-org', 'Schema Organization', 'schema-org', 'schema-subject')
+      `);
+      await client.query(`
+        insert into auth.member (id, organization_id, user_id, role)
+        values ('schema-member', 'schema-org', 'schema-subject', 'owner')
+      `);
+      await client.query(`
+        insert into auth.invitation (
+          id, organization_id, email, role, status, expires_at, inviter_id
+        ) values (
+          'schema-invitation', 'schema-org', 'schema-invite@example.test',
+          'member', 'pending', now() + interval '1 hour', 'schema-grantor'
+        )
+      `);
+    });
+
+    await expect(
+      asOwner((client) =>
+        client.query(`
+          insert into auth.member (id, organization_id, user_id, role)
+          values ('schema-invalid-member', 'schema-org', 'schema-grantor', 'owner,admin')
+        `),
+      ),
+    ).rejects.toThrow(/member_role_check/);
+    await expect(
+      asOwner((client) =>
+        client.query(`
+          insert into auth.invitation (
+            id, organization_id, email, role, status, expires_at, inviter_id
+          ) values (
+            'schema-invalid-invitation', 'schema-org', 'invalid@example.test',
+            'legacy', 'pending', now() + interval '1 hour', 'schema-grantor'
+          )
+        `),
+      ),
+    ).rejects.toThrow(/invitation_role_check/);
+
+    await asOwner((client) =>
+      client.query('delete from auth."user" where id = \'schema-grantor\''),
+    );
+    await expect(
+      rootPool.query<{ granted_by: string | null }>(
+        "select granted_by from auth.organization_quota where user_id = 'schema-subject'",
+      ),
+    ).resolves.toMatchObject({ rows: [{ granted_by: null }] });
+    await asOwner((client) =>
+      client.query('delete from auth."user" where id = \'schema-subject\''),
+    );
+    await expect(
+      rootPool.query<{ created_by: string | null }>(
+        "select created_by from auth.organization where id = 'schema-org'",
+      ),
+    ).resolves.toMatchObject({ rows: [{ created_by: null }] });
+    await expect(
+      rootPool.query(
+        "select user_id from auth.organization_quota where user_id = 'schema-subject'",
+      ),
+    ).resolves.toMatchObject({ rows: [] });
+    await asOwner((client) =>
+      client.query("delete from auth.organization where id = 'schema-org'"),
+    );
   });
 
   it('confines the public sign-up switch to its narrow auth accessor', async () => {
@@ -842,9 +1456,9 @@ describe('PostgreSQL 18 isolation', () => {
       await client.query(`
         insert into auth.member (id, organization_id, user_id, role)
         values
-          ('lifecycle-member-sole', 'lifecycle-sole-org', 'lifecycle-owner', 'owner,admin'),
+          ('lifecycle-member-sole', 'lifecycle-sole-org', 'lifecycle-owner', 'owner'),
           ('lifecycle-member-shared-a', 'lifecycle-shared-org', 'lifecycle-owner', 'owner'),
-          ('lifecycle-member-shared-b', 'lifecycle-shared-org', 'lifecycle-coowner', 'admin,owner')
+          ('lifecycle-member-shared-b', 'lifecycle-shared-org', 'lifecycle-coowner', 'owner')
       `);
     });
 

@@ -15,7 +15,8 @@
     "src/lib/auth/bootstrap-owner.ts",
     "src/lib/auth/contract.ts",
     "src/lib/auth/models.ts",
-    "src/lib/auth/server.ts"
+    "src/lib/auth/server.ts",
+    "src/lib/organizations/slug.ts"
   ],
   "exclude": ["src/**/*.test.ts"]
 }

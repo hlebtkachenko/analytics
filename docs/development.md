@@ -56,6 +56,15 @@ Use `docker compose ... logs --no-color` for stack diagnostics and
 `docker compose ... down` for normal shutdown. Do not use `down --volumes`
 outside disposable local or CI environments.
 
+Owner bootstrap and synthetic operational setup run only through the profiled
+`bootstrap-owner` one-shot. That service holds separate auth and migrator
+credential paths so each command can validate its slug, create or reuse the
+user, establish the minimum initial quota, close the migrator pool, and then
+create the organization. Do not execute `create-synthetic-account` inside the
+long-lived web container: web intentionally has no migrator credential. The
+synthetic command remains gated by `BAP_E2E_SETUP=true` and is not a general
+quota administration tool.
+
 ## Conductor workspaces
 
 Each Conductor workspace is a separate git worktree, so everything the
