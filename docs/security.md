@@ -277,8 +277,16 @@ lock derived from the exact `created_by` user id, reads the grant, counts rows
 with that creator, and rejects the insert at quota. The fixed-search-path
 trigger function is invoker-rights and not directly executable by runtime roles.
 A NULL creator is explicitly an unattributed legacy or system organization and
-consumes no user's quota. Phase 7 does not yet enable the ordinary creation path
-or inject attribution; those are Phase 8 responsibilities.
+consumes no user's quota. The enabled Better Auth creation path declares
+`createdBy` as `input: false`; its create hook validates the normalized slug and
+injects the authenticated user id, so a client cannot forge attribution.
+
+The web precheck counts rows with that creator against the SELECT-only quota
+row. Better Auth interprets `organizationLimit` as "limit reached", and the
+function returns `true` for exhausted quota. An absent row, invalid result, or
+query failure also denies. This check is not atomic with insertion: concurrent
+requests can both pass, and the PostgreSQL trigger remains authoritative. A
+trigger-rejected race may return a generic server failure rather than 403.
 
 The interactive bootstrap and gated operational synthetic-account command need
 one initial grant. They validate the normalized slug before any user or quota
@@ -289,11 +297,33 @@ commands run in the profiled one-shot bootstrap service. That service alone has
 the auth and migrator mounts together; long-lived web has no migrator path or
 secret. Errors disclose no credential, provider, or database detail.
 
+General quota changes use the existing one-shot `bap_migrator` service and the
+database CLI's exact `organization-quota --email --total --note` arguments. The
+accessor starts 1 transaction, sets `bap_owner` locally, resolves the subject
+with a parameterized email, and upserts the total with a required provenance
+note. It records `granted_by` as NULL because the host operator is not an auth
+identity. Success is the resulting row as JSON; all failures are 1 generic JSON
+code. No web process, HTTP endpoint, or `bap_auth`-executable function can write
+quota.
+
 Slugs are constrained identically in TypeScript and PostgreSQL: 3 through 20
 lowercase ASCII letters or digits with single internal hyphens, not all digits,
 and not any of the 15 literal route reservations. New member and invitation
 writes accept only scalar `owner`, `admin`, or `member`. Historical invalid role
 values are denied as no membership rather than throwing.
+
+Organization creation explicitly makes the creator an `owner` and caps
+membership at 100. The auth before-hook requires `organizationId` on the 10
+installed 1.7.2 fallback endpoints that can bind it. The eleventh,
+`get-active-member`, has no id input and is rejected unconditionally by the hook
+and disabled at the public router. The source inventory is larger than the
+plan's earlier count of 8. Better Auth creation and invitation acceptance may
+update stored `activeOrganizationId`, but no supported BAP operation consumes
+that state as an implicit selector. Public `/organization/set-active` is
+disabled, and `/organization/delete` is disabled because auth-only deletion
+would strand cross-schema data. With the sole-owner account deletion guard, this
+means a sole owner cannot delete either object until ownership is delegated. A
+later operator purge workflow must solve that gap.
 
 ## Account erasure boundary
 

@@ -9,7 +9,9 @@ import type { DatabasePool } from './pool.js';
 import {
   isDirectInvocation,
   parseEraseUserId,
+  parseOrganizationQuotaArguments,
   runEraseUserCli,
+  runOrganizationQuotaCli,
   runSignupCli,
 } from './cli.js';
 
@@ -164,6 +166,73 @@ function createEraseUserHarness(
     query,
     release,
     userId,
+  };
+}
+
+function createOrganizationQuotaHarness(
+  options: Readonly<{ failOnWrite?: Error; userExists?: boolean }> = {},
+) {
+  const grantedAt = new Date('2026-08-31T15:00:00.000Z');
+  let committedTotal: number | null = null;
+  let transactionTotal: number | null = committedTotal;
+  const query = vi.fn(async (statement: string, parameters?: unknown[]) => {
+    const normalized = statement.replaceAll(/\s+/g, ' ').trim().toLowerCase();
+
+    if (normalized === 'begin') {
+      transactionTotal = committedTotal;
+      return { rows: [] };
+    }
+    if (normalized === 'set local role bap_owner') {
+      return { rows: [] };
+    }
+    if (normalized.startsWith('select id')) {
+      return options.userExists === false
+        ? { rows: [] }
+        : { rows: [{ id: 'quota-user' }] };
+    }
+    if (normalized.startsWith('insert into auth.organization_quota')) {
+      if (options.failOnWrite) {
+        throw options.failOnWrite;
+      }
+      transactionTotal = Number(parameters?.[1]);
+      return {
+        rows: [
+          {
+            granted_at: grantedAt,
+            granted_by: null,
+            granted_total: transactionTotal,
+            note: parameters?.[2],
+            user_id: 'quota-user',
+          },
+        ],
+      };
+    }
+    if (normalized === 'commit') {
+      committedTotal = transactionTotal;
+      return { rows: [] };
+    }
+    if (normalized === 'rollback') {
+      transactionTotal = committedTotal;
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected statement: ${normalized}`);
+  });
+  const release = vi.fn();
+  const end = vi.fn(async () => undefined);
+  const pool = {
+    connect: vi.fn(async () => ({ query, release })),
+    end,
+  } as unknown as DatabasePool;
+
+  return {
+    get committedTotal() {
+      return committedTotal;
+    },
+    end,
+    grantedAt,
+    pool,
+    query,
+    release,
   };
 }
 
@@ -399,6 +468,143 @@ describe('user erasure database CLI', () => {
       }),
     ).resolves.toBe(1);
 
+    expect(loadPool).not.toHaveBeenCalled();
+  });
+});
+
+describe('organization quota database CLI', () => {
+  it('parses exactly one of each named argument', () => {
+    expect(
+      parseOrganizationQuotaArguments([
+        '--note',
+        ' approved capacity ',
+        '--email',
+        'Member@Example.Test',
+        '--total',
+        '4',
+      ]),
+    ).toEqual({
+      email: 'member@example.test',
+      note: 'approved capacity',
+      total: 4,
+    });
+
+    for (const arguments_ of [
+      [],
+      ['--email', 'member@example.test', '--total', '1'],
+      ['--email', 'member@example.test', '--total', '-1', '--note', 'approved'],
+      [
+        '--email',
+        'member@example.test',
+        '--email',
+        'other@example.test',
+        '--note',
+        'approved',
+      ],
+    ]) {
+      expect(() => parseOrganizationQuotaArguments(arguments_)).toThrow();
+    }
+  });
+
+  it('sets the resulting row in one owner transaction and emits JSON', async () => {
+    const harness = createOrganizationQuotaHarness();
+    const stdout = output();
+    const stderr = output();
+
+    await expect(
+      runOrganizationQuotaCli(
+        [
+          '--email',
+          'member@example.test',
+          '--total',
+          '4',
+          '--note',
+          'approved capacity',
+        ],
+        {
+          loadPool: async () => harness.pool,
+          stderr,
+          stdout,
+        },
+      ),
+    ).resolves.toBe(0);
+
+    expect(harness.committedTotal).toBe(4);
+    expect(
+      harness.query.mock.calls.map(([statement]) =>
+        String(statement).replaceAll(/\s+/g, ' ').trim().toLowerCase(),
+      ),
+    ).toEqual([
+      'begin',
+      'set local role bap_owner',
+      expect.stringMatching(/^select id/),
+      expect.stringMatching(/^insert into auth\.organization_quota/),
+      'commit',
+    ]);
+    expect(harness.query.mock.calls[2]?.[1]).toEqual(['member@example.test']);
+    expect(harness.query.mock.calls[3]?.[1]).toEqual([
+      'quota-user',
+      4,
+      'approved capacity',
+    ]);
+    expect(stdout.write).toHaveBeenCalledWith(
+      `${JSON.stringify({
+        grantedAt: harness.grantedAt,
+        grantedBy: null,
+        grantedTotal: 4,
+        note: 'approved capacity',
+        userId: 'quota-user',
+      })}\n`,
+    );
+    expect(stderr.write).not.toHaveBeenCalled();
+    expect(harness.release).toHaveBeenCalledOnce();
+    expect(harness.end).toHaveBeenCalledOnce();
+  });
+
+  it('rolls back and redacts a quota failure', async () => {
+    const sensitiveDetail = 'private-quota-provider-detail';
+    const harness = createOrganizationQuotaHarness({
+      failOnWrite: new Error(sensitiveDetail),
+    });
+    const stdout = output();
+    const stderr = output();
+
+    await expect(
+      runOrganizationQuotaCli(
+        [
+          '--email',
+          'member@example.test',
+          '--total',
+          '4',
+          '--note',
+          'approved capacity',
+        ],
+        { loadPool: async () => harness.pool, stderr, stdout },
+      ),
+    ).resolves.toBe(1);
+
+    expect(harness.committedTotal).toBeNull();
+    expect(harness.query).toHaveBeenCalledWith('rollback');
+    expect(stdout.write).not.toHaveBeenCalled();
+    expect(stderr.write).toHaveBeenCalledWith(
+      '{"code":"ORGANIZATION_QUOTA_COMMAND_FAILED","status":"error"}\n',
+    );
+    expect(JSON.stringify(stderr.write.mock.calls)).not.toContain(
+      sensitiveDetail,
+    );
+    expect(harness.end).toHaveBeenCalledOnce();
+  });
+
+  it('rejects malformed arguments before opening a pool', async () => {
+    const loadPool = vi.fn<() => Promise<DatabasePool>>();
+
+    await expect(
+      runOrganizationQuotaCli([], {
+        loadPool,
+        stderr: output(),
+        stdout: output(),
+      }),
+    ).resolves.toBe(1);
     expect(loadPool).not.toHaveBeenCalled();
   });
 });

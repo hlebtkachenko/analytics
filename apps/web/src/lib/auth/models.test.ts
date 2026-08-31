@@ -94,7 +94,17 @@ describe('Better Auth database mappings', () => {
         modelName: 'member',
         fields: { organizationId: 'organization_id', userId: 'user_id' },
       },
-      organization: { modelName: 'organization' },
+      organization: {
+        additionalFields: {
+          createdBy: {
+            fieldName: 'created_by',
+            input: false,
+            required: false,
+            type: 'string',
+          },
+        },
+        modelName: 'organization',
+      },
       session: { fields: { activeOrganizationId: 'active_organization_id' } },
     });
     expect(jwtAuthSchema).toEqual({

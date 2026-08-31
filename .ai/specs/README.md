@@ -2,6 +2,7 @@
 
 ## Current specs
 
+- [Organization creation path](2026-08-31-organization-creation-path.md)
 - [Organization schema and slugs](2026-08-31-organization-schema-and-slugs.md)
 - [Public sign-up operational proof](2026-08-31-public-sign-up-operational-proof.md)
 - [Admin HTTP gating](2026-08-31-admin-gating.md)

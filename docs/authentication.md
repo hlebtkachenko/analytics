@@ -8,7 +8,7 @@ origin and trusted origin are exact values, never wildcards. Email/password
 sign-up is available behind a default-off runtime switch. A pending, unexpired
 organization invitation for the submitted address bypasses that switch.
 
-Six authentication paths are disabled:
+Nine authentication paths are disabled:
 
 - `/api/auth/token`, because resource JWTs exist only inside a BFF call
 - `/api/auth/change-email`, because email changes use BAP-owned flows
@@ -20,6 +20,12 @@ Six authentication paths are disabled:
   session-minting impersonation workflow
 - `/api/auth/admin/stop-impersonating`, because its paired impersonation entry
   point is disabled
+- `/api/auth/organization/delete`, because BAP has no cross-schema purge
+  workflow and deleting only auth rows would strand application data
+- `/api/auth/organization/get-active-member`, because the installed endpoint has
+  no bindable organization-id input and reads ambient session state only
+- `/api/auth/organization/set-active`, because organization scope must be an
+  explicit request input instead of mutable session state
 
 BAP has no UI or HTTP consumer for any Admin-plugin path. The public route gate
 and Better Auth reject all 3 disabled admin paths, including trailing-slash
@@ -327,13 +333,14 @@ New or changed member and invitation rows accept only the scalar roles `owner`,
 historical composed or otherwise invalid value does not block deployment. The
 resolver treats such a legacy value as no membership instead of throwing.
 
-## Organization creation foundation
+## Organization creation
 
 `auth.organization.created_by` attributes a created organization independently
 of membership. It references the user with `ON DELETE SET NULL`. NULL means an
 unattributed legacy or system-created organization and counts against no user's
-quota. Phase 7 setup organizations still use that NULL system path; the Phase 8
-creation hook will inject attribution for the approved user-facing flow.
+quota. The approved creation path injects the authenticated user id as
+authoritative creator data. `createdBy` is not a client input, so a forged value
+is discarded.
 
 `auth.organization_quota` stores a non-negative total per user; no row means
 zero. `bap_auth` may SELECT the table for Better Auth policy checks but cannot
@@ -343,16 +350,63 @@ enforcement point for non-NULL creators. It serializes each creator with
 attributed to that creator, and rejects an insert at or above quota. Joining or
 accepting invitations does not consume creation quota.
 
+Better Auth creation is enabled with an explicit `owner` creator role and a
+100-member organization limit. Before Better Auth performs its quota and slug
+uniqueness queries, the global auth hook normalizes the submitted slug through
+the shared contract and rejects an invalid result. The plugin hook validates it
+again and supplies `created_by`. The function-form `organizationLimit` reads the
+creator's quota and attributed count through `@bap/db`; `true` means the limit
+is reached. A missing row, malformed result, or read error fails closed.
+Ordinary exhaustion returns 403.
+
+That precheck is advisory only. Two concurrent requests may both observe spare
+capacity, so the PostgreSQL trigger remains the enforcement point. The losing
+race can surface as a generic server failure after the trigger rejects it; the
+application does not misreport that case as a deterministic precheck denial.
+
 Organization slugs are 3 through 20 lowercase ASCII letters or digits separated
 by single hyphens, cannot be all digits, and cannot be one of `access`, `api`,
 `datasets`, `design-system`, `health`, `invitation`, `metrics`, `ready`,
 `sign-in`, `sign-up`, `forgot-password`, `reset-password`, `activate`,
 `welcome`, or `account`. The shared web validator and database constraints use
 the same literal contract. The normalizer is deterministic and never silently
-renames a reserved, numeric, empty, or too-short result.
+renames a reserved, numeric, empty, or too-short result. Organization routing
+and creation UI remain Phase 9 work.
 
-Phase 7 does not enable ordinary organization creation, add the general quota
-grant CLI, or add slug routing. Those remain Phase 8 and Phase 9 work.
+Installed Better Auth 1.7.2 has 11 endpoints that otherwise fall back to
+`session.activeOrganizationId`. BAP's before-hook requires a non-empty explicit
+`organizationId` in the body for `has-permission`, `update`, `invite-member`,
+`remove-member`, and `update-member-role`; and in the query for
+`get-organization`, `get-full-organization`, `list-invitations`, `list-members`,
+and `get-active-member-role`. Those 10 endpoints can bind the supplied id.
+`get-active-member` has no installed organization-id input and is always
+rejected by the hook, including server-side `auth.api` calls; its public path is
+also disabled before dispatch. Creation, slug checking, organization listing,
+user-invitation listing, and invitation-id routes remain legitimately unscoped.
+Public delete and set-active are disabled at both the BAP route contract and
+Better Auth router.
+
+Better Auth creation and invitation acceptance may update the session's stored
+`activeOrganizationId`. BAP does not treat that value as authoritative: no
+supported operation may use it as an implicit organization selector.
+
+Only a host-shell operator with the migrator credential can set quota:
+
+```sh
+docker compose -f compose.yaml -f compose.development.yaml run --rm --no-deps migrator node node_modules/@bap/db/dist/cli.js organization-quota --email member@example.test --total 2 --note 'operator-approved capacity'
+```
+
+The command requires exactly `--email`, `--total`, and `--note`, resolves the
+subject by email, and upserts the resulting total and note in 1 transaction
+after `SET LOCAL ROLE bap_owner`. `granted_by` is NULL because the operator is
+not represented by an auth user; the required note is the durable operator
+provenance. It prints only the resulting row as JSON and reduces failures to 1
+generic JSON code. No application or HTTP quota writer exists.
+
+Organization deletion remains intentionally unavailable. Combined with the
+account-deletion sole-owner guard, a sole owner can delete neither the
+organization nor their account until ownership is delegated. Cross-schema
+operator purge is a later milestone, not part of this phase.
 
 ## First owner
 
@@ -392,10 +446,11 @@ other paths continue to apply. Password reset requests, sign-in, sign-up,
 verification-mail requests, and two-factor credential submissions are pinned at
 three requests per minute. Verification and password reset completion, including
 token-bearing reset paths, are five per minute. Member invitation stays at five
-per minute. Every reachable mutating admin path is pinned at three per minute;
-read-only and disabled admin paths have no custom rule. Sign-up also consumes
-the independent 3-per-minute edge bucket before Better Auth runs, so an allowed
-request must pass both limits.
+per minute, and authenticated slug checking is ten per minute. Every reachable
+mutating admin path is pinned at three per minute; read-only and disabled admin
+paths have no custom rule. Sign-up also consumes the independent 3-per-minute
+edge bucket before Better Auth runs, so an allowed request must pass both
+limits.
 
 ## Future identity work
 

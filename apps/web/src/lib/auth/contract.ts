@@ -5,6 +5,9 @@ export const disabledAuthPaths = new Set([
   '/admin/stop-impersonating',
   '/change-email',
   '/delete-user/callback',
+  '/organization/delete',
+  '/organization/get-active-member',
+  '/organization/set-active',
   '/token',
 ]);
 

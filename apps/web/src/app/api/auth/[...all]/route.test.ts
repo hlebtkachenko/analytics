@@ -162,6 +162,53 @@ describe('Better Auth route exposure', () => {
     expect(downstreamPostMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    '/organization/delete',
+    '/organization/delete///',
+    '/organization/set-active',
+    '/organization/set-active///',
+  ])('does not dispatch the public %s route', async (path) => {
+    const response = await POST(
+      new NextRequest(`https://bap.invalid/api/auth${path}`, {
+        body: JSON.stringify({ organizationId: 'organization-1' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expect(getAuthMock).not.toHaveBeenCalled();
+    expect(downstreamPostMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { method: 'GET', path: '/organization/get-active-member' },
+    { method: 'GET', path: '/organization/get-active-member///' },
+    { method: 'POST', path: '/organization/get-active-member' },
+    { method: 'POST', path: '/organization/get-active-member///' },
+  ])('does not dispatch public $method $path', async ({ method, path }) => {
+    const request = new NextRequest(
+      `https://bap.invalid/api/auth${path}?organizationId=organization-1`,
+      {
+        body:
+          method === 'POST'
+            ? JSON.stringify({ organizationId: 'organization-1' })
+            : null,
+        headers: { 'content-type': 'application/json' },
+        method,
+      },
+    );
+    const response =
+      method === 'GET' ? await GET(request) : await POST(request);
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expect(getAuthMock).not.toHaveBeenCalled();
+    expect(downstreamGetMock).not.toHaveBeenCalled();
+    expect(downstreamPostMock).not.toHaveBeenCalled();
+  });
+
   it('denies through the actual POST route when public sign-up is off', async () => {
     const request = signUpRequest();
     const { pool, query } = poolWithState();
