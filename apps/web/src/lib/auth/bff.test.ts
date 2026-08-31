@@ -122,6 +122,32 @@ describe('getOrganizationAccess', () => {
     expect(denied.status).toBe(403);
   });
 
+  it('passes a slug-shaped selector to the id-only service and preserves its denial', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/organization-one/access',
+      );
+      return Response.json(
+        { detail: 'private membership state' },
+        { status: 403 },
+      );
+    });
+
+    const response = await getOrganizationAccess(
+      auth,
+      new Request(
+        'https://bap.invalid/api/bff/application/organizations/organization-one/access',
+      ),
+      'application',
+      'organization-one',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: 'access_denied' });
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+  });
+
   it('does not sign a resource token for an unverified session', async () => {
     const response = await getOrganizationAccess(
       {

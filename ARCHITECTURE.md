@@ -164,6 +164,17 @@ The general organization-quota command runs in the existing one-shot migrator
 service. It has no auth credential, web route, or long-lived process and returns
 only the resulting quota row as JSON.
 
+Organization slugs are resolved only in the Next.js web tier. The dynamic layout
+validates the slug, requires a verified browser session, and calls a narrow
+`@bap/db` accessor which joins `auth.organization` to `auth.member` by slug and
+session user id through `bap_auth`. React `cache` deduplicates that whole
+resolution within 1 request only. Every negative or failed lookup becomes the
+same 404, and no slug-to-id mapping is cached across requests. The BFF,
+application API, reporting API, RLS context, and service membership resolver
+remain id-only. The root route redirects to `/organizations`; that index and the
+first descendant `[orgSlug]` page arrive in Phase 10, so both targets remain 404
+in the Phase 9 routing foundation.
+
 The separately selected development and operational-proof Mailpit overlay adds 1
 ephemeral sink on the `app` network. Web sends to its internal cleartext SMTP
 port and awaits verification-message acceptance before returning the development

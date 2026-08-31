@@ -17,6 +17,18 @@ export interface ResolveMembershipInput {
   subjectId: string;
 }
 
+export interface OrganizationRouteResolution {
+  id: string;
+  name: string;
+  role: MembershipRole;
+  slug: string;
+}
+
+export interface ResolveOrganizationRouteInput {
+  organizationSlug: string;
+  subjectId: string;
+}
+
 // Exact match against the version recorded by the migration runner.
 // Bump it to the newest migration id in the same pull request as that migration.
 // Rollback consequence: application code rolled back after the migration is
@@ -372,6 +384,39 @@ export async function resolveMembership(
   }
 
   return { emailVerified: row.email_verified, role: role.data };
+}
+
+export async function resolveOrganizationRoute(
+  pool: DatabasePool,
+  input: ResolveOrganizationRouteInput,
+): Promise<OrganizationRouteResolution | null> {
+  const result = await pool.query<{
+    id: string;
+    name: string;
+    role: string;
+    slug: string;
+  }>(
+    `select organization.id, organization.name, organization.slug, membership.role
+     from auth.organization as organization
+     inner join auth.member as membership
+       on membership.organization_id = organization.id
+     where organization.slug = $1
+       and membership.user_id = $2
+     limit 1`,
+    [input.organizationSlug, input.subjectId],
+  );
+  const row = result.rows[0];
+
+  if (row === undefined) {
+    return null;
+  }
+
+  const role = membershipRoleSchema.safeParse(row.role);
+  if (!role.success) {
+    return null;
+  }
+
+  return { id: row.id, name: row.name, role: role.data, slug: row.slug };
 }
 
 export interface MigrationCompatibility {

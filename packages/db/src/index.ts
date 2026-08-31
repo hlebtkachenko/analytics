@@ -10,6 +10,7 @@ export {
   publicSignupEnabled,
   recordUserErasureRequest,
   resolveMembership,
+  resolveOrganizationRoute,
   setOrganizationQuota,
 } from './access.js';
 export type {
@@ -18,8 +19,10 @@ export type {
   MigrationCompatibility,
   InitialOrganizationQuota,
   OrganizationQuotaGrant,
+  OrganizationRouteResolution,
   PublicSignupEdgeRateLimitDecision,
   ResolveMembershipInput,
+  ResolveOrganizationRouteInput,
   SetOrganizationQuotaInput,
 } from './access.js';
 export {

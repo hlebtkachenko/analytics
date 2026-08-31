@@ -49,6 +49,11 @@ test('protects the public BAP access contract without browser token leakage', as
   expect(ready.status()).toBe(404);
   const metrics = await page.request.get('/metrics');
   expect(metrics.status()).toBe(404);
+  const root = await page.request.get('/', { maxRedirects: 0 });
+  expect(root.status()).toBe(307);
+  expect(root.headers()['location']).toMatch(/\/organizations$/);
+  expect((await page.request.get('/organizations')).status()).toBe(404);
+  expect((await page.request.get('/bap-operational')).status()).toBe(404);
   const unauthenticated = await page.request.get(
     '/api/bff/application/organizations/forged_organization/access',
   );
@@ -97,6 +102,10 @@ test('protects the public BAP access contract without browser token leakage', as
     '/api/bff/reporting/organizations/forged_organization/access',
   );
   expect(forged.status()).toBe(403);
+  const slugInsteadOfId = await page.request.get(
+    '/api/bff/reporting/organizations/bap-operational/access',
+  );
+  expect(slugInsteadOfId.status()).toBe(403);
 
   const browserState = await page.evaluate(() => ({
     cookies: document.cookie,
