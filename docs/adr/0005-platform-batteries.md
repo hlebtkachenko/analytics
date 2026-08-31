@@ -35,8 +35,21 @@ Transactional mail: use Resend, with the API key mounted as a credential file.
 The transport is selected explicitly rather than inferred from the key, because
 inferring it would let a deployment with a placeholder key drop every message
 while reporting success. `BAP_MAIL_TRANSPORT` names the transport, the
-development overlay opts into the log transport, and the Resend transport
-refuses to start without a real key.
+production Resend transport refuses to start without a real key, and non-sending
+one-shot runtimes may opt into the log transport. A separately selected
+development and CI overlay uses Nodemailer only against a digest-pinned Mailpit
+sink at the exact internal `mailpit:1025` endpoint. That cleartext
+unauthenticated SMTP path has no general relay configuration, host SMTP port,
+Caddy route, persistent mail volume, or production service. Its
+development-only, loopback-bound companion uses an exact GET allowlist for
+`/readyz` and `/api/v1/search`, returns 404 everywhere else, and runs with no
+added capability. Mailpit itself stays only on the internal network, and the
+public Caddy configuration remains unchanged. The SMTP client disables file and
+URL access and applies small independent DNS, connection, greeting, and socket
+timeouts as fail-fast settings. Better Auth verification through that exact
+development sink awaits SMTP acceptance at the public request boundary and
+returns a generic failure when delivery fails. Production Resend and the
+explicit log path remain non-blocking.
 
 Model access: keep the provider choice out of the deployment topology. One
 `ai_provider_config` JSON credential file carries the configured provider names
@@ -78,3 +91,8 @@ document must be validated before use.
 
 Deferring PDF keeps the container hardening intact but means any future
 print-quality output needs its own isolated service and its own decision.
+
+Mailpit makes delivery observable without real recipients or a provider call in
+development and CI. Its explicit overlay and GET-only loopback inspection
+surface remain absent from bootstrap, production, and operations. Production
+topology and Resend delivery remain unchanged.

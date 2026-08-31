@@ -9,11 +9,12 @@ template. Copy it to an ignored file for local development.
 | -------------------- | ------------------------------------------ | ------------------------ |
 | `WEB_PORT`           | Caddy host port                            | `3000`                   |
 | `POSTGRES_PORT`      | Loopback PostgreSQL host port              | `5432`                   |
+| `MAILPIT_HTTP_PORT`  | Unique loopback mail-inspection port       | `8025`                   |
 | `POSTGRES_DB`        | Database name                              | `bap`                    |
 | `BAP_PUBLIC_HOST`    | Caddy site address                         | `http://localhost`       |
 | `BAP_PUBLIC_ORIGIN`  | Exact Better Auth issuer and public origin | `http://localhost:3000`  |
 | `BAP_MAIL_SENDER`    | From address for transactional mail        | `no-reply@bap.localhost` |
-| `BAP_MAIL_TRANSPORT` | `resend` or the opt-in `log` transport     | `log` in development     |
+| `BAP_MAIL_TRANSPORT` | Explicit `resend`, `smtp`, or `log` mode   | `smtp` in development    |
 
 `BAP_PUBLIC_ORIGIN` must be an origin without a path. It is never a
 `NEXT_PUBLIC_*` value. Production accepts HTTPS origins, with plain HTTP
@@ -21,7 +22,10 @@ restricted to local loopback development.
 
 The committed template uses production-shaped host and origin values. Override
 `BAP_PUBLIC_HOST` to `http://localhost` for the development Compose stack; its
-overlay sets the matching local origin from `WEB_PORT`.
+overlay sets the matching local origin from `WEB_PORT`. Select
+`compose.mailpit.yaml` explicitly for local mail delivery and inspection.
+`MAILPIT_HTTP_PORT` may be any integer from 1 through 65535, but it cannot equal
+the web or PostgreSQL host port.
 
 ## Runtime configuration
 
@@ -29,9 +33,9 @@ Compose provides service hosts, ports, database login names, and credential file
 paths. These are internal runtime values, not user configuration.
 
 - Web uses `BAP_DATABASE_*`, `BETTER_AUTH_SECRET_FILE`, `BAP_MAIL_SENDER`,
-  `BAP_MAIL_TRANSPORT`, `BAP_RESEND_API_KEY_FILE`, and
-  `BAP_AI_PROVIDER_CONFIG_FILE`. Its two BFF targets are fixed internal service
-  origins, not deployment inputs.
+  `BAP_MAIL_TRANSPORT`, `BAP_RESEND_API_KEY_FILE`, `BAP_MAIL_SMTP_HOST`,
+  `BAP_MAIL_SMTP_PORT`, and `BAP_AI_PROVIDER_CONFIG_FILE`. Its two BFF targets
+  are fixed internal service origins, not deployment inputs.
 - Application and reporting APIs use `BAP_DATABASE_*`, `BAP_JWKS_URL`, and
   `BAP_PUBLIC_ORIGIN`. The application API also uses `BAP_UPLOAD_STAGING_DIR`,
   which must name the mounted upload staging volume.
@@ -58,10 +62,19 @@ backup, Better Auth, Resend, AI provider, and restic credential files listed in
 document are seeded with the literal placeholder
 `local-development-placeholder`, and the AI credential refuses it too, so no
 model call leaves a development machine by accident. The mail transport is never
-inferred from that value: `BAP_MAIL_TRANSPORT` selects it explicitly, the
-development overlay sets `log`, and the `resend` transport refuses to start with
-an absent or placeholder key so a misconfigured deployment fails loudly instead
-of dropping mail. Create disposable local values with:
+inferred from that value: `BAP_MAIL_TRANSPORT` selects it explicitly. Production
+uses `resend`, which refuses an absent or placeholder key. The separately
+selected Mailpit overlay sets `smtp` with the exact `mailpit:1025` endpoint. The
+schema rejects every other SMTP host or port. The SMTP client fixes DNS,
+connection, greeting, and socket timeouts to 1, 1.5, 1.5, and 2 seconds, and
+disables file and URL access. Those are independent fail-fast settings, not a
+total delivery bound. Verification through the development SMTP sink is awaited
+at the auth response boundary; production Resend remains non-blocking.
+Production, operations, and bootstrap Compose contain neither the sink nor its
+SMTP variables, so cleartext unauthenticated SMTP is limited to the isolated
+development/CI network. The `log` transport remains an explicit option for
+non-sending one-shot runtimes and deliberately prints message content if it is
+ever used. Create disposable local values with:
 
 ```sh
 pnpm secrets:local

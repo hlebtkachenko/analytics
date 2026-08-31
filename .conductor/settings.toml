@@ -26,5 +26,5 @@ icon = "globe"
 
 [scripts.run.stack]
 available_in = ["local"]
-command = "COMPOSE_PROJECT_NAME=bap-$CONDUCTOR_WORKSPACE_ID BIND_ADDRESS=127.0.0.1 WEB_PORT=$CONDUCTOR_PORT API_PORT=$(($CONDUCTOR_PORT + 1)) REPORTING_API_PORT=$(($CONDUCTOR_PORT + 2)) POSTGRES_PORT=$(($CONDUCTOR_PORT + 3)) POSTGRES_PASSWORD=local-development-only docker compose -f compose.yaml -f compose.development.yaml up --build"
+command = "COMPOSE_PROJECT_NAME=bap-$CONDUCTOR_WORKSPACE_ID BIND_ADDRESS=127.0.0.1 WEB_PORT=$CONDUCTOR_PORT API_PORT=$(($CONDUCTOR_PORT + 1)) REPORTING_API_PORT=$(($CONDUCTOR_PORT + 2)) POSTGRES_PORT=$(($CONDUCTOR_PORT + 3)) MAILPIT_HTTP_PORT=$(($CONDUCTOR_PORT + 4)) POSTGRES_PASSWORD=local-development-only docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml up --build"
 icon = "container"

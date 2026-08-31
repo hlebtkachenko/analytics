@@ -35,7 +35,8 @@ isolation guarantee.
   runs every job through a gate that validates the payload, re-resolves
   membership, and only then opens a short tenant transaction.
 - A Resend-backed mail module reads its key from a mounted credential file and
-  falls back to a log-only transport when no key is configured.
+  fails closed when Resend is selected without a real key. Non-sending runtimes
+  may select the separate log-only transport explicitly.
 - One provider-agnostic `ai_provider_config` credential file is mounted into the
   web service and the worker, so changing model provider changes secret content
   rather than deployment topology.

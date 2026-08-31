@@ -14,7 +14,7 @@ pnpm compose:verify
 ```sh
 cp config/compose.environment.example .env
 pnpm secrets:local
-BAP_PUBLIC_HOST=http://localhost docker compose --env-file .env -f compose.yaml -f compose.development.yaml up --build
+BAP_PUBLIC_HOST=http://localhost docker compose --env-file .env -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml up --build
 ```
 
 ## Production model

@@ -31,6 +31,7 @@ import {
   normalizePublicSignUpClientIdentity,
   publicSignUpFallbackIdentity,
 } from '../../../../lib/auth/public-sign-up-edge';
+import { VerificationDeliveryUnavailableError } from '../../../../lib/auth/server';
 
 function signUpRequest(email = 'member@bap.invalid'): NextRequest {
   return new NextRequest('https://bap.invalid/api/auth/sign-up/email', {
@@ -249,6 +250,22 @@ describe('Better Auth route exposure', () => {
     });
     expect(query).toHaveBeenCalledTimes(3);
     expect(downstreamPostMock).toHaveBeenCalledWith(request);
+  });
+
+  it('returns a generic failure when awaited verification delivery is unavailable', async () => {
+    const request = signUpRequest();
+    const { pool } = poolWithState({ enabled: true });
+    getAuthPoolMock.mockResolvedValue(pool);
+    downstreamPostMock.mockRejectedValueOnce(
+      new VerificationDeliveryUnavailableError(),
+    );
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      code: 'AUTHENTICATION_UNAVAILABLE',
+    });
   });
 
   it('uses one fallback bucket for absent or malformed client IP values', async () => {

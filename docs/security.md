@@ -71,6 +71,23 @@ path. `scripts/verify-compose.mjs` fails when any other service joins that
 network, and the container smoke job proves the web service still resolves and
 connects outward.
 
+The separately selected development and CI overlay replaces external delivery
+with Mailpit. Its cleartext unauthenticated SMTP listener remains on the Docker
+`app` network with no host SMTP port. A non-root, read-only companion exposes
+only GET `/readyz` and GET `/api/v1/search` on host loopback. Root, the UI, all
+other API paths, and every non-GET method return 404. The companion drops every
+capability, adds none, and runs the mounted config with Caddy's admin API and
+automatic HTTPS disabled. The public Caddy configuration has no Mailpit route.
+Mailpit itself runs non-root with a read-only filesystem and ephemeral storage.
+The web transport accepts only exact `mailpit:1025`, disables file and URL
+access, and applies small independent DNS, connection, greeting, and socket
+timeouts as fail-fast settings. Verification through that sink is awaited at the
+public auth request boundary; a failed delivery becomes a generic 503 even
+though Better Auth catches the callback error. It never logs SMTP recipients,
+bodies, links, tokens, or provider errors. Compose verification rejects the
+overlay in bootstrap, production, and operations; production continues to use
+non-blocking Resend delivery.
+
 ## Model provider boundary
 
 Model calls are the one place where tenant-derived text deliberately leaves the
@@ -158,8 +175,9 @@ scheduler.
 
 Better Auth uses opaque secure cookies for browser identity. Resource JWTs are
 signed only inside the server-side BFF, expire after five minutes, and are never
-returned to browser code. The test-only synthetic-account CLI is explicitly
-gated by `BAP_E2E_SETUP=true`; do not set that variable in a normal runtime.
+returned to browser code. The operational-proof synthetic-account CLI is
+explicitly gated by `BAP_E2E_SETUP=true`; do not set that variable in a normal
+runtime.
 
 ## Public sign-up boundary
 
@@ -201,6 +219,18 @@ The command emits JSON only, and failures use a generic code without database
 details. Better Auth returns a complete synthetic user shape for duplicate
 addresses, including Admin and Two Factor fields, so plugin fields do not weaken
 its anti-enumeration response.
+
+The operational proof uses only unique `example.test` identities and the public
+Caddy path. It compares fresh and duplicate status, exact `Set-Cookie` headers,
+and bodies after removing only generated identity ids and timestamps. It never
+reads or prints a verification body, link, or token. Mailpit is queried by the
+unique recipient, and only message ids are retained long enough to prove 1 fresh
+delivery after the awaited fresh response. Immediate and final recipient-id
+checks over a short Mailpit API-consistency window prove the duplicate and
+fourth responses do not change their recipient sets; this is not an SMTP work
+timeout. The proof also confirms the account remains unverified and sessionless,
+attempt 4 in the same public client bucket is limited, and public sign-up is
+restored OFF.
 
 The `/sign-up` page reads the admission switch only in a Server Component and
 fails closed to a state with no form. Client code receives only the resulting

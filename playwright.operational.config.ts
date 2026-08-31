@@ -5,8 +5,9 @@ export default defineConfig({
   retries: 0,
   testDir: './tests/operational',
   timeout: 30_000,
+  workers: 1,
   use: {
-    baseURL: process.env.BAP_OPERATIONAL_BASE_URL ?? 'http://127.0.0.1:39100',
+    baseURL: process.env.BAP_OPERATIONAL_BASE_URL ?? 'http://localhost:39100',
     trace: 'retain-on-failure',
   },
 });

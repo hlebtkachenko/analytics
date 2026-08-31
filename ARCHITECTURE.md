@@ -133,15 +133,28 @@ into no other service, which `scripts/verify-compose.mjs` asserts. Backup
 scheduling, backend-specific credentials, and off-host durability require owner
 configuration.
 
+The separately selected development and operational-proof Mailpit overlay adds 1
+ephemeral sink on the `app` network. Web sends to its internal cleartext SMTP
+port and awaits verification-message acceptance before returning the development
+auth response; production Resend remains non-blocking. A non-root, read-only
+companion exposes only GET `/readyz` and GET `/api/v1/search` on host loopback;
+every other path and method returns 404. It runs with every capability dropped
+and no additions. The public Caddy configuration has no Mailpit route. Mailpit
+has no provider credential, persistent volume, or production service. Bootstrap
+omits the overlay, and production mail continues through Resend on
+`internet-egress`.
+
 ## Operational map
 
-| Process         | Internal port | Public surface       | Private readiness |
-| --------------- | ------------: | -------------------- | ----------------- |
-| Caddy           |       80, 443 | All browser traffic  | Config validation |
-| Web             |          3000 | `GET /health`        | `GET /ready`      |
-| Application API |          3001 | None                 | `GET /ready`      |
-| Reporting API   |          3002 | None                 | `GET /ready`      |
-| PostgreSQL      |          5432 | Development loopback | `pg_isready`      |
+| Process           | Internal port | Public surface            | Private readiness |
+| ----------------- | ------------: | ------------------------- | ----------------- |
+| Caddy             |       80, 443 | All browser traffic       | Config validation |
+| Web               |          3000 | `GET /health`             | `GET /ready`      |
+| Application API   |          3001 | None                      | `GET /ready`      |
+| Reporting API     |          3002 | None                      | `GET /ready`      |
+| PostgreSQL        |          5432 | Development loopback      | `pg_isready`      |
+| Mailpit           |    1025, 8025 | None                      | `GET /readyz`     |
+| Mailpit API proxy |          8025 | Development loopback only | `GET /readyz`     |
 
 ## Deliberately deferred
 

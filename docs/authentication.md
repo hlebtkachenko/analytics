@@ -26,9 +26,21 @@ and Better Auth reject all 3 disabled admin paths, including trailing-slash
 variants, before endpoint dispatch.
 
 Password reset, verification mail, and organization invitations are enabled and
-deliver through the single mail module without waiting for the mail provider.
-Invitation mail links to `/invitation/:invitationId`, where an authenticated
-recipient reviews and accepts the invitation.
+deliver through the single mail module. Password reset and invitation delivery,
+plus verification through production Resend or the explicit log transport,
+remain non-blocking. Verification through the exact development SMTP sink waits
+for SMTP acceptance before the auth response resolves. Invitation mail links to
+`/invitation/:invitationId`, where an authenticated recipient reviews and
+accepts the invitation.
+
+Production delivery uses Resend. Development and CI select a narrowly fixed
+Nodemailer transport to the internal `mailpit:1025` sink; no other SMTP endpoint
+is accepted. The explicit Mailpit overlay is absent from bootstrap and
+production. Its development-only companion exposes only GET `/readyz` and GET
+`/api/v1/search` on host loopback for operational tests. SMTP failures are
+generic and make the awaited public auth request return a generic 503. File and
+URL access are disabled, and the transport logs no recipient, body, link, token,
+or provider error.
 
 ## Browser identity routes
 
@@ -178,6 +190,19 @@ docker compose --env-file .env -f compose.yaml -f compose.development.yaml run -
 The command emits only JSON state. Failures emit one generic JSON error and
 never include the underlying database message. There is no browser, HTTP, or
 long-running service control surface for this setting.
+
+The scheduled operational proof uses that same CLI and the real public Caddy
+path. Its first POST is denied while OFF and still consumes edge attempt 1. With
+the switch ON, attempts 2 and 3 submit identical fresh and duplicate requests;
+their statuses, exact `Set-Cookie` headers, and response bodies match after only
+generated ids and timestamps are removed, both tokens are null, and neither
+creates a session. Correct-password sign-in remains 403 for the unverified
+account, and attempt 4 returns 429. A recipient-filtered Mailpit query proves
+the fresh request sends exactly 1 verification message after its awaited auth
+response. The duplicate and fourth response boundaries are followed by immediate
+and final recipient-id comparisons over a short Mailpit API-consistency window.
+That window does not bound SMTP work. Cleanup always restores the default-off
+state.
 
 ## Password and email verification
 

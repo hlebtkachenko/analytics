@@ -94,13 +94,30 @@ Copyright (c) 2016 Tim Jones.
 - License: [MIT](licenses/PG-BOSS-MIT.txt)
 
 Resend provides the transactional mail client under the MIT license. BAP reads
-its API key from a mounted credential file and falls back to a log-only
-transport when no key is configured.
+its API key from a mounted credential file. Transport selection is explicit:
+selecting Resend without a non-placeholder key fails closed, and the log
+transport is available only as a separate opt-in for non-sending runtimes.
 
 Copyright (c) 2023 Plus Five Five, Inc.
 
 - Source: <https://github.com/resend/resend-node>
 - License: [MIT](licenses/RESEND-MIT.txt)
+
+Nodemailer provides the narrow SMTP client used only with the development/CI
+Mailpit sink. It is licensed under MIT-0.
+
+Copyright (c) 2011-2023 Andris Reinman.
+
+- Source: <https://github.com/nodemailer/nodemailer>
+- License: [MIT-0](licenses/NODEMAILER-MIT-0.txt)
+
+Mailpit provides the digest-pinned development/CI mail sink under the MIT
+license. It is absent from the production topology.
+
+Copyright (c) 2022-Now() Ralph Slooten.
+
+- Source: <https://github.com/axllent/mailpit>
+- License: [MIT](licenses/MAILPIT-MIT.txt)
 
 ExcelJS provides the streaming spreadsheet reader and writer under the MIT
 license. BAP overrides its pinned `uuid` dependency to a patched release.

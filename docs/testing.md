@@ -84,9 +84,35 @@ transitions, rollback, JSON-only output, and redacted errors.
 The scheduled and manually runnable GitHub Actions operational proof creates a
 disposable local Compose stack, creates a gated synthetic account, completes a
 browser sign-in and organization-access check, then backs up and restores the
-database into a separate service. It validates the restored owner membership and
-current migration identifier. It does not exercise production data or
-infrastructure.
+database into a separate service. Before the existing identity suite, it enables
+public sign-up through the migrator CLI and runs a serial Caddy-path proof that
+returns the switch OFF in both test and workflow cleanup.
+
+That sign-up proof checks the closed page and a 403 POST while OFF. Because the
+edge limiter runs before policy, that denial is attempt 1; fresh sign-up is
+attempt 2, its identical duplicate is attempt 3, and a different attempt 4 must
+return 429 in the same 60-second Caddy-established client bucket. Fresh and
+duplicate must have equal statuses, exact equal `Set-Cookie` headers, bodies
+deep-equal after removing only generated ids and timestamps, `token: null`, and
+no session cookie. Correct-password sign-in for the new unverified account must
+return 403 without a cookie. The development Mailpit API is queried by the
+unique synthetic `example.test` recipient: exactly 1 fresh verification message
+must appear after the fresh auth response, which awaits development SMTP
+acceptance. The recipient id set is checked immediately and finally over a short
+Mailpit API-consistency window after both the duplicate and fourth responses.
+That window does not bound SMTP work. The test never fetches a message body,
+link, or token. It also proves the loopback inspection proxy permits only GET
+`/readyz` and GET `/api/v1/search`, returning 404 for the UI, other paths, and
+non-GET methods.
+
+The workflow then validates the restored owner membership and current migration
+identifier. It does not exercise production data, a real recipient, external
+mail delivery, or production infrastructure. The production Compose contract is
+separately verified to contain no Mailpit service, route, SMTP port, or SMTP
+transport configuration, and no loopback API proxy or proxy network. The same
+model probe verifies bootstrap and operations absence, accepts a valid Mailpit
+port override, and rejects collisions with web or PostgreSQL without starting
+services.
 
 The focused identity browser regression runs against a production Compose stack:
 
@@ -119,7 +145,7 @@ accessibility-window attachment with `permission_denied`; Apple Events UI
 control was also denied. This is not a VoiceOver pass or an automated VoiceOver
 claim. A human VoiceOver confirmation is still required.
 
-The test-only synthetic-account command is unavailable unless
+The operational-proof synthetic-account command is unavailable unless
 `BAP_E2E_SETUP=true` is set. It accepts one strict JSON object on standard input
 and emits only status and generated IDs. It is not an HTTP endpoint and must not
 be used for interactive owner provisioning.

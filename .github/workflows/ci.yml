@@ -176,39 +176,18 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate development configuration
-        run: >-
-          docker compose -f compose.yaml -f compose.development.yaml config
-          --format json | node scripts/verify-compose.mjs development
+      - name: Validate Compose configuration models
+        run: node scripts/verify-compose-models.mjs
 
       - name: Validate backup entrypoints
         run: |
           bash -n scripts/backup-entrypoint.sh scripts/backup-stage-entrypoint.sh scripts/create-local-secrets.sh
           shellcheck scripts/backup-entrypoint.sh scripts/backup-stage-entrypoint.sh scripts/create-local-secrets.sh
 
-      - name: Validate production configuration
-        run: >-
-          docker compose -f compose.yaml -f compose.production.yaml config
-          --format json | node scripts/verify-compose.mjs production
-
-      - name: Validate operations configuration
-        run: >-
-          docker compose --profile operations -f compose.yaml -f
-          compose.production.yaml config --format json | node
-          scripts/verify-compose.mjs operations
-
-      - name: Validate owner bootstrap configuration
-        run: >-
-          docker compose --profile bootstrap -f compose.yaml -f
-          compose.development.yaml config --format json | node
-          scripts/verify-compose.mjs bootstrap
-
-      - name: Validate Caddy configuration
-        run: >-
-          docker run --rm -e BAP_PUBLIC_HOST=bap.invalid -v
-          "$PWD/infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro"
-          caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
-          caddy validate --config /etc/caddy/Caddyfile
+      - name: Validate Caddy configurations
+        run: |
+          docker run --rm -e BAP_PUBLIC_HOST=bap.invalid -v "$PWD/infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 caddy validate --config /etc/caddy/Caddyfile
+          docker run --rm -v "$PWD/infrastructure/caddy/MailpitApi.Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 caddy validate --config /etc/caddy/Caddyfile
 
   database-integration:
     name: PostgreSQL integration
@@ -247,6 +226,7 @@ jobs:
       BAP_PUBLIC_HOST: http://localhost
       BAP_PUBLIC_ORIGIN: http://localhost:39100
       POSTGRES_PORT: '39432'
+      MAILPIT_HTTP_PORT: '39825'
       WEB_PORT: '39100'
     steps:
       - name: Check out repository
@@ -260,26 +240,26 @@ jobs:
         run: |
           started_at=$(date +%s)
           bash scripts/create-local-secrets.sh
-          docker compose -f compose.yaml -f compose.development.yaml up --build --detach --wait --wait-timeout 60
+          docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml up --build --detach --wait --wait-timeout 60
           curl --fail --silent --show-error "http://localhost:${WEB_PORT}/health"
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://localhost:${WEB_PORT}/ready")" = 404
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://localhost:${WEB_PORT}/metrics")" = 404
           test "$(curl --header 'Host: unknown.invalid' --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${WEB_PORT}/health")" = 421
-          docker compose -f compose.yaml -f compose.development.yaml exec -T web node -e "fetch('https://example.org/',{method:'HEAD'}).then((response)=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))"
+          docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml exec -T web node -e "fetch('https://example.org/',{method:'HEAD'}).then((response)=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))"
           elapsed_seconds=$(($(date +%s) - started_at))
           printf '### Container smoke\n\n- Duration: %ss\n' "$elapsed_seconds" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Show failure logs
         if: failure() && steps.stack.outcome == 'failure'
         run:
-          docker compose -f compose.yaml -f compose.development.yaml logs
-          --no-color
+          docker compose -f compose.yaml -f compose.development.yaml -f
+          compose.mailpit.yaml logs --no-color
 
       - name: Stop stack
         if: always()
         run:
-          docker compose -f compose.yaml -f compose.development.yaml down
-          --volumes
+          docker compose -f compose.yaml -f compose.development.yaml -f
+          compose.mailpit.yaml down --volumes
 
   operational-proof:
     if: github.event_name == 'workflow_dispatch'
