@@ -10,6 +10,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   bootstrapDatabaseRoles,
   checkMigrationCompatibility,
+  consumePublicSignupEdgeRateLimit,
+  publicSignupInvitationExists,
+  publicSignupEnabled,
   resolveMembership,
   runMigrations,
   withTenantContext,
@@ -275,6 +278,220 @@ describe('PostgreSQL 18 isolation', () => {
         subjectId: 'user-1',
       }),
     ).resolves.toBeNull();
+  });
+
+  it('confines the public sign-up switch to its narrow auth accessor', async () => {
+    await expect(publicSignupEnabled(authPool)).resolves.toBe(false);
+
+    for (const statement of [
+      'select * from auth.platform_setting',
+      `insert into auth.platform_setting ("key", enabled) values ('denied', true)`,
+      `update auth.platform_setting set enabled = true where "key" = 'public_signup'`,
+      `delete from auth.platform_setting where "key" = 'public_signup'`,
+    ]) {
+      await expect(authPool.query(statement)).rejects.toThrow(
+        /permission denied/,
+      );
+    }
+
+    for (const pool of [apiPool, reportingPool]) {
+      await expect(
+        pool.query('select auth.public_signup_enabled()'),
+      ).rejects.toThrow(/permission denied/);
+      for (const statement of [
+        'select * from auth.platform_setting',
+        `insert into auth.platform_setting ("key", enabled) values ('denied', true)`,
+        `update auth.platform_setting set enabled = true where "key" = 'public_signup'`,
+        `delete from auth.platform_setting where "key" = 'public_signup'`,
+      ]) {
+        await expect(pool.query(statement)).rejects.toThrow(
+          /permission denied/,
+        );
+      }
+    }
+
+    await expect(
+      backupPool.query(
+        `select "key", enabled from auth.platform_setting where "key" = 'public_signup'`,
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ enabled: false, key: 'public_signup' }],
+    });
+    await expect(
+      backupPool.query('select auth.public_signup_enabled()'),
+    ).rejects.toThrow(/permission denied/);
+
+    const functionProperties = await rootPool.query<{
+      owner: string;
+      proconfig: string[];
+      prosecdef: boolean;
+      provolatile: string;
+    }>(`select
+      pg_get_userbyid(proowner) as owner,
+      proconfig,
+      prosecdef,
+      provolatile
+    from pg_proc
+    where oid = 'auth.public_signup_enabled()'::regprocedure`);
+    expect(functionProperties.rows).toEqual([
+      {
+        owner: 'bap_owner',
+        proconfig: ['search_path=pg_catalog, auth'],
+        prosecdef: true,
+        provolatile: 's',
+      },
+    ]);
+    const functionAcl = await rootPool.query<{
+      grantee: string;
+      privilege_type: string;
+    }>(`select
+      coalesce(grantee_role.rolname, 'PUBLIC') as grantee,
+      privilege.privilege_type
+    from pg_proc as p
+    cross join lateral aclexplode(
+      coalesce(p.proacl, acldefault('f', p.proowner))
+    ) as privilege
+    left join pg_roles as grantee_role on grantee_role.oid = privilege.grantee
+    where p.oid = 'auth.public_signup_enabled()'::regprocedure
+    order by grantee, privilege_type`);
+    expect(functionAcl.rows).toEqual([
+      { grantee: 'bap_auth', privilege_type: 'EXECUTE' },
+      { grantee: 'bap_owner', privilege_type: 'EXECUTE' },
+    ]);
+
+    await asOwner((client) =>
+      client.query(
+        `delete from auth.platform_setting where "key" = 'public_signup'`,
+      ),
+    );
+    try {
+      await expect(publicSignupEnabled(authPool)).resolves.toBe(false);
+    } finally {
+      await asOwner((client) =>
+        client.query(
+          `insert into auth.platform_setting ("key", enabled)
+           values ('public_signup', false)
+           on conflict ("key") do update set enabled = excluded.enabled`,
+        ),
+      );
+    }
+  });
+
+  it('matches only pending unexpired invitations case-insensitively', async () => {
+    await asOwner((client) =>
+      client.query(`
+        insert into auth.invitation (
+          id,
+          organization_id,
+          email,
+          role,
+          status,
+          expires_at,
+          inviter_id
+        ) values
+          ('public-signup-pending', 'org-1', 'MixedCase@example.test', 'member', 'pending', now() + interval '1 hour', 'user-1'),
+          ('public-signup-expired', 'org-1', 'expired@example.test', 'member', 'pending', now() - interval '1 hour', 'user-1'),
+          ('public-signup-accepted', 'org-1', 'accepted@example.test', 'member', 'accepted', now() + interval '1 hour', 'user-1'),
+          ('public-signup-canceled', 'org-1', 'canceled@example.test', 'member', 'canceled', now() + interval '1 hour', 'user-1')
+      `),
+    );
+
+    await expect(
+      publicSignupInvitationExists(authPool, 'mixedcase@EXAMPLE.TEST'),
+    ).resolves.toBe(true);
+    for (const email of [
+      'expired@example.test',
+      'accepted@example.test',
+      'canceled@example.test',
+    ]) {
+      await expect(publicSignupInvitationExists(authPool, email)).resolves.toBe(
+        false,
+      );
+    }
+  });
+
+  it('atomically admits exactly three concurrent edge sign-up attempts', async () => {
+    const now = 1_800_000_000_000;
+    const decisions = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        consumePublicSignupEdgeRateLimit(authPool, '198.51.100.77', now),
+      ),
+    );
+
+    expect(decisions.filter(({ allowed }) => allowed)).toHaveLength(3);
+    expect(decisions.filter(({ allowed }) => !allowed)).toEqual([
+      { allowed: false, retryAfterSeconds: 60 },
+    ]);
+    await expect(
+      authPool.query<{ count: number }>(
+        `select count
+         from auth.rate_limit
+         where "key" like 'bap-edge:public-sign-up:%'`,
+      ),
+    ).resolves.toMatchObject({ rows: [{ count: 3 }] });
+  });
+
+  it('prunes only expired edge identities on every consume', async () => {
+    const now = 1_810_000_000_000;
+    await authPool.query(
+      `insert into auth.rate_limit (id, "key", count, last_request)
+       values
+         ('expired-edge-one', 'bap-edge:public-sign-up:expired-one', 1, $1),
+         ('expired-edge-two', 'bap-edge:public-sign-up:expired-two', 1, $1),
+         ('fresh-edge', 'bap-edge:public-sign-up:fresh', 1, $2),
+         ('expired-better-auth', 'better-auth:expired', 1, $1)`,
+      [now - 60_001, now],
+    );
+
+    await expect(
+      consumePublicSignupEdgeRateLimit(authPool, '203.0.113.41', now),
+    ).resolves.toEqual({ allowed: true });
+
+    await expect(
+      authPool.query<{ key: string }>(
+        `select "key" as key
+         from auth.rate_limit
+         where id in (
+           'expired-edge-one',
+           'expired-edge-two',
+           'fresh-edge',
+           'expired-better-auth'
+         )
+         order by "key"`,
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        { key: 'bap-edge:public-sign-up:fresh' },
+        { key: 'better-auth:expired' },
+      ],
+    });
+  });
+
+  it('documents the auth default-privilege trap with a disposable table', async () => {
+    await asOwner((client) =>
+      client.query(
+        'create table auth.default_privilege_probe (id text primary key)',
+      ),
+    );
+    const privileges = await rootPool.query<{
+      can_delete: boolean;
+      can_insert: boolean;
+      can_select: boolean;
+      can_update: boolean;
+    }>(`select
+      has_table_privilege('bap_auth', 'auth.default_privilege_probe', 'DELETE') as can_delete,
+      has_table_privilege('bap_auth', 'auth.default_privilege_probe', 'INSERT') as can_insert,
+      has_table_privilege('bap_auth', 'auth.default_privilege_probe', 'SELECT') as can_select,
+      has_table_privilege('bap_auth', 'auth.default_privilege_probe', 'UPDATE') as can_update`);
+
+    expect(privileges.rows).toEqual([
+      {
+        can_delete: true,
+        can_insert: true,
+        can_select: true,
+        can_update: true,
+      },
+    ]);
   });
 
   it('permits Better Auth database rate limits only to the auth role', async () => {

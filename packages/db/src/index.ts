@@ -1,12 +1,17 @@
 export {
   checkMigrationCompatibility,
+  consumePublicSignupEdgeRateLimit,
   DATABASE_MIGRATION_COMPATIBILITY,
+  PUBLIC_SIGNUP_EDGE_RATE_LIMIT,
+  publicSignupInvitationExists,
+  publicSignupEnabled,
   resolveMembership,
 } from './access.js';
 export type {
   MembershipResolution,
   MembershipRole,
   MigrationCompatibility,
+  PublicSignupEdgeRateLimitDecision,
   ResolveMembershipInput,
 } from './access.js';
 export {
