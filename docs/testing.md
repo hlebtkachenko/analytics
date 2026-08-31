@@ -15,6 +15,8 @@ The suite proves:
 - Carbon-backed identity and access surfaces render with translated strings;
 - sign-up, activation, password recovery, and welcome pages preserve their
   server gates, generic outcomes, redirects, and alert semantics;
+- the account page gates on a server session and calls the exact Better Auth
+  password-change, session-revocation, sign-out, and deletion client methods;
 - web health is public while readiness and metrics remain private;
 - Better Auth configuration, resource-JWT bounds, BFF response boundaries, CSP,
   bootstrap recovery states, and synthetic-account safeguards behave as
@@ -63,6 +65,17 @@ a CSV fixture through the real queue and proves that the queued payload carries
 identifiers only, that a declared format contradicting the file content fails
 the upload with a bounded message, and that the staged file is deleted on both
 the success and the failure path.
+
+The database suite also proves the account lifecycle: exact `bap_eraser`
+attributes and memberships, no login or CONNECT leakage, exact request and
+function ACLs, column-only app grants, comma-composed sole-owner versus co-owner
+counts, and the session/account/member/invitation/two-factor cascades. Web tests
+also dispatch the configured and public HTTP handlers to prove Admin-plugin user
+removal is disabled. Explicit-id erasure must use 1 opaque tombstone across all
+3 documented app columns, consume its pending request transactionally, leave an
+unrelated missing-auth fixture untouched, reject live and unrequested ids, and
+leave stored state unchanged on a direct repeat. Unit coverage drives CLI role
+transitions, rollback, JSON-only output, and redacted errors.
 
 The scheduled and manually runnable GitHub Actions operational proof creates a
 disposable local Compose stack, creates a gated synthetic account, completes a

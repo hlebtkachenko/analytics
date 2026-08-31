@@ -21,7 +21,7 @@ export interface ResolveMembershipInput {
 // Bump it to the newest migration id in the same pull request as that migration.
 // Rollback consequence: application code rolled back after the migration is
 // applied makes /ready return 503 on every service until this is bumped again.
-export const DATABASE_MIGRATION_COMPATIBILITY = '20260831.0001';
+export const DATABASE_MIGRATION_COMPATIBILITY = '20260831.0002';
 
 export const PUBLIC_SIGNUP_EDGE_RATE_LIMIT = {
   max: 3,
@@ -121,6 +121,40 @@ export async function publicSignupEnabled(
   );
 
   return result.rows[0]?.enabled ?? false;
+}
+
+export async function countSoleOwnedOrganizations(
+  pool: DatabasePool,
+  userId: string,
+): Promise<number> {
+  const result = await pool.query<{ total: number }>(
+    `select count(*)::integer as total
+     from auth.member as subject_membership
+     where subject_membership.user_id = $1
+       and 'owner' = any(string_to_array(subject_membership.role, ','))
+       and not exists (
+         select 1
+         from auth.member as other_owner
+         where other_owner.organization_id = subject_membership.organization_id
+           and 'owner' = any(string_to_array(other_owner.role, ','))
+           and other_owner.user_id <> subject_membership.user_id
+       )`,
+    [userId],
+  );
+  const total = result.rows[0]?.total;
+
+  if (typeof total !== 'number' || !Number.isInteger(total) || total < 0) {
+    throw new Error('Invalid sole-owned organization count.');
+  }
+
+  return total;
+}
+
+export async function recordUserErasureRequest(
+  pool: DatabasePool,
+  userId: string,
+): Promise<void> {
+  await pool.query('select auth.request_user_erasure($1)', [userId]);
 }
 
 export async function resolveMembership(

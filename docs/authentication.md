@@ -8,10 +8,17 @@ origin and trusted origin are exact values, never wildcards. Email/password
 sign-up is available behind a default-off runtime switch. A pending, unexpired
 organization invitation for the submitted address bypasses that switch.
 
-Two authentication paths are disabled:
+Four authentication paths are disabled:
 
 - `/api/auth/token`, because resource JWTs exist only inside a BFF call
 - `/api/auth/change-email`, because email changes use BAP-owned flows
+- `/api/auth/delete-user/callback`, because deletion has no email-verification
+  callback
+- `/api/auth/admin/remove-user`, because Better Auth 1.7.2 bypasses the BAP
+  deletion hook and erasure request on that Admin-plugin path
+
+BAP has no consumer of the disabled admin removal path. Phase 5 may inventory
+the remaining Admin-plugin surface; Phase 4 does not add an admin flow.
 
 Password reset, verification mail, and organization invitations are enabled and
 deliver through the single mail module without waiting for the mail provider.
@@ -70,6 +77,12 @@ All identity forms use standard Carbon form controls through
 `@bap/design-system`. Auth failures use a non-dismissible, low-contrast error
 `InlineNotification` with an alert role. The pages never render or log raw
 tokens, framework error bodies, or database errors.
+
+`/account` is a separate authenticated, deliberately temporary plain-HTML page.
+It has no Carbon components, style sheet, product header, or UI shell. It shows
+the session email and exposes sign-out, password change, and account deletion.
+Its Server Component redirects failed or absent session reads to `/sign-in` and
+passes only the email into the interactive client boundary.
 
 ## Sign-up admission
 
@@ -146,6 +159,62 @@ factor during verification.
 
 The JWKS read endpoint remains public because private Nest services validate
 resource-token signatures against it.
+
+## Password change and account deletion
+
+Password change uses Better Auth's installed `/change-password` endpoint. It
+requires `currentPassword`, enforces the configured 14-128 character bounds, and
+accepts `revokeOtherSessions`. The account page exposes that option. No custom
+rate rule is added: Better Auth 1.7.2 already applies its special
+3-per-10-second rule to the endpoint.
+
+Account deletion is enabled. Better Auth 1.7.2 accepts either the submitted
+password or a session younger than `session.freshAge`; the endpoint is therefore
+not password-protected. BAP sets freshness to 5 minutes to keep passwordless
+acceptance short, and the account page always submits the current password.
+
+The deletion hook counts organizations where the deleting user has `owner` as an
+exact comma-separated role token and no different member has that same token.
+This matches Better Auth's composed roles such as `owner,admin` and
+`admin,owner`, without substring matching. A count above 0 refuses deletion with
+generic UI feedback. Co-owned organizations do not block it. Any database read
+or request write failure fails closed.
+
+Before Better Auth deletes identity rows, the hook calls the narrow `@bap/db`
+request accessor with the explicit session user id. Better Auth does not wrap
+its hook and identity deletes in 1 transaction, so this order is intentional. A
+failed later delete can leave a stale pending request, but the operator CLI
+locks the row and refuses it while `auth.user` is still live. The database's
+`ON DELETE CASCADE` constraints remove that user's sessions, accounts,
+memberships, invitations they created, and two-factor row with the identity.
+
+After a successful browser deletion, an authorized host-shell operator runs:
+
+```sh
+docker compose --env-file .env -f compose.yaml -f compose.development.yaml run --rm --no-deps migrator node node_modules/@bap/db/dist/cli.js erase-user USER_ID
+```
+
+The command requires exactly 1 explicit pending id. In 1 transaction it locks
+that request, proves the auth identity is absent, assumes the RLS-bypassing
+eraser role only for the 3 app-column updates, returns to owner, consumes the
+request, and commits. It emits JSON only. A missing request, live identity, or
+database failure produces the same redacted JSON failure. There is no orphan
+sweep.
+
+One opaque `erased_<uuid>` replaces the subject in `app.audit_log.user_id`,
+`app.data_grants.user_id`, and `app.dataset.created_by`. It is generated
+independently of the user id and used consistently for that invocation. A repeat
+direct function call changes no stored state, and a repeat CLI call fails
+because the request was consumed.
+
+A retained or granted dataset can remain readable after `created_by` is
+tombstoned. `app.dataset_is_writable` then recognizes no live creator, so that
+dataset remains unwritable until later ownership or delegation work. This phase
+does not implement that later workflow.
+
+This lifecycle is not complete GDPR compliance. BAP has no access or portability
+workflow, and identifiers can remain in `app.audit_log.metadata`,
+`auth.rate_limit`, `auth.verification`, and pg-boss job payloads.
 
 ## Resource-token boundary
 

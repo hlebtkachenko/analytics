@@ -1,6 +1,8 @@
 import {
+  countSoleOwnedOrganizations,
   publicSignupEnabled,
   publicSignupInvitationExists,
+  recordUserErasureRequest,
 } from '@bap/db/access';
 import { admin, jwt, organization, twoFactor } from 'better-auth/plugins';
 import { APIError, betterAuth } from 'better-auth';
@@ -49,6 +51,11 @@ const signUpEmailBodySchema = z.object({ email: z.email().max(254) });
 
 export const publicSignUpErrorCode = 'PUBLIC_SIGN_UP_DISABLED';
 export const authLoggerConfiguration = { level: 'warn' } as const;
+export const accountSessionFreshAgeSeconds = 5 * 60;
+export const accountDeletionSoleOwnerErrorCode =
+  'ACCOUNT_HAS_SOLE_OWNED_ORGANIZATIONS';
+export const accountDeletionUnavailableErrorCode =
+  'ACCOUNT_DELETION_UNAVAILABLE';
 
 export async function publicSignUpAllowed(
   pool: DatabasePool,
@@ -80,6 +87,30 @@ export function createPublicSignUpBeforeHook(pool: DatabasePool) {
       throw APIError.from('FORBIDDEN', {
         code: publicSignUpErrorCode,
         message: 'Public sign-up is disabled.',
+      });
+    }
+  };
+}
+
+export function createAccountDeletionBeforeHook(pool: DatabasePool) {
+  return async (user: { id: string }): Promise<void> => {
+    try {
+      if ((await countSoleOwnedOrganizations(pool, user.id)) > 0) {
+        throw APIError.from('FORBIDDEN', {
+          code: accountDeletionSoleOwnerErrorCode,
+          message: 'Delete or delegate sole-owned organizations first.',
+        });
+      }
+
+      await recordUserErasureRequest(pool, user.id);
+    } catch (error) {
+      if (error instanceof APIError) {
+        throw error;
+      }
+
+      throw APIError.from('INTERNAL_SERVER_ERROR', {
+        code: accountDeletionUnavailableErrorCode,
+        message: 'Account deletion is unavailable.',
       });
     }
   };
@@ -319,8 +350,17 @@ async function createAuth() {
     },
     secret,
     trustedOrigins: [environment.BAP_PUBLIC_ORIGIN],
-    user: coreAuthModels.user,
-    session: coreAuthModels.session,
+    user: {
+      ...coreAuthModels.user,
+      deleteUser: {
+        beforeDelete: createAccountDeletionBeforeHook(pool),
+        enabled: true,
+      },
+    },
+    session: {
+      ...coreAuthModels.session,
+      freshAge: accountSessionFreshAgeSeconds,
+    },
     account: coreAuthModels.account,
     verification: coreAuthModels.verification,
   });

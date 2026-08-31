@@ -1,10 +1,12 @@
 export {
   checkMigrationCompatibility,
+  countSoleOwnedOrganizations,
   consumePublicSignupEdgeRateLimit,
   DATABASE_MIGRATION_COMPATIBILITY,
   PUBLIC_SIGNUP_EDGE_RATE_LIMIT,
   publicSignupInvitationExists,
   publicSignupEnabled,
+  recordUserErasureRequest,
   resolveMembership,
 } from './access.js';
 export type {
