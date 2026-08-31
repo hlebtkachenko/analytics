@@ -15,7 +15,7 @@
 		-Server
 		X-Content-Type-Options nosniff
 		X-Request-ID {http.request.uuid}
-		Referrer-Policy strict-origin-when-cross-origin
+		?Referrer-Policy strict-origin-when-cross-origin
 		Permissions-Policy "camera=(), geolocation=(), microphone=()"
 	}
 

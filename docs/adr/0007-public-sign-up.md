@@ -60,6 +60,18 @@ distinguished by response shape. New accounts stay unverified until the
 30-minute verification link is used; successful verification creates the browser
 session. Sign-up does not create an organization or membership.
 
+The `/sign-up` browser page reads the switch through the server-only accessor
+and renders no form when it is false or unavailable. It discards Better Auth's
+success payload so fresh and duplicate addresses have the same visible outcome,
+and uses only the relative `/activate` callback. The remaining identity pages
+apply the same generic-outcome rule to password recovery and activation errors.
+The proxy removes raw reset tokens and activation error codes from callback URLs
+before render. A valid reset capability is held only in a short-lived,
+path-scoped `HttpOnly` cookie and consumed by a Server Action through Better
+Auth's in-process HTTP handler so the router limiter executes. Exact callback
+matchers include prefetch requests, and callback responses use
+`Referrer-Policy: no-referrer`.
+
 Only a host-shell operator who already has access to the `bap_migrator`
 credential may run `signup enable`, `signup disable`, or `signup status` through
 the database CLI. Writes run in a transaction under `SET LOCAL ROLE bap_owner`.
@@ -70,11 +82,12 @@ is JSON; failures use one generic code and never reflect a database error.
 
 ## Consequences
 
-The switch changes without a web restart, and invitations keep working while
-public sign-up is closed. Every allowed sign-up passes 2 independent policy
-checks and 2 independent 3-per-minute rate-limit buckets by design. A database
-outage rejects registration, including invitation registration, until the read
-boundary recovers.
+The switch changes without a web restart, and invitations keep working at the
+framework boundary while public sign-up is closed. The public sign-up page shows
+no registration form in that state. Every allowed sign-up passes 2 independent
+policy checks and 2 independent 3-per-minute rate-limit buckets by design. A
+database outage rejects registration, including invitation registration, until
+the read boundary recovers.
 
 The migration compatibility version advances with the new table and function.
 Rolling application code back while leaving the migration applied creates the

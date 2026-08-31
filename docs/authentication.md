@@ -18,6 +18,59 @@ deliver through the single mail module without waiting for the mail provider.
 Invitation mail links to `/invitation/:invitationId`, where an authenticated
 recipient reviews and accepts the invitation.
 
+## Browser identity routes
+
+The bare Carbon identity layout covers these public URLs without a product
+header or UI shell:
+
+- `/sign-in` for email and password sign-in, with a link to password recovery
+- `/sign-in/two-factor` for the pending TOTP challenge
+- `/sign-up` for server-gated account creation
+- `/forgot-password` for a generic password-reset request
+- `/reset-password` for a valid Better Auth reset callback
+- `/activate` for the email-verification callback result
+- `/welcome` for the authenticated post-activation handoff
+
+The sign-up page reads the switch through the server-only database boundary. A
+false value or failed read replaces the whole form with the closed state. The
+form sends name, email, and a 14-128 character password with the relative
+`/activate` callback. Both a new address and an existing address produce the
+same visible check-email result.
+
+Password recovery uses the relative `/reset-password` callback and gives the
+same check-email result whether the address exists or not. Before rendering, the
+proxy moves exactly 1 valid-shape callback token into a 30-minute `HttpOnly`,
+`SameSite=Lax` cookie scoped to `/reset-password`, sets `Secure` in production,
+and redirects to the clean path. A callback error, malformed token, or duplicate
+token clears that capability. A clean request without a valid capability
+produces one generic reset-link failure with no form. Callback redirects and the
+clean reset page use `Referrer-Policy: no-referrer`. Exact matcher entries apply
+this canonicalization even to `Purpose: prefetch` and `Next-Router-Prefetch`
+requests, while other routes keep the generic prefetch exclusion.
+
+The page passes only a capability-present boolean to its Client Component. Its
+Server Action reads the cookie, validates password bounds and confirmation, and
+dispatches a `Request` to Better Auth's in-process HTTP handler at a fixed
+non-routable URL. This executes the normal router limiter and hooks without an
+outbound request. Only JSON content type and the Caddy-established client-IP
+header are forwarded; incoming Host, origin, and cookies are not. Password
+mismatch keeps the capability so the user can correct the form. Success or
+terminal invalidity clears it. The token is never a client prop, form field,
+action argument, log value, visible message, HTML value, or RSC payload, and
+every framework rejection becomes the same generic visible failure.
+
+Activation callback error codes are canonicalized before render to the fixed
+`/activate?state=invalid` URL with `Referrer-Policy: no-referrer` and are never
+rendered. A live session redirects from `/activate` to `/welcome`. With no
+session, the page explains generically that an email scanner may have consumed
+the link and offers sign-in. `/welcome` redirects an unauthenticated request to
+`/sign-in` and links an authenticated account to `/access`.
+
+All identity forms use standard Carbon form controls through
+`@bap/design-system`. Auth failures use a non-dismissible, low-contrast error
+`InlineNotification` with an alert role. The pages never render or log raw
+tokens, framework error bodies, or database errors.
+
 ## Sign-up admission
 
 `auth.platform_setting` stores the `public_signup` switch and seeds it to

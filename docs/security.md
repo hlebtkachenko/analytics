@@ -202,5 +202,35 @@ details. Better Auth returns a complete synthetic user shape for duplicate
 addresses, including Admin and Two Factor fields, so plugin fields do not weaken
 its anti-enumeration response.
 
+The `/sign-up` page reads the admission switch only in a Server Component and
+fails closed to a state with no form. Client code receives only the resulting
+boolean, never a database handle or setting-table access. Sign-up and recovery
+callbacks are fixed relative paths. Fresh and duplicate sign-up responses, and
+existing and nonexistent password-reset requests, collapse to identical visible
+success states without consuming framework messages.
+
+Reset and activation callbacks are canonicalized before any page render. The
+proxy accepts exactly 1 reset token in Better Auth's installed shape, stores it
+for at most 30 minutes in an `HttpOnly`, `SameSite=Lax`, `/reset-password`
+cookie that is `Secure` in production, and redirects to the clean path. An
+error, malformed token, or duplicate token clears the capability. A clean
+request without a valid capability fails closed. Raw activation errors redirect
+to the fixed `/activate?state=invalid` state. These responses and the clean
+reset page use `Referrer-Policy: no-referrer`. Exact proxy matchers keep both
+callbacks inside this boundary even when `Purpose: prefetch` or
+`Next-Router-Prefetch` is present.
+
+The reset Server Action reads the cookie directly and dispatches a `Request` to
+Better Auth's in-process HTTP handler at a fixed `.invalid` URL. This invokes
+the installed router limiter and hooks without network access. The action copies
+only JSON content type and the Caddy-established client-IP header, never the
+incoming Host, origin, or cookies. No reset token is passed through a client
+prop, RSC value, action argument, form field, visible content, or log. It clears
+the capability on success or terminal invalidity and reduces all framework
+failures to one generic result. Activation error codes are never echoed, and
+Better Auth failures are neither rendered nor logged. Session reads for
+activation and welcome stay on the server and fail closed. Every visible auth
+failure uses the same Carbon alert semantics.
+
 Do not publish a vulnerability report containing secrets or personal data. Use
 GitHub's enabled private vulnerability reporting channel.

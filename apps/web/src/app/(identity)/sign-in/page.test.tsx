@@ -7,7 +7,7 @@ import {
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { I18nProvider } from '../../i18n/client-provider';
+import { I18nProvider } from '../../../i18n/client-provider';
 import SignInPage from './page';
 
 const mocks = vi.hoisted(() => ({
@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   signIn: vi.fn(),
 }));
 
-vi.mock('../../lib/auth/client', () => ({
+vi.mock('../../../lib/auth/client', () => ({
   authClient: { signIn: { email: mocks.signIn } },
 }));
 
@@ -80,10 +80,20 @@ describe('SignInPage', () => {
     fireEvent.submit(screen.getByRole('form', { name: 'Sign in to BAP' }));
 
     expect(
-      await screen.findByText(
-        'Sign-in failed. Check your credentials and try again.',
-      ),
-    ).toHaveAttribute('role', 'alert');
+      (
+        await screen.findByText(
+          'Sign-in failed. Check your credentials and try again.',
+        )
+      ).closest('[role="alert"]'),
+    ).toBeInTheDocument();
     expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
+  it('links to password recovery', () => {
+    renderSignIn();
+
+    expect(
+      screen.getByRole('link', { name: 'Forgot your password?' }),
+    ).toHaveAttribute('href', '/forgot-password');
   });
 });

@@ -7,7 +7,7 @@ import {
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { I18nProvider } from '../../../i18n/client-provider';
+import { I18nProvider } from '../../../../i18n/client-provider';
 import TwoFactorPage from './page';
 
 const mocks = vi.hoisted(() => ({
@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   verifyTotp: vi.fn(),
 }));
 
-vi.mock('../../../lib/auth/client', () => ({
+vi.mock('../../../../lib/auth/client', () => ({
   authClient: { twoFactor: { verifyTotp: mocks.verifyTotp } },
 }));
 
@@ -64,10 +64,12 @@ describe('TwoFactorPage', () => {
     );
 
     expect(
-      await screen.findByText(
-        'Verification failed. Check the code and try again.',
-      ),
-    ).toHaveAttribute('role', 'alert');
+      (
+        await screen.findByText(
+          'Verification failed. Check the code and try again.',
+        )
+      ).closest('[role="alert"]'),
+    ).toBeInTheDocument();
     expect(mocks.replace).not.toHaveBeenCalled();
   });
 

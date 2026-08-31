@@ -1,11 +1,17 @@
 'use client';
 
-import { Button, Form, Stack, TextInput } from '@bap/design-system/react';
+import {
+  Button,
+  Form,
+  InlineNotification,
+  Stack,
+  TextInput,
+} from '@bap/design-system/react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { authClient } from '../../../lib/auth/client';
+import { authClient } from '../../../../lib/auth/client';
 
 export default function TwoFactorPage() {
   const { t } = useTranslation();
@@ -15,14 +21,18 @@ export default function TwoFactorPage() {
   async function submit(formData: FormData): Promise<void> {
     setError(false);
     // The pending challenge is carried by the signed cookie the sign-in response set.
-    const result = await authClient.twoFactor.verifyTotp({
-      code: String(formData.get('code') ?? ''),
-    });
-    if (result.error) {
+    try {
+      const result = await authClient.twoFactor.verifyTotp({
+        code: String(formData.get('code') ?? ''),
+      });
+      if (result.error) {
+        setError(true);
+        return;
+      }
+      router.replace('/access');
+    } catch {
       setError(true);
-      return;
     }
-    router.replace('/access');
   }
 
   return (
@@ -40,7 +50,15 @@ export default function TwoFactorPage() {
               name="code"
               required
             />
-            {error ? <p role="alert">{t('twoFactor.failed')}</p> : null}
+            {error ? (
+              <InlineNotification
+                hideCloseButton
+                kind="error"
+                lowContrast
+                role="alert"
+                title={t('twoFactor.failed')}
+              />
+            ) : null}
             <Button type="submit">{t('twoFactor.verify')}</Button>
           </Stack>
         </Form>

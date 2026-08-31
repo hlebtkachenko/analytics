@@ -141,6 +141,9 @@ catalogs:
     ai:
       specifier: 7.0.84
       version: 7.0.84
+    axe-core:
+      specifier: 4.13.0
+      version: 4.13.0
     better-auth:
       specifier: 1.7.2
       version: 1.7.2
@@ -264,6 +267,9 @@ importers:
       '@playwright/test':
         specifier: 'catalog:'
         version: 1.62.1
+      axe-core:
+        specifier: 'catalog:'
+        version: 4.13.0
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(supports-color@7.2.0)

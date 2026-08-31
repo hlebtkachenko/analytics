@@ -24,10 +24,21 @@ export const resources = {
       },
       auth: {
         email: 'Email address',
+        forgotPassword: 'Forgot your password?',
         password: 'Password',
         signIn: 'Sign in',
         signInFailed: 'Sign-in failed. Check your credentials and try again.',
         title: 'Sign in to BAP',
+      },
+      activate: {
+        invalidBody:
+          'Use the most recent activation email, or ask an administrator for help.',
+        invalidTitle: 'This activation link is invalid or expired.',
+        noSessionBody:
+          'Email scanners can open activation links before you do. Try signing in to continue.',
+        noSessionTitle: 'Your account may already be active.',
+        signIn: 'Sign in',
+        title: 'Activate your account',
       },
       common: {
         signOut: 'Sign out',
@@ -97,6 +108,18 @@ export const resources = {
         uploadTitle: 'Upload a dataset',
         uploadWaiting: 'Uploading the file.',
       },
+      forgotPassword: {
+        backToSignIn: 'Back to sign in',
+        email: 'Email address',
+        failed: 'The reset request could not be completed. Try again.',
+        submit: 'Send reset link',
+        successBody:
+          'If an account exists for that address, a password reset email is on its way.',
+        successTitle: 'Check your email',
+        summary:
+          'Enter your email address and we will send password reset instructions if an account exists.',
+        title: 'Reset your password',
+      },
       invitation: {
         accept: 'Accept invitation',
         acceptFailed: 'The invitation could not be accepted.',
@@ -110,6 +133,34 @@ export const resources = {
       reference: {
         title: 'Carbon design system',
       },
+      resetPassword: {
+        confirmPassword: 'Confirm new password',
+        failed:
+          'The password could not be reset. Request a new link and try again.',
+        invalid: 'This password reset link is invalid or expired.',
+        newPassword: 'New password',
+        passwordHelper: 'Use 14 to 128 characters.',
+        requestNew: 'Request a new reset link',
+        submit: 'Update password',
+        successBody: 'You can now sign in with your new password.',
+        successTitle: 'Password updated',
+        title: 'Choose a new password',
+      },
+      signUp: {
+        closed: 'Account creation is not available right now.',
+        email: 'Email address',
+        failed: 'The account could not be created. Try again.',
+        name: 'Full name',
+        password: 'Password',
+        passwordHelper: 'Use 14 to 128 characters.',
+        submit: 'Create account',
+        successBody:
+          'If an account can be created for that address, an activation email is on its way.',
+        successTitle: 'Check your email',
+        summary:
+          'Create an account with your name, email address, and password.',
+        title: 'Create your BAP account',
+      },
       twoFactor: {
         code: 'Verification code',
         failed: 'Verification failed. Check the code and try again.',
@@ -117,6 +168,11 @@ export const resources = {
           'Enter the 6-digit verification code from your authenticator app.',
         title: 'Two-step verification',
         verify: 'Verify',
+      },
+      welcome: {
+        continue: 'Continue to BAP',
+        summary: 'Your email address is verified and your account is active.',
+        title: 'Welcome to BAP',
       },
     },
   },
