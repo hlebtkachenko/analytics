@@ -232,5 +232,50 @@ Better Auth failures are neither rendered nor logged. Session reads for
 activation and welcome stay on the server and fail closed. Every visible auth
 failure uses the same Carbon alert semantics.
 
+## Account erasure boundary
+
+Account deletion uses Better Auth's hard-delete path with a 5-minute fresh
+session window. That endpoint can accept a sufficiently fresh session without a
+password, so it is not treated as password-protected; the BAP account form still
+always supplies the current password. The `beforeDelete` hook fails closed on
+database errors and blocks only users who are the sole owner of at least 1
+organization. Owner checks use exact comma-separated tokens for both the subject
+and possible co-owners, matching Better Auth's composed roles without substring
+matching.
+
+Installed Better Auth 1.7.2 implements `/admin/remove-user` as a direct delete
+that does not call `user.deleteUser.beforeDelete`. BAP has no consumer, so both
+the auth configuration and public route gate disable that path. Phase 5 may
+inventory the remaining Admin-plugin surface; no global hook reproduces admin
+permission logic in this phase.
+
+The hook records the explicit session user id in a pending-only auth-schema
+request before the framework deletes the identity. The request table revokes
+Better Auth's inherited table grants and exposes only a fixed-search-path
+security-definer recorder to `bap_auth`. Because Better Auth 1.7.2 does not make
+the hook and identity deletes 1 transaction, a failed delete can leave a stale
+request. The operator command makes that state safe by refusing any id that
+still exists in `auth.user`.
+
+Only the one-shot migrator tier can process the request. It locks exactly the
+named row, verifies identity absence as owner, sets the non-login `bap_eraser`
+role for an invoker-rights app function, returns to owner, consumes the request,
+and commits atomically. `bap_eraser` has BYPASSRLS but no password, CONNECT, or
+inherited membership. Its app privileges are limited to schema usage, function
+execution, and SELECT/UPDATE on the 3 subject columns. `bap_auth` retains no
+app-schema access, and `bap_api` cannot execute erasure or UPDATE the audit log.
+There is no blind orphan sweep.
+
+The function generates 1 opaque `erased_<uuid>` only when a matching row exists,
+never derives it from the user id, and applies it to audit attribution, data
+grants, and dataset creators. A repeat leaves stored state unchanged. Retained
+or granted datasets can remain readable after `dataset.created_by` is
+tombstoned, but `dataset_is_writable` no longer recognizes a live creator. They
+remain unwritable until later ownership or delegation work.
+`app.audit_log.metadata` is deliberately not rewritten and can retain user ids.
+Identifiers can also remain in `auth.rate_limit`, `auth.verification`, and
+pg-boss job payloads. Access and portability are not implemented. This is a
+narrow erasure mechanism, not a claim of complete GDPR compliance.
+
 Do not publish a vulnerability report containing secrets or personal data. Use
 GitHub's enabled private vulnerability reporting channel.

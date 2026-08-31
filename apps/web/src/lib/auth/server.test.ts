@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DatabasePool } from '@bap/db/pool';
 import { betterAuth } from 'better-auth';
+import { memoryAdapter, type MemoryDB } from 'better-auth/adapters/memory';
+import { admin } from 'better-auth/plugins';
 
 const { sendMailMock } = vi.hoisted(() => ({ sendMailMock: vi.fn() }));
 
@@ -16,8 +18,12 @@ vi.mock('../mail/index.ts', async (importOriginal) => ({
 import type { MailConfiguration } from '../mail/index.js';
 import { disabledAuthPaths, resourceJwtConfiguration } from './contract.js';
 import {
+  accountDeletionSoleOwnerErrorCode,
+  accountDeletionUnavailableErrorCode,
+  accountSessionFreshAgeSeconds,
   authLoggerConfiguration,
   authRateLimitRules,
+  createAccountDeletionBeforeHook,
   createPublicSignUpBeforeHook,
   createInvitationSender,
   createPasswordResetSender,
@@ -50,10 +56,98 @@ beforeEach(() => {
 });
 
 describe('Better Auth resource contract', () => {
-  it('keeps browser token retrieval and email changes disabled', () => {
+  it('keeps unsafe or BAP-owned identity paths disabled', () => {
     expect([...disabledAuthPaths].sort()).toEqual(
-      ['/change-email', '/token'].sort(),
+      [
+        '/admin/remove-user',
+        '/change-email',
+        '/delete-user/callback',
+        '/token',
+      ].sort(),
     );
+  });
+
+  it('refuses admin removal in the configured HTTP dispatcher without deleting or requesting erasure', async () => {
+    const createdAt = new Date('2026-08-31T12:00:00.000Z');
+    const adminPassword = 'test-only-admin-password';
+    const targetUser = {
+      banExpires: null,
+      banned: false,
+      banReason: null,
+      createdAt,
+      email: 'target@bap.invalid',
+      emailVerified: true,
+      id: 'controlled-target',
+      image: null,
+      name: 'Controlled Target',
+      role: 'user',
+      updatedAt: createdAt,
+    };
+    const database = {
+      account: [],
+      session: [],
+      user: [] as Array<Record<string, unknown>>,
+      verification: [],
+    } satisfies MemoryDB;
+    const erasureRequests: string[] = [];
+    const auth = betterAuth({
+      baseURL: 'https://bap.invalid',
+      database: memoryAdapter(database),
+      disabledPaths: [...disabledAuthPaths],
+      emailAndPassword: { enabled: true },
+      plugins: [admin()],
+      secret: 'test-only-secret-that-is-long-enough',
+      user: {
+        deleteUser: {
+          beforeDelete: async (user) => {
+            erasureRequests.push(user.id);
+          },
+          enabled: true,
+        },
+      },
+    });
+    const signUpResponse = await auth.handler(
+      new Request('https://bap.invalid/api/auth/sign-up/email', {
+        body: JSON.stringify({
+          email: 'admin@bap.invalid',
+          name: 'Controlled Admin',
+          password: adminPassword,
+        }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      }),
+    );
+    const seededAdmin = database.user[0];
+    if (!seededAdmin) {
+      throw new Error('Better Auth did not seed the controlled admin.');
+    }
+    seededAdmin.role = 'admin';
+    database.user.push(targetUser);
+    const sessionCookie = signUpResponse.headers
+      .get('set-cookie')
+      ?.split(';', 1)[0];
+
+    expect(signUpResponse.status).toBe(200);
+    expect(sessionCookie).toBeTruthy();
+
+    const response = await auth.handler(
+      new Request('https://bap.invalid/api/auth/admin/remove-user', {
+        body: JSON.stringify({ userId: targetUser.id }),
+        headers: {
+          'content-type': 'application/json',
+          cookie: sessionCookie ?? '',
+        },
+        method: 'POST',
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(database.user).toEqual([seededAdmin, targetUser]);
+    expect(erasureRequests).toEqual([]);
+  });
+
+  it('uses a five-minute fresh-session window for sensitive account actions', () => {
+    expect(accountSessionFreshAgeSeconds).toBe(300);
   });
 
   it('uses the fixed internal audience and five-minute expiry', () => {
@@ -107,6 +201,62 @@ describe('Better Auth resource contract', () => {
     await expect(readAuthSecret(file)).rejects.toThrow(
       'protected regular file',
     );
+  });
+});
+
+describe('account deletion policy', () => {
+  function poolWithQuery(query: ReturnType<typeof vi.fn>): DatabasePool {
+    return { query } as unknown as DatabasePool;
+  }
+
+  it('allows a composed-role co-owner and records the explicit id', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ total: 0 }] })
+      .mockResolvedValueOnce({ rows: [{ request_user_erasure: null }] });
+
+    await expect(
+      createAccountDeletionBeforeHook(poolWithQuery(query))({ id: 'user-1' }),
+    ).resolves.toBeUndefined();
+
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query.mock.calls[0]?.[0]).toContain(
+      "'owner' = any(string_to_array(subject_membership.role, ','))",
+    );
+    expect(query.mock.calls[0]?.[0]).toContain(
+      "'owner' = any(string_to_array(other_owner.role, ','))",
+    );
+    expect(query.mock.calls[0]?.[1]).toEqual(['user-1']);
+    expect(query.mock.calls[1]).toEqual([
+      'select auth.request_user_erasure($1)',
+      ['user-1'],
+    ]);
+  });
+
+  it('refuses a composed-role sole owner without recording an erasure request', async () => {
+    const query = vi.fn().mockResolvedValueOnce({ rows: [{ total: 1 }] });
+
+    await expect(
+      createAccountDeletionBeforeHook(poolWithQuery(query))({ id: 'user-1' }),
+    ).rejects.toMatchObject({
+      body: { code: accountDeletionSoleOwnerErrorCode },
+    });
+
+    expect(query).toHaveBeenCalledOnce();
+  });
+
+  it('fails closed with one generic error when the database is unavailable', async () => {
+    const sensitiveDetail = 'private-database-detail';
+    const query = vi.fn().mockRejectedValue(new Error(sensitiveDetail));
+
+    await expect(
+      createAccountDeletionBeforeHook(poolWithQuery(query))({ id: 'user-1' }),
+    ).rejects.toMatchObject({
+      body: {
+        code: accountDeletionUnavailableErrorCode,
+        message: 'Account deletion is unavailable.',
+      },
+    });
   });
 });
 

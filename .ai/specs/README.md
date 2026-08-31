@@ -1,5 +1,10 @@
 # Feature Specs
 
+## Current specs
+
+- [Account lifecycle](2026-08-31-account-lifecycle.md)
+- [Public sign-up and activation](2026-08-31-public-sign-up-and-activation.md)
+
 A spec is a short document describing one feature before it is built. Whoever is
 about to implement the feature writes it, human or agent. Its purpose is to make
 disagreement cheap: a reviewer reads a page instead of a diff.

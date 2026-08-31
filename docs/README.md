@@ -40,6 +40,7 @@ exist.
 - [ADR 0005: platform batteries](adr/0005-platform-batteries.md)
 - [ADR 0006: upload staging](adr/0006-upload-staging.md)
 - [ADR 0007: public sign-up](adr/0007-public-sign-up.md)
+- [ADR 0008: operator-tier account erasure](adr/0008-account-erasure.md)
 
 Documentation must stay synchronized with commands, runtime behavior, and
 architecture decisions in the same change.

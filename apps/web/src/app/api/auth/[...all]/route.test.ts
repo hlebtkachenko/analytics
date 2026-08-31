@@ -127,6 +127,20 @@ describe('Better Auth route exposure', () => {
     expect(token.status).toBe(404);
   });
 
+  it('does not dispatch the public admin user-removal route', async () => {
+    const response = await POST(
+      new NextRequest('https://bap.invalid/api/auth/admin/remove-user', {
+        body: JSON.stringify({ userId: 'controlled-target' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(getAuthMock).not.toHaveBeenCalled();
+    expect(downstreamPostMock).not.toHaveBeenCalled();
+  });
+
   it('denies through the actual POST route when public sign-up is off', async () => {
     const request = signUpRequest();
     const { pool, query } = poolWithState();

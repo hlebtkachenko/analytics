@@ -52,6 +52,13 @@ The browser receives only opaque Better Auth cookies. Resource JWTs exist only
 inside a fixed BFF-to-service request and contain `iss`, `aud`, `sub`, `iat`,
 and `exp`. No catch-all proxy or browser Bearer-token flow exists.
 
+Account deletion hard-deletes the Better Auth identity after a sole-owner guard
+records its explicit id in an auth-schema pending request. The web role never
+crosses into schema `app`. A one-shot operator command later assumes the NOLOGIN
+`bap_eraser` role inside 1 transaction, anonymizes only the 3 approved subject
+columns behind forced RLS, consumes the request, and retains no raw-id mapping.
+It refuses live and unrequested identities.
+
 ## Workspace dependency rules
 
 ```mermaid

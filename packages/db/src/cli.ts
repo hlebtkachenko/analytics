@@ -20,12 +20,38 @@ export interface SignupCliDependencies {
   stdout: CliOutput;
 }
 
+export interface EraseUserCliDependencies {
+  loadPool: () => Promise<DatabasePool>;
+  stderr: CliOutput;
+  stdout: CliOutput;
+}
+
+export interface EraseUserResult {
+  tombstone: string | null;
+}
+
 export function parseSignupAction(value: string | undefined): SignupAction {
   if (value === 'disable' || value === 'enable' || value === 'status') {
     return value;
   }
 
   throw new Error('Expected signup enable, signup disable, or signup status.');
+}
+
+export function parseEraseUserId(arguments_: readonly string[]): string {
+  const userId = arguments_[0];
+
+  if (
+    arguments_.length !== 1 ||
+    userId === undefined ||
+    userId.length === 0 ||
+    userId.length > 255 ||
+    userId.trim() !== userId
+  ) {
+    throw new Error('Expected erase-user followed by one explicit user id.');
+  }
+
+  return userId;
 }
 
 async function bootstrapRoles(): Promise<void> {
@@ -127,7 +153,112 @@ export async function runSignupCli(
   }
 }
 
+export async function executeEraseUser(
+  pool: DatabasePool,
+  userId: string,
+): Promise<EraseUserResult> {
+  const client = await pool.connect();
+  let transactionOpen = false;
+
+  try {
+    await client.query('begin');
+    transactionOpen = true;
+    await client.query('set local role bap_owner');
+
+    const request = await client.query<{ user_id: string }>(
+      `select user_id
+       from auth.user_erasure_request
+       where user_id = $1
+       for update`,
+      [userId],
+    );
+    if (request.rows[0]?.user_id !== userId) {
+      throw new Error('Pending user erasure request not found.');
+    }
+
+    const identity = await client.query<{ live: boolean }>(
+      `select exists (
+         select 1 from auth."user" where id = $1
+       ) as live`,
+      [userId],
+    );
+    if (identity.rows[0]?.live !== false) {
+      throw new Error('Live users cannot be erased.');
+    }
+
+    await client.query('set local role bap_eraser');
+    const erasure = await client.query<{ tombstone: string | null }>(
+      'select app.erase_user($1) as tombstone',
+      [userId],
+    );
+    const tombstone = erasure.rows[0]?.tombstone ?? null;
+    if (
+      tombstone !== null &&
+      !/^erased_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+        tombstone,
+      )
+    ) {
+      throw new Error('Invalid user erasure result.');
+    }
+
+    await client.query('set local role bap_owner');
+    const consumed = await client.query<{ user_id: string }>(
+      `delete from auth.user_erasure_request
+       where user_id = $1
+       returning user_id`,
+      [userId],
+    );
+    if (consumed.rows[0]?.user_id !== userId) {
+      throw new Error('Pending user erasure request was not consumed.');
+    }
+
+    await client.query('commit');
+    transactionOpen = false;
+    return { tombstone };
+  } catch (error) {
+    if (transactionOpen) {
+      await client.query('rollback').catch(() => undefined);
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function runEraseUserCli(
+  arguments_: readonly string[],
+  dependencies: EraseUserCliDependencies,
+): Promise<number> {
+  try {
+    const userId = parseEraseUserId(arguments_);
+    const pool = await dependencies.loadPool();
+    let result: EraseUserResult;
+
+    try {
+      result = await executeEraseUser(pool, userId);
+    } finally {
+      await pool.end();
+    }
+    dependencies.stdout.write(
+      `${JSON.stringify({ status: 'erased', tombstone: result.tombstone })}\n`,
+    );
+
+    return 0;
+  } catch {
+    dependencies.stderr.write(
+      `${JSON.stringify({ code: 'USER_ERASURE_COMMAND_FAILED', status: 'error' })}\n`,
+    );
+    return 1;
+  }
+}
+
 async function loadSignupPool(): Promise<DatabasePool> {
+  return createDatabasePool(
+    await loadDatabaseConfiguration(process.env, { role: 'bap_migrator' }),
+  );
+}
+
+async function loadEraseUserPool(): Promise<DatabasePool> {
   return createDatabasePool(
     await loadDatabaseConfiguration(process.env, { role: 'bap_migrator' }),
   );
@@ -148,9 +279,15 @@ export async function runDatabaseCli(
       stderr: process.stderr,
       stdout: process.stdout,
     });
+  } else if (command === 'erase-user') {
+    process.exitCode = await runEraseUserCli(arguments_.slice(1), {
+      loadPool: loadEraseUserPool,
+      stderr: process.stderr,
+      stdout: process.stdout,
+    });
   } else {
     throw new Error(
-      'Expected bootstrap-roles, migrate, or signup enable|disable|status.',
+      'Expected bootstrap-roles, migrate, signup enable|disable|status, or erase-user <user-id>.',
     );
   }
 }

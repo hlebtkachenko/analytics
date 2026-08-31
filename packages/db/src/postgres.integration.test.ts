@@ -10,14 +10,17 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   bootstrapDatabaseRoles,
   checkMigrationCompatibility,
+  countSoleOwnedOrganizations,
   consumePublicSignupEdgeRateLimit,
   publicSignupInvitationExists,
   publicSignupEnabled,
+  recordUserErasureRequest,
   resolveMembership,
   runMigrations,
   withTenantContext,
 } from './index.js';
 import type { TenantContext } from './index.js';
+import { executeEraseUser } from './cli.js';
 
 const postgresImage =
   'pgvector/pgvector:pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a';
@@ -87,6 +90,26 @@ async function asOwner<T>(
   const client = await migratorPool.connect();
   await client.query('begin');
   await client.query('set local role bap_owner');
+
+  try {
+    const result = await operation(client);
+    await client.query('commit');
+    return result;
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function asEraser<T>(
+  operation: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await migratorPool.connect();
+  await client.query('begin');
+  await client.query('set local role bap_owner');
+  await client.query('set local role bap_eraser');
 
   try {
     const result = await operation(client);
@@ -518,6 +541,505 @@ describe('PostgreSQL 18 isolation', () => {
     await expect(
       reportingPool.query('select * from auth.rate_limit'),
     ).rejects.toThrow();
+  });
+
+  it('reconciles the eraser role to exact non-login operator-only privileges', async () => {
+    const databaseName = container.getDatabase().replaceAll('"', '""');
+    await rootPool.query(
+      "alter role bap_eraser login inherit nobypassrls password 'test-only-temporary-password'",
+    );
+    await rootPool.query(
+      `grant connect on database "${databaseName}" to bap_eraser`,
+    );
+    await rootPool.query(
+      'grant bap_eraser to bap_auth with inherit true, set true, admin false',
+    );
+    await rootPool.query('grant pg_read_all_settings to bap_eraser');
+    const root = await rootPool.connect();
+
+    try {
+      await bootstrapDatabaseRoles(root, {
+        bap_api: testPassword,
+        bap_auth: testPassword,
+        bap_backup: testPassword,
+        bap_migrator: testPassword,
+        bap_reporting: testPassword,
+      });
+    } finally {
+      root.release();
+    }
+
+    const role = await rootPool.query<{
+      rolbypassrls: boolean;
+      rolcanlogin: boolean;
+      rolcreatedb: boolean;
+      rolcreaterole: boolean;
+      rolinherit: boolean;
+      rolpasswordisnull: boolean;
+      rolreplication: boolean;
+      rolsuper: boolean;
+    }>(`select
+      rolbypassrls,
+      rolcanlogin,
+      rolcreatedb,
+      rolcreaterole,
+      rolinherit,
+      rolpassword is null as rolpasswordisnull,
+      rolreplication,
+      rolsuper
+    from pg_authid
+    where rolname = 'bap_eraser'`);
+    expect(role.rows).toEqual([
+      {
+        rolbypassrls: true,
+        rolcanlogin: false,
+        rolcreatedb: false,
+        rolcreaterole: false,
+        rolinherit: false,
+        rolpasswordisnull: true,
+        rolreplication: false,
+        rolsuper: false,
+      },
+    ]);
+
+    const memberships = await rootPool.query<{
+      admin_option: boolean;
+      granted_role: string;
+      inherit_option: boolean;
+      member_role: string;
+      set_option: boolean;
+    }>(`select
+      granted_role.rolname as granted_role,
+      member_role.rolname as member_role,
+      membership.admin_option,
+      membership.inherit_option,
+      membership.set_option
+    from pg_auth_members as membership
+    inner join pg_roles as granted_role on granted_role.oid = membership.roleid
+    inner join pg_roles as member_role on member_role.oid = membership.member
+    where granted_role.rolname = 'bap_eraser'
+       or member_role.rolname = 'bap_eraser'
+    order by granted_role, member_role`);
+    expect(memberships.rows).toEqual([
+      {
+        admin_option: false,
+        granted_role: 'bap_eraser',
+        inherit_option: false,
+        member_role: 'bap_owner',
+        set_option: true,
+      },
+    ]);
+
+    const connectivity = await rootPool.query<{ can_connect: boolean }>(
+      `select has_database_privilege(
+        'bap_eraser',
+        current_database(),
+        'CONNECT'
+      ) as can_connect`,
+    );
+    expect(connectivity.rows).toEqual([{ can_connect: false }]);
+  });
+
+  it('pins request and erasure functions, table ACLs, and column-scoped eraser grants', async () => {
+    const functionProperties = await rootPool.query<{
+      identity_arguments: string;
+      owner: string;
+      proconfig: string[];
+      prosecdef: boolean;
+      schema_name: string;
+    }>(`select
+      namespace.nspname as schema_name,
+      pg_get_function_identity_arguments(function.oid) as identity_arguments,
+      pg_get_userbyid(function.proowner) as owner,
+      function.proconfig,
+      function.prosecdef
+    from pg_proc as function
+    inner join pg_namespace as namespace on namespace.oid = function.pronamespace
+    where function.oid in (
+      'auth.request_user_erasure(text)'::regprocedure,
+      'app.erase_user(text)'::regprocedure
+    )
+    order by schema_name`);
+    expect(functionProperties.rows).toEqual([
+      {
+        identity_arguments: 'subject_user_id text',
+        owner: 'bap_owner',
+        proconfig: ['search_path=pg_catalog, app'],
+        prosecdef: false,
+        schema_name: 'app',
+      },
+      {
+        identity_arguments: 'requested_user_id text',
+        owner: 'bap_owner',
+        proconfig: ['search_path=pg_catalog, auth'],
+        prosecdef: true,
+        schema_name: 'auth',
+      },
+    ]);
+
+    const functionAcl = await rootPool.query<{
+      function_name: string;
+      grantee: string;
+      privilege_type: string;
+    }>(`select
+      namespace.nspname || '.' || function.proname as function_name,
+      coalesce(grantee_role.rolname, 'PUBLIC') as grantee,
+      privilege.privilege_type
+    from pg_proc as function
+    inner join pg_namespace as namespace on namespace.oid = function.pronamespace
+    cross join lateral aclexplode(
+      coalesce(function.proacl, acldefault('f', function.proowner))
+    ) as privilege
+    left join pg_roles as grantee_role on grantee_role.oid = privilege.grantee
+    where function.oid in (
+      'auth.request_user_erasure(text)'::regprocedure,
+      'app.erase_user(text)'::regprocedure
+    )
+    order by function_name, grantee, privilege_type`);
+    expect(functionAcl.rows).toEqual([
+      {
+        function_name: 'app.erase_user',
+        grantee: 'bap_eraser',
+        privilege_type: 'EXECUTE',
+      },
+      {
+        function_name: 'app.erase_user',
+        grantee: 'bap_owner',
+        privilege_type: 'EXECUTE',
+      },
+      {
+        function_name: 'auth.request_user_erasure',
+        grantee: 'bap_auth',
+        privilege_type: 'EXECUTE',
+      },
+      {
+        function_name: 'auth.request_user_erasure',
+        grantee: 'bap_owner',
+        privilege_type: 'EXECUTE',
+      },
+    ]);
+
+    const requestTableAcl = await rootPool.query<{
+      grantee: string;
+      privilege_type: string;
+    }>(`select grantee, privilege_type
+       from information_schema.table_privileges
+       where table_schema = 'auth'
+         and table_name = 'user_erasure_request'
+       order by grantee, privilege_type`);
+    expect(requestTableAcl.rows).toEqual([
+      { grantee: 'bap_backup', privilege_type: 'SELECT' },
+      { grantee: 'bap_owner', privilege_type: 'DELETE' },
+      { grantee: 'bap_owner', privilege_type: 'INSERT' },
+      { grantee: 'bap_owner', privilege_type: 'REFERENCES' },
+      { grantee: 'bap_owner', privilege_type: 'SELECT' },
+      { grantee: 'bap_owner', privilege_type: 'TRIGGER' },
+      { grantee: 'bap_owner', privilege_type: 'TRUNCATE' },
+      { grantee: 'bap_owner', privilege_type: 'UPDATE' },
+    ]);
+
+    const eraserSchemaAccess = await rootPool.query<{
+      can_create: boolean;
+      can_use: boolean;
+    }>(`select
+      has_schema_privilege('bap_eraser', 'app', 'CREATE') as can_create,
+      has_schema_privilege('bap_eraser', 'app', 'USAGE') as can_use`);
+    expect(eraserSchemaAccess.rows).toEqual([
+      { can_create: false, can_use: true },
+    ]);
+
+    const eraserTableAcl = await rootPool.query<{
+      privilege_type: string;
+      table_name: string;
+    }>(`select table_name, privilege_type
+       from information_schema.table_privileges
+       where table_schema = 'app'
+         and grantee = 'bap_eraser'
+       order by table_name, privilege_type`);
+    expect(eraserTableAcl.rows).toEqual([]);
+
+    const eraserColumns = await rootPool.query<{
+      column_name: string;
+      privilege_type: string;
+      table_name: string;
+    }>(`select table_name, column_name, privilege_type
+       from information_schema.column_privileges
+       where table_schema = 'app'
+         and grantee = 'bap_eraser'
+       order by table_name, column_name, privilege_type`);
+    expect(eraserColumns.rows).toEqual([
+      {
+        column_name: 'user_id',
+        privilege_type: 'SELECT',
+        table_name: 'audit_log',
+      },
+      {
+        column_name: 'user_id',
+        privilege_type: 'UPDATE',
+        table_name: 'audit_log',
+      },
+      {
+        column_name: 'user_id',
+        privilege_type: 'SELECT',
+        table_name: 'data_grants',
+      },
+      {
+        column_name: 'user_id',
+        privilege_type: 'UPDATE',
+        table_name: 'data_grants',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'dataset',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'dataset',
+      },
+    ]);
+
+    await expect(
+      authPool.query('select app.erase_user($1)', ['not-requested']),
+    ).rejects.toThrow(/permission denied/);
+    await expect(
+      apiPool.query('select app.erase_user($1)', ['not-requested']),
+    ).rejects.toThrow(/permission denied/);
+    await expect(
+      apiPool.query("update app.audit_log set user_id = 'denied' where false"),
+    ).rejects.toThrow(/permission denied/);
+    for (const statement of [
+      'select * from app.audit_log',
+      "insert into app.data_grants (organization_id, user_id, resource_type, resource_id, scope) values ('org-1', 'denied', 'dataset', 'denied', 'read')",
+      "update app.dataset set created_by = 'denied' where false",
+      'delete from app.audit_log where false',
+    ]) {
+      await expect(authPool.query(statement)).rejects.toThrow(
+        /permission denied/,
+      );
+    }
+    const authAppSchema = await rootPool.query<{ can_use: boolean }>(
+      `select has_schema_privilege('bap_auth', 'app', 'USAGE') as can_use`,
+    );
+    expect(authAppSchema.rows).toEqual([{ can_use: false }]);
+  });
+
+  it('counts only sole-owned organizations and records requests through the narrow accessor', async () => {
+    await asOwner(async (client) => {
+      await client.query(`
+        insert into auth."user" (id, name, email, email_verified)
+        values
+          ('lifecycle-owner', 'Lifecycle Owner', 'lifecycle-owner@example.test', true),
+          ('lifecycle-coowner', 'Lifecycle Co-owner', 'lifecycle-coowner@example.test', true)
+      `);
+      await client.query(`
+        insert into auth.organization (id, name, slug)
+        values
+          ('lifecycle-sole-org', 'Lifecycle Sole', 'lifecycle-sole'),
+          ('lifecycle-shared-org', 'Lifecycle Shared', 'lifecycle-shared')
+      `);
+      await client.query(`
+        insert into auth.member (id, organization_id, user_id, role)
+        values
+          ('lifecycle-member-sole', 'lifecycle-sole-org', 'lifecycle-owner', 'owner,admin'),
+          ('lifecycle-member-shared-a', 'lifecycle-shared-org', 'lifecycle-owner', 'owner'),
+          ('lifecycle-member-shared-b', 'lifecycle-shared-org', 'lifecycle-coowner', 'admin,owner')
+      `);
+    });
+
+    try {
+      await expect(
+        countSoleOwnedOrganizations(authPool, 'lifecycle-owner'),
+      ).resolves.toBe(1);
+      await expect(
+        countSoleOwnedOrganizations(authPool, 'lifecycle-coowner'),
+      ).resolves.toBe(0);
+      await expect(
+        countSoleOwnedOrganizations(authPool, 'missing-user'),
+      ).resolves.toBe(0);
+      await expect(
+        recordUserErasureRequest(authPool, 'lifecycle-coowner'),
+      ).resolves.toBeUndefined();
+      await expect(
+        authPool.query('select * from auth.user_erasure_request'),
+      ).rejects.toThrow(/permission denied/);
+      await expect(
+        authPool.query(
+          "insert into auth.user_erasure_request (user_id) values ('denied')",
+        ),
+      ).rejects.toThrow(/permission denied/);
+      await expect(
+        apiPool.query('select auth.request_user_erasure($1)', [
+          'lifecycle-coowner',
+        ]),
+      ).rejects.toThrow(/permission denied/);
+      await expect(
+        reportingPool.query('select auth.request_user_erasure($1)', [
+          'lifecycle-coowner',
+        ]),
+      ).rejects.toThrow(/permission denied/);
+      await expect(
+        recordUserErasureRequest(authPool, 'missing-user'),
+      ).rejects.toThrow(/live identity/);
+    } finally {
+      await asOwner(async (client) => {
+        await client.query(
+          "delete from auth.user_erasure_request where user_id like 'lifecycle-%'",
+        );
+        await client.query(
+          "delete from auth.organization where id like 'lifecycle-%'",
+        );
+        await client.query(
+          'delete from auth."user" where id like \'lifecycle-%\'',
+        );
+      });
+    }
+  });
+
+  it('cascades identity deletion through every user-owned Better Auth table', async () => {
+    await asOwner(async (client) => {
+      await client.query(`
+        insert into auth."user" (id, name, email, email_verified)
+        values ('cascade-user', 'Cascade User', 'cascade@example.test', true)
+      `);
+      await client.query(`
+        insert into auth.organization (id, name, slug)
+        values ('cascade-org', 'Cascade Organization', 'cascade-org')
+      `);
+      await client.query(`
+        insert into auth.session (id, expires_at, token, user_id)
+        values ('cascade-session', now() + interval '1 hour', 'cascade-token', 'cascade-user')
+      `);
+      await client.query(`
+        insert into auth.account (id, account_id, issuer, provider_id, user_id, password)
+        values ('cascade-account', 'cascade-user', 'credential', 'credential', 'cascade-user', 'hash')
+      `);
+      await client.query(`
+        insert into auth.member (id, organization_id, user_id, role)
+        values ('cascade-member', 'cascade-org', 'cascade-user', 'member')
+      `);
+      await client.query(`
+        insert into auth.invitation (id, organization_id, email, status, expires_at, inviter_id)
+        values ('cascade-invitation', 'cascade-org', 'invited@example.test', 'pending', now() + interval '1 hour', 'cascade-user')
+      `);
+      await client.query(`
+        insert into auth.two_factor (id, user_id, secret, backup_codes)
+        values ('cascade-two-factor', 'cascade-user', 'secret', 'codes')
+      `);
+      await client.query(`delete from auth."user" where id = 'cascade-user'`);
+    });
+
+    const survivors = await rootPool.query<{
+      account: number;
+      invitation: number;
+      member: number;
+      session: number;
+      two_factor: number;
+    }>(`select
+      (select count(*)::integer from auth.account where user_id = 'cascade-user') as account,
+      (select count(*)::integer from auth.invitation where inviter_id = 'cascade-user') as invitation,
+      (select count(*)::integer from auth.member where user_id = 'cascade-user') as member,
+      (select count(*)::integer from auth.session where user_id = 'cascade-user') as session,
+      (select count(*)::integer from auth.two_factor where user_id = 'cascade-user') as two_factor`);
+    expect(survivors.rows).toEqual([
+      { account: 0, invitation: 0, member: 0, session: 0, two_factor: 0 },
+    ]);
+    await asOwner((client) =>
+      client.query("delete from auth.organization where id = 'cascade-org'"),
+    );
+  });
+
+  it('erases only the requested absent identity with one opaque tombstone', async () => {
+    const datasetId = '00000000-0000-4000-8000-000000000101';
+    await asOwner((client) =>
+      client.query(`
+        insert into auth."user" (id, name, email, email_verified)
+        values ('erasure-user', 'Erasure User', 'erasure@example.test', true)
+      `),
+    );
+    await rootPool.query(
+      `insert into app.audit_log (organization_id, user_id, action, resource_type, metadata)
+       values ('erasure-org', 'erasure-user', 'account.test', 'user', '{"subject_id":"erasure-user"}')`,
+    );
+    await rootPool.query(
+      `insert into app.data_grants (organization_id, user_id, resource_type, resource_id, scope)
+       values ('erasure-org', 'erasure-user', 'dataset', 'erasure-resource', 'read')`,
+    );
+    await rootPool.query(
+      `insert into app.dataset (id, organization_id, name, status, created_by)
+       values ($1, 'erasure-org', 'erasure container', 'ready', 'erasure-user')`,
+      [datasetId],
+    );
+    await recordUserErasureRequest(authPool, 'erasure-user');
+
+    await expect(
+      executeEraseUser(migratorPool, 'erasure-user'),
+    ).rejects.toThrow(/Live users/);
+    await expect(
+      backupPool.query(
+        "select user_id from auth.user_erasure_request where user_id = 'erasure-user'",
+      ),
+    ).resolves.toMatchObject({ rows: [{ user_id: 'erasure-user' }] });
+
+    await asOwner((client) =>
+      client.query(`delete from auth."user" where id = 'erasure-user'`),
+    );
+    const result = await executeEraseUser(migratorPool, 'erasure-user');
+    expect(result.tombstone).toMatch(
+      /^erased_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+
+    const stored = await rootPool.query<{
+      audit_metadata: { subject_id: string };
+      audit_user_id: string;
+      dataset_created_by: string;
+      grant_user_id: string;
+    }>(
+      `select
+      audit.user_id as audit_user_id,
+      audit.metadata as audit_metadata,
+      data_grant.user_id as grant_user_id,
+      dataset.created_by as dataset_created_by
+    from app.audit_log as audit
+    inner join app.data_grants as data_grant on data_grant.resource_id = 'erasure-resource'
+    inner join app.dataset as dataset on dataset.id = $1
+    where audit.action = 'account.test'`,
+      [datasetId],
+    );
+    expect(stored.rows).toEqual([
+      {
+        audit_metadata: { subject_id: 'erasure-user' },
+        audit_user_id: result.tombstone,
+        dataset_created_by: result.tombstone,
+        grant_user_id: result.tombstone,
+      },
+    ]);
+    await expect(
+      backupPool.query(
+        "select user_id from auth.user_erasure_request where user_id = 'erasure-user'",
+      ),
+    ).resolves.toMatchObject({ rows: [] });
+    await expect(
+      executeEraseUser(migratorPool, 'erasure-user'),
+    ).rejects.toThrow(/request not found/);
+
+    await expect(
+      asEraser((client) =>
+        client.query<{ tombstone: string | null }>(
+          'select app.erase_user($1) as tombstone',
+          ['erasure-user'],
+        ),
+      ),
+    ).resolves.toMatchObject({ rows: [{ tombstone: null }] });
+    await expect(executeEraseUser(migratorPool, 'user-3')).rejects.toThrow(
+      /request not found/,
+    );
+    await expect(
+      rootPool.query(
+        "select count(*)::integer as total from app.dataset where created_by = 'user-3'",
+      ),
+    ).resolves.toMatchObject({ rows: [{ total: 2 }] });
   });
 
   it('fails closed without tenant context and resets settings after a transaction', async () => {
