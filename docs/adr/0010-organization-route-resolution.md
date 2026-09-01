@@ -44,6 +44,12 @@ distinct forbidden response. A slug-shaped value can pass the BFF's syntactic
 selector validation, but the id-only service membership resolver finds no row
 and returns 403. The slug dies at the web routing boundary.
 
+Phase 11 pins both halves of that boundary. The BFF assertion forwards the
+slug-shaped value only to the fixed application target with an in-memory token,
+preserves the redacted 403, and proves the slug never enters the token payload.
+The PostgreSQL integration assertion passes the stored slug to
+`auth.resolve_membership` as an organization id and receives no row.
+
 Phase 9 added only the dynamic layout. Phase 10 now publishes the deliberately
 temporary `/organizations` index and the overview, members, and settings pages
 beneath `[orgSlug]`. All of their scoped server actions resolve the slug through

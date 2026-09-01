@@ -2,6 +2,7 @@
 
 ## Current specs
 
+- [Identity and organization integration closure](2026-09-01-identity-organization-integration-closure.md)
 - [Carbon application icons](2026-09-01-carbon-application-icons.md)
 - [Organization throwaway UI](2026-08-31-organization-throwaway-ui.md)
 - [Organization routing](2026-08-31-organization-routing.md)

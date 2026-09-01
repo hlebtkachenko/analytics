@@ -314,6 +314,12 @@ named CHECK; any collision aborts the migration. New member and invitation
 writes accept only scalar `owner`, `admin`, or `member`. Historical invalid role
 values are denied as no membership rather than throwing.
 
+The integration closure enumerates all 16 reserved literals in the shared
+database/Zod corpus. It also executes the inherited SELECT, INSERT, UPDATE, and
+DELETE privileges on a newly created disposable `auth.*` table, then proves the
+quota table remains SELECT-only for `bap_auth` and schema `app` remains entirely
+outside that role.
+
 Organization creation explicitly makes the creator an `owner` and caps
 membership at 100. The auth before-hook requires `organizationId` on the 10
 installed 1.7.2 fallback endpoints that can bind it. The eleventh,

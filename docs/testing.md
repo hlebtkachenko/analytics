@@ -141,11 +141,23 @@ session state, forged organization ids are ignored, explicit resolved ids reach
 Better Auth, the temporary sole-owner recheck runs, co-owner changes work, and
 failures expose only fixed generic outcomes.
 
+Phase 11 closes the identity and organization milestones without adding a new
+runtime path. The shared TypeScript/PostgreSQL corpus explicitly enumerates all
+16 reserved routes. The PostgreSQL default-privilege probe creates a disposable
+`auth.*` table as `bap_owner` and executes SELECT, INSERT, UPDATE, and DELETE as
+`bap_auth`; the quota test then proves that `auth.organization_quota` remains a
+SELECT-only exception, while the account-lifecycle proof keeps `bap_auth`
+outside schema `app`. A paired BFF and real resolver proof shows that a valid
+slug-shaped selector is forwarded only to the fixed service, receives a redacted
+403, and resolves no database membership when used as an id. The full
+integration command reruns every pre-existing RLS assertion as the milestone
+exit.
+
 PostgreSQL integration keeps the TypeScript and database slug corpus in exact
-parity, now including `organizations`. It also runs the forward reservation SQL
-inside a rollback-only collision fixture and proves the migration aborts before
-replacing the constraint. The real quota reader covers positive, exhausted, and
-absent grants through `bap_auth`.
+parity. It also runs the forward reservation SQL inside a rollback-only
+collision fixture and proves the migration aborts before replacing the
+constraint. The real quota reader covers positive, exhausted, and absent grants
+through `bap_auth`.
 
 The live Phase 10 browser walk starts from `/organizations`, creates an allowed
 organization, and traverses its overview, members, and settings pages through

@@ -55,6 +55,18 @@ describe('organization slugs', () => {
     }
   });
 
+  it('enumerates every reserved route in the shared database parity corpus', async () => {
+    const rejectedSlugs = new Set(
+      (await readSlugCorpus())
+        .filter((testCase) => !testCase.valid)
+        .map((testCase) => testCase.slug),
+    );
+
+    expect(
+      reservedOrganizationSlugs.every((slug) => rejectedSlugs.has(slug)),
+    ).toBe(true);
+  });
+
   it.each([
     ['  Alpha Organization  ', 'alpha-organization'],
     ['alpha___beta', 'alpha-beta'],

@@ -49,11 +49,13 @@ session state. No slug, membership, session, or organization data is logged.
 
 Unit tests cover the exact parameterized join, role parsing, resolver
 fail-closed behavior, not-found equivalence, request-scoped layout use, and the
-root redirect. Web/API/DB tests prove a slug-shaped value cannot cross the
-numeric-id service boundary. PostgreSQL integration exercises real membership
-rows. Run focused package tests, full database integration, the exact
-`pnpm check`, scoped Prettier, stale-document scans, and `git diff --check`; use
-live browser checks only for routes that exist in this transitional phase.
+root redirect. A paired BFF and PostgreSQL proof forwards a valid slug-shaped
+selector with an in-memory resource token, preserves the id-only service's
+redacted 403, and proves the same value resolves no membership when supplied as
+an organization id. PostgreSQL integration exercises real membership rows. Run
+focused package tests, full database integration, the exact `pnpm check`, scoped
+Prettier, stale-document scans, and `git diff --check`; use live browser checks
+only for routes that exist in this transitional phase.
 
 ## Open questions
 
