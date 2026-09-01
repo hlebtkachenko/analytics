@@ -1,10 +1,19 @@
 'use client';
 
 import {
+  AiGenerate,
+  DataSet,
+  Logout,
+  Security,
+  Upload,
+  UserMultiple,
+} from '@bap/design-system/icons';
+import {
   Button,
+  Column,
+  Grid,
   InlineLoading,
   InlineNotification,
-  Link,
   Select,
   SelectItem,
   Stack,
@@ -128,10 +137,17 @@ export default function AccessPage() {
     <main>
       <Stack gap={7}>
         <h1>{t('access.title')}</h1>
-        <Button kind="secondary" onClick={() => void signOut()} type="button">
+        <Button
+          kind="secondary"
+          onClick={() => void signOut()}
+          renderIcon={Logout}
+          type="button"
+        >
           {t('common.signOut')}
         </Button>
-        <Link href="/datasets">{t('access.datasets')}</Link>
+        <Button href="/datasets" kind="tertiary" renderIcon={DataSet}>
+          {t('access.datasets')}
+        </Button>
         {state === 'loading' ? (
           <InlineLoading description={t('access.loading')} />
         ) : null}
@@ -177,28 +193,56 @@ export default function AccessPage() {
               </p>
               <h2>{t('access.actions')}</h2>
               {/* Capabilities only choose which actions are offered, the database enforces access. */}
-              <Stack gap={3} orientation="horizontal">
+              <Grid>
                 {applicationAccess.capabilities.manageMembers ? (
-                  <Button kind="tertiary" size="sm" type="button">
-                    {t('access.manageMembers')}
-                  </Button>
+                  <Column lg={4} md={4} sm={4}>
+                    <Button
+                      kind="tertiary"
+                      renderIcon={UserMultiple}
+                      size="lg"
+                      type="button"
+                    >
+                      {t('access.manageMembers')}
+                    </Button>
+                  </Column>
                 ) : null}
                 {applicationAccess.capabilities.manageGrants ? (
-                  <Button kind="tertiary" size="sm" type="button">
-                    {t('access.manageGrants')}
-                  </Button>
+                  <Column lg={4} md={4} sm={4}>
+                    <Button
+                      kind="tertiary"
+                      renderIcon={Security}
+                      size="lg"
+                      type="button"
+                    >
+                      {t('access.manageGrants')}
+                    </Button>
+                  </Column>
                 ) : null}
                 {applicationAccess.capabilities.uploadData ? (
-                  <Button kind="tertiary" size="sm" type="button">
-                    {t('access.uploadData')}
-                  </Button>
+                  <Column lg={4} md={4} sm={4}>
+                    <Button
+                      kind="tertiary"
+                      renderIcon={Upload}
+                      size="lg"
+                      type="button"
+                    >
+                      {t('access.uploadData')}
+                    </Button>
+                  </Column>
                 ) : null}
                 {applicationAccess.capabilities.useAi ? (
-                  <Button kind="tertiary" size="sm" type="button">
-                    {t('access.useAi')}
-                  </Button>
+                  <Column lg={4} md={4} sm={4}>
+                    <Button
+                      kind="tertiary"
+                      renderIcon={AiGenerate}
+                      size="lg"
+                      type="button"
+                    >
+                      {t('access.useAi')}
+                    </Button>
+                  </Column>
                 ) : null}
-              </Stack>
+              </Grid>
             </Stack>
           </Tile>
         ) : null}

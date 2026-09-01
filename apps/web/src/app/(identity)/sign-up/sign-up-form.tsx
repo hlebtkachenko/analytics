@@ -1,5 +1,6 @@
 'use client';
 
+import { UserFollow } from '@bap/design-system/icons';
 import {
   Button,
   Form,
@@ -85,6 +86,7 @@ export default function SignUpForm({ enabled }: SignUpFormProperties) {
                 minLength={14}
                 name="password"
                 required
+                size="lg"
               />
               {state === 'error' ? (
                 <InlineNotification
@@ -95,7 +97,9 @@ export default function SignUpForm({ enabled }: SignUpFormProperties) {
                   title={t('signUp.failed')}
                 />
               ) : null}
-              <Button type="submit">{t('signUp.submit')}</Button>
+              <Button renderIcon={UserFollow} type="submit">
+                {t('signUp.submit')}
+              </Button>
             </Stack>
           </Form>
         ) : null}

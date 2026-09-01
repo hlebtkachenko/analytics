@@ -132,7 +132,7 @@ jobs:
       - name: Run browser proof
         shell: bash
         run: |
-          pnpm exec playwright test --config playwright.operational.config.ts tests/operational/access.spec.ts tests/operational/identity.spec.ts tests/operational/organizations.spec.ts tests/operational/slice.spec.ts
+          pnpm exec playwright test --config playwright.operational.config.ts tests/operational/access.spec.ts tests/operational/icons.spec.ts tests/operational/identity.spec.ts tests/operational/organizations.spec.ts tests/operational/slice.spec.ts
           if docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml logs --no-color web | grep -Fq 'could not determine a client IP'; then
             exit 1
           fi

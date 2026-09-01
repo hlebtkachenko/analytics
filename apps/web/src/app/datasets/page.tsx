@@ -1,5 +1,6 @@
 'use client';
 
+import { Upload, View } from '@bap/design-system/icons';
 import {
   Button,
   FileUploader,
@@ -246,6 +247,7 @@ export default function DatasetsPage() {
         {datasets.length > 0 ? (
           <TableContainer
             description={t('datasets.listDescription')}
+            style={{ minInlineSize: 0 }}
             title={t('datasets.listTitle')}
           >
             <Table aria-label={t('datasets.listTitle')} size="sm">
@@ -280,11 +282,12 @@ export default function DatasetsPage() {
                         aria-label={t('datasets.openNamed', {
                           name: dataset.name,
                         })}
-                        kind="ghost"
+                        kind="tertiary"
                         onClick={() => {
                           setOpenDataset(dataset);
                         }}
-                        size="sm"
+                        renderIcon={View}
+                        size="lg"
                         type="button"
                       >
                         {t('datasets.open')}
@@ -320,6 +323,7 @@ export default function DatasetsPage() {
             <Button
               disabled={file === undefined || uploadState === 'uploading'}
               onClick={() => void upload()}
+              renderIcon={Upload}
               type="button"
             >
               {t('datasets.uploadSubmit')}

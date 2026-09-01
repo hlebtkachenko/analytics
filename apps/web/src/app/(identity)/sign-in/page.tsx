@@ -1,5 +1,6 @@
 'use client';
 
+import { Login } from '@bap/design-system/icons';
 import {
   Button,
   Form,
@@ -70,6 +71,7 @@ export default function SignInPage() {
               labelText={t('auth.password')}
               name="password"
               required
+              size="lg"
             />
             <Link href="/forgot-password">{t('auth.forgotPassword')}</Link>
             {error ? (
@@ -81,7 +83,9 @@ export default function SignInPage() {
                 title={t('auth.signInFailed')}
               />
             ) : null}
-            <Button type="submit">{t('auth.signIn')}</Button>
+            <Button renderIcon={Login} type="submit">
+              {t('auth.signIn')}
+            </Button>
           </Stack>
         </Form>
       </Stack>

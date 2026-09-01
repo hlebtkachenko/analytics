@@ -23,8 +23,10 @@ source-attributed summaries for the pinned public APIs.
 ## Design-system workbench
 
 The local workbench uses Storybook, TanStack Virtual, and MiniSearch. Storybook
-provides the interactive component catalog, TanStack Virtual keeps complete icon
-and pictogram explorers bounded, and MiniSearch indexes local knowledge content.
+provides the interactive component catalog, TanStack Virtual keeps the curated
+18-icon application explorer and complete 1,575-pictogram explorer bounded, and
+MiniSearch indexes local knowledge content. The generated catalog, rather than
+the executable application explorer, retains exhaustive upstream icon metadata.
 All three are licensed under the MIT license. BAP disables Storybook telemetry
 in configuration and every Storybook execution environment.
 

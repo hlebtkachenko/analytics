@@ -1,5 +1,6 @@
 'use client';
 
+import { Checkmark } from '@bap/design-system/icons';
 import {
   Button,
   InlineLoading,
@@ -115,7 +116,11 @@ export default function InvitationPage() {
                 {t('invitation.role')}: {invitation.role.join(', ')}
               </p>
               {/* Acceptance is authorized by the session, the page only offers the action. */}
-              <Button onClick={() => void accept()} type="button">
+              <Button
+                onClick={() => void accept()}
+                renderIcon={Checkmark}
+                type="button"
+              >
                 {t('invitation.accept')}
               </Button>
             </Stack>

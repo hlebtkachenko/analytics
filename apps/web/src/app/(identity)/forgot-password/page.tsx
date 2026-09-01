@@ -1,5 +1,6 @@
 'use client';
 
+import { Email } from '@bap/design-system/icons';
 import {
   Button,
   Form,
@@ -63,7 +64,9 @@ export default function ForgotPasswordPage() {
                   title={t('forgotPassword.failed')}
                 />
               ) : null}
-              <Button type="submit">{t('forgotPassword.submit')}</Button>
+              <Button renderIcon={Email} type="submit">
+                {t('forgotPassword.submit')}
+              </Button>
             </Stack>
           </Form>
         )}

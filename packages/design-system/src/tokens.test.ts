@@ -312,9 +312,28 @@ describe('Carbon catalog', () => {
     }
   });
 
-  it('keeps public facades in matching ESM parity', async () => {
+  it('keeps full facades in ESM parity and the icon facade curated', async () => {
     expect(facadeKeys(bapReact)).toEqual(facadeEsmKeys('@carbon/react'));
-    expect(facadeKeys(bapIcons)).toEqual(facadeEsmKeys('@carbon/icons-react'));
+    expect(facadeKeys(bapIcons)).toEqual([
+      'AiGenerate',
+      'ArrowLeft',
+      'ArrowRight',
+      'Checkmark',
+      'Close',
+      'DataSet',
+      'Download',
+      'Email',
+      'Launch',
+      'Login',
+      'Logout',
+      'Password',
+      'Security',
+      'Send',
+      'Upload',
+      'UserFollow',
+      'UserMultiple',
+      'View',
+    ]);
     expect(facadeKeys(bapPictograms)).toEqual(
       facadeEsmKeys('@carbon/pictograms-react'),
     );

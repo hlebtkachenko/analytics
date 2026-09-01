@@ -62,7 +62,7 @@ export function DatasetExport({
               download('csv');
             }}
             renderIcon={Download}
-            size="sm"
+            size="lg"
             type="button"
           >
             {t('datasets.exportCsv')}
@@ -73,7 +73,7 @@ export function DatasetExport({
               download('xlsx');
             }}
             renderIcon={Download}
-            size="sm"
+            size="lg"
             type="button"
           >
             {t('datasets.exportXlsx')}

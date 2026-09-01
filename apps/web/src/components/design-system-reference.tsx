@@ -1,11 +1,13 @@
 'use client';
 
+import { Launch } from '@bap/design-system/icons';
 import {
+  Button,
   Column,
   Grid,
   Heading,
   Layer,
-  Link,
+  Section,
   Stack,
   Tag,
   Tile,
@@ -41,26 +43,30 @@ export function DesignSystemReference() {
               <Tag type="cool-gray">Sass tokens</Tag>
               <Tag type="purple">Accessible charts</Tag>
             </Stack>
-            <Layer>
-              <Tile>
-                <Heading>Implementation reference</Heading>
-                <Stack gap={5}>
-                  <p>
-                    {carbonComponentFamilies.length} source component families
-                    and {carbonChartComponents.length} standard chart types are
-                    cataloged without creating product screens.
-                  </p>
-                  <p>Available themes: {carbonThemes.join(', ')}.</p>
-                  <Link
-                    href="https://carbondesignsystem.com/developing/frameworks/react/"
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    Open Carbon React documentation
-                  </Link>
-                </Stack>
-              </Tile>
-            </Layer>
+            <Section level={2}>
+              <Layer>
+                <Tile>
+                  <Heading>Implementation reference</Heading>
+                  <Stack gap={5}>
+                    <p>
+                      {carbonComponentFamilies.length} source component families
+                      and {carbonChartComponents.length} standard chart types
+                      are cataloged without creating product screens.
+                    </p>
+                    <p>Available themes: {carbonThemes.join(', ')}.</p>
+                    <Button
+                      href="https://carbondesignsystem.com/developing/frameworks/react/"
+                      kind="tertiary"
+                      rel="noreferrer"
+                      renderIcon={Launch}
+                      target="_blank"
+                    >
+                      Open Carbon React documentation
+                    </Button>
+                  </Stack>
+                </Tile>
+              </Layer>
+            </Section>
           </Stack>
         </Column>
       </Grid>

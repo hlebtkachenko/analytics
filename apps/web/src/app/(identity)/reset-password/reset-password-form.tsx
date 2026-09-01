@@ -1,5 +1,6 @@
 'use client';
 
+import { Password } from '@bap/design-system/icons';
 import {
   Button,
   Form,
@@ -61,6 +62,7 @@ export default function ResetPasswordForm({
                 minLength={14}
                 name="newPassword"
                 required
+                size="lg"
               />
               <PasswordInput
                 autoComplete="new-password"
@@ -70,6 +72,7 @@ export default function ResetPasswordForm({
                 minLength={14}
                 name="confirmPassword"
                 required
+                size="lg"
               />
               {state.status === 'error' ? (
                 <InlineNotification
@@ -80,7 +83,7 @@ export default function ResetPasswordForm({
                   title={t('resetPassword.failed')}
                 />
               ) : null}
-              <Button disabled={pending} type="submit">
+              <Button disabled={pending} renderIcon={Password} type="submit">
                 {t('resetPassword.submit')}
               </Button>
             </Stack>

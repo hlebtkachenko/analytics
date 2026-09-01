@@ -118,6 +118,13 @@ JWT/access contracts, and `@bap/design-system` is the only UI library. `@bap/ai`
 owns the model-provider boundary, and the web streaming chat route is its only
 application consumer.
 
+The client-only `@bap/design-system/icons` entrypoint is an exact 18-export
+curated named facade, not a mirror of the full upstream icon module. Application
+code imports no `@carbon/icons-react` symbol directly. The generated catalog
+retains the complete installed upstream inventory for upgrade inspection, while
+the workbench renders those 18 application glyphs and the complete 1,575-export
+pictogram inventory.
+
 The design-system workbench is a development and static-reference application,
 not a production container. It consumes only public `@bap/design-system`
 entrypoints and verifies the generated Carbon catalog, executable stories, and
