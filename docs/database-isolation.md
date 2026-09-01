@@ -182,19 +182,26 @@ consumption, and idempotent stored state.
 
 Organization-creation coverage asserts the exact quota columns, named checks,
 foreign-key delete actions, trigger and function catalog state, direct table ACL
-and inherited default-privilege exception. It proves `bap_auth` has SELECT only,
-cannot write quota or disable the trigger, absence means zero, NULL attribution
-consumes no quota, positive quotas work, and two concurrent quota-1 inserts
-produce exactly 1 organization. It also exercises the nullable web precheck and
-the migrator-to-owner quota writer with its stored note and NULL auth grantor. A
-shared corpus proves that PostgreSQL and the web Zod validator agree on valid,
-malformed, overlong, numeric, and reserved slugs. It also verifies that invalid
-legacy membership is returned as no access instead of a server error.
+and inherited default-privilege exception. The default probe executes SELECT,
+INSERT, UPDATE, and DELETE as `bap_auth` on a newly created disposable `auth.*`
+table. The quota assertions then prove `bap_auth` has SELECT only, cannot write
+quota or disable the trigger, and still has no schema `app` usage. Absence means
+zero, NULL attribution consumes no quota, positive quotas work, and the
+deterministic two-backend quota-1 test observes the advisory-lock waiter before
+proving exactly 1 organization succeeds. It also exercises the nullable web
+precheck and the migrator-to-owner quota writer with its stored note and NULL
+auth grantor. A shared corpus proves that PostgreSQL and the web Zod validator
+agree on valid, malformed, overlong, numeric, and all 16 reserved slugs. It also
+verifies that invalid legacy membership is returned as no access instead of a
+server error.
 
 Organization-routing coverage performs the real join through `bap_auth` and
 proves member success plus nonmember and unknown-slug absence. It separately
 passes the valid stored slug as an `organization_id` to the API role's resolver
-and proves no row is returned, preserving the id-only service boundary.
+and proves no row is returned, preserving the id-only service boundary. The
+paired BFF assertion proves that the same syntactically valid slug is forwarded
+only to the fixed application target with an in-memory resource token, returns
+the service's 403, and exposes only the fixed `access_denied` response.
 
 It also proves the phase 1 authorization tables: `app.data_grants` is readable
 only inside its own tenant context and rejects a cross-tenant write, and

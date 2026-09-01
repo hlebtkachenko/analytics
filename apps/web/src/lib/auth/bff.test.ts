@@ -123,9 +123,13 @@ describe('getOrganizationAccess', () => {
   });
 
   it('passes a slug-shaped selector to the id-only service and preserves its denial', async () => {
-    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+    const signingCallCount = signJWT.mock.calls.length;
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe(
         'http://api:3001/v1/organizations/organization-one/access',
+      );
+      expect(new Headers(init?.headers).get('authorization')).toBe(
+        'Bearer resource-token',
       );
       return Response.json(
         { detail: 'private membership state' },
@@ -146,6 +150,12 @@ describe('getOrganizationAccess', () => {
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: 'access_denied' });
     expect(fetchImplementation).toHaveBeenCalledOnce();
+    expect(signJWT).toHaveBeenCalledTimes(signingCallCount + 1);
+    const signingCall = signJWT.mock.calls[signingCallCount]?.[0];
+    expect(signingCall).toEqual({
+      body: { payload: { iat: expect.any(Number), sub: 'user_1' } },
+    });
+    expect(JSON.stringify(signingCall)).not.toContain('organization-one');
   });
 
   it('does not sign a resource token for an unverified session', async () => {

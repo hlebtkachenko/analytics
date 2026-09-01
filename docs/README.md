@@ -2,10 +2,12 @@
 
 ## Current status
 
-The operational SaaS foundation and the pinned Carbon workbench are delivered on
-`main`. Analytics product behavior and production rollout remain deliberately
-deferred until their requirements and owner-provided infrastructure inputs
-exist.
+The operational SaaS foundation, identity and organization milestones, and the
+pinned Carbon workbench are delivered on `main`. Their final integration closure
+keeps the organization quota, role isolation, slug boundary, and existing RLS
+invariants under one repository gate. Analytics product behavior and production
+rollout remain deliberately deferred until their requirements and owner-provided
+infrastructure inputs exist.
 
 ## Documentation map
 

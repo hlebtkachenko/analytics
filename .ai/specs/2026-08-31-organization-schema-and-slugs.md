@@ -26,12 +26,13 @@ Auth's inherited auth-table DML is explicitly revoked, then only SELECT is
 returned to `bap_auth`.
 
 Stable CHECK constraints pin slugs to 3-20 lowercase ASCII letters, digits, and
-single internal hyphens, reject all-digit values, and reject only the 15
-approved literal route segments. Member and invitation roles accept only
-`owner`, `admin`, or `member`; they are added `NOT VALID` so existing composed
-or otherwise invalid legacy rows do not block deployment, while every new or
-changed row is constrained. Membership resolution uses `safeParse` and returns
-null for a legacy invalid role.
+single internal hyphens, reject all-digit values, and initially rejected the 15
+approved literal route segments. Phase 10's forward migration added
+`organizations`, so the current database and shared contracts reject 16. Member
+and invitation roles accept only `owner`, `admin`, or `member`; they are added
+`NOT VALID` so existing composed or otherwise invalid legacy rows do not block
+deployment, while every new or changed row is constrained. Membership resolution
+uses `safeParse` and returns null for a legacy invalid role.
 
 A fixed-search-path, invoker-rights BEFORE INSERT trigger skips NULL creators.
 For an attributed creator it takes
@@ -73,13 +74,16 @@ boundaries.
 
 PostgreSQL integration covers exact columns, constraints, FKs, trigger/function
 catalog state and ACLs, NULL attribution, quota absence and positive quota,
-concurrent quota-1 insertion, service-role denial, and slug rejection. A shared
-table-driven corpus proves database/Zod parity. Unit tests cover normalization,
-legacy invalid membership, migrator role transitions and rollback, and both
-actual CLI entrypoints' validation and seed-before-create ordering. Run focused
-database/web/CLI tests, PostgreSQL 18 integration, Compose model and operational
-proof after the one-shot workflow change, `pnpm check`, Prettier, stale scans,
-and `git diff --check`.
+deterministic concurrent quota-1 insertion, service-role denial, and slug
+rejection. A shared table-driven corpus proves database/Zod parity and now
+enumerates every current reserved route. The suite also executes the inherited
+SELECT, INSERT, UPDATE, and DELETE privileges on a newly created disposable
+`auth.*` table before proving the quota exception. Unit tests cover
+normalization, legacy invalid membership, migrator role transitions and
+rollback, and both actual CLI entrypoints' validation and seed-before-create
+ordering. Run focused database/web/CLI tests, PostgreSQL 18 integration, Compose
+model and operational proof after the one-shot workflow change, `pnpm check`,
+Prettier, stale scans, and `git diff --check`.
 
 ## Open questions
 

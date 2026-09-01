@@ -102,6 +102,12 @@ published. It aborts before replacing the stable named constraint if a colliding
 organization already exists. No confusable folding, `slug_key`, or reserved-slug
 table is introduced here.
 
+Phase 11 closes the decision with executable evidence: the shared web/database
+corpus enumerates all 16 literals, the deterministic two-backend quota test
+observes the advisory-lock waiter and exactly 1 success, and a newly created
+disposable `auth.*` table executes all 4 inherited DML verbs as `bap_auth`
+before the quota exception is checked as SELECT-only.
+
 Migration compatibility is now `20260831.0004`. There is no down migration.
 Rolling application code back while leaving the newer migration applied makes
 every service readiness route return 503 until code expecting that exact version

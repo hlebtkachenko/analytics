@@ -645,7 +645,7 @@ describe('PostgreSQL 18 isolation', () => {
     }
   });
 
-  it('keeps the database slug rules in parity with the shared corpus', async () => {
+  it('rejects every reserved slug and keeps all database slug rules in parity with the shared corpus', async () => {
     const corpus = await readOrganizationSlugCorpus();
 
     for (const [index, testCase] of corpus.entries()) {
@@ -1217,10 +1217,10 @@ describe('PostgreSQL 18 isolation', () => {
     });
   });
 
-  it('documents the auth default-privilege trap with a disposable table', async () => {
+  it('executes inherited auth-table DML as bap_auth on a newly created disposable table', async () => {
     await asOwner((client) =>
       client.query(
-        'create table auth.default_privilege_probe (id text primary key)',
+        'create table auth.default_privilege_probe (id text primary key, value text not null)',
       ),
     );
     const privileges = await rootPool.query<{
@@ -1242,6 +1242,34 @@ describe('PostgreSQL 18 isolation', () => {
         can_update: true,
       },
     ]);
+    await expect(
+      authPool.query(
+        "insert into auth.default_privilege_probe (id, value) values ('probe', 'initial') returning id, value",
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ id: 'probe', value: 'initial' }],
+    });
+    await expect(
+      authPool.query(
+        "select id, value from auth.default_privilege_probe where id = 'probe'",
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ id: 'probe', value: 'initial' }],
+    });
+    await expect(
+      authPool.query(
+        "update auth.default_privilege_probe set value = 'updated' where id = 'probe' returning id, value",
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ id: 'probe', value: 'updated' }],
+    });
+    await expect(
+      authPool.query(
+        "delete from auth.default_privilege_probe where id = 'probe' returning id, value",
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ id: 'probe', value: 'updated' }],
+    });
   });
 
   it('permits Better Auth database rate limits only to the auth role', async () => {
