@@ -118,9 +118,31 @@ errors disclose nothing, and the layout uses the same not-found path for every
 negative result. The root redirect is pinned to `/organizations`. Separate BFF
 and PostgreSQL assertions prove a valid slug-shaped selector can cross the web's
 syntax check but cannot resolve as an id at the service membership boundary.
-Phase 9 adds no descendant dynamic page, so live browser checks cover the root
-redirect and transitional 404 only; member rendering becomes a live route in
-Phase 10.
+Phase 10 page tests cover every new route: membership listing, quota-positive
+and quota-zero creation states, name-to-slug prefill, organization navigation,
+explicit-id member and invitation reads, permission-based form visibility, and
+settings prefill. Action tests prove normalized creation preserves ambient
+session state, forged organization ids are ignored, explicit resolved ids reach
+Better Auth, the temporary sole-owner recheck runs, co-owner changes work, and
+failures expose only fixed generic outcomes.
+
+PostgreSQL integration keeps the TypeScript and database slug corpus in exact
+parity, now including `organizations`. It also runs the forward reservation SQL
+inside a rollback-only collision fixture and proves the migration aborts before
+replacing the constraint. The real quota reader covers positive, exhausted, and
+absent grants through `bap_auth`.
+
+The live Phase 10 browser walk starts from `/organizations`, creates an allowed
+organization, and traverses its overview, members, and settings pages through
+Caddy. It also covers native keyboard operation, axe, a mobile viewport, 200%
+zoom, horizontal overflow, and page/console errors. The pages intentionally have
+no CSS or Carbon imports. The operational workflow raises only its disposable
+synthetic owner's total quota from 1 to 2 through the existing migrator command;
+the second organization consumes that capacity and the proof finishes on the
+zero-quota state. The organization and dataset specs share one worker-scoped
+synthetic browser session, while the access spec keeps its independent
+sign-in/sign-out proof. This keeps the combined suite inside the unchanged
+public sign-in rate limit after the preceding unverified-account check.
 
 The scheduled and manually runnable GitHub Actions operational proof creates a
 disposable local Compose stack, creates a gated synthetic account, completes a

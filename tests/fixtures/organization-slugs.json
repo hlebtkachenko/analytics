@@ -14,5 +14,6 @@
   { "slug": "123", "valid": false },
   { "slug": "api", "valid": false },
   { "slug": "design-system", "valid": false },
-  { "slug": "account", "valid": false }
+  { "slug": "account", "valid": false },
+  { "slug": "organizations", "valid": false }
 ]

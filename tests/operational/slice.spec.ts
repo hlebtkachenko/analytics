@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './authenticated-test';
 
 const email = process.env.BAP_OPERATIONAL_EMAIL ?? 'owner@bap.invalid';
 const organizationId =
@@ -34,17 +34,6 @@ test('imports an uploaded CSV and renders its rows and chart', async ({
       consoleErrors.push(message.text());
     }
   });
-
-  await page.goto('/sign-in');
-  await page.getByLabel('Email address').fill(email);
-  await page.locator('input[name="password"]').fill(password);
-  const signedIn = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'POST' &&
-      response.url().includes('/api/auth/sign-in/email'),
-  );
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  expect((await signedIn).ok()).toBe(true);
 
   await page.goto('/datasets');
   await expect(

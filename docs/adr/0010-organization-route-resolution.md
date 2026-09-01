@@ -44,8 +44,9 @@ distinct forbidden response. A slug-shaped value can pass the BFF's syntactic
 selector validation, but the id-only service membership resolver finds no row
 and returns 403. The slug dies at the web routing boundary.
 
-Phase 9 adds only the dynamic layout, not a descendant page. Next.js does not
-publish a layout by itself, so member route rendering becomes publicly reachable
-only when Phase 10 adds pages beneath `[orgSlug]`. The `/organizations` redirect
-target is likewise intentionally absent until that phase and currently resolves
-to 404.
+Phase 9 added only the dynamic layout. Phase 10 now publishes the deliberately
+temporary `/organizations` index and the overview, members, and settings pages
+beneath `[orgSlug]`. All of their scoped server actions resolve the slug through
+this same member gate and call Better Auth with the resulting explicit id. The
+new literal is reserved in TypeScript and PostgreSQL by migration
+`20260831.0004` before the route becomes reachable.

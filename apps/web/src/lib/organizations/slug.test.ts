@@ -42,6 +42,7 @@ describe('organization slugs', () => {
       'activate',
       'welcome',
       'account',
+      'organizations',
     ]);
   });
 
@@ -64,7 +65,7 @@ describe('organization slugs', () => {
     expect(normalizeOrganizationSlug(input)).toBe(expected);
   });
 
-  it.each(['access', '12345', 'a', '---'])(
+  it.each(['access', 'organizations', '12345', 'a', '---'])(
     'keeps %j as an invalid candidate instead of silently renaming it',
     (input) => {
       const normalized = normalizeOrganizationSlug(input);

@@ -16,6 +16,7 @@ export const reservedOrganizationSlugs = [
   'activate',
   'welcome',
   'account',
+  'organizations',
 ] as const;
 
 const reservedOrganizationSlugSet = new Set<string>(reservedOrganizationSlugs);

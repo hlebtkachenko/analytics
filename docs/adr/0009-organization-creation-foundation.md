@@ -38,7 +38,7 @@ by `bap_owner`, and grants no direct execution to runtime roles.
 
 Organization slugs use lowercase ASCII letters and digits separated by single
 hyphens, are 3 through 20 characters, cannot be all digits, and cannot equal the
-15 approved route segments. The database CHECK and shared Zod validator use the
+approved route segments. The database CHECK and shared Zod validator use the
 same literal contract. The normalizer lowercases, converts unsupported runs to
 one hyphen, trims edge hyphens, and truncates deterministically. It does not
 invent alternative names for reserved, numeric, empty, or short candidates.
@@ -87,7 +87,7 @@ Creator-attributed inserts cannot race past quota, and accepting an invitation
 does not consume creation allowance. Existing and Phase 7 system-created
 organizations with NULL attribution count against no user. The ordinary path is
 now quota gated and creator attributed. Phase 9 adds the member-gated routing
-boundary; organization UI remains a separate Phase 10 concern.
+boundary. Phase 10 adds the deliberately temporary organization browser loop.
 
 The Better Auth precheck can race, so an insertion rejected by the trigger may
 surface as a generic server failure. Disabling auth-only organization deletion
@@ -96,10 +96,13 @@ organization nor their account until ownership is delegated. A cross-schema
 operator purge workflow is a later milestone.
 
 The literal reserved list advances in the same pull request as every new
-top-level application route. No confusable folding, `slug_key`, or reserved-slug
+top-level application route. Migration `20260831.0004` reserves `organizations`,
+bringing the database and shared validator to 16 literals before that route is
+published. It aborts before replacing the stable named constraint if a colliding
+organization already exists. No confusable folding, `slug_key`, or reserved-slug
 table is introduced here.
 
-Migration compatibility advances to `20260831.0003`. There is no down migration.
-Rolling application code back while leaving this migration applied makes every
-service readiness route return 503 until code expecting that exact version is
-deployed or the expected version is deliberately updated.
+Migration compatibility is now `20260831.0004`. There is no down migration.
+Rolling application code back while leaving the newer migration applied makes
+every service readiness route return 503 until code expecting that exact version
+is deployed or the expected version is deliberately updated.
