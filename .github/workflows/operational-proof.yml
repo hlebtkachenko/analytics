@@ -110,6 +110,12 @@ jobs:
           result=$(docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm --no-deps migrator node node_modules/@bap/db/dist/cli.js signup enable)
           printf '%s' "$result" | jq -e '.publicSignupEnabled == true' >/dev/null
 
+      - name: Allow the temporary organization loop
+        shell: bash
+        run: |
+          result=$(docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm --no-deps migrator node node_modules/@bap/db/dist/cli.js organization-quota --email "$BAP_OPERATIONAL_EMAIL" --total 2 --note 'operational-proof: Phase 10 organization loop')
+          printf '%s' "$result" | jq -e '.grantedTotal == 2' >/dev/null
+
       - name: Run public sign-up proof
         shell: bash
         run: >-
@@ -126,7 +132,7 @@ jobs:
       - name: Run browser proof
         shell: bash
         run: |
-          pnpm exec playwright test --config playwright.operational.config.ts tests/operational/access.spec.ts tests/operational/identity.spec.ts tests/operational/slice.spec.ts
+          pnpm exec playwright test --config playwright.operational.config.ts tests/operational/access.spec.ts tests/operational/identity.spec.ts tests/operational/organizations.spec.ts tests/operational/slice.spec.ts
           if docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml logs --no-color web | grep -Fq 'could not determine a client IP'; then
             exit 1
           fi

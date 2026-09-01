@@ -17,11 +17,11 @@ not-found result. Keep internal APIs keyed by organization id and add the
 repository rule that every new top-level route reserves its organization slug in
 the same pull request.
 
-This phase adds no descendant organization page, organization switcher, settings
-or member-management UI, API/reporting slug support, shared cache, or ambient
-active-organization routing. Until Phase 10 adds pages, the dynamic layout is
-not itself publicly reachable and `/organizations` remains a 404 redirect
-target.
+This phase added no descendant organization page, organization switcher,
+settings or member-management UI, API/reporting slug support, shared cache, or
+ambient active-organization routing. Phase 10 subsequently published the
+deliberately temporary descendant pages and `/organizations` target without
+changing this routing boundary.
 
 ## Design
 
@@ -57,5 +57,5 @@ live browser checks only for routes that exist in this transitional phase.
 
 ## Open questions
 
-None. Phase 10 will add the first descendant pages and reserve their top-level
-route segments in the same change.
+None. Phase 10 added the first descendant pages and reserved `organizations` in
+the shared and database contracts through a new forward migration.

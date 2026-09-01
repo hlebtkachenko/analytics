@@ -52,7 +52,11 @@ test('protects the public BAP access contract without browser token leakage', as
   const root = await page.request.get('/', { maxRedirects: 0 });
   expect(root.status()).toBe(307);
   expect(root.headers()['location']).toMatch(/\/organizations$/);
-  expect((await page.request.get('/organizations')).status()).toBe(404);
+  const organizations = await page.request.get('/organizations', {
+    maxRedirects: 0,
+  });
+  expect(organizations.status()).toBe(307);
+  expect(organizations.headers()['location']).toMatch(/\/sign-in$/);
   expect((await page.request.get('/bap-operational')).status()).toBe(404);
   const unauthenticated = await page.request.get(
     '/api/bff/application/organizations/forged_organization/access',

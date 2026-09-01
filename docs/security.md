@@ -308,7 +308,9 @@ quota.
 
 Slugs are constrained identically in TypeScript and PostgreSQL: 3 through 20
 lowercase ASCII letters or digits with single internal hyphens, not all digits,
-and not any of the 15 literal route reservations. New member and invitation
+and not any of the 16 literal route reservations. Migration `20260831.0004`
+checks for an existing `organizations` collision before it replaces the stable
+named CHECK; any collision aborts the migration. New member and invitation
 writes accept only scalar `owner`, `admin`, or `member`. Historical invalid role
 values are denied as no membership rather than throwing.
 
@@ -346,6 +348,29 @@ the BFF syntax check, but `auth.resolve_membership(subject_id, organization_id)`
 finds no row and the service returns 403. Adding a literal top-level web route
 must add the matching reserved slug in the same pull request so a future route
 cannot silently shadow an existing organization URL.
+
+## Temporary organization action boundary
+
+Phase 10's 5 organization pages are deliberately plain and temporary, but their
+server actions are untrusted public POST boundaries. They rederive the verified
+session and member-gated organization resolution, validate `FormData`, ignore
+any browser-supplied organization id, and call only installed Better Auth APIs
+with the exact resolved id. Creation keeps the stored active organization
+unchanged. Each scoped action validates its bound slug before constructing any
+path or calling the resolver or provider. Malformed, protocol-relative-looking,
+and encoded-looking values reach only `/organizations?result=error` with no side
+effect. Valid scoped redirects use only the parsed or durable resolved slug;
+provider and database failures become generic messages and are not logged.
+
+The UI mirrors installed Better Auth permissions: owners may assign all three
+roles and manage owner targets, while admins may assign only `admin` or `member`
+and receive no change or removal controls for owner targets. Members are
+read-only. Better Auth remains authoritative. Role and removal actions reread up
+to the configured 100-member limit and refuse a final-owner change in the
+temporary UI. That read followed by mutation is not atomic and does not repair
+Better Auth 1.7.2's direct endpoint gaps: its last-owner role check applies only
+to self-demotion and its removal check is bounded by `membershipLimit`. The
+approved plan leaves a global, race-safe solution as follow-up work.
 
 ## Account erasure boundary
 

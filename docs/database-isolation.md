@@ -91,6 +91,11 @@ user by a parameterized email, and upserts `granted_total`, a NULL `granted_by`,
 the grant time, and the required operator note. No quota-write function or DML
 grant is added to `bap_auth`.
 
+The Phase 10 quota-display accessor uses the same SELECT-only role and join. It
+returns granted, attributed, and non-negative remaining totals. An absent row is
+NULL and the web page converts NULL, malformed state, and query errors to zero.
+It adds no quota write path.
+
 The web organization-route accessor also stays behind `@bap/db`. Through the
 existing `bap_auth` pool it performs 1 parameterized join of `auth.organization`
 and `auth.member`, keyed by validated slug and authenticated subject id. It
@@ -99,6 +104,14 @@ missing membership or invalid legacy role returns no route. API and reporting
 roles continue to use only the fixed
 `auth.resolve_membership(subject_id, organization_id)` function and gain no slug
 lookup.
+
+Migration `20260831.0004` reserves the newly published literal `/organizations`
+route. It checks for an existing colliding organization before dropping the
+previous stable named constraint, then recreates that constraint with all 16
+literals. A collision raises a named check violation and rolls back the
+migration. There is no down migration. Rolling code back after this schema
+change leaves readiness at 503 until code expecting exact compatibility
+`20260831.0004` is deployed or the expected version is deliberately advanced.
 
 `auth.organization.created_by` is a nullable user foreign key with
 `ON DELETE SET NULL`. NULL denotes an unattributed legacy or system organization

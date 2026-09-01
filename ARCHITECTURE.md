@@ -172,8 +172,19 @@ resolution within 1 request only. Every negative or failed lookup becomes the
 same 404, and no slug-to-id mapping is cached across requests. The BFF,
 application API, reporting API, RLS context, and service membership resolver
 remain id-only. The root route redirects to `/organizations`; that index and the
-first descendant `[orgSlug]` page arrive in Phase 10, so both targets remain 404
-in the Phase 9 routing foundation.
+first descendant `[orgSlug]` page are now the deliberately plain Phase 10
+organization loop. The index lists current memberships and links quota-gated
+creation. Descendant pages expose navigation, members, pending invitations, and
+name/slug settings. Every mutation is a server action which resolves the slug
+through the same member gate and supplies the resulting organization id to
+Better Auth; no browser-supplied id or ambient active organization selects a
+tenant.
+
+These five pages are explicitly throwaway milestone UI. They use semantic HTML,
+native forms, no page CSS, and no design-system import. The layout and shared
+slug resolver remain durable. Publishing the literal `/organizations` route also
+advances the reserved database and TypeScript slug contract through migration
+`20260831.0004`.
 
 The separately selected development and operational-proof Mailpit overlay adds 1
 ephemeral sink on the `app` network. Web sends to its internal cleartext SMTP

@@ -24,6 +24,12 @@ export interface OrganizationRouteResolution {
   slug: string;
 }
 
+export interface OrganizationCreationQuota {
+  attributedTotal: number;
+  grantedTotal: number;
+  remainingTotal: number;
+}
+
 export interface ResolveOrganizationRouteInput {
   organizationSlug: string;
   subjectId: string;
@@ -33,7 +39,7 @@ export interface ResolveOrganizationRouteInput {
 // Bump it to the newest migration id in the same pull request as that migration.
 // Rollback consequence: application code rolled back after the migration is
 // applied makes /ready return 503 on every service until this is bumped again.
-export const DATABASE_MIGRATION_COMPATIBILITY = '20260831.0003';
+export const DATABASE_MIGRATION_COMPATIBILITY = '20260831.0004';
 
 export const PUBLIC_SIGNUP_EDGE_RATE_LIMIT = {
   max: 3,
@@ -289,6 +295,44 @@ export async function organizationCreationLimitReached(
   const limitReached = result.rows[0]?.limit_reached;
 
   return typeof limitReached === 'boolean' ? limitReached : null;
+}
+
+export async function getOrganizationCreationQuota(
+  pool: DatabasePool,
+  userId: string,
+): Promise<OrganizationCreationQuota | null> {
+  const result = await pool.query<{
+    attributed_total: number;
+    granted_total: number;
+  }>(
+    `select quota.granted_total,
+            count(organization.id)::integer as attributed_total
+     from auth.organization_quota as quota
+     left join auth.organization as organization
+       on organization.created_by = quota.user_id
+     where quota.user_id = $1
+     group by quota.granted_total`,
+    [userId],
+  );
+  const row = result.rows[0];
+
+  if (row === undefined) {
+    return null;
+  }
+  if (
+    !Number.isInteger(row.attributed_total) ||
+    row.attributed_total < 0 ||
+    !Number.isInteger(row.granted_total) ||
+    row.granted_total < 0
+  ) {
+    throw new Error('Invalid organization quota state.');
+  }
+
+  return {
+    attributedTotal: row.attributed_total,
+    grantedTotal: row.granted_total,
+    remainingTotal: Math.max(0, row.granted_total - row.attributed_total),
+  };
 }
 
 export async function setOrganizationQuota(

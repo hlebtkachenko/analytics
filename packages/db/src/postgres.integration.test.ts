@@ -13,6 +13,7 @@ import {
   countSoleOwnedOrganizations,
   consumePublicSignupEdgeRateLimit,
   ensureInitialOrganizationQuota,
+  getOrganizationCreationQuota,
   organizationCreationLimitReached,
   publicSignupInvitationExists,
   publicSignupEnabled,
@@ -495,7 +496,7 @@ describe('PostgreSQL 18 isolation', () => {
         conname: 'organization_slug_reserved_check',
         convalidated: true,
         definition:
-          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text])))",
+          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text, 'organizations'::text])))",
         table_name: 'organization',
       },
     ]);
@@ -669,6 +670,50 @@ describe('PostgreSQL 18 isolation', () => {
     );
   });
 
+  it('fails the route reservation migration before replacing the constraint when the slug is occupied', async () => {
+    const migration = await readFile(
+      new URL(
+        '../drizzle/20260831.0004_organizations_route_slug.sql',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    const client = await migratorPool.connect();
+    let transactionOpen = false;
+
+    try {
+      await client.query('begin');
+      transactionOpen = true;
+      await client.query('set local role bap_owner');
+      await client.query(
+        'alter table auth.organization drop constraint organization_slug_reserved_check',
+      );
+      await client.query(
+        `insert into auth.organization (id, name, slug)
+         values ('reserved-route-collision', 'Reserved route collision', 'organizations')`,
+      );
+
+      await expect(client.query(migration)).rejects.toMatchObject({
+        code: '23514',
+        constraint: 'organization_slug_reserved_check',
+      });
+    } finally {
+      if (transactionOpen) {
+        await client.query('rollback').catch(() => undefined);
+      }
+      client.release();
+    }
+
+    await expect(
+      asOwner((owner) =>
+        owner.query(
+          `insert into auth.organization (id, name, slug)
+           values ('reserved-route-still-blocked', 'Reserved route blocked', 'organizations')`,
+        ),
+      ),
+    ).rejects.toThrow();
+  });
+
   it('enforces attributed quota atomically and preserves initial-seed provenance', async () => {
     await asOwner(async (client) => {
       await client.query(`
@@ -742,6 +787,16 @@ describe('PostgreSQL 18 isolation', () => {
       await expect(
         organizationCreationLimitReached(authPool, 'quota-two'),
       ).resolves.toBe(true);
+      await expect(
+        getOrganizationCreationQuota(authPool, 'quota-two'),
+      ).resolves.toEqual({
+        attributedTotal: 2,
+        grantedTotal: 2,
+        remainingTotal: 0,
+      });
+      await expect(
+        getOrganizationCreationQuota(authPool, 'quota-none'),
+      ).resolves.toBeNull();
 
       const firstRaceClient = await authPool.connect();
       let firstTransactionOpen = false;

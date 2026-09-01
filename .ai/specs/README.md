@@ -2,6 +2,7 @@
 
 ## Current specs
 
+- [Organization throwaway UI](2026-08-31-organization-throwaway-ui.md)
 - [Organization routing](2026-08-31-organization-routing.md)
 - [Organization creation path](2026-08-31-organization-creation-path.md)
 - [Organization schema and slugs](2026-08-31-organization-schema-and-slugs.md)

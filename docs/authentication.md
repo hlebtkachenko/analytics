@@ -368,11 +368,9 @@ Organization slugs are 3 through 20 lowercase ASCII letters or digits separated
 by single hyphens, cannot be all digits, and cannot be one of `access`, `api`,
 `datasets`, `design-system`, `health`, `invitation`, `metrics`, `ready`,
 `sign-in`, `sign-up`, `forgot-password`, `reset-password`, `activate`,
-`welcome`, or `account`. The shared web validator and database constraints use
-the same literal contract. The normalizer is deterministic and never silently
-renames a reserved, numeric, empty, or too-short result. Phase 9 supplies the
-routing boundary; organization list, creation, settings, and member-management
-UI remain Phase 10 work.
+`welcome`, `account`, or `organizations`. The shared web validator and database
+constraints use the same literal contract. The normalizer is deterministic and
+never silently renames a reserved, numeric, empty, or too-short result.
 
 Installed Better Auth 1.7.2 has 11 endpoints that otherwise fall back to
 `session.activeOrganizationId`. BAP's before-hook requires a non-empty explicit
@@ -433,12 +431,48 @@ BFF syntax check, but resolves no id membership and is refused with 403 by the
 service boundary.
 
 `/` redirects unconditionally to `/organizations`, not to a last-visited
-organization. Phase 9 adds no descendant page beneath `[orgSlug]` and no
-`/organizations` page, so Next.js does not yet expose a member organization URL
-and the redirect target currently resolves to 404. Phase 10 will add those
-pages. Literal top-level routes take precedence over the dynamic segment. Adding
-one must reserve its segment in the organization-slug contract in the same pull
-request.
+organization. That page lists only the verified session user's memberships and
+links creation. `/{orgSlug}` links the member and settings pages. Literal
+top-level routes take precedence over the dynamic segment, so migration
+`20260831.0004` and the shared validator reserve `organizations` before the
+literal route is published. Adding another top-level route must reserve its
+segment in the same pull request.
+
+## Temporary organization pages
+
+The 5 Phase 10 pages are an intentionally throwaway, unstyled browser loop. They
+use semantic headings, navigation, labels, native controls, lists, and
+progressive-enhancement server-action forms, with no page CSS or design-system
+imports. `/organizations/new` reads creator-attributed quota through a narrow
+SELECT-only `@bap/db` accessor. A missing row, malformed state, or read failure
+renders remaining quota as zero and replaces the complete form with one
+sentence. When capacity exists, the account name prefills the organization name
+and the shared normalizer keeps the slug field in step with name edits.
+
+Creation validates and normalizes again on the server, calls Better Auth with
+`keepCurrentActiveOrganization: true`, and redirects only to the validated
+created slug. Settings, invitation, role, and removal actions accept no
+organization id or callback from the browser. They resolve the bound slug
+through the member-gated route resolver and pass that exact id to Better Auth.
+Before doing either, every scoped action validates the bound slug. A malformed,
+protocol-relative-looking, or encoded-looking value redirects only to
+`/organizations?result=error`, without calling the resolver or Better Auth.
+Destinations for valid values use only the parsed slug or the durable slug
+returned by the resolver. All failures use fixed local redirects and generic
+messages.
+
+Owners can update settings, invite or assign `owner`, `admin`, or `member`, and
+manage owner targets subject to the temporary final-owner safeguard. Admins can
+update settings, invite or assign only `admin` or `member`, and receive change
+and removal forms only for non-owner targets. Ordinary members receive read-only
+membership and invitation lists. Better Auth remains the permission boundary.
+Before this temporary UI demotes or removes an owner, its action rereads the
+full 100-member-bounded list and refuses to remove the final observed owner.
+This is a non-atomic UI safeguard, not a global invariant. Installed Better Auth
+1.7.2 checks only self-demotion and uses its configured member limit when
+counting owners for removal, so concurrent or direct endpoint gaps remain the
+approved follow-up. Organization deletion, active selection, custom roles, and
+teams remain unavailable.
 
 ## First owner
 

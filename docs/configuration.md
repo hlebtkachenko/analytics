@@ -37,7 +37,9 @@ paths. These are internal runtime values, not user configuration.
   `BAP_MAIL_SMTP_PORT`, and `BAP_AI_PROVIDER_CONFIG_FILE`. Its two BFF targets
   are fixed internal service origins, not deployment inputs.
 - Organization route resolution reuses the `bap_auth` pool and has no separate
-  database role, endpoint, cache, or runtime configuration.
+  database role, endpoint, cache, or runtime configuration. The Phase 10 quota
+  display reuses that pool's existing SELECT-only quota access and adds no
+  runtime input or credential.
 - Application and reporting APIs use `BAP_DATABASE_*`, `BAP_JWKS_URL`, and
   `BAP_PUBLIC_ORIGIN`. The application API also uses `BAP_UPLOAD_STAGING_DIR`,
   which must name the mounted upload staging volume.

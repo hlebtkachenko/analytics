@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   ensureInitialOrganizationQuota,
+  getOrganizationCreationQuota,
   organizationCreationLimitReached,
   resolveMembership,
   resolveOrganizationRoute,
@@ -23,6 +24,52 @@ function createPool(query: ReturnType<typeof vi.fn>): {
 }
 
 describe('organization accessors', () => {
+  it.each([
+    {
+      expected: {
+        attributedTotal: 2,
+        grantedTotal: 5,
+        remainingTotal: 3,
+      },
+      rows: [{ attributed_total: 2, granted_total: 5 }],
+    },
+    {
+      expected: {
+        attributedTotal: 3,
+        grantedTotal: 1,
+        remainingTotal: 0,
+      },
+      rows: [{ attributed_total: 3, granted_total: 1 }],
+    },
+    { expected: null, rows: [] },
+  ])(
+    'reads remaining attributed creation quota',
+    async ({ expected, rows }) => {
+      const query = vi.fn(async () => ({ rows }));
+      const pool = { query } as unknown as DatabasePool;
+
+      await expect(
+        getOrganizationCreationQuota(pool, 'user-1'),
+      ).resolves.toEqual(expected);
+      expect(query).toHaveBeenCalledWith(
+        expect.stringContaining('organization.created_by = quota.user_id'),
+        ['user-1'],
+      );
+    },
+  );
+
+  it('rejects malformed organization quota state', async () => {
+    const pool = {
+      query: vi.fn(async () => ({
+        rows: [{ attributed_total: -1, granted_total: 1 }],
+      })),
+    } as unknown as DatabasePool;
+
+    await expect(getOrganizationCreationQuota(pool, 'user-1')).rejects.toThrow(
+      'Invalid organization quota state.',
+    );
+  });
+
   it.each([
     { rows: [{ limit_reached: false }], expected: false },
     { rows: [{ limit_reached: true }], expected: true },
