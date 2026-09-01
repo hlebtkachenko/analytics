@@ -65,8 +65,10 @@ retarget an action, invalid scoped slugs have no side effects, owner safeguards
 run, admin controls match installed permissions, and failures are generic. Run
 focused DB/web tests, full integration and web gates, exact `pnpm check`, scoped
 Prettier, stale-contract scans, and `git diff --check`. Walk the full loop
-through the real Caddy route using native keyboard interaction, axe, mobile
-viewport, and 200% zoom without page/console errors or horizontal overflow.
+through the real Caddy route using native keyboard interaction, axe, a mobile
+viewport, and 640 CSS-pixel layout-equivalent reflow without page/console errors
+or horizontal overflow. Record true browser zoom only as separate dated local
+evidence.
 
 ## Open questions
 

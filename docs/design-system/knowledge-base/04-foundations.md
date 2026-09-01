@@ -170,33 +170,38 @@ an equivalent state change under reduced motion.
 Use an icon to reinforce an action or concept, not as ornament. Carbon icons are
 optimized at 16, 20, 24, and 32px. Match icon and adjacent text color and center
 their alignment. Interactive icon targets must be at least 44px even when the
-glyph is smaller.
+glyph is smaller. Prefer the Carbon component's `renderIcon` or icon prop and
+keep a useful visible label. A glyph that repeats the label is decorative,
+`aria-hidden`, and never a separate focus stop.
 
 ```tsx
 'use client';
 
-import { Add } from '@bap/design-system/icons';
-import { IconButton } from '@bap/design-system/react';
+import { Download } from '@bap/design-system/icons';
+import { Button } from '@bap/design-system/react';
 
-export function AddAction() {
+export function DownloadAction() {
   return (
-    <IconButton label="Add item">
-      <Add />
-    </IconButton>
+    <Button renderIcon={Download} size="lg">
+      Download CSV
+    </Button>
   );
 }
 ```
 
-Use named imports. The virtualized explorer is the exhaustive visual inventory
-for the installed release.
+Use named imports from the exact 18-export curated BAP facade. Add an export
+only with a real application call site and never import the upstream package
+directly. The virtualized workbench explorer shows those 18 executable glyphs;
+the generated catalog remains the exhaustive installed upstream icon inventory.
 
 ## Pictograms
 
 Pictograms communicate a broader concept and occupy more space than UI icons.
-They come from the separate `@bap/design-system/pictograms` facade. Do not use a
-pictogram as a compact control glyph. Give informative pictograms an accessible
-text alternative in surrounding content and hide decorative repetitions from
-assistive technology.
+All 1,575 installed exports come from the separate
+`@bap/design-system/pictograms` facade and appear in its complete workbench
+explorer. Do not use a pictogram as a compact control glyph. Give informative
+pictograms an accessible text alternative in surrounding content and hide
+decorative repetitions from assistive technology.
 
 ## Fonts
 

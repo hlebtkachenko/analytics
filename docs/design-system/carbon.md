@@ -34,8 +34,8 @@ peers so an application provides one compatible React runtime.
 | `@bap/design-system/catalog`           | Server-safe, heavy   | Exhaustive generated API, declarations, token, flag, and Sass metadata |
 | `@bap/design-system/component-catalog` | Server-safe, compact | Renderable exports, status, parents, aliases, and controls             |
 | `@bap/design-system/react`             | Client               | Full official `@carbon/react` public API                               |
-| `@bap/design-system/icons`             | Client               | Full official `@carbon/icons-react` public API                         |
-| `@bap/design-system/pictograms`        | Client               | Full official Carbon React pictogram public API                        |
+| `@bap/design-system/icons`             | Client               | Exact 18 Carbon icons used by reviewed BAP application actions         |
+| `@bap/design-system/pictograms`        | Client               | Complete 1,575-export Carbon React pictogram public API                |
 | `@bap/design-system/charts`            | Client               | Full official `@carbon/charts-react` API plus `ChartFrame`             |
 | `@bap/design-system/theme`             | Client               | `DesignSystemProvider`                                                 |
 | `@bap/design-system/tokens`            | Server-safe, compact | Semantic inventory and theme types                                     |
@@ -43,21 +43,24 @@ peers so an application provides one compatible React runtime.
 | `@bap/design-system/fonts.scss`        | Global               | Selected self-hosted IBM Plex faces                                    |
 | `@bap/design-system/charts.css`        | Global               | Official Carbon Charts styles                                          |
 
-The React, icon, pictogram, and chart facades use `export *`, so their installed
-public APIs do not depend on a hand-written component barrel. The pinned React
+The React, pictogram, and chart facades use `export *` and exact-match their
+installed public APIs. The icon facade is intentionally different: it names only
+the Carbon icons used by reviewed BAP application actions. The pinned React
 package exposes a 367-key ESM namespace and a 365-key CommonJS namespace. The
-catalog records module modes separately, classifies recursive namespace members,
-and exact-compares each facade with its matching upstream mode. Renderable API
-metadata resolves props from exported types, call signatures, construct
-signatures, and class instances, including aliased and namespace exports. It
-separates Carbon-owned fields from inherited React and DOM fields and records
-portable declaration paths. Every current renderable has a public props record.
-The two Overflow Menu V2 aliases are explicitly reviewed upstream `any` props;
-there are no genuine no-props renderables in the pinned release. It also records
-the public declaration surfaces of `@carbon/charts-react` and `@carbon/charts`,
-including type-only exports, aliases, declaration paths, property types, and
-literal option controls. The generated catalog, not a manual family list or
-count, is the exhaustive API reference.
+catalog records module modes separately and retains the complete upstream icon
+inventory independently of the curated product facade. It classifies recursive
+namespace members and exact-compares every full facade with its matching
+upstream mode. Renderable API metadata resolves props from exported types, call
+signatures, construct signatures, and class instances, including aliased and
+namespace exports. It separates Carbon-owned fields from inherited React and DOM
+fields and records portable declaration paths. Every current renderable has a
+public props record. The two Overflow Menu V2 aliases are explicitly reviewed
+upstream `any` props; there are no genuine no-props renderables in the pinned
+release. It also records the public declaration surfaces of
+`@carbon/charts-react` and `@carbon/charts`, including type-only exports,
+aliases, declaration paths, property types, and literal option controls. The
+generated catalog, not a manual family list or count, is the exhaustive API
+reference.
 
 Use the client facades from a Client Component. Server Components may import
 metadata from the root, `tokens`, or `component-catalog` entrypoints, then pass
@@ -131,14 +134,21 @@ constant surfaces are separate catalog classifications. A source folder or
 upstream story is not proof that a name is a public root export. See the
 [component guide](knowledge-base/05-components.md) and generated workbench.
 
-The icon facade exports every official Carbon React icon. Use named imports and
-the approved 16, 20, 24, or 32px sizes. Use an accessible text label or an
-appropriate `aria-label` when an icon conveys an action.
+The icon facade exports exactly the 18 reviewed application glyphs. Use named
+imports and Carbon's approved 16, 20, 24, or 32px artboards. Prefer a Carbon
+component's `renderIcon` or equivalent icon prop so glyphs inherit the
+monochrome text color and remain center-aligned. Keep visible action text where
+it is needed. A glyph that repeats that label stays `aria-hidden` and never
+receives focus; a future icon-only control must use the Carbon tooltip/label API
+and a 44px touch target. Add no facade export without a real application call
+site, and never import `@carbon/icons-react` from an application.
 
-The pictogram facade is separate from icons and exports every installed Carbon
-React pictogram. Pictograms communicate broader concepts and are not compact
-control glyphs. The workbench virtualizes both visual inventories so it remains
-responsive without omitting exports.
+The pictogram facade is separate from icons and exports all 1,575 installed
+Carbon React pictograms. Pictograms communicate broader concepts and are not
+compact control glyphs. The workbench virtualizes the complete 1,575-pictogram
+inventory and the exact 18-icon application set. The generated catalog, rather
+than the executable icon facade or explorer, preserves exhaustive metadata for
+the complete installed upstream icon inventory.
 
 The charts facade exports the 25 standard React chart components: area, stacked
 area, grouped/simple/stacked bar, boxplot, bubble, bullet, choropleth, donut,

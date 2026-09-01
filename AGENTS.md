@@ -28,6 +28,8 @@ financial, operational, or development data.
 - Database access must go through `@bap/db`.
 - Service JWT and access contracts must go through `@bap/security`.
 - Application UI must import Carbon through `@bap/design-system`.
+- Application icons must use named exports from the exact curated 18-icon
+  `@bap/design-system/icons` facade, never `@carbon/icons-react` directly.
 - The design-system workbench must consume only public design-system
   entrypoints.
 - Browser sessions and resource JWTs must never cross their documented boundary.

@@ -363,7 +363,7 @@ try {
     'Foundations/Knowledge base',
     'Local Handbook',
   );
-  const icons = entryFor(entries, 'Explorers/Icons', 'All Carbon Icons');
+  const icons = entryFor(entries, 'Explorers/Icons', 'Curated BAP Icons');
   const iconsSize32 = entryFor(entries, 'Explorers/Icons', 'Icon Size 32');
   const pictograms = entryFor(
     entries,
@@ -573,19 +573,29 @@ try {
     );
   });
 
-  for (const [label, entry, searchLabel, expectedCount] of [
-    ['Icon explorer', icons, 'Search Carbon icons', 2762],
-    ['Pictogram explorer', pictograms, 'Search Carbon pictograms', 1575],
+  for (const [label, entry, searchLabel, expectedCount, sectionLabel] of [
+    [
+      'Icon explorer',
+      icons,
+      'Search BAP application icons',
+      18,
+      'BAP application icons',
+    ],
+    [
+      'Pictogram explorer',
+      pictograms,
+      'Search Carbon pictograms',
+      1575,
+      'Carbon pictograms',
+    ],
   ]) {
     await check(label, async () => {
       await visit(entry, label);
       assert(
         (await page
-          .locator(
-            `#storybook-root section[aria-label="${label === 'Icon explorer' ? 'Carbon icons' : 'Carbon pictograms'}"] p`,
-          )
+          .locator(`#storybook-root section[aria-label="${sectionLabel}"] p`)
           .innerText()) === `${expectedCount.toLocaleString('en-US')} results`,
-        `${label} does not expose its complete installed export count.`,
+        `${label} does not expose its expected export count.`,
       );
       const results = page.locator('[role="listitem"]');
       await results.first().waitFor({ timeout: 10_000 });

@@ -12,7 +12,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const AllCarbonIcons: Story = {
-  args: { iconSize: 24, items: icons, label: 'Carbon icons' },
+  args: { iconSize: 24, items: icons, label: 'BAP application icons' },
   argTypes: {
     iconSize: { control: 'select', options: [16, 20, 24, 32] },
     items: { table: { disable: true } },
@@ -22,12 +22,13 @@ export const AllCarbonIcons: Story = {
     docs: {
       description: {
         story:
-          'The installed package exposes 2,763 runtime keys: 2,762 renderable icons plus its Icon helper.',
+          'The product facade exposes only the reviewed Carbon icons used by BAP application pages. The generated catalog retains the complete installed upstream inventory.',
       },
     },
   },
+  name: 'Curated BAP Icons',
 };
 
 export const IconSize32: Story = {
-  args: { iconSize: 32, items: icons, label: 'Carbon icons' },
+  args: { iconSize: 32, items: icons, label: 'BAP application icons' },
 };

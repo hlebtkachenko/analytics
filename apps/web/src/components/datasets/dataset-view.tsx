@@ -1,5 +1,6 @@
 'use client';
 
+import { ArrowLeft, ArrowRight, Close } from '@bap/design-system/icons';
 import {
   Button,
   Heading,
@@ -103,9 +104,19 @@ export function DatasetView({
   return (
     <Section level={2}>
       <Stack gap={7}>
-        <Stack gap={3} orientation="horizontal">
+        <Stack
+          gap={3}
+          orientation="horizontal"
+          style={{ alignItems: 'center' }}
+        >
           <Heading>{dataset.name}</Heading>
-          <Button kind="ghost" onClick={onClose} size="sm" type="button">
+          <Button
+            kind="tertiary"
+            onClick={onClose}
+            renderIcon={Close}
+            size="lg"
+            type="button"
+          >
             {t('datasets.close')}
           </Button>
         </Stack>
@@ -135,7 +146,8 @@ export function DatasetView({
               disabled={paging || requests.length === 1}
               kind="tertiary"
               onClick={showPreviousPage}
-              size="sm"
+              renderIcon={ArrowLeft}
+              size="lg"
               type="button"
             >
               {t('datasets.previousPage')}
@@ -144,7 +156,8 @@ export function DatasetView({
               disabled={paging || nextCursor === undefined}
               kind="tertiary"
               onClick={showNextPage}
-              size="sm"
+              renderIcon={ArrowRight}
+              size="lg"
               type="button"
             >
               {t('datasets.nextPage')}

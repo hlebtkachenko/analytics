@@ -1,5 +1,6 @@
 'use client';
 
+import { Checkmark } from '@bap/design-system/icons';
 import {
   Button,
   Form,
@@ -59,7 +60,9 @@ export default function TwoFactorPage() {
                 title={t('twoFactor.failed')}
               />
             ) : null}
-            <Button type="submit">{t('twoFactor.verify')}</Button>
+            <Button renderIcon={Checkmark} type="submit">
+              {t('twoFactor.verify')}
+            </Button>
           </Stack>
         </Form>
       </Stack>

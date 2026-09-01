@@ -122,17 +122,11 @@ test('walks the temporary organization loop through explicit member-scoped actio
   ).toBeVisible();
   await expectNoAccessibilityViolations(page);
 
+  // A 640 CSS-pixel viewport is an automated layout equivalent, not browser zoom.
+  await page.setViewportSize({ height: 900, width: 640 });
+  await expectNoHorizontalOverflow(page);
   await page.setViewportSize({ height: 640, width: 360 });
   await expectNoHorizontalOverflow(page);
-  const browserSession = await page.context().newCDPSession(page);
-  await browserSession.send('Emulation.setPageScaleFactor', {
-    pageScaleFactor: 2,
-  });
-  await expectNoHorizontalOverflow(page);
-  await browserSession.send('Emulation.setPageScaleFactor', {
-    pageScaleFactor: 1,
-  });
-  await browserSession.detach();
 
   await page.getByRole('link', { name: 'Back to organization' }).click();
   await page.getByRole('link', { name: 'All organizations' }).click();

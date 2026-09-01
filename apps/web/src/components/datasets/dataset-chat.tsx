@@ -1,5 +1,6 @@
 'use client';
 
+import { Send } from '@bap/design-system/icons';
 import {
   AILabel,
   AILabelContent,
@@ -182,7 +183,11 @@ export function DatasetChat({
               placeholder={t('datasets.chatPlaceholder')}
               rows={3}
             />
-            <Button disabled={state === 'waiting'} type="submit">
+            <Button
+              disabled={state === 'waiting'}
+              renderIcon={Send}
+              type="submit"
+            >
               {t('datasets.chatSend')}
             </Button>
           </Stack>

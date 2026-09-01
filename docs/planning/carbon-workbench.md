@@ -32,7 +32,10 @@ pinned release.
 
 ## Included scope
 
-- Every installed public React, icon, pictogram, and chart export.
+- Every installed public React, pictogram, and chart export, plus exhaustive
+  generated metadata for every installed upstream icon export.
+- The exact curated 18-icon BAP application facade and executable explorer,
+  alongside the complete 1,575-export pictogram facade and explorer.
 - Recursive namespace members, compound children, hooks, contexts, constants,
   preview APIs, unstable APIs, aliases, and deprecated names.
 - Default and Playground workbench entries for every renderable export.
@@ -60,8 +63,9 @@ pinned release.
 
 `@bap/design-system` is the single consumption boundary. Generated manifests
 classify the exact upstream API and expose server-safe metadata. Client
-entrypoints re-export React components, icons, pictograms, and charts. Sass
-entrypoints forward Carbon modules without copying token values.
+entrypoints re-export React components, pictograms, charts, and the exact 18
+reviewed icon glyphs used by BAP application actions. Sass entrypoints forward
+Carbon modules without copying token values.
 
 The catalog generator uses the TypeScript compiler and installed package files
 to record:
@@ -85,9 +89,11 @@ target, or unknown status.
 The `apps/design-system-workbench` Storybook application consumes only BAP
 facades. It provides four theme modes, left-to-right and right-to-left
 directions, Carbon viewports down to 320px, pinned feature flags, reduced-motion
-coverage, searchable virtualized visual-asset explorers, generated component
-entries, charts, diagrams, pattern specimens, local knowledge pages, and
-provenance search.
+coverage, a searchable virtualized explorer for the exact 18 application icons,
+a complete 1,575-pictogram explorer, generated component entries, charts,
+diagrams, pattern specimens, local knowledge pages, and provenance search. The
+generated catalog separately retains exhaustive metadata for the installed
+upstream icon namespace.
 
 Default and Playground entries are individual and searchable. Compound children
 use valid parent fixtures. Preview, unstable, deprecated, and feature-flagged
@@ -103,7 +109,8 @@ chapter is original BAP prose with source and modified-work attribution.
 ## Verification contract
 
 - Frozen install under Node 24.20 and pnpm 11.
-- Exact mode-specific facade parity.
+- Exact mode-specific full-facade parity plus exact parity for the curated
+  18-icon application facade.
 - Zero unclassified public exports and zero unmapped pinned sources.
 - Default and Playground coverage for each renderable item.
 - Valid chart, diagram, icon, and pictogram fixtures.
@@ -142,6 +149,7 @@ pnpm design-system:offline:check
 ## Acceptance
 
 The work is complete when a fresh agent can use only repository files to find
-every installed Carbon Core API, understand its status and valid usage, switch
-themes and viewports, inspect interaction examples, use charts and visual
-assets, and build a BAP page through `@bap/design-system`.
+every installed Carbon Core API in generated metadata, understand its status and
+valid usage, inspect the exact 18 executable application icons and all 1,575
+pictograms, switch themes and viewports, inspect interaction examples, use
+charts and visual assets, and build a BAP page through `@bap/design-system`.

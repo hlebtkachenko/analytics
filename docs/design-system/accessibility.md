@@ -16,6 +16,9 @@ gate. This page remains the compact repository contract.
 - Ensure keyboard order follows document order and focus is always visible.
 - Supply useful accessible names for icon-only controls and text alternatives
   for non-text content.
+- Keep icons beside visible labels decorative and out of the focus order. Use
+  Carbon's tooltip/label API for a justified icon-only control, and give every
+  interactive icon a 44px mobile target.
 - Do not identify a state or chart series by color alone.
 - Keep Carbon focus styles and do not remove outlines.
 - Support browser zoom, localization, and user font-size preferences.
@@ -32,13 +35,15 @@ equivalent is mandatory.
 ## Verification
 
 The design-system checks verify theme synchronization, the chart-table fallback,
-mode-specific facade parity, generated inventories, source coverage, and the
-static workbench. Before merging product UI, add focused keyboard, VoiceOver,
-axe, localization, zoom, and reduced-motion assertions for the actual
-interaction.
+mode-specific full-facade parity, the exact curated 18-icon facade, generated
+inventories, source coverage, and the static workbench. Before merging product
+UI, add focused keyboard, VoiceOver, axe, localization, zoom, and reduced-motion
+assertions for the actual interaction.
 
 ## Sources
 
 - [Carbon accessibility overview](https://carbondesignsystem.com/guidelines/accessibility/overview/)
 - [Carbon accessibility for developers](https://carbondesignsystem.com/guidelines/accessibility/developers/)
 - [Carbon keyboard guidance](https://carbondesignsystem.com/guidelines/accessibility/keyboard/)
+- [Carbon icon usage](https://carbondesignsystem.com/elements/icons/usage/)
+- [Carbon icon code](https://carbondesignsystem.com/elements/icons/code/)

@@ -30,6 +30,9 @@ component API. Helper text, constraints, and error messages must be associated
 with the field they explain.
 
 Do not duplicate visible and hidden labels in a way that causes repeated speech.
+An icon beside visible control text is decorative and stays `aria-hidden`; the
+control, not its SVG, owns focus and the accessible name. Keep icon-only actions
+exceptional, use Carbon's tooltip/label API, and provide a 44px mobile target.
 
 ```tsx
 'use client';

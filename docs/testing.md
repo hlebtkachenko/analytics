@@ -49,6 +49,21 @@ pixel mismatch cap and a 0.2 pixelmatch threshold. Chromium baselines are
 platform-specific: `chromium-darwin` supports local development and
 `chromium-linux` is refreshed in Playwright 1.62.1 Noble for GitHub Actions.
 
+Design-system icon tests pin the exact 18 curated `@bap/design-system/icons`
+exports and their intrinsic glyph behavior at the supported 16, 20, 24, and 32px
+artboards. A separate TypeScript compiler AST contract parses the actual
+production TSX, rejects direct application imports from `@carbon/icons-react`,
+and pins the exact 21 reviewed `renderIcon={Identifier}` callsites, facade
+imports, visible children, and absence of icon-only props. The AST coverage also
+protects the five Phase 10 pages' exact throwaway marker and zero
+CSS/design-system/icon boundary. Committed production Playwright coverage
+verifies real public and authenticated controls for keyboard order, axe,
+label-derived accessible names, 16px Carbon SVG semantics and alignment, 44px
+targets, Phase 10 exclusion, console and page errors, and 640 CSS-pixel
+layout-equivalent reflow without document overflow. The 640px check is not a
+browser-zoom claim; true browser zoom is recorded only as separate dated local
+evidence after setting and reading the Chrome tab zoom.
+
 ## Integration and operational proof
 
 ```sh
@@ -134,15 +149,19 @@ absent grants through `bap_auth`.
 
 The live Phase 10 browser walk starts from `/organizations`, creates an allowed
 organization, and traverses its overview, members, and settings pages through
-Caddy. It also covers native keyboard operation, axe, a mobile viewport, 200%
-zoom, horizontal overflow, and page/console errors. The pages intentionally have
-no CSS or Carbon imports. The operational workflow raises only its disposable
+Caddy. It also covers native keyboard operation, axe, a mobile viewport, 640
+CSS-pixel layout-equivalent reflow, horizontal overflow, and page/console
+errors. This is not a browser-zoom assertion. The pages intentionally have no
+CSS or Carbon imports. The operational workflow raises only its disposable
 synthetic owner's total quota from 1 to 2 through the existing migrator command;
 the second organization consumes that capacity and the proof finishes on the
-zero-quota state. The organization and dataset specs share one worker-scoped
-synthetic browser session, while the access spec keeps its independent
-sign-in/sign-out proof. This keeps the combined suite inside the unchanged
-public sign-in rate limit after the preceding unverified-account check.
+zero-quota state. The authenticated access, icon, organization, dataset, and
+final sign-out specs share one worker-scoped synthetic browser session. The
+public access assertions remain unauthenticated, and the lexically final
+sign-out spec closes the shared session and proves the post-sign-out 401.
+Together with the icon invitation recipient, this keeps the combined suite
+inside the unchanged public sign-in rate limit after the preceding unverified
+account check.
 
 The scheduled and manually runnable GitHub Actions operational proof creates a
 disposable local Compose stack, creates a gated synthetic account, completes a
@@ -202,12 +221,34 @@ errors. Focused server coverage uses isolated per-test rate-limit storage with
 the installed Better Auth handler and proves reset completion returns 429 on the
 6th request after allowing 5.
 
+The committed icon regression uses the same disposable production stack and a
+real authenticated fixture:
+
+```sh
+BAP_OPERATIONAL_BASE_URL=http://localhost:3000 pnpm exec playwright test --config playwright.operational.config.ts tests/operational/icons.spec.ts
+```
+
+It covers the actual public and authenticated application callsites. The test
+creates only disposable synthetic accounts, an invitation, and a 30-row neutral
+CSV inside that stack. It does not mock application routes. Its explicit 640
+CSS-pixel viewport is the repeatable layout-equivalent check, not browser zoom.
+
 On 2026-08-31, a headed Google Chrome for Testing 151.0.7922.34 check on macOS
 26 set the `/sign-in` tab to a true 200% browser zoom. The extension-reported
 zoom factor was 2; the 1280-pixel-wide window exposed a 640 CSS-pixel viewport
 at DPR 4, the document had no horizontal overflow, and keyboard focus retained
 the expected order. This manual zoom result supplements the durable browser
 suite.
+
+On 2026-09-01, the Carbon icon follow-up repeated that check in a headed local
+Google Chrome for Testing 151.0.7922.34 window on macOS 26. The local extension
+called `chrome.tabs.setZoom(2)` and read back a factor of 2 from
+`chrome.tabs.getZoom`, with automatic per-origin zoom. The 1280-pixel window
+again exposed 640 CSS pixels at DPR 4. The labeled Sign in control retained
+keyboard focus and a 48px height; its decorative 16px `currentColor` glyph
+remained out of focus and vertically centered within 0.004px. The document did
+not overflow and page/application error listeners remained empty. This is dated
+manual/local evidence, not CI automation and not a CDP page-scale claim.
 
 VoiceOver verification was attempted on the same date and host but was not
 completed. Orca could enumerate the Chrome window, but macOS denied its
