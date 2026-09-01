@@ -155,10 +155,13 @@ errors. This is not a browser-zoom assertion. The pages intentionally have no
 CSS or Carbon imports. The operational workflow raises only its disposable
 synthetic owner's total quota from 1 to 2 through the existing migrator command;
 the second organization consumes that capacity and the proof finishes on the
-zero-quota state. The organization and dataset specs share one worker-scoped
-synthetic browser session, while the access spec keeps its independent
-sign-in/sign-out proof. This keeps the combined suite inside the unchanged
-public sign-in rate limit after the preceding unverified-account check.
+zero-quota state. The authenticated access, icon, organization, dataset, and
+final sign-out specs share one worker-scoped synthetic browser session. The
+public access assertions remain unauthenticated, and the lexically final
+sign-out spec closes the shared session and proves the post-sign-out 401.
+Together with the icon invitation recipient, this keeps the combined suite
+inside the unchanged public sign-in rate limit after the preceding unverified
+account check.
 
 The scheduled and manually runnable GitHub Actions operational proof creates a
 disposable local Compose stack, creates a gated synthetic account, completes a

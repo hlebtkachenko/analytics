@@ -386,10 +386,27 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   const errors = monitorPage(page);
   await page.setViewportSize({ height: 900, width: 640 });
 
+  const accessReady = Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' &&
+        new URL(response.url()).pathname ===
+          `/api/bff/application/organizations/${organizationId}/access`,
+    ),
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' &&
+        new URL(response.url()).pathname ===
+          `/api/bff/reporting/organizations/${organizationId}/access`,
+    ),
+  ]);
   await page.goto('/access');
+  for (const response of await accessReady) {
+    authenticatedExpect(response.ok()).toBe(true);
+  }
   const organization = page.getByLabel('Organization');
   await authenticatedExpect(organization).toBeVisible();
-  await organization.selectOption(organizationId);
+  await authenticatedExpect(organization).toHaveValue(organizationId);
   await authenticatedExpect(
     page.getByText('Application API role: owner'),
   ).toBeVisible();
@@ -408,10 +425,27 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   await expectNoAccessibilityViolations(page);
   await expectNoDocumentOverflow(page);
 
+  const datasetsReady = Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' &&
+        new URL(response.url()).pathname ===
+          `/api/bff/application/organizations/${organizationId}/access`,
+    ),
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' &&
+        new URL(response.url()).pathname ===
+          `/api/bff/application/organizations/${organizationId}/datasets`,
+    ),
+  ]);
   await page.goto('/datasets');
+  for (const response of await datasetsReady) {
+    authenticatedExpect(response.ok()).toBe(true);
+  }
   const datasetOrganization = page.getByLabel('Organization');
   await authenticatedExpect(datasetOrganization).toBeVisible();
-  await datasetOrganization.selectOption(organizationId);
+  await authenticatedExpect(datasetOrganization).toHaveValue(organizationId);
   const chooser = page.locator('input[name="file"]');
   await authenticatedExpect(chooser).toBeAttached();
   await chooser.setInputFiles({
