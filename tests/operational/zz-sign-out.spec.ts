@@ -5,6 +5,7 @@ const organizationId =
 const password = process.env.BAP_OPERATIONAL_PASSWORD ?? '';
 
 test('signs out after every shared authenticated browser proof', async ({
+  authenticatedContext,
   page,
 }) => {
   test.skip(password.length === 0, 'BAP_OPERATIONAL_PASSWORD is required.');
@@ -19,9 +20,11 @@ test('signs out after every shared authenticated browser proof', async ({
   await expect(
     page.getByRole('heading', { name: 'Organization access' }),
   ).toBeVisible();
+  await expect(page.getByText('Application API role: owner')).toBeVisible();
+  await expect(page.getByText('Reporting API role: owner')).toBeVisible();
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page).toHaveURL(/\/sign-in$/);
-  const signedOut = await page.request.get(
+  const signedOut = await authenticatedContext.request.get(
     `/api/bff/application/organizations/${organizationId}/access`,
   );
   expect(signedOut.status()).toBe(401);

@@ -9,6 +9,7 @@ export default defineConfig({
   workers: 1,
   use: {
     baseURL: process.env.BAP_OPERATIONAL_BASE_URL ?? 'http://localhost:39100',
-    trace: 'retain-on-failure',
+    // The invitation proof crosses a verification capability; traces must never retain it.
+    trace: 'off',
   },
 });

@@ -5,6 +5,8 @@ import { expect as authenticatedExpect, test } from './authenticated-test';
 const email = process.env.BAP_OPERATIONAL_EMAIL ?? 'owner@bap.invalid';
 const organizationId =
   process.env.BAP_OPERATIONAL_ORGANIZATION_ID ?? 'bap-operational';
+const organizationSlug =
+  process.env.BAP_OPERATIONAL_ORGANIZATION_SLUG ?? 'bap-operational';
 const password = process.env.BAP_OPERATIONAL_PASSWORD ?? '';
 
 publicTest('protects the public BAP access boundary', async ({ page }) => {
@@ -141,5 +143,55 @@ test('protects the authenticated BAP access contract without browser token leaka
   authenticatedExpect(visibleState).not.toContain(email);
   authenticatedExpect(visibleState).not.toContain(password);
   authenticatedExpect(visibleState).not.toMatch(/token|jwt|bearer/i);
+
+  const manageMembers = page.getByRole('link', { name: 'Manage members' });
+  await authenticatedExpect(manageMembers).toHaveAttribute(
+    'href',
+    `/${organizationSlug}/members`,
+  );
+  await manageMembers.click();
+  await authenticatedExpect(page).toHaveURL(
+    new RegExp(`/${organizationSlug}/members$`),
+  );
+  await authenticatedExpect(
+    page.getByRole('heading', { name: 'BAP Operational members' }),
+  ).toBeVisible();
+
+  const primaryNavigation = page.getByRole('navigation', {
+    exact: true,
+    name: 'Primary navigation',
+  });
+  await primaryNavigation.getByRole('link', { name: 'Account' }).click();
+  await authenticatedExpect(page).toHaveURL(/\/account$/);
+  await authenticatedExpect(
+    page.getByRole('heading', { exact: true, name: 'Account' }),
+  ).toBeVisible();
+  await authenticatedExpect(
+    page.getByRole('form', { name: 'Change password' }),
+  ).toBeVisible();
+
+  await page
+    .getByRole('navigation', { exact: true, name: 'Primary navigation' })
+    .getByRole('link', { name: 'Access' })
+    .click();
+  await authenticatedExpect(
+    page.getByText('Application API role: owner'),
+  ).toBeVisible();
+  const uploadData = page.getByRole('link', { name: 'Upload data' });
+  await authenticatedExpect(uploadData).toHaveAttribute(
+    'href',
+    `/datasets?organization=${organizationSlug}#upload-dataset`,
+  );
+  await uploadData.click();
+  const destination = new URL(page.url());
+  authenticatedExpect(destination.pathname).toBe('/datasets');
+  authenticatedExpect(destination.searchParams.get('organization')).toBe(
+    organizationSlug,
+  );
+  authenticatedExpect(destination.hash).toBe('#upload-dataset');
+  await authenticatedExpect(page.getByLabel('Organization')).toHaveValue(
+    organizationId,
+  );
+  await authenticatedExpect(page.locator('#upload-dataset')).toBeVisible();
   authenticatedExpect(consoleErrors).toEqual([]);
 });
