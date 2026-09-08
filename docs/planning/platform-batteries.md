@@ -1,5 +1,11 @@
 # Platform Batteries Plan
 
+> **Status: historical delivered plan.** The platform-batteries phase shipped
+> before the tenant-data and AI phases. Its queue, worker, mail, pgvector,
+> provider-credential, and egress decisions remain active. Current behavior is
+> documented in [architecture](../../ARCHITECTURE.md) and the
+> [Phase 6 report](../reports/phase-6-platform-batteries.md).
+
 This plan covers the platform foundation that has to exist before any product
 table. It is the specification behind
 [ADR 0005](../adr/0005-platform-batteries.md) and
@@ -66,7 +72,10 @@ job. Model and network calls happen outside the transaction.
   outbound reachability from the web container.
 - The operational proof for backup, restore, and migration-version agreement.
 
-## Out of scope
+## Out of scope for this historical phase
 
 Product tables, ingestion, the AI package itself, chat streaming, and the
-vertical slice UI. Those follow in their own phases and depend on this one.
+vertical slice UI were intentionally left to later phases. Those later phases
+delivered the domain-free dataset schema and ingestion path, `@bap/ai`,
+metadata-grounded chat, background summarization and embeddings, and the dataset
+UI. Business-domain schemas and analytics semantics remain deferred.

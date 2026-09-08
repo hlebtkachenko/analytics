@@ -1,5 +1,11 @@
 # SaaS Foundation Plan
 
+> **Status: historical approved plan.** Phase 5 delivered this foundation. Later
+> phases added mail-backed identity flows, queues, generic dataset ingestion,
+> AI, and organizations. Current behavior is documented in
+> [architecture](../../ARCHITECTURE.md), [authentication](../authentication.md),
+> and the [execution reports](../reports/master-plan-execution.md).
+
 ## Status
 
 This Phase 4 plan was researched, challenged through repeated Sol advisor
@@ -93,13 +99,16 @@ format, lint, typecheck, unit test, build, Compose contract, container smoke,
 PostgreSQL integration, Gitleaks, dependency review, package audit, and CodeQL.
 Browser and backup/restore operational proofs run on schedule or manually.
 
-## Deferred owner-dependent enablement
+## Deferred at foundation approval time
 
 Production needs an owner-supplied hostname/origin, DNS, ACME connectivity,
 initial owner identity, credential files, off-host restic backend, scheduling,
-alerts, and RPO/RTO. Mail, MFA, SSO, queues, OpenTelemetry, billing, uploads,
-HA, registry publishing, and deployment automation remain deferred until a real
-requirement and operating target exist.
+alerts, and RPO/RTO. At approval time, mail, MFA, SSO, queues, OpenTelemetry,
+billing, uploads, HA, registry publishing, and deployment automation were also
+outside this phase. Mail, TOTP, queues, and bounded CSV/XLSX upload ingestion
+were delivered later. SSO, OpenTelemetry, billing, HA, registry publishing,
+deployment automation, and owner-dependent production operations remain
+deferred.
 
 ## Primary sources
 

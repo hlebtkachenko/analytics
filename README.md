@@ -1,9 +1,12 @@
 # Business Analytics Platform
 
 BAP is a pnpm and Turborepo monorepo for a Next.js web application, an
-application API, a reporting API, and PostgreSQL 18. The repository contains
-only synthetic test data and operational foundation code. Product behavior is
-intentionally developed separately.
+application API with a background worker, a reporting API, and PostgreSQL 18.
+The delivered domain-free product slice can ingest CSV and XLSX files, list and
+view isolated datasets, stream CSV and XLSX exports, and run metadata-grounded
+AI chat plus background summarization and embedding jobs. Business-domain
+schemas, analytics semantics, and real operational data remain out of scope. The
+repository contains only synthetic test data.
 
 ## Workspaces
 
@@ -11,6 +14,7 @@ intentionally developed separately.
 - `apps/api`: NestJS application API
 - `apps/reporting-api`: NestJS reporting API
 - `apps/design-system-workbench`: local and static Carbon component workbench
+- `packages/ai`: provider-neutral model, embedding, prompt, and tool boundaries
 - `packages/design-system`: Carbon components, tokens, themes, charts, and fonts
 - `packages/db`: reviewed migrations, PostgreSQL roles, pools, and tenant
   context
@@ -40,8 +44,9 @@ remain private. Use `pnpm dev` for native application watch mode after the
 database roles and migrations exist.
 
 Run `pnpm check`, `pnpm test:integration`, and `pnpm compose:verify` before
-shipping foundation changes. See [docs/README.md](docs/README.md) for setup,
-architecture, testing, deployment, configuration, and security documentation.
+shipping platform changes. See [docs/README.md](docs/README.md) for setup,
+application routes, architecture, testing, deployment, configuration, and
+security documentation.
 
 Run `pnpm design-system:dev` to inspect the complete local Carbon workbench. Use
 `pnpm design-system:catalog:check` to verify that its generated API and

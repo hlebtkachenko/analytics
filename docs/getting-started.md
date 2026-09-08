@@ -15,14 +15,16 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-`scripts/conductor-setup.sh` performs that sequence and seeds the local secret
-files in one step. See
+`scripts/conductor-setup.sh` attempts the pinned nvm install, verifies the exact
+active Node.js version, installs dependencies with the frozen lockfile through
+Corepack, and seeds the local secret files. Run `pnpm check` separately. See
 [the Conductor workspace notes](development.md#conductor-workspaces).
 
-`engineStrict` is enabled, so `pnpm install` fails with
-`ERR_PNPM_UNSUPPORTED_ENGINE` when the active Node.js version is not 24.20.0.
+`engineStrict` rejects Node.js versions outside the supported 24.x range in
+`package.json`. Repository scripts and CI use the exact 24.20.0 pin, and the
+Conductor setup script enforces that exact active version before installation.
 Run `nvm use` in the shell, or restart the editor or terminal application when
-it still carries an older Node.js path from a previous session.
+it still carries another Node.js path from a previous session.
 
 Install the workbench browser once when you need its Storybook browser,
 accessibility, or offline-static checks:
@@ -32,7 +34,7 @@ pnpm design-system:browser:install
 ```
 
 ```sh
-cp config/compose.environment.example .env
+test -e .env || cp config/compose.environment.example .env
 pnpm secrets:local
 BAP_PUBLIC_HOST=http://localhost docker compose --env-file .env -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml up --build --detach --wait
 ```

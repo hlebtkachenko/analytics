@@ -2,6 +2,12 @@
 
 **Date:** 2026-09-01
 
+**Correction (2026-09-01):** Access capabilities that are not implemented no
+longer render as buttons. Their Security and AI icons now appear directly as
+decorative 20px status glyphs inside non-interactive unavailable tiles. The
+curated facade remains exactly 18 exports; the AST contract covers 19
+`renderIcon` callsites plus these 2 reviewed direct uses.
+
 ## Problem
 
 BAP exposes the entire installed Carbon React icon package through its product
@@ -25,14 +31,16 @@ icon styling.
 
 `@bap/design-system/icons` explicitly re-exports only the reviewed icon names
 from `@carbon/icons-react`. Applications import those names only through the BAP
-entrypoint and pass them to Carbon's supported `renderIcon` prop. Button icons
-use Carbon's standard 16px control artboard, inherit the component's
-monochrome/current text color, remain center-aligned with their label, and are
-decorative in the accessibility tree because the visible text already names the
-control. Icon-bearing controls use Carbon's large button size where the previous
-small size did not provide a 44px mobile target. Carbon Grid and Column make the
-access actions responsive, and a logical minimum-size reset lets Carbon's own
-data-table scroller contain wide table content on mobile.
+entrypoint and normally pass them to Carbon's supported `renderIcon` prop.
+Button icons use Carbon's standard 16px control artboard, inherit the
+component's monochrome/current text color, remain center-aligned with their
+label, and are decorative in the accessibility tree because the visible text
+already names the control. The non-interactive Access status tiles render their
+reviewed 20px glyphs directly with `aria-hidden` and no focus. Icon-bearing
+controls use Carbon's large button size where the previous small size did not
+provide a 44px mobile target. Carbon Grid and Column make the access actions
+responsive, and a logical minimum-size reset lets Carbon's own data-table
+scroller contain wide table content on mobile.
 
 The workbench continues to record the complete installed upstream icon inventory
 in generated catalog metadata, but its executable icon explorer shows the
@@ -51,20 +59,21 @@ intentionally plain Phase 10 surfaces.
 
 Design-system unit tests pin the exact curated exports and the glyphs' intrinsic
 behavior at the supported 16, 20, 24, and 32px artboards. A TypeScript compiler
-AST contract parses the actual production TSX, pins the exact 21 reviewed
-`renderIcon={Identifier}` callsites and their facade imports and visible
-children, rejects icon-only replacements and direct upstream imports, and
-protects the Phase 10 throwaway marker and zero CSS/design-system/icon boundary.
-A committed operational Playwright spec checks the real public and authenticated
-controls through a production stack for label-derived accessible names, Carbon
-SVG semantics and alignment, 44px targets, keyboard operation, axe, console and
-page errors, Phase 10 exclusion, and 640 CSS-pixel layout-equivalent reflow with
-no document overflow. This automated reflow check is not browser zoom. A
-separate dated local Chrome check must set and read a true 2x tab zoom through
-`chrome.tabs.setZoom(2)`; that manual/local evidence is not a CI claim. Run the
-design-system catalog check, design-system and workbench unit/browser/offline
-gates, web tests, lint, typecheck, builds, exact `pnpm check`, Prettier, stale
-contract scans, and `git diff --check`.
+AST contract parses the actual production TSX, pins the 19 reviewed
+`renderIcon={Identifier}` callsites and 2 direct decorative status-icon uses,
+their facade imports and visible labels, rejects icon-only replacements and
+direct upstream imports, and protects the Phase 10 throwaway marker and zero
+CSS/design-system/icon boundary. A committed operational Playwright spec checks
+the real public and authenticated controls through a production stack for
+label-derived accessible names, Carbon SVG semantics and alignment, 44px
+targets, keyboard operation, axe, console and page errors, Phase 10 content
+exclusion, and 640 CSS-pixel layout-equivalent reflow with no document overflow.
+This automated reflow check is not browser zoom. A separate dated local Chrome
+check must set and read a true 2x tab zoom through `chrome.tabs.setZoom(2)`;
+that manual/local evidence is not a CI claim. Run the design-system catalog
+check, design-system and workbench unit/browser/offline gates, web tests, lint,
+typecheck, builds, exact `pnpm check`, Prettier, stale contract scans, and
+`git diff --check`.
 
 ## Open questions
 
