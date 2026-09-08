@@ -224,6 +224,32 @@ describe('Better Auth route exposure', () => {
     expect(getAuthMock).not.toHaveBeenCalled();
   });
 
+  it('passes an invited address while public sign-up is off without forwarding invitation data', async () => {
+    const request = signUpRequest('Invited@bap.invalid');
+    const { pool, query } = poolWithState({ invited: true });
+    getAuthPoolMock.mockResolvedValue(pool);
+    downstreamPostMock.mockImplementation(
+      async (downstreamRequest: NextRequest) =>
+        Response.json(await downstreamRequest.json()),
+    );
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      email: 'Invited@bap.invalid',
+      name: 'Member',
+      password: 'test-only-password',
+    });
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(
+      query.mock.calls.some(([statement]) =>
+        String(statement).includes('auth.public_signup_enabled()'),
+      ),
+    ).toBe(false);
+    expect(downstreamPostMock).toHaveBeenCalledWith(request);
+  });
+
   it('rate limits before parsing or policy reads', async () => {
     const { pool, query } = poolWithState({ edgeCount: 4 });
     getAuthPoolMock.mockResolvedValue(pool);

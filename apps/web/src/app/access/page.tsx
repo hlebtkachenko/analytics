@@ -17,6 +17,7 @@ import {
   Select,
   SelectItem,
   Stack,
+  Tag,
   Tile,
 } from '@bap/design-system/react';
 import { useRouter } from 'next/navigation';
@@ -30,6 +31,7 @@ const organizationsSchema = z.array(
   z.object({
     id: z.string().min(1),
     name: z.string().min(1),
+    slug: z.string().min(1),
   }),
 );
 const accessSchema = z.object({
@@ -132,9 +134,12 @@ export default function AccessPage() {
   }
 
   const empty = state === 'idle' && organizations.length === 0;
+  const selectedOrganization = organizations.find(
+    (organization) => organization.id === organizationId,
+  );
 
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
       <Stack gap={7}>
         <h1>{t('access.title')}</h1>
         <Button
@@ -155,6 +160,7 @@ export default function AccessPage() {
           <InlineNotification
             kind="error"
             lowContrast
+            role="alert"
             subtitle={t('access.error')}
             title={t('access.denied')}
           />
@@ -194,13 +200,14 @@ export default function AccessPage() {
               <h2>{t('access.actions')}</h2>
               {/* Capabilities only choose which actions are offered, the database enforces access. */}
               <Grid>
-                {applicationAccess.capabilities.manageMembers ? (
+                {applicationAccess.capabilities.manageMembers &&
+                selectedOrganization ? (
                   <Column lg={4} md={4} sm={4}>
                     <Button
+                      href={`/${encodeURIComponent(selectedOrganization.slug)}/members`}
                       kind="tertiary"
                       renderIcon={UserMultiple}
                       size="lg"
-                      type="button"
                     >
                       {t('access.manageMembers')}
                     </Button>
@@ -208,23 +215,28 @@ export default function AccessPage() {
                 ) : null}
                 {applicationAccess.capabilities.manageGrants ? (
                   <Column lg={4} md={4} sm={4}>
-                    <Button
-                      kind="tertiary"
-                      renderIcon={Security}
-                      size="lg"
-                      type="button"
-                    >
-                      {t('access.manageGrants')}
-                    </Button>
+                    <Tile>
+                      <Stack gap={3}>
+                        <Security
+                          aria-hidden="true"
+                          focusable="false"
+                          size={20}
+                        />
+                        <h3>{t('access.manageGrants')}</h3>
+                        <Tag type="gray">{t('access.unavailable')}</Tag>
+                        <p>{t('access.manageGrantsUnavailable')}</p>
+                      </Stack>
+                    </Tile>
                   </Column>
                 ) : null}
-                {applicationAccess.capabilities.uploadData ? (
+                {applicationAccess.capabilities.uploadData &&
+                selectedOrganization ? (
                   <Column lg={4} md={4} sm={4}>
                     <Button
+                      href={`/datasets?organization=${encodeURIComponent(selectedOrganization.slug)}#upload-dataset`}
                       kind="tertiary"
                       renderIcon={Upload}
                       size="lg"
-                      type="button"
                     >
                       {t('access.uploadData')}
                     </Button>
@@ -232,14 +244,18 @@ export default function AccessPage() {
                 ) : null}
                 {applicationAccess.capabilities.useAi ? (
                   <Column lg={4} md={4} sm={4}>
-                    <Button
-                      kind="tertiary"
-                      renderIcon={AiGenerate}
-                      size="lg"
-                      type="button"
-                    >
-                      {t('access.useAi')}
-                    </Button>
+                    <Tile>
+                      <Stack gap={3}>
+                        <AiGenerate
+                          aria-hidden="true"
+                          focusable="false"
+                          size={20}
+                        />
+                        <h3>{t('access.useAi')}</h3>
+                        <Tag type="gray">{t('access.unavailable')}</Tag>
+                        <p>{t('access.useAiUnavailable')}</p>
+                      </Stack>
+                    </Tile>
                   </Column>
                 ) : null}
               </Grid>

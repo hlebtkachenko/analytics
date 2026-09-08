@@ -12,7 +12,7 @@ const throwawayMarker =
 const reviewedImports = {
   'app/(identity)/forgot-password/page.tsx': ['Email'],
   'app/(identity)/reset-password/reset-password-form.tsx': ['Password'],
-  'app/(identity)/sign-in/page.tsx': ['Login'],
+  'app/(identity)/sign-in/sign-in-form.tsx': ['Login'],
   'app/(identity)/sign-in/two-factor/page.tsx': ['Checkmark'],
   'app/(identity)/sign-up/sign-up-form.tsx': ['UserFollow'],
   'app/access/page.tsx': [
@@ -24,7 +24,7 @@ const reviewedImports = {
     'UserMultiple',
   ],
   'app/datasets/page.tsx': ['Upload', 'View'],
-  'app/invitation/[invitationId]/page.tsx': ['Checkmark'],
+  'app/invitation/[invitationId]/invitation-client.tsx': ['Checkmark'],
   'components/datasets/dataset-chat.tsx': ['Send'],
   'components/datasets/dataset-export.tsx': ['Download'],
   'components/datasets/dataset-view.tsx': ['ArrowLeft', 'ArrowRight', 'Close'],
@@ -44,7 +44,12 @@ const reviewedCallsites = [
     'Password',
     "{t('resetPassword.submit')}",
   ],
-  ['app/(identity)/sign-in/page.tsx', 'Button', 'Login', "{t('auth.signIn')}"],
+  [
+    'app/(identity)/sign-in/sign-in-form.tsx',
+    'Button',
+    'Login',
+    "{t('auth.signIn')}",
+  ],
   [
     'app/(identity)/sign-in/two-factor/page.tsx',
     'Button',
@@ -65,13 +70,11 @@ const reviewedCallsites = [
     'UserMultiple',
     "{t('access.manageMembers')}",
   ],
-  ['app/access/page.tsx', 'Button', 'Security', "{t('access.manageGrants')}"],
   ['app/access/page.tsx', 'Button', 'Upload', "{t('access.uploadData')}"],
-  ['app/access/page.tsx', 'Button', 'AiGenerate', "{t('access.useAi')}"],
   ['app/datasets/page.tsx', 'Button', 'View', "{t('datasets.open')}"],
   ['app/datasets/page.tsx', 'Button', 'Upload', "{t('datasets.uploadSubmit')}"],
   [
-    'app/invitation/[invitationId]/page.tsx',
+    'app/invitation/[invitationId]/invitation-client.tsx',
     'Button',
     'Checkmark',
     "{t('invitation.accept')}",
@@ -148,8 +151,16 @@ type IconCallsite = Readonly<{
   selfClosing: boolean;
 }>;
 
+type DirectIconCallsite = Readonly<{
+  attributes: Readonly<Record<string, string>>;
+  file: string;
+  icon: string;
+  selfClosing: boolean;
+}>;
+
 type ParsedSource = Readonly<{
   callsites: readonly IconCallsite[];
+  directCallsites: readonly DirectIconCallsite[];
   file: string;
   imports: readonly IconImport[];
   importModules: readonly string[];
@@ -223,6 +234,7 @@ function parseSource(file: string): ParsedSource {
   const imports: IconImport[] = [];
   const importModules: string[] = [];
   const callsites: IconCallsite[] = [];
+  const directCallsites: DirectIconCallsite[] = [];
 
   for (const statement of sourceFile.statements) {
     if (
@@ -248,12 +260,43 @@ function parseSource(file: string): ParsedSource {
     }
   }
 
+  const importedIconNames = new Set(
+    imports
+      .filter((binding) => binding.module === iconFacade)
+      .map((binding) => binding.local),
+  );
+
   function visit(node: ts.Node): void {
     if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
       const opening = ts.isJsxElement(node) ? node.openingElement : node;
       const renderIcon = opening.attributes.properties.find(
         (attribute) => attributeName(attribute) === 'renderIcon',
       );
+      const tagName = opening.tagName.getText(sourceFile);
+
+      if (importedIconNames.has(tagName)) {
+        directCallsites.push({
+          attributes: Object.fromEntries(
+            opening.attributes.properties.flatMap((attribute) => {
+              if (!ts.isJsxAttribute(attribute)) {
+                return [];
+              }
+              const initializer = attribute.initializer;
+              const value = !initializer
+                ? ''
+                : ts.isStringLiteral(initializer)
+                  ? initializer.text
+                  : ts.isJsxExpression(initializer) && initializer.expression
+                    ? `{${initializer.expression.getText(sourceFile)}}`
+                    : initializer.getText(sourceFile);
+              return [[attribute.name.getText(sourceFile), value]] as const;
+            }),
+          ),
+          file: relativeFile,
+          icon: tagName,
+          selfClosing: ts.isJsxSelfClosingElement(node),
+        });
+      }
 
       if (renderIcon && ts.isJsxAttribute(renderIcon)) {
         const initializer = renderIcon.initializer;
@@ -284,7 +327,14 @@ function parseSource(file: string): ParsedSource {
   }
 
   visit(sourceFile);
-  return { callsites, file: relativeFile, imports, importModules, sourceFile };
+  return {
+    callsites,
+    directCallsites,
+    file: relativeFile,
+    imports,
+    importModules,
+    sourceFile,
+  };
 }
 
 function leadingComments(sourceFile: ts.SourceFile): string[] {
@@ -370,6 +420,49 @@ describe('Carbon application icon AST contract', () => {
     }
   });
 
+  it('pins direct decorative status icons and their accessibility contract', () => {
+    const actualCallsites = parsedSources.flatMap(
+      (source) => source.directCallsites,
+    );
+
+    expect(actualCallsites).toEqual([
+      {
+        attributes: {
+          'aria-hidden': 'true',
+          focusable: 'false',
+          size: '{20}',
+        },
+        file: 'app/access/page.tsx',
+        icon: 'Security',
+        selfClosing: true,
+      },
+      {
+        attributes: {
+          'aria-hidden': 'true',
+          focusable: 'false',
+          size: '{20}',
+        },
+        file: 'app/access/page.tsx',
+        icon: 'AiGenerate',
+        selfClosing: true,
+      },
+    ]);
+
+    for (const callsite of actualCallsites) {
+      const source = parsedSources.find(
+        (candidate) => candidate.file === callsite.file,
+      );
+      expect(
+        source?.imports.find((binding) => binding.local === callsite.icon),
+        `${callsite.file}: ${callsite.icon}`,
+      ).toEqual({
+        imported: callsite.icon,
+        local: callsite.icon,
+        module: iconFacade,
+      });
+    }
+  });
+
   it('keeps every Phase 10 route marker and import exclusion exact', () => {
     for (const relativeFile of throwawayPages) {
       const source = parsedSources.find(
@@ -409,7 +502,7 @@ describe('Carbon application icon AST contract', () => {
     ).toEqual([]);
   });
 
-  it('keeps the temporary account implementation intentionally icon-free', () => {
+  it('keeps the temporary account implementation intentionally plain', () => {
     for (const relativeFile of intentionalPlainAccountSources) {
       const source = parsedSources.find(
         (candidate) => candidate.file === relativeFile,
@@ -419,7 +512,10 @@ describe('Carbon application icon AST contract', () => {
       expect(
         source!.importModules.filter(
           (module) =>
-            module === iconFacade || module.startsWith('@carbon/icons-react'),
+            module.startsWith('@bap/design-system') ||
+            module.startsWith('@carbon/') ||
+            module.endsWith('.css') ||
+            module.endsWith('.scss'),
         ),
         relativeFile,
       ).toEqual([]);

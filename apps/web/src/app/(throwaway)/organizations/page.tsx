@@ -32,7 +32,7 @@ export default async function OrganizationsPage() {
   }
 
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
       <h1>Organizations</h1>
       <p>
         <Link href="/organizations/new">Create organization</Link>

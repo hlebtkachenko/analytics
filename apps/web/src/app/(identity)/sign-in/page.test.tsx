@@ -11,8 +11,18 @@ import { I18nProvider } from '../../../i18n/client-provider';
 import SignInPage from './page';
 
 const mocks = vi.hoisted(() => ({
+  getAuthPool: vi.fn(),
+  publicSignupEnabled: vi.fn(),
   replace: vi.fn(),
   signIn: vi.fn(),
+}));
+
+vi.mock('@bap/db/access', () => ({
+  publicSignupEnabled: mocks.publicSignupEnabled,
+}));
+
+vi.mock('../../../lib/auth/server', () => ({
+  getAuthPool: mocks.getAuthPool,
 }));
 
 vi.mock('../../../lib/auth/client', () => ({
@@ -28,18 +38,17 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function renderSignIn() {
-  return render(
-    <I18nProvider>
-      <SignInPage />
-    </I18nProvider>,
-  );
+async function renderSignIn(publicSignup = true) {
+  const pool = {};
+  mocks.getAuthPool.mockResolvedValue(pool);
+  mocks.publicSignupEnabled.mockResolvedValue(publicSignup);
+  return render(<I18nProvider>{await SignInPage()}</I18nProvider>);
 }
 
 describe('SignInPage', () => {
   it('continues to the access page after successful authentication', async () => {
     mocks.signIn.mockResolvedValue({ data: {}, error: null });
-    renderSignIn();
+    await renderSignIn();
     fireEvent.change(screen.getByLabelText('Email address'), {
       target: { value: 'owner@bap.invalid' },
     });
@@ -56,7 +65,7 @@ describe('SignInPage', () => {
       data: { twoFactorMethods: ['totp'], twoFactorRedirect: true },
       error: null,
     });
-    renderSignIn();
+    await renderSignIn();
     fireEvent.change(screen.getByLabelText('Email address'), {
       target: { value: 'owner@bap.invalid' },
     });
@@ -76,7 +85,7 @@ describe('SignInPage', () => {
       data: null,
       error: { message: 'Denied' },
     });
-    renderSignIn();
+    await renderSignIn();
     fireEvent.submit(screen.getByRole('form', { name: 'Sign in to BAP' }));
 
     expect(
@@ -89,11 +98,31 @@ describe('SignInPage', () => {
     expect(mocks.replace).not.toHaveBeenCalled();
   });
 
-  it('links to password recovery', () => {
-    renderSignIn();
+  it('links to password recovery and discovers public sign-up when enabled', async () => {
+    await renderSignIn();
 
     expect(
       screen.getByRole('link', { name: 'Forgot your password?' }),
     ).toHaveAttribute('href', '/forgot-password');
+    expect(
+      screen.getByRole('link', { name: 'Create an account' }),
+    ).toHaveAttribute('href', '/sign-up');
+  });
+
+  it('does not advertise public sign-up when the switch is off or unreadable', async () => {
+    await renderSignIn(false);
+    expect(
+      screen.queryByRole('link', { name: 'Create an account' }),
+    ).not.toBeInTheDocument();
+
+    cleanup();
+    mocks.publicSignupEnabled.mockRejectedValueOnce(
+      new Error('private database detail'),
+    );
+    render(<I18nProvider>{await SignInPage()}</I18nProvider>);
+    expect(
+      screen.queryByRole('link', { name: 'Create an account' }),
+    ).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('private database detail');
   });
 });

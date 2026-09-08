@@ -74,6 +74,7 @@ export const organizationCreationConfiguration = {
   creatorRole: 'owner',
   disableOrganizationDeletion: true,
   membershipLimit: 100,
+  requireEmailVerificationOnInvitation: true,
 } as const;
 
 export const organizationIdRequiredPaths = {

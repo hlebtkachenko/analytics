@@ -15,7 +15,15 @@ export default async function OrganizationPage({
   }
 
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
+      <nav aria-label="Breadcrumb">
+        <ol>
+          <li>
+            <Link href="/organizations">Organizations</Link>
+          </li>
+          <li aria-current="page">{organization.name}</li>
+        </ol>
+      </nav>
       <h1>{organization.name}</h1>
       <p>Your role: {organization.role}</p>
       <nav aria-label="Organization">

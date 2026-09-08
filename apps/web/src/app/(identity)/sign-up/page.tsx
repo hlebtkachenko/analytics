@@ -12,5 +12,5 @@ async function isPublicSignUpEnabled(): Promise<boolean> {
 }
 
 export default async function SignUpPage() {
-  return <SignUpForm enabled={await isPublicSignUpEnabled()} />;
+  return <SignUpForm publicSignupEnabled={await isPublicSignUpEnabled()} />;
 }

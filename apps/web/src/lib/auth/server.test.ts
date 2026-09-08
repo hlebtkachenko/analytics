@@ -626,6 +626,7 @@ describe('organization creation policy', () => {
       creatorRole: 'owner',
       disableOrganizationDeletion: true,
       membershipLimit: 100,
+      requireEmailVerificationOnInvitation: true,
     });
   });
 

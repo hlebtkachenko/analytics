@@ -54,7 +54,7 @@ async function submitSignUp(): Promise<void> {
 }
 
 describe('SignUpPage', () => {
-  it('renders the form only when the server-side switch read is enabled', async () => {
+  it('renders public or invitation-only guidance from the server-side switch', async () => {
     const pool = {};
     mocks.getAuthPool.mockResolvedValue(pool);
     mocks.publicSignupEnabled.mockResolvedValueOnce(true);
@@ -64,6 +64,9 @@ describe('SignUpPage', () => {
     expect(
       screen.getByRole('form', { name: 'Create your BAP account' }),
     ).toBeVisible();
+    expect(
+      screen.queryByText('Account creation requires an invitation.'),
+    ).not.toBeInTheDocument();
     expect(mocks.publicSignupEnabled).toHaveBeenCalledWith(pool);
 
     cleanup();
@@ -71,14 +74,19 @@ describe('SignUpPage', () => {
     await renderSignUp();
 
     expect(
-      screen.queryByRole('form', { name: 'Create your BAP account' }),
-    ).not.toBeInTheDocument();
+      screen.getByRole('form', { name: 'Create your BAP account' }),
+    ).toBeVisible();
     expect(
-      screen.getByText('Account creation is not available right now.'),
+      screen.getByText('Account creation requires an invitation.'),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        'If you received an organization invitation, create the account using the invited email address.',
+      ),
     ).toBeVisible();
   });
 
-  it('fails closed when the server-side switch read fails', async () => {
+  it('falls back to invitation-only guidance when the switch read fails', async () => {
     mocks.getAuthPool.mockResolvedValue({});
     mocks.publicSignupEnabled.mockRejectedValue(
       new Error('private database detail'),
@@ -86,7 +94,10 @@ describe('SignUpPage', () => {
 
     await renderSignUp();
 
-    expect(screen.queryByRole('form')).not.toBeInTheDocument();
+    expect(screen.getByRole('form')).toBeVisible();
+    expect(
+      screen.getByText('Account creation requires an invitation.'),
+    ).toBeVisible();
     expect(mocks.publicSignupEnabled).toHaveBeenCalledOnce();
     expect(document.body.textContent).not.toContain('private database detail');
   });

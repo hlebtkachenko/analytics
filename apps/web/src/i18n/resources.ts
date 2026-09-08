@@ -13,6 +13,8 @@ export const resources = {
         error: 'Organization access could not be checked.',
         loading: 'Checking organization access.',
         manageGrants: 'Manage data grants',
+        manageGrantsUnavailable:
+          'Data-grant management is not available in this interface yet.',
         manageMembers: 'Manage members',
         organization: 'Organization',
         reporting: 'Reporting API role',
@@ -20,9 +22,13 @@ export const resources = {
         selectOrganization: 'Select an organization',
         title: 'Organization access',
         uploadData: 'Upload data',
+        unavailable: 'Unavailable',
         useAi: 'Ask the assistant',
+        useAiUnavailable:
+          'The general assistant is not available from this page yet.',
       },
       auth: {
+        createAccount: 'Create an account',
         email: 'Email address',
         forgotPassword: 'Forgot your password?',
         password: 'Password',
@@ -127,6 +133,11 @@ export const resources = {
         loading: 'Checking the invitation.',
         organization: 'Organization',
         role: 'Role',
+        signedOutGuidance:
+          'Sign in with the invited address if you already have an account. Otherwise, create an account with that address, verify it, then return to this invitation link.',
+        signedOutTitle: 'Organization invitation',
+        signInLink: 'Sign in',
+        signUpLink: 'Create invited account',
         summary: 'You were invited to join an organization on BAP.',
         title: 'Organization invitation',
       },
@@ -147,9 +158,11 @@ export const resources = {
         title: 'Choose a new password',
       },
       signUp: {
-        closed: 'Account creation is not available right now.',
         email: 'Email address',
         failed: 'The account could not be created. Try again.',
+        invitationOnly: 'Account creation requires an invitation.',
+        invitationOnlySummary:
+          'If you received an organization invitation, create the account using the invited email address.',
         name: 'Full name',
         password: 'Password',
         passwordHelper: 'Use 14 to 128 characters.',

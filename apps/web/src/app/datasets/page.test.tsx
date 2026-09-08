@@ -34,7 +34,13 @@ const columns = [
 function respondWithUpload(uploadData: boolean) {
   return vi.fn(async (input: string) => {
     if (input === '/api/auth/organization/list') {
-      return Response.json([{ id: 'organization_1', name: 'Organization 1' }]);
+      return Response.json([
+        {
+          id: 'organization_1',
+          name: 'Organization 1',
+          slug: 'organization-1',
+        },
+      ]);
     }
 
     if (input.includes('/rows')) {
@@ -86,7 +92,13 @@ const secondDataset = {
 function respondWithTwoDatasets() {
   return vi.fn(async (input: string) => {
     if (input === '/api/auth/organization/list') {
-      return Response.json([{ id: 'organization_1', name: 'Organization 1' }]);
+      return Response.json([
+        {
+          id: 'organization_1',
+          name: 'Organization 1',
+          slug: 'organization-1',
+        },
+      ]);
     }
 
     if (input === '/api/chat') {
@@ -191,6 +203,40 @@ describe('DatasetsPage', () => {
     }
   });
 
+  it('returns from the dataset breadcrumb through its native link', async () => {
+    vi.stubGlobal('fetch', respondWithUpload(true));
+
+    renderDatasetsPage();
+
+    const openButton = await screen.findByRole('button', {
+      name: 'Open Placeholder dataset',
+    });
+    fireEvent.click(openButton);
+    await screen.findByRole('table', { name: 'Dataset rows' });
+
+    const breadcrumb = screen.getByRole('navigation', {
+      name: 'Breadcrumb',
+    });
+    const datasetsLink = within(breadcrumb).getByRole('link', {
+      name: 'Datasets',
+    });
+    const currentDataset = within(breadcrumb).getByText('Placeholder dataset');
+
+    expect(datasetsLink).toHaveAttribute('href', '#dataset-list');
+    expect(currentDataset).toHaveAttribute('aria-current', 'true');
+    expect(breadcrumb).not.toHaveTextContent(dataset.id);
+
+    // Keyboard activation of a native link dispatches a click with no pointer detail.
+    datasetsLink.focus();
+    expect(datasetsLink).toHaveFocus();
+    fireEvent.click(datasetsLink, { detail: 0 });
+
+    expect(
+      screen.queryByRole('table', { name: 'Dataset rows' }),
+    ).not.toBeInTheDocument();
+    expect(document.querySelector('#dataset-list')).toBeInTheDocument();
+  });
+
   it('opens a second dataset at its first page with no rows or chat carried over', async () => {
     const fetchMock = respondWithTwoDatasets();
     vi.stubGlobal('fetch', fetchMock);
@@ -248,7 +294,11 @@ describe('DatasetsPage', () => {
       vi.fn(async (input: string) => {
         if (input === '/api/auth/organization/list') {
           return Response.json([
-            { id: 'organization_1', name: 'Organization 1' },
+            {
+              id: 'organization_1',
+              name: 'Organization 1',
+              slug: 'organization-1',
+            },
           ]);
         }
 
