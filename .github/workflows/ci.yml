@@ -179,10 +179,10 @@ jobs:
       - name: Validate Compose configuration models
         run: node scripts/verify-compose-models.mjs
 
-      - name: Validate backup entrypoints
+      - name: Validate shell entrypoints
         run: |
-          bash -n scripts/backup-entrypoint.sh scripts/backup-stage-entrypoint.sh scripts/create-local-secrets.sh
-          shellcheck scripts/backup-entrypoint.sh scripts/backup-stage-entrypoint.sh scripts/create-local-secrets.sh
+          bash -n scripts/backup-entrypoint.sh scripts/backup-stage-entrypoint.sh scripts/create-local-secrets.sh scripts/conductor-setup.sh scripts/conductor-archive.sh
+          shellcheck scripts/backup-entrypoint.sh scripts/backup-stage-entrypoint.sh scripts/create-local-secrets.sh scripts/conductor-setup.sh scripts/conductor-archive.sh
 
       - name: Validate Caddy configurations
         run: |

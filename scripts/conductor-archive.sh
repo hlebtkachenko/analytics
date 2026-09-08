@@ -3,7 +3,15 @@
 # Archiving deletes the workspace itself, so anything left here leaks for the life of the machine.
 set -uo pipefail
 
-cd "$(dirname "$0")/.."
+if ! script_directory=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd); then
+  echo "Cannot resolve the Conductor script directory, so no Docker resources were changed." >&2
+  exit 0
+fi
+
+if ! cd -- "$script_directory/.."; then
+  echo "Cannot enter the repository, so no Docker resources were changed." >&2
+  exit 0
+fi
 
 # Archiving must never be blocked, so a missing or stopped Docker is reported and accepted.
 if ! command -v docker >/dev/null 2>&1; then
