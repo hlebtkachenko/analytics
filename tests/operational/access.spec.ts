@@ -66,6 +66,7 @@ test('protects the authenticated BAP access contract without browser token leaka
       bffRequests.push(request.headers());
     }
   });
+  // the page may close before a late BFF body is read
   page.on('response', async (response) => {
     if (!response.url().includes('/api/bff/')) {
       return;
@@ -74,7 +75,7 @@ test('protects the authenticated BAP access contract without browser token leaka
     const status = response.status();
     bffResponses.push({
       body: response.headers()['content-type']?.includes('application/json')
-        ? await response.json()
+        ? await response.json().catch(() => null)
         : null,
       headers: response.headers(),
       status,
