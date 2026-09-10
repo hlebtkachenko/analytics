@@ -1,0 +1,43 @@
+name: Dependabot auto-merge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CI: 'true'
+  IBM_TELEMETRY_DISABLED: 'true'
+  NEXT_TELEMETRY_DISABLED: '1'
+  NO_UPDATE_NOTIFIER: '1'
+  TURBO_TELEMETRY_DISABLED: '1'
+
+jobs:
+  enable-auto-merge:
+    name: Enable auto-merge
+    if:
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.repository == 'hlebtkachenko/analytics'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Read Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2.5.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Major updates are left for a human to review and merge manually.
+      - name: Enable auto-merge for non-major updates
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        run: gh pr merge --auto --merge "$PR_URL"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
