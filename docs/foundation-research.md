@@ -8,7 +8,7 @@ outside the research scope.
 
 | Foundation | Pinned version | Reason                                                  |
 | ---------- | -------------: | ------------------------------------------------------- |
-| Node.js    |        24.20.0 | Active LTS compatible with NestJS 12 tooling            |
+| Node.js    |        24.21.0 | Active LTS compatible with NestJS 12 tooling            |
 | pnpm       |        11.24.0 | Workspace catalogs and strict dependency controls       |
 | TypeScript |          6.0.3 | Requested major and supported by typescript-eslint 8.68 |
 | Turborepo  |        2.10.12 | Cached workspace task graph                             |

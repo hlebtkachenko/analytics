@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Node.js 24.20.0
+- Node.js 24.21.0
 - pnpm 11.24.0 through Corepack
 - Docker Engine with Compose v2
 
@@ -21,7 +21,7 @@ Corepack, and seeds the local secret files. Run `pnpm check` separately. See
 [the Conductor workspace notes](development.md#conductor-workspaces).
 
 `engineStrict` rejects Node.js versions outside the supported 24.x range in
-`package.json`. Repository scripts and CI use the exact 24.20.0 pin, and the
+`package.json`. Repository scripts and CI use the exact 24.21.0 pin, and the
 Conductor setup script enforces that exact active version before installation.
 Run `nvm use` in the shell, or restart the editor or terminal application when
 it still carries another Node.js path from a previous session.

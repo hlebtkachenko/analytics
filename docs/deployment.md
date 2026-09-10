@@ -37,7 +37,7 @@ unrestricted outbound connectivity while they run, not a destination allowlist.
 Production Caddy enables TLS when the owner supplies a valid public host,
 origin, DNS, and ACME reachability.
 
-Application images use Node.js 24.20.0, frozen pnpm dependencies, non-root
+Application images use Node.js 24.21.0, frozen pnpm dependencies, non-root
 runtime users, dropped Linux capabilities, and health checks. The operations
 image has a root-only credential staging wrapper with four explicit
 capabilities, then executes every networked restic and PostgreSQL client as UID
