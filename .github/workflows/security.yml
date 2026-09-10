@@ -61,7 +61,7 @@ jobs:
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-scopes: runtime,development
-          fail-on-severity: high
+          fail-on-severity: moderate
           show-openssf-scorecard: false
           show-patched-versions: true
 
@@ -89,8 +89,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Audit high-severity advisories
-        run: pnpm audit --audit-level high
+      - name: Audit moderate-severity advisories
+        run: pnpm audit --audit-level moderate
 
   codeql:
     name: CodeQL
