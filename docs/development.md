@@ -76,6 +76,22 @@ All 3 named arguments are required. The command writes only through a local
 owner role inside its transaction and emits the resulting row as JSON. Do not
 run it in web or add the migrator credential to a long-lived service.
 
+## Two-level tenancy demo
+
+One command builds a disposable stack, creates an owner, an admin, and a member
+of the same organization with one generated local password, and runs the legal
+entity browser proof with a narrated reporter:
+
+```sh
+pnpm demo:tenancy
+pnpm demo:tenancy:down
+```
+
+It uses the same Compose files and ports as the operational proof workflow (web
+39100, PostgreSQL 39432, Mailpit 39825), resets any previous demo stack first,
+and leaves the stack running so the three roles can be explored by hand. The
+printed password is disposable and local only.
+
 ## Conductor workspaces
 
 Each Conductor workspace is a separate git worktree, so everything the

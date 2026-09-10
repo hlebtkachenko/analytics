@@ -221,8 +221,10 @@ The profiled owner-bootstrap service is the only dual-tier exception: it mounts
 the auth credential used by Better Auth and a separate migrator credential used
 only to establish the minimum initial organization quota. The migrator pool is
 closed before the organization API call. The gated operational synthetic setup
-runs as a command override of this one-shot service. Long-lived web has neither
-the migrator environment path nor its secret mount.
+runs as a command override of this one-shot service. Its second input shape adds
+a verified user to an organization already resolved by slug through a narrow
+`@bap/db` accessor, creating no organization and consuming no quota. Long-lived
+web has neither the migrator environment path nor its secret mount.
 
 The general organization-quota command runs in the existing one-shot migrator
 service. It has no auth credential, web route, or long-lived process and returns

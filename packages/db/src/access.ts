@@ -427,6 +427,19 @@ export async function resolveMembership(
   return { emailVerified: row.email_verified, role: role.data };
 }
 
+// Slug-only lookup for the gated synthetic setup path, never a request-time resolver.
+export async function findOrganizationIdBySlug(
+  pool: DatabasePool,
+  organizationSlug: string,
+): Promise<string | null> {
+  const result = await pool.query<{ id: string }>(
+    'select id from auth.organization where slug = $1 limit 1',
+    [organizationSlug],
+  );
+
+  return result.rows[0]?.id ?? null;
+}
+
 export async function resolveOrganizationRoute(
   pool: DatabasePool,
   input: ResolveOrganizationRouteInput,

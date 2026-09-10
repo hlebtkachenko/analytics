@@ -181,24 +181,61 @@ synthetic browser session. The public access assertions remain unauthenticated,
 and the lexically final sign-out spec closes the shared session and proves the
 post-sign-out 401.
 
-The combined serial suite uses exactly 3 sign-in requests per 60 seconds: the
-shared synthetic owner browser session, the expected unverified-account denial,
-and one verified invited-recipient sign-in. That recipient follows the fixed
-invitation link and submits the visible sign-up form while public sign-up is off
-as attempt 2 in the same 4-attempt edge bucket, verifies through the internal
-Mailpit API without emitting a message body, link, token, or address, reopens
-and accepts the real invitation, and is then changed to `admin` and removed by
-the owner through the real organization workflow. The one-worker operational
-configuration disables Playwright tracing, and the sensitive lifecycle reports
-only fixed errors or sanitized pathnames. Its member locators contain no invitee
-address, so a failed proof does not retain the token, invitation id, or address
-in test artifacts or assertion output.
+The combined serial suite issues 5 sign-in requests in total: the shared
+synthetic owner browser session, the synthetic admin and member sessions of the
+legal entity proof, the expected unverified-account denial, and one verified
+invited-recipient sign-in. Better Auth still allows only 3 a minute per client,
+so every browser sign-in goes through one shared helper that waits out a 429 and
+submits the same form again instead of failing the run. That recipient follows
+the fixed invitation link and submits the visible sign-up form while public
+sign-up is off as attempt 2 in the same 4-attempt edge bucket, verifies through
+the internal Mailpit API without emitting a message body, link, token, or
+address, reopens and accepts the real invitation, and is then changed to `admin`
+and removed by the owner through the real organization workflow. The one-worker
+operational configuration disables Playwright tracing, and the sensitive
+lifecycle reports only fixed errors or sanitized pathnames. Its member locators
+contain no invitee address, so a failed proof does not retain the token,
+invitation id, or address in test artifacts or assertion output. The synthetic
+admin and member addresses are the only ones the membership assertions exclude
+by name.
+
+Every authenticated spec also stays inside the 60-requests-a-minute subject rule
+of the application API. Dataset readiness is polled on a widening interval, the
+legal entity proof reuses its own scope switch instead of a second page load,
+and a scope switch that is denied is driven again rather than trusted, because a
+denied request consumes no budget and the fixed window resets within a minute.
+
+The two-level tenancy proof runs as `tests/operational/legal-entities.spec.ts`
+against the same disposable stack. Its narrated steps prove that the owner
+creates two neutral legal entities, restricts the member to the first one
+through the members page scope editor, that an admin is offered the create form
+and no delete control, that the member's `/access` page reports read-only
+capabilities and the restricted scope, that the member's dataset scope select
+lists only the permitted entity, that an owner upload lands in the chosen entity
+and the all-entities versus one-entity switch filters it, and that the owner
+deletes the admin-created entity. The spec signs in the admin and the member
+once each in their own browser contexts and waits out the shared 3-per-minute
+sign-in rule rather than retrying blindly.
+
+```sh
+pnpm demo:tenancy
+pnpm demo:tenancy:down
+```
+
+`pnpm demo:tenancy` is the same proof as a one-command local demo. It creates
+the disposable secrets, resets and rebuilds the stack on the CI ports, creates
+the owner, admin, and member accounts with one generated disposable password,
+grants the organization quota, runs the legal entity spec with the list
+reporter, and then prints the URLs, the three addresses, the password, and the
+organization slug while leaving the stack running for manual exploration.
+`pnpm demo:tenancy:down` removes it with its volumes.
 
 The scheduled and manually runnable GitHub Actions operational proof creates a
-disposable local Compose stack, creates a gated synthetic account, completes a
-browser sign-in and organization-access check, then backs up and restores the
-database into a separate service. The serial Caddy-path proof owns its switch
-transitions and returns the switch OFF in both test and workflow cleanup.
+disposable local Compose stack, creates a gated synthetic account plus a
+synthetic admin and member of the same organization, completes a browser sign-in
+and organization-access check, then backs up and restores the database into a
+separate service. The serial Caddy-path proof owns its switch transitions and
+returns the switch OFF in both test and workflow cleanup.
 
 Synthetic account creation is a command override of the profiled
 `bootstrap-owner` one-shot, not an exec inside long-lived web. The rendered
@@ -303,4 +340,8 @@ claim. A human VoiceOver confirmation is still required.
 The operational-proof synthetic-account command is unavailable unless
 `BAP_E2E_SETUP=true` is set. It accepts one strict JSON object on standard input
 and emits only status and generated IDs. It is not an HTTP endpoint and must not
-be used for interactive owner provisioning.
+be used for interactive owner provisioning. The same command takes a second
+strict shape, `{ email, name, password, organizationSlug, role }` with role
+`admin` or `member`, which resolves the existing organization by slug before any
+user write and joins the verified user through Better Auth's server-only
+`addMember`. That shape creates no organization and seeds no creation quota.

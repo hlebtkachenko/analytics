@@ -1,28 +1,55 @@
 import { stdin, stderr, stdout } from 'node:process';
 import { pathToFileURL } from 'node:url';
+import { findOrganizationIdBySlug } from '@bap/db/access';
 import { z } from 'zod';
 
-import { getAuth } from '../lib/auth/server.js';
+import { getAuth, getAuthPool } from '../lib/auth/server.js';
 import {
   normalizeOrganizationSlug,
   organizationSlugSchema,
 } from '../lib/organizations/slug.js';
 import { seedInitialOrganizationQuotaForCli } from './organization-quota.js';
 
-const syntheticAccountInputSchema = z
+const syntheticAccountShape = {
+  email: z.email().max(254),
+  name: z.string().trim().min(1).max(256),
+  organizationSlug: z.string().trim().min(1).max(256),
+  password: z.string().min(14).max(128),
+};
+
+// The owner form creates the organization; the member form joins an existing one.
+const syntheticOwnerInputSchema = z
   .object({
-    email: z.email().max(254),
-    name: z.string().trim().min(1).max(256),
+    ...syntheticAccountShape,
     organizationName: z.string().trim().min(1).max(256),
-    organizationSlug: z.string().trim().min(1).max(256),
-    password: z.string().min(14).max(128),
   })
   .strict();
+
+const syntheticMemberInputSchema = z
+  .object({
+    ...syntheticAccountShape,
+    role: z.enum(['admin', 'member']),
+  })
+  .strict();
+
+const syntheticAccountInputSchema = z.union([
+  syntheticOwnerInputSchema,
+  syntheticMemberInputSchema,
+]);
 
 export type SyntheticAccountInput = z.infer<typeof syntheticAccountInputSchema>;
 
 type SyntheticAuth = Readonly<{
   api: Readonly<{
+    addMember: (
+      input: Readonly<{
+        body: Readonly<{
+          organizationId: string;
+          role: 'admin' | 'member';
+          userId: string;
+        }>;
+      }>,
+    ) => Promise<unknown>;
     createOrganization: (
       input: Readonly<{
         body: Readonly<{ name: string; slug: string; userId: string }>;
@@ -49,6 +76,10 @@ type SyntheticAccountResult = Readonly<{
 type SyntheticCliOutput = Readonly<{
   write: (value: string) => boolean;
 }>;
+
+export type FindSyntheticOrganizationId = (
+  organizationSlug: string,
+) => Promise<string | null>;
 
 export function assertSyntheticSetupEnabled(
   environment: Readonly<Record<string, string | undefined>> = process.env,
@@ -89,29 +120,60 @@ export async function readSyntheticAccountInput(
   return parseSyntheticAccountInput(value);
 }
 
+// Reads the organization by slug through the gated auth pool, never a browser-supplied id.
+export async function findSyntheticOrganizationId(
+  organizationSlug: string,
+): Promise<string | null> {
+  return await findOrganizationIdBySlug(await getAuthPool(), organizationSlug);
+}
+
+async function createVerifiedUser(
+  auth: SyntheticAuth,
+  account: SyntheticAccountInput,
+): Promise<string> {
+  const created = await auth.api.createUser({
+    body: {
+      data: { emailVerified: true },
+      email: account.email,
+      name: account.name,
+      password: account.password,
+    },
+  });
+  return created.user.id;
+}
+
 export async function createSyntheticAccount(
   input: SyntheticAccountInput,
   auth: SyntheticAuth,
   seedQuota: (userId: string) => Promise<void>,
+  findOrganizationId: FindSyntheticOrganizationId,
 ): Promise<SyntheticAccountResult> {
   const validated = validateSyntheticAccountInput(input);
-  const user = await auth.api.createUser({
-    body: {
-      data: { emailVerified: true },
-      email: validated.email,
-      name: validated.name,
-      password: validated.password,
-    },
-  });
-  await seedQuota(user.user.id);
+
+  if ('role' in validated) {
+    // The organization is resolved before any user write, so an unknown slug stays side-effect free.
+    const organizationId = await findOrganizationId(validated.organizationSlug);
+    if (organizationId === null) {
+      throw new Error('Invalid synthetic account input.');
+    }
+
+    const userId = await createVerifiedUser(auth, validated);
+    await auth.api.addMember({
+      body: { organizationId, role: validated.role, userId },
+    });
+    return { organizationId, userId };
+  }
+
+  const userId = await createVerifiedUser(auth, validated);
+  await seedQuota(userId);
   const organization = await auth.api.createOrganization({
     body: {
       name: validated.organizationName,
       slug: validated.organizationSlug,
-      userId: user.user.id,
+      userId,
     },
   });
-  return { organizationId: organization.id, userId: user.user.id };
+  return { organizationId: organization.id, userId };
 }
 
 export function formatSyntheticAccountResult(
@@ -128,6 +190,7 @@ export async function runSyntheticAccountCli(
   seedQuota: (
     userId: string,
   ) => Promise<void> = seedInitialOrganizationQuotaForCli,
+  findOrganizationId: FindSyntheticOrganizationId = findSyntheticOrganizationId,
 ): Promise<void> {
   assertSyntheticSetupEnabled(environment);
   const account = await readSyntheticAccountInput(input);
@@ -135,6 +198,7 @@ export async function runSyntheticAccountCli(
     account,
     await loadAuth(),
     seedQuota,
+    findOrganizationId,
   );
   output.write(formatSyntheticAccountResult(result));
 }

@@ -1,8 +1,14 @@
 import { expect, test } from './authenticated-test';
+import {
+  ensureLegalEntity,
+  selectUploadLegalEntity,
+} from './legal-entity-support';
 
 const email = process.env.BAP_OPERATIONAL_EMAIL ?? 'owner@bap.invalid';
 const organizationId =
   process.env.BAP_OPERATIONAL_ORGANIZATION_ID ?? 'bap-operational';
+const organizationSlug =
+  process.env.BAP_OPERATIONAL_ORGANIZATION_SLUG ?? 'bap-operational';
 const password = process.env.BAP_OPERATIONAL_PASSWORD ?? '';
 
 // A synthetic fixture with no meaning: one text column, one numeric column, five rows.
@@ -17,6 +23,8 @@ const fixture = `${[
 
 // The worker names the dataset after the uploaded file, so a per-run name keeps the row unambiguous.
 const fixtureName = `operational-slice-${Date.now()}.csv`;
+// Neutral placeholder: every upload belongs to exactly one legal entity.
+const legalEntityName = 'Placeholder Slice';
 
 type DatasetList = Readonly<{
   datasets: ReadonlyArray<Readonly<{ name: string; status: string }>>;
@@ -35,10 +43,13 @@ test('imports an uploaded CSV and renders its rows and chart', async ({
     }
   });
 
+  await ensureLegalEntity(page, organizationSlug, legalEntityName);
   await page.goto('/datasets');
   await expect(
     page.getByRole('heading', { exact: true, name: 'Datasets' }),
   ).toBeVisible();
+  // Every upload belongs to exactly one legal entity, so the uploader picks one first.
+  await selectUploadLegalEntity(page, legalEntityName);
   // The uploader is offered only once the access contract grants the upload capability.
   const chooser = page.locator('input[name="file"]');
   await expect(chooser).toBeAttached();
@@ -77,7 +88,8 @@ test('imports an uploaded CSV and renders its rows and chart', async ({
             ?.status ?? 'absent'
         );
       },
-      { intervals: [1_000], timeout: 30_000 },
+      // A widening interval keeps the owner well inside the 60-per-minute subject rule.
+      { intervals: [1_000, 2_000, 3_000], timeout: 45_000 },
     )
     .toBe('ready');
 

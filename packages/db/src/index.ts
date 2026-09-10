@@ -4,6 +4,7 @@ export {
   consumePublicSignupEdgeRateLimit,
   DATABASE_MIGRATION_COMPATIBILITY,
   ensureInitialOrganizationQuota,
+  findOrganizationIdBySlug,
   getOrganizationCreationQuota,
   organizationCreationLimitReached,
   PUBLIC_SIGNUP_EDGE_RATE_LIMIT,

@@ -46,11 +46,14 @@ jobs:
   operational-proof:
     name: Browser and recovery proof
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # Two extra synthetic sign-ins and the legal entity proof add roughly three minutes.
+    timeout-minutes: 12
     env:
+      BAP_OPERATIONAL_ADMIN_EMAIL: admin@bap.invalid
       BAP_OPERATIONAL_BASE_URL: http://localhost:39100
       BAP_OPERATIONAL_EMAIL: owner@bap.invalid
       BAP_OPERATIONAL_MAILPIT_URL: http://127.0.0.1:39825
+      BAP_OPERATIONAL_MEMBER_EMAIL: member@bap.invalid
       BAP_PUBLIC_HOST: http://localhost
       BAP_PUBLIC_ORIGIN: http://localhost:39100
       POSTGRES_PORT: '39432'
@@ -110,6 +113,24 @@ jobs:
           printf 'BAP_OPERATIONAL_ORGANIZATION_ID=%s\n' "$organization_id" >> "$GITHUB_ENV"
           printf 'BAP_OPERATIONAL_USER_ID=%s\n' "$user_id" >> "$GITHUB_ENV"
 
+      - name: Create synthetic admin and member accounts
+        shell: bash
+        run: |
+          for role in admin member; do
+            case "$role" in
+              admin) email="$BAP_OPERATIONAL_ADMIN_EMAIL"; display='Operational Admin' ;;
+              member) email="$BAP_OPERATIONAL_MEMBER_EMAIL"; display='Operational Member' ;;
+            esac
+            input=$(jq -cn \
+              --arg email "$email" \
+              --arg name "$display" \
+              --arg organization_slug 'bap-operational' \
+              --arg role "$role" \
+              '{email: $email, password: env.BAP_OPERATIONAL_PASSWORD, name: $name, organizationSlug: $organization_slug, role: $role}')
+            result=$(printf '%s' "$input" | docker compose --profile bootstrap -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm --no-deps -T -e BAP_E2E_SETUP=true bootstrap-owner node apps/web/dist-cli/cli/create-synthetic-account.js)
+            printf '%s' "$result" | jq -er 'select(.status == "created") | .userId | select(type == "string" and test("^[A-Za-z0-9_-]{1,128}$"))' >/dev/null
+          done
+
       - name: Allow the temporary organization loop
         shell: bash
         run: |
@@ -119,7 +140,7 @@ jobs:
       - name: Run browser proof
         shell: bash
         run: |
-          pnpm exec playwright test --config playwright.operational.config.ts tests/operational/sign-up.spec.ts tests/operational/access.spec.ts tests/operational/icons.spec.ts tests/operational/identity.spec.ts tests/operational/organizations.spec.ts tests/operational/slice.spec.ts tests/operational/zz-sign-out.spec.ts
+          pnpm exec playwright test --config playwright.operational.config.ts tests/operational/sign-up.spec.ts tests/operational/access.spec.ts tests/operational/icons.spec.ts tests/operational/identity.spec.ts tests/operational/legal-entities.spec.ts tests/operational/organizations.spec.ts tests/operational/slice.spec.ts tests/operational/zz-sign-out.spec.ts
           if docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml logs --no-color web | grep -Fq 'could not determine a client IP'; then
             exit 1
           fi

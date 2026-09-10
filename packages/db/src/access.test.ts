@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   ensureInitialOrganizationQuota,
+  findOrganizationIdBySlug,
   getOrganizationCreationQuota,
   organizationCreationLimitReached,
   resolveMembership,
@@ -368,4 +369,23 @@ describe('organization accessors', () => {
       }),
     ).resolves.toBeNull();
   });
+
+  it.each([
+    { expected: 'organization-1', rows: [{ id: 'organization-1' }] },
+    { expected: null, rows: [] },
+  ])(
+    'resolves an organization id from its slug alone',
+    async ({ expected, rows }) => {
+      const query = vi.fn(async () => ({ rows }));
+      const pool = { query } as unknown as DatabasePool;
+
+      await expect(
+        findOrganizationIdBySlug(pool, 'organization-one'),
+      ).resolves.toBe(expected);
+      expect(query).toHaveBeenCalledWith(
+        'select id from auth.organization where slug = $1 limit 1',
+        ['organization-one'],
+      );
+    },
+  );
 });
