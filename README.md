@@ -24,7 +24,7 @@ repository contains only synthetic test data.
 
 ## Install
 
-Use Node.js 24.20.0 and pnpm 11.24.0.
+Use Node.js 24.21.0 and pnpm 11.24.0.
 
 ```sh
 corepack enable

@@ -80,7 +80,7 @@ jobs:
         with:
           cache: true
           install: false
-          runtime: node@24.20.0
+          runtime: node@24.21.0
           version: 11.24.0
 
       - name: Verify package signatures
