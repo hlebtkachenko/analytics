@@ -48,7 +48,7 @@ bash scripts/create-local-secrets.sh
 # The containers run as uid 1001; a host with another uid cannot hand them the 0600 files, so the demo mounts disposable copies.
 demo_secret_directory=$(mktemp -d)
 for secret_name in postgres_admin_password bap_migrator_password bap_auth_password bap_api_password bap_reporting_password bap_backup_password better_auth_secret resend_api_key ai_provider_config restic_password restic_repository; do
-  install -m 0644 ".secrets/$secret_name" "$demo_secret_directory/$secret_name"
+  install -m 0444 ".secrets/$secret_name" "$demo_secret_directory/$secret_name"
 done
 export POSTGRES_ADMIN_PASSWORD_FILE="$demo_secret_directory/postgres_admin_password"
 export BAP_MIGRATOR_PASSWORD_FILE="$demo_secret_directory/bap_migrator_password"
