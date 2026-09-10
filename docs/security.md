@@ -32,7 +32,10 @@ environments.
 ## Dependency updates
 
 Dependabot opens grouped weekly pull requests for the npm, GitHub Actions, and
-Docker ecosystems, and CI audits the dependency tree on every push.
+Docker ecosystems. CI audits the dependency tree on every pull request and every
+push to `main`, and fails at moderate severity, because a moderate advisory in a
+runtime dependency still reaches production. Pull requests additionally fail
+when a change newly introduces one in the runtime or development scope.
 
 The npm updater runs real pnpm against this workspace, so it inherits
 `strictPeerDependencies: true`. A bump whose peers the tree cannot satisfy
