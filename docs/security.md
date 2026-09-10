@@ -54,6 +54,13 @@ Dependabot supplies its own cooldown of three days, which is longer than the
 one-day workspace floor, and it bypasses that cooldown only for security
 updates.
 
+The `dependabot-auto-merge.yml` workflow enables GitHub auto-merge (merge
+commit) on Dependabot pull requests for non-major updates, so required checks
+still gate the merge and major updates are left for manual review. Docker base
+image and Compose image Dependabot pull requests still need a companion commit
+for the Node pin and Mailpit digest guards, so those pull requests do not
+auto-merge on their own.
+
 ## Runtime boundary
 
 Caddy is the sole public entry point. It blocks `/ready` and `/metrics` before
