@@ -29,9 +29,11 @@ import {
   datasetsPath,
   getJson,
   isAbortError,
+  legalEntitiesPath,
+  legalEntityListSchema,
   uploadsPath,
 } from '../../lib/datasets/client';
-import type { DatasetSummary } from '../../lib/datasets/client';
+import type { DatasetSummary, LegalEntity } from '../../lib/datasets/client';
 
 const organizationsSchema = z.array(
   z.object({
@@ -43,13 +45,19 @@ const organizationsSchema = z.array(
 // Mirrors the access contract the BFF validated; only the gated capabilities are read back.
 const accessSchema = z.object({
   capabilities: z.object({
-    manageGrants: z.boolean(),
+    createEntities: z.boolean(),
+    deleteEntities: z.boolean(),
+    manageEntityAccess: z.boolean(),
     manageMembers: z.boolean(),
+    manageOrganization: z.boolean(),
+    updateEntities: z.boolean(),
     uploadData: z.boolean(),
     useAi: z.boolean(),
   }),
   organizationId: z.string().min(1),
 });
+// The page scope is one entity or none at all; an absent filter is the all-entities view.
+const allEntitiesValue = '';
 
 const statusLabels = {
   failed: 'datasets.statusFailed',
@@ -67,6 +75,9 @@ export default function DatasetsPage() {
   const [organizationId, setOrganizationId] = useState('');
   const [access, setAccess] = useState<Access>();
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
+  const [legalEntities, setLegalEntities] = useState<LegalEntity[]>([]);
+  const [scopeEntityId, setScopeEntityId] = useState(allEntitiesValue);
+  const [uploadEntityId, setUploadEntityId] = useState(allEntitiesValue);
   const [openDataset, setOpenDataset] = useState<DatasetSummary>();
   const [reloads, setReloads] = useState(0);
   // One status per request, so a success can never repaint another request's failure as healthy.
@@ -74,6 +85,7 @@ export default function DatasetsPage() {
     useState<LoadState>('loading');
   const [accessState, setAccessState] = useState<LoadState>('loading');
   const [datasetsState, setDatasetsState] = useState<LoadState>('loading');
+  const [entitiesState, setEntitiesState] = useState<LoadState>('loading');
   const [file, setFile] = useState<File>();
   const [uploadState, setUploadState] = useState<
     'accepted' | 'error' | 'idle' | 'uploading'
@@ -140,7 +152,30 @@ export default function DatasetsPage() {
     }
 
     const controller = new AbortController();
-    void getJson(datasetsPath(organizationId), controller.signal)
+    void getJson(legalEntitiesPath(organizationId), controller.signal)
+      .then((payload) => legalEntityListSchema.parse(payload))
+      .then((list) => {
+        setLegalEntities(list.legalEntities);
+        setEntitiesState('idle');
+      })
+      .catch((error: unknown) => {
+        if (!isAbortError(error)) {
+          setLegalEntities([]);
+          setEntitiesState('error');
+        }
+      });
+    return () => {
+      controller.abort();
+    };
+  }, [organizationId, reloads]);
+
+  useEffect(() => {
+    if (organizationId.length === 0) {
+      return;
+    }
+
+    const controller = new AbortController();
+    void getJson(datasetsPath(organizationId, scopeEntityId), controller.signal)
       .then((payload) => datasetListSchema.parse(payload))
       .then((list) => {
         setDatasets(list.datasets);
@@ -155,27 +190,48 @@ export default function DatasetsPage() {
     return () => {
       controller.abort();
     };
-  }, [organizationId, reloads]);
+  }, [organizationId, reloads, scopeEntityId]);
 
   function selectOrganization(id: string): void {
     setAccess(undefined);
     setAccessState('loading');
     setDatasets([]);
     setDatasetsState('loading');
+    setEntitiesState('loading');
     setFile(undefined);
+    setLegalEntities([]);
     setOpenDataset(undefined);
     setOrganizationId(id);
+    // An entity belongs to one organization, so neither selection survives the switch.
+    setScopeEntityId(allEntitiesValue);
+    setUploadEntityId(allEntitiesValue);
     setUploadState('idle');
   }
 
+  function selectScope(id: string): void {
+    setDatasets([]);
+    setDatasetsState('loading');
+    setOpenDataset(undefined);
+    setScopeEntityId(id);
+  }
+
+  function entityName(id: string): string {
+    return (
+      legalEntities.find((entity) => entity.id === id)?.name ??
+      t('datasets.entityUnknown')
+    );
+  }
+
   async function upload(): Promise<void> {
-    if (file === undefined) {
+    if (file === undefined || uploadEntityId.length === 0) {
       return;
     }
 
     setUploadState('uploading');
     const body = new FormData();
     body.append('file', file);
+    // Every upload belongs to exactly one legal entity, and the API checks it against the scope.
+    body.append('legalEntityId', uploadEntityId);
 
     try {
       const response = await fetch(uploadsPath(organizationId), {
@@ -200,9 +256,13 @@ export default function DatasetsPage() {
   const resolving =
     organizationsState === 'loading' ||
     (organizationId.length > 0 &&
-      (accessState === 'loading' || datasetsState === 'loading'));
+      (accessState === 'loading' ||
+        datasetsState === 'loading' ||
+        entitiesState === 'loading'));
   const listFailed =
-    organizationsState === 'error' || datasetsState === 'error';
+    organizationsState === 'error' ||
+    datasetsState === 'error' ||
+    entitiesState === 'error';
   const accessFailed = accessState === 'error';
   const empty =
     !resolving && !listFailed && !accessFailed && datasets.length === 0;
@@ -248,6 +308,28 @@ export default function DatasetsPage() {
             ))}
           </Select>
         ) : null}
+        {organizationId.length > 0 && legalEntities.length > 0 ? (
+          <Select
+            id="datasets-scope"
+            labelText={t('datasets.scope')}
+            onChange={(event) => {
+              selectScope(event.target.value);
+            }}
+            value={scopeEntityId}
+          >
+            <SelectItem
+              text={t('datasets.scopeAll')}
+              value={allEntitiesValue}
+            />
+            {legalEntities.map((entity) => (
+              <SelectItem
+                key={entity.id}
+                text={entity.name}
+                value={entity.id}
+              />
+            ))}
+          </Select>
+        ) : null}
         {empty ? (
           <InlineNotification
             kind="info"
@@ -269,6 +351,9 @@ export default function DatasetsPage() {
                     {t('datasets.columnName')}
                   </TableHeader>
                   <TableHeader scope="col">
+                    {t('datasets.columnEntity')}
+                  </TableHeader>
+                  <TableHeader scope="col">
                     {t('datasets.columnStatus')}
                   </TableHeader>
                   <TableHeader scope="col">
@@ -286,6 +371,7 @@ export default function DatasetsPage() {
                 {datasets.map((dataset) => (
                   <TableRow key={dataset.id}>
                     <TableCell>{dataset.name}</TableCell>
+                    <TableCell>{entityName(dataset.legalEntityId)}</TableCell>
                     <TableCell>{t(statusLabels[dataset.status])}</TableCell>
                     <TableCell>{dataset.rowCount}</TableCell>
                     <TableCell>{dataset.updatedAt.slice(0, 10)}</TableCell>
@@ -316,6 +402,27 @@ export default function DatasetsPage() {
           <section aria-labelledby="upload-dataset-heading" id="upload-dataset">
             <Stack gap={5}>
               <h2 id="upload-dataset-heading">{t('datasets.uploadTitle')}</h2>
+              <Select
+                id="upload-legal-entity"
+                labelText={t('datasets.uploadEntity')}
+                onChange={(event) => {
+                  setUploadEntityId(event.target.value);
+                  setUploadState('idle');
+                }}
+                value={uploadEntityId}
+              >
+                <SelectItem
+                  text={t('datasets.uploadEntityPrompt')}
+                  value={allEntitiesValue}
+                />
+                {legalEntities.map((entity) => (
+                  <SelectItem
+                    key={entity.id}
+                    text={entity.name}
+                    value={entity.id}
+                  />
+                ))}
+              </Select>
               <FileUploader
                 accept={['.csv', '.xlsx']}
                 buttonKind="tertiary"
@@ -334,7 +441,11 @@ export default function DatasetsPage() {
                 }}
               />
               <Button
-                disabled={file === undefined || uploadState === 'uploading'}
+                disabled={
+                  file === undefined ||
+                  uploadEntityId.length === 0 ||
+                  uploadState === 'uploading'
+                }
                 onClick={() => void upload()}
                 renderIcon={Upload}
                 type="button"

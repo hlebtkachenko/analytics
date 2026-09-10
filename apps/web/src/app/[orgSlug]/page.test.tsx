@@ -48,6 +48,10 @@ describe('OrganizationPage', () => {
       'href',
       '/organization-one/members',
     );
+    expect(screen.getByRole('link', { name: 'Entities' })).toHaveAttribute(
+      'href',
+      '/organization-one/entities',
+    );
     expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
       'href',
       '/organization-one/settings',

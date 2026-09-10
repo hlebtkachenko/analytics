@@ -3,6 +3,10 @@ import type { Locator, Page } from '@playwright/test';
 import axe from 'axe-core';
 
 import { expect as authenticatedExpect, test } from './authenticated-test';
+import {
+  ensureLegalEntity,
+  selectUploadLegalEntity,
+} from './legal-entity-support';
 
 const organizationId =
   process.env.BAP_OPERATIONAL_ORGANIZATION_ID ?? 'bap-operational';
@@ -18,6 +22,8 @@ const fixture = `${[
   ),
 ].join('\n')}\n`;
 const fixtureName = `operational-icons-${Date.now()}.csv`;
+// Neutral placeholder: every upload belongs to exactly one legal entity.
+const legalEntityName = 'Placeholder Icons';
 
 type AxeWindow = Window &
   typeof globalThis & {
@@ -228,6 +234,7 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   test.setTimeout(90_000);
   const errors = monitorPage(page);
   await page.setViewportSize({ height: 900, width: 640 });
+  await ensureLegalEntity(page, organizationSlug, legalEntityName);
 
   const accessReady = Promise.all([
     page.waitForResponse(
@@ -258,11 +265,30 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
     ['button', 'Sign out'],
     ['link', 'Open datasets'],
     ['link', 'Manage members'],
+    ['link', 'Manage entity access'],
+    ['link', 'Manage legal entities'],
     ['link', 'Upload data'],
   ] as const) {
     await expectIconControl(page.getByRole(role, { name: label }), label);
   }
-  for (const label of ['Manage data grants', 'Ask the assistant']) {
+  for (const capability of [
+    'Manage organization',
+    'Manage members',
+    'Manage entity access',
+    'Create legal entities',
+    'Edit legal entities',
+    'Delete legal entities',
+    'Upload data',
+    'Ask the assistant',
+  ]) {
+    await authenticatedExpect(
+      page.getByText(`${capability}: Allowed`),
+    ).toBeVisible();
+  }
+  await authenticatedExpect(
+    page.getByText('Entity scope: All legal entities'),
+  ).toBeVisible();
+  for (const label of ['Ask the assistant']) {
     const heading = page.getByRole('heading', { name: label });
     await authenticatedExpect(heading).toBeVisible();
     await expectDecorativeStatusIcon(heading);
@@ -298,6 +324,7 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   const datasetOrganization = page.getByLabel('Organization');
   await authenticatedExpect(datasetOrganization).toBeVisible();
   await authenticatedExpect(datasetOrganization).toHaveValue(organizationId);
+  await selectUploadLegalEntity(page, legalEntityName);
   const chooser = page.locator('input[name="file"]');
   await authenticatedExpect(chooser).toBeAttached();
   await chooser.setInputFiles({
@@ -330,7 +357,8 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
             ?.status ?? 'absent'
         );
       },
-      { intervals: [1_000], timeout: 30_000 },
+      // A widening interval keeps the owner well inside the 60-per-minute subject rule.
+      { intervals: [1_000, 2_000, 3_000], timeout: 45_000 },
     )
     .toBe('ready');
 

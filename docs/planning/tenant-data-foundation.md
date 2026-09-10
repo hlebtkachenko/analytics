@@ -321,6 +321,9 @@ Details of each gate are in [testing](../testing.md).
 
 - Any business-domain entity. No customer, employee, company, transaction, or
   analytics table, and no sample rows of any kind.
+  [ADR 0011](../adr/0011-two-level-tenancy.md) later introduced
+  `app.legal_entity` as a generic workspace container, kind `company` or
+  `sole_trader` only, still with no sample data.
 - Analytics semantics: aggregation, metric definitions, derived or transformed
   datasets, and joins between datasets.
 - Embeddings, semantic search, chat, and model calls belonged to phase 3 and

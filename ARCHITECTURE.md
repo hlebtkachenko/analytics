@@ -60,11 +60,12 @@ C4Container
 ```
 
 The browser receives only opaque Better Auth cookies. Resource JWTs exist only
-inside the 6 fixed BFF-to-service route shapes: application access, upload,
-dataset list, dataset rows, dataset export, and reporting access. They contain
-`iss`, `aud`, `sub`, `iat`, and `exp`. The web route validates and allow-lists
-each upstream response or stream. No catch-all service proxy or browser
-Bearer-token flow exists.
+inside the 13 fixed BFF-to-service route shapes: application access, legal
+entity list/create/update/delete, member entity-scope read/update, the bulk
+entity-scope read, upload, dataset list, dataset rows, dataset export, and
+reporting access. They contain `iss`, `aud`, `sub`, `iat`, and `exp`. The web
+route validates and allow-lists each upstream response or stream. No catch-all
+service proxy or browser Bearer-token flow exists.
 
 The web-local chat route requires a verified session, resolves application
 access through the same fixed BFF boundary, and can optionally resolve one
@@ -80,9 +81,10 @@ carry no filename, cell, prompt, provider error, or secret.
 Account deletion hard-deletes the Better Auth identity after a sole-owner guard
 records its explicit id in an auth-schema pending request. The web role never
 crosses into schema `app`. A one-shot operator command later assumes the NOLOGIN
-`bap_eraser` role inside 1 transaction, anonymizes only the 3 approved subject
-columns behind forced RLS, consumes the request, and retains no raw-id mapping.
-It refuses live and unrequested identities.
+`bap_eraser` role inside 1 transaction, anonymizes only the 5 approved subject
+columns and deletes the subject's own entity scope rows behind forced RLS,
+consumes the request, and retains no raw-id mapping. It refuses live and
+unrequested identities.
 
 Organization creation quota is durable auth-schema state separate from
 membership. A database trigger serializes non-NULL creator-attributed inserts
@@ -103,6 +105,32 @@ as an implicit selector. Public active-organization mutation and organization
 deletion are disabled. A host operator can change quota only through the
 one-shot migrator CLI, which sets the owner role locally inside 1 transaction
 and records a required note.
+
+## Tenancy model
+
+An organization is a workspace, not a legal entity. ADR 0011 gives it many inner
+legal entities, companies or sole traders, held in `app.legal_entity`, and every
+dataset and upload belongs to exactly one. The organization stays the only row
+level security boundary: reads stay organization-wide, and `owner`/`admin` write
+gating and entity deletion are enforced in PostgreSQL through the `bap.role`
+tenant-transaction setting and its `app.role_can_write()`/`app.role_is_owner()`
+helpers. Entity selection and the restricted scope for an admin or member are
+application-level filters, applied by one shared resolver in the application API
+from `app.member_entity_scope` and `app.legal_entity_access`, never a database
+policy. `owner` manages organization settings, members, invitations, entity
+access, and entity deletion; `admin` creates and updates entities and uploads
+data; `member` is read-only aside from the assistant. Per-dataset grants are
+removed.
+
+`apps/api` adds `GET`/`POST /v1/organizations/:organizationId/legal-entities`,
+`PATCH`/`DELETE .../legal-entities/:legalEntityId`, and
+`GET`/`PUT .../members/:userId/entity-scope`, `GET .../entity-scopes` for every
+stored scope at once, and extends `GET .../datasets` with an optional
+`legalEntityId` filter and `POST .../uploads` with a required `legalEntityId`
+field. `apps/web` mirrors every route through the BFF and adds
+`/[orgSlug]/entities` to list, create, edit, and delete legal entities by
+capability, an owner-only entity scope editor on `/[orgSlug]/members`, and an
+entity scope switch plus upload entity selector on `/datasets`.
 
 ## Workspace dependency rules
 
@@ -193,8 +221,10 @@ The profiled owner-bootstrap service is the only dual-tier exception: it mounts
 the auth credential used by Better Auth and a separate migrator credential used
 only to establish the minimum initial organization quota. The migrator pool is
 closed before the organization API call. The gated operational synthetic setup
-runs as a command override of this one-shot service. Long-lived web has neither
-the migrator environment path nor its secret mount.
+runs as a command override of this one-shot service. Its second input shape adds
+a verified user to an organization already resolved by slug through a narrow
+`@bap/db` accessor, creating no organization and consuming no quota. Long-lived
+web has neither the migrator environment path nor its secret mount.
 
 The general organization-quota command runs in the existing one-shot migrator
 service. It has no auth credential, web route, or long-lived process and returns
@@ -210,13 +240,14 @@ application API, reporting API, RLS context, and service membership resolver
 remain id-only. The root route redirects to `/organizations`; that index and the
 first descendant `[orgSlug]` page are now the deliberately plain Phase 10
 organization loop. The index lists current memberships and links quota-gated
-creation. Descendant pages expose navigation, members, pending invitations, and
-name/slug settings. Every mutation is a server action which resolves the slug
+creation. Descendant pages expose navigation, members, pending invitations,
+name/slug settings, and, since ADR 0011, legal entities at
+`/[orgSlug]/entities`. Every mutation is a server action which resolves the slug
 through the same member gate and supplies the resulting organization id to
 Better Auth; no browser-supplied id or ambient active organization selects a
 tenant.
 
-These five pages are explicitly throwaway milestone UI. They use semantic HTML,
+These six pages are explicitly throwaway milestone UI. They use semantic HTML,
 native forms, no page CSS, and no design-system import. The layout and shared
 slug resolver remain durable. Publishing the literal `/organizations` route also
 advances the reserved database and TypeScript slug contract through migration
@@ -257,9 +288,11 @@ omits the overlay, and production mail continues through Resend on
 ## Deliberately deferred
 
 Business-domain tables, metric definitions, aggregation and transformation
-semantics, derived datasets, cross-dataset joins, grant-management UI, dataset
-editing and versioning, SSO, distributed caches or limits, OpenTelemetry, PDF
-export, billing, object storage, HA, registry publishing, and deployment
-automation require real owner or product requirements. See
+semantics, derived datasets, cross-dataset joins, dataset editing and
+versioning, custom roles, workspace deletion, cross-workspace queries, SSO,
+distributed caches or limits, OpenTelemetry, PDF export, billing, object
+storage, HA, registry publishing, and deployment automation require real owner
+or product requirements. Per-dataset sharing is superseded by legal-entity scope
+rather than deferred. See
 [the approved SaaS foundation plan](docs/planning/saas-foundation.md) and
 [the platform batteries plan](docs/planning/platform-batteries.md).

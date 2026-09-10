@@ -1,8 +1,11 @@
 import { Injectable, type OnModuleDestroy } from '@nestjs/common';
+import { readEntityScope, runInTenantContext } from '@bap/db';
+import type { TenantContext } from '@bap/db';
 import { checkMigrationCompatibility, resolveMembership } from '@bap/db/access';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 import type { DatabasePool } from '@bap/db/pool';
+import type { EntityScope } from '@bap/security';
 
 import { MembershipResolver } from './membership-resolver.js';
 
@@ -38,6 +41,17 @@ export class DatabaseMembershipResolver
     if (this.poolPromise !== undefined) {
       await (await this.poolPromise).end();
     }
+  }
+
+  async readEntityScope(tenant: TenantContext): Promise<EntityScope> {
+    // An owner is never restricted, so the unrestricted answer needs no connection at all.
+    if (tenant.role === 'owner') {
+      return { mode: 'all' };
+    }
+
+    return runInTenantContext(await this.getPool(), tenant, (transaction) =>
+      readEntityScope(transaction, tenant),
+    );
   }
 
   async resolve(subjectId: string, organizationId: string) {

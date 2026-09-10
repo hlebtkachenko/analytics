@@ -10,6 +10,7 @@ describe('ReadyController', () => {
     const memberships: MembershipResolver = {
       checkReadiness: vi.fn(async () => true),
       getPoolStatistics: vi.fn(() => ({ idle: 0, total: 0, waiting: 0 })),
+      readEntityScope: vi.fn(async () => ({ mode: 'all' as const })),
       resolve: vi.fn(),
     };
 
@@ -25,6 +26,7 @@ describe('ReadyController', () => {
     const memberships: MembershipResolver = {
       checkReadiness: vi.fn(async () => false),
       getPoolStatistics: vi.fn(() => ({ idle: 0, total: 0, waiting: 0 })),
+      readEntityScope: vi.fn(async () => ({ mode: 'all' as const })),
       resolve: vi.fn(),
     };
 

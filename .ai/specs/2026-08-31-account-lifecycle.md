@@ -1,5 +1,9 @@
 # Account Lifecycle
 
+Superseded in part by 2026-09-10-workspace-legal-entities.md: `app.data_grants`
+is dropped, so `app.erase_user` no longer tombstones a `data_grants.user_id`
+column.
+
 ## Problem
 
 Signed-in users cannot change their password or delete their account from BAP.

@@ -32,8 +32,7 @@ export const localSmtpTimeouts = {
   socketTimeout: 2_000,
 } as const;
 
-// An explicit development opt-in, so it prints the link a developer has to follow.
-// Never select it where real recipients exist: the body reaches container stdout.
+// A development-only opt-in that prints the body to container stdout, never for real recipients.
 export const logTransport: MailTransport = {
   kind: 'log',
   async send(sender, message) {

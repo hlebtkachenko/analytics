@@ -3,6 +3,9 @@
 - Status: accepted
 - Date: 2026-08-31
 
+Amended by [ADR 0011](0011-two-level-tenancy.md): the organization is a
+workspace holding many legal entities, not the only tenant unit.
+
 ## Context
 
 Better Auth stores organizations, memberships, and invitations, but its base

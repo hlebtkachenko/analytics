@@ -19,6 +19,7 @@ describe('completed request metrics', () => {
     const memberships: MembershipResolver = {
       checkReadiness: async () => true,
       getPoolStatistics: () => ({ idle: 0, total: 0, waiting: 0 }),
+      readEntityScope: async () => ({ mode: 'all' as const }),
       resolve: async (subjectId, organizationId) => {
         if (organizationId === 'organization_error') {
           throw new Error('unavailable');

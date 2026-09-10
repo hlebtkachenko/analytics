@@ -6,6 +6,7 @@ import { expect, test as publicTest } from '@playwright/test';
 import type { APIResponse, Page, Response } from '@playwright/test';
 
 import { test } from './authenticated-test';
+import { postSignInProbe, signInThroughForm } from './sign-in';
 
 const execFileAsync = promisify(execFile);
 const mailpitUrl =
@@ -16,6 +17,11 @@ const operationalOrganizationId =
 const operationalOrganizationSlug =
   process.env.BAP_OPERATIONAL_ORGANIZATION_SLUG ?? 'bap-operational';
 const operationalPassword = process.env.BAP_OPERATIONAL_PASSWORD ?? '';
+// The workflow also seeds synthetic admin and member accounts, which this proof must not address.
+const seededMemberEmails = [
+  process.env.BAP_OPERATIONAL_ADMIN_EMAIL ?? 'admin@bap.invalid',
+  process.env.BAP_OPERATIONAL_MEMBER_EMAIL ?? 'member@bap.invalid',
+];
 
 publicTest.describe.configure({ mode: 'serial' });
 
@@ -449,7 +455,8 @@ test('proves invitation-only registration, acceptance, and membership management
     operationalPassword.length === 0,
     'BAP_OPERATIONAL_PASSWORD is required.',
   );
-  test.setTimeout(90_000);
+  // A denied sign-in is waited out rather than asserted, so the budget covers one full rate window.
+  test.setTimeout(180_000);
   const suffix = `${Date.now()}-${randomUUID()}`;
   const email = `invited-${suffix}@example.test`;
   const closedEmail = `closed-${suffix}@example.test`;
@@ -598,14 +605,6 @@ test('proves invitation-only registration, acceptance, and membership management
     const freshMessageId = await waitForFreshMessage(email);
     expect(freshMessageId).not.toBe('');
 
-    const unverifiedSignIn = await recipientPage.request.post(
-      '/api/auth/sign-in/email',
-      { data: { email, password }, headers },
-    );
-    expect(unverifiedSignIn.status()).toBe(403);
-    assertNoSessionCookies(await setCookieHeaders(unverifiedSignIn));
-    assertPasswordAbsent(await readJson(unverifiedSignIn), password);
-
     await setPublicSignup(true);
     await assertSignUpPage(recipientPage, true);
     await recipientPage.goto('/sign-in');
@@ -654,6 +653,16 @@ test('proves invitation-only registration, acceptance, and membership management
     expect(await mailMessageIds(rateLimitedEmail)).toEqual([]);
     await expectMessageSetUnchanged(rateLimitedEmail, []);
 
+    // Placed after all 4 attempts, so waiting out a denied sign-in cannot expire their edge bucket.
+    const unverifiedSignIn = await postSignInProbe(
+      recipientPage,
+      { email, password },
+      headers,
+    );
+    expect(unverifiedSignIn.status()).toBe(403);
+    assertNoSessionCookies(await setCookieHeaders(unverifiedSignIn));
+    assertPasswordAbsent(await readJson(unverifiedSignIn), password);
+
     await setPublicSignup(false);
     verificationRedirect = await startVerificationRedirect(email);
     await navigateToSensitivePath(recipientPage, verificationRedirect.url);
@@ -677,15 +686,7 @@ test('proves invitation-only registration, acceptance, and membership management
     await recipientPage.getByRole('button', { name: 'Sign out' }).click();
     expect((await signedOutPromise).ok()).toBe(true);
     await expect(recipientPage).toHaveURL(/\/sign-in$/);
-    await recipientPage.getByLabel('Email address').fill(email);
-    await recipientPage.locator('input[name="password"]').fill(password);
-    const signedInPromise = recipientPage.waitForResponse(
-      (response) =>
-        response.request().method() === 'POST' &&
-        new URL(response.url()).pathname === '/api/auth/sign-in/email',
-    );
-    await recipientPage.getByRole('button', { name: 'Sign in' }).click();
-    expect((await signedInPromise).ok()).toBe(true);
+    await signInThroughForm(recipientPage, email, password);
     await expect(recipientPage).toHaveURL(/\/access$/);
 
     await navigateToSensitivePath(recipientPage, `/invitation/${invitationId}`);
@@ -718,19 +719,23 @@ test('proves invitation-only registration, acceptance, and membership management
     ).toBeVisible();
 
     await page.goto(`/${operationalOrganizationSlug}/members`);
-    let member = page
-      .locator('section[aria-labelledby="members-heading"] p')
-      .filter({ hasText: /, member$/ })
-      .locator('..');
+    // The invitee address stays out of every locator, so only the seeded addresses are excluded.
+    const memberEntry = (role: RegExp) => {
+      let entries = page
+        .locator('section[aria-labelledby="members-heading"] p')
+        .filter({ hasText: role });
+      for (const seeded of seededMemberEmails) {
+        entries = entries.filter({ hasNotText: seeded });
+      }
+      return entries.locator('..');
+    };
+    let member = memberEntry(/, member$/);
     await expect(member).toHaveCount(1);
     const roleForm = member.getByRole('form', { name: /^Change role for / });
     await roleForm.getByLabel('Role').selectOption('admin');
     await roleForm.getByRole('button', { name: 'Change role' }).click();
     await expect(page).toHaveURL(/\/members\?result=success$/);
-    member = page
-      .locator('section[aria-labelledby="members-heading"] p')
-      .filter({ hasText: /, admin$/ })
-      .locator('..');
+    member = memberEntry(/, admin$/);
     await expect(member).toHaveCount(1);
 
     await member
@@ -738,11 +743,7 @@ test('proves invitation-only registration, acceptance, and membership management
       .getByRole('button', { name: 'Remove member' })
       .click();
     await expect(page).toHaveURL(/\/members\?result=success$/);
-    await expect(
-      page
-        .locator('section[aria-labelledby="members-heading"] p')
-        .filter({ hasText: /, admin$/ }),
-    ).toHaveCount(0);
+    await expect(memberEntry(/, admin$/)).toHaveCount(0);
   } finally {
     await verificationRedirect?.stop();
     await recipientContext.close();

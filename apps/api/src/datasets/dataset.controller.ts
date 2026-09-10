@@ -2,7 +2,6 @@ import { PassThrough } from 'node:stream';
 
 import {
   Controller,
-  ForbiddenException,
   Get,
   Inject,
   NotFoundException,
@@ -10,7 +9,6 @@ import {
   Query,
   Req,
   StreamableFile,
-  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -23,8 +21,9 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import {
+  legalEntityInScope,
   organizationIdentifierSchema,
-  resolveOrganizationAccess,
+  type EntityScope,
 } from '@bap/security';
 
 import { datasetIdentifierSchema } from '../agents/contract.js';
@@ -32,11 +31,13 @@ import { MembershipResolver } from '../membership-resolver.js';
 import type { AuthenticatedRequest } from '../request-context.js';
 import { ResourceJwtGuard } from '../resource-jwt.guard.js';
 import { SubjectRateLimitGuard } from '../subject-rate-limit.guard.js';
+import { allowedEntityIds, resolveTenantAccess } from '../tenant-access.js';
 import {
   DATASET_EXPORT_BATCH_SIZE,
   DATASET_EXPORT_MEDIA_TYPES,
   datasetExportFilename,
   datasetExportQuerySchema,
+  datasetListQuerySchema,
   datasetListResponseSchema,
   datasetRowPageResponseSchema,
   datasetRowQuerySchema,
@@ -46,12 +47,13 @@ import {
 } from './contract.js';
 import type {
   DatasetExportQuery,
+  DatasetListQuery,
   DatasetListResponse,
   DatasetRowPageResponse,
   DatasetRowQuery,
 } from './contract.js';
 import { DatasetRepository } from './dataset-repository.js';
-import type { TenantSelector } from './dataset-repository.js';
+import type { EntityScopeSelector } from './dataset-repository.js';
 import { writeDatasetExport } from './export.js';
 
 const datasetSummarySchema = {
@@ -60,6 +62,7 @@ const datasetSummarySchema = {
     createdAt: { format: 'date-time', type: 'string' },
     description: { nullable: true, type: 'string' },
     id: { format: 'uuid', type: 'string' },
+    legalEntityId: { format: 'uuid', type: 'string' },
     name: { type: 'string' },
     rowCount: { minimum: 0, type: 'integer' },
     status: { enum: ['importing', 'ready', 'failed'], type: 'string' },
@@ -69,6 +72,7 @@ const datasetSummarySchema = {
     'createdAt',
     'description',
     'id',
+    'legalEntityId',
     'name',
     'rowCount',
     'status',
@@ -138,8 +142,8 @@ export class DatasetController {
     @Query({ schema: datasetExportQuerySchema }) query: DatasetExportQuery,
     @Req() request: AuthenticatedRequest,
   ): Promise<StreamableFile> {
-    const tenant = await this.resolveTenant(request, organizationId);
-    const columns = await this.datasets.readColumns({ ...tenant, datasetId });
+    const { selector } = await this.resolveScope(request, organizationId);
+    const columns = await this.datasets.readColumns({ ...selector, datasetId });
 
     if (columns === null) {
       throw new NotFoundException();
@@ -148,7 +152,7 @@ export class DatasetController {
     const output = new PassThrough();
     const source = {
       batches: this.datasets.streamRows({
-        ...tenant,
+        ...selector,
         batchSize: DATASET_EXPORT_BATCH_SIZE,
         datasetId,
       }),
@@ -217,9 +221,9 @@ export class DatasetController {
     @Query({ schema: datasetRowQuerySchema }) query: DatasetRowQuery,
     @Req() request: AuthenticatedRequest,
   ): Promise<DatasetRowPageResponse> {
-    const tenant = await this.resolveTenant(request, organizationId);
+    const { selector } = await this.resolveScope(request, organizationId);
     const page = await this.datasets.readRowPage({
-      ...tenant,
+      ...selector,
       after: query.after ?? null,
       datasetId,
       pageSize: query.pageSize,
@@ -247,6 +251,12 @@ export class DatasetController {
   @Get(':organizationId/datasets')
   @UseGuards(ResourceJwtGuard, SubjectRateLimitGuard)
   @ApiOperation({ summary: 'List the datasets visible to the caller' })
+  @ApiQuery({
+    description: 'Narrows the list to one legal entity in the caller scope',
+    name: 'legalEntityId',
+    required: false,
+    schema: { format: 'uuid', type: 'string' },
+  })
   @ApiOkResponse({
     description: `At most ${MAX_DATASET_LIST_SIZE} datasets, newest first`,
     schema: {
@@ -263,38 +273,41 @@ export class DatasetController {
   async listDatasets(
     @Param('organizationId', { schema: organizationIdentifierSchema })
     organizationId: string,
+    @Query({ schema: datasetListQuerySchema }) query: DatasetListQuery,
     @Req() request: AuthenticatedRequest,
   ): Promise<DatasetListResponse> {
-    const tenant = await this.resolveTenant(request, organizationId);
-    const datasets = await this.datasets.listDatasets(tenant);
+    const { entityScope, selector } = await this.resolveScope(
+      request,
+      organizationId,
+    );
+    // A requested entity outside the scope narrows the list to nothing instead of widening it.
+    const legalEntityIds =
+      query.legalEntityId === undefined
+        ? selector.legalEntityIds
+        : legalEntityInScope(entityScope, query.legalEntityId)
+          ? [query.legalEntityId]
+          : [];
+    const datasets = await this.datasets.listDatasets({
+      ...selector,
+      legalEntityIds,
+    });
     return datasetListResponseSchema.parse({ datasets });
   }
 
-  // Reading is a member level action: the access contract holds no narrower read flag, and row level security still decides the rows.
-  private async resolveTenant(
+  // Reading is a member level action: the access contract holds no narrower read flag, row level security decides the organization, and the entity scope decides the entities.
+  private async resolveScope(
     request: AuthenticatedRequest,
     organizationId: string,
-  ): Promise<TenantSelector> {
-    const principal = request.resourcePrincipal;
-
-    if (principal === undefined) {
-      throw new UnauthorizedException();
-    }
-
-    const membership = await this.memberships.resolve(
-      principal.subject,
+  ): Promise<{ entityScope: EntityScope; selector: EntityScopeSelector }> {
+    const { entityScope, tenant } = await resolveTenantAccess({
+      memberships: this.memberships,
       organizationId,
-    );
-    const access = resolveOrganizationAccess(
-      'application-api',
-      organizationId,
-      membership,
-    );
+      request,
+    });
 
-    if (access === null) {
-      throw new ForbiddenException();
-    }
-
-    return { organizationId: access.organizationId, userId: principal.subject };
+    return {
+      entityScope,
+      selector: { ...tenant, legalEntityIds: allowedEntityIds(entityScope) },
+    };
   }
 }

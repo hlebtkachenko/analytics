@@ -1,5 +1,7 @@
 import { expect, test as base } from '@playwright/test';
 
+import { signInThroughForm } from './sign-in';
+
 const baseURL =
   process.env.BAP_OPERATIONAL_BASE_URL ?? 'http://localhost:39100';
 const email = process.env.BAP_OPERATIONAL_EMAIL ?? 'owner@bap.invalid';
@@ -15,30 +17,15 @@ export const test = base.extend<
 
       if (password.length > 0) {
         const page = await context.newPage();
-        await page.goto('/sign-in');
-        await page.getByLabel('Email address').fill(email);
-        await page.locator('input[name="password"]').fill(password);
-        const signedIn = page.waitForResponse(
-          (response) =>
-            response.request().method() === 'POST' &&
-            response.url().includes('/api/auth/sign-in/email'),
-        );
-        await page.getByRole('button', { name: 'Sign in' }).click();
-        const response = await signedIn;
-
-        if (!response.ok()) {
-          throw new Error(
-            `Operational sign-in failed with ${response.status()}.`,
-          );
-        }
-
+        await signInThroughForm(page, email, password);
         await page.close();
       }
 
       await use(context);
       await context.close();
     },
-    { scope: 'worker' },
+    // A rate-limited sign-in is waited out, so the shared session gets more than the test budget.
+    { scope: 'worker', timeout: 120_000 },
   ],
   page: async ({ authenticatedContext }, use) => {
     const page = await authenticatedContext.newPage();

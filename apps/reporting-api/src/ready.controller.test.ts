@@ -10,6 +10,7 @@ describe('ReadyController', () => {
     const memberships = {
       checkReadiness: async () => false,
       getPoolStatistics: () => ({ idle: 0, total: 0, waiting: 0 }),
+      readEntityScope: async () => ({ mode: 'all' as const }),
       resolve: async () => ({ emailVerified: false, role: null }),
     } as MembershipResolver;
     const controller = new ReadyController(
@@ -26,6 +27,7 @@ describe('ReadyController', () => {
     const memberships = {
       checkReadiness: async () => true,
       getPoolStatistics: () => ({ idle: 1, total: 2, waiting: 0 }),
+      readEntityScope: async () => ({ mode: 'all' as const }),
       resolve: async () => ({ emailVerified: false, role: null }),
     } as MembershipResolver;
     const controller = new ReadyController(

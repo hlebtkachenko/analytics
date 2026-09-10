@@ -108,6 +108,20 @@ describe('runTenantJob', () => {
     expect(fake.queries).toEqual([]);
   });
 
+  it('aborts without opening a transaction when the role can no longer write', async () => {
+    const fake = createFakePool([{ email_verified: true, role: 'member' }]);
+
+    await expect(
+      runTenantJob({
+        data: { organizationId: 'org-1', userId: 'user-1' },
+        pool: fake.pool,
+        work: async () => 'unreachable',
+      }),
+    ).rejects.toThrow('Job subject can no longer write in the organization.');
+    expect(fake.connects).toBe(0);
+    expect(fake.queries).toEqual([]);
+  });
+
   it('runs the unit of work inside a tenant transaction and releases the client', async () => {
     const fake = createFakePool(membership);
 
@@ -122,10 +136,11 @@ describe('runTenantJob', () => {
     expect(fake.releases).toBe(1);
     expect(fake.queries.map(({ text }) => text)).toEqual([
       'begin',
-      "select set_config('bap.user_id', $1, true), set_config('bap.organization_id', $2, true)",
+      "select set_config('bap.user_id', $1, true), set_config('bap.organization_id', $2, true), set_config('bap.role', $3, true)",
       'commit',
     ]);
-    expect(fake.queries[1]?.values).toEqual(['user-1', 'org-1']);
+    // The role comes from the freshly resolved membership, never from the job payload.
+    expect(fake.queries[1]?.values).toEqual(['user-1', 'org-1', 'owner']);
   });
 
   it('rolls back and releases the client when the work fails', async () => {

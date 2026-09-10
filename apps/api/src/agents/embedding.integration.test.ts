@@ -5,6 +5,7 @@ import {
   runMigrations,
   withTenantContext,
 } from '@bap/db';
+import type { TenantContext } from '@bap/db';
 import type { DatabaseConfiguration, DatabaseRole } from '@bap/db/config';
 import type { DatabasePool } from '@bap/db/pool';
 import {
@@ -42,9 +43,27 @@ let container: StartedPostgreSqlContainer;
 let migratorPool: DatabasePool;
 let metrics: WorkerMetrics;
 let embedCalls = 0;
-const alpha = { datasetId: '', organizationId: 'org-1', userId: 'user-1' };
-const beta = { datasetId: '', organizationId: 'org-1', userId: 'user-1' };
-const foreign = { datasetId: '', organizationId: 'org-2', userId: 'user-2' };
+const alpha = {
+  datasetId: '',
+  legalEntityId: '',
+  organizationId: 'org-1',
+  role: 'owner' as const,
+  userId: 'user-1',
+};
+const beta = {
+  datasetId: '',
+  legalEntityId: '',
+  organizationId: 'org-1',
+  role: 'owner' as const,
+  userId: 'user-1',
+};
+const foreign = {
+  datasetId: '',
+  legalEntityId: '',
+  organizationId: 'org-2',
+  role: 'owner' as const,
+  userId: 'user-2',
+};
 
 function configurationFor(role: DatabaseRole): DatabaseConfiguration {
   return {
@@ -108,7 +127,7 @@ function testRegistry(): AiRegistry {
 const registry = (): Promise<AiRegistry> => Promise.resolve(testRegistry());
 
 async function asTenant<T>(
-  tenant: { organizationId: string; userId: string },
+  tenant: TenantContext,
   operation: (transaction: PoolClient) => Promise<T>,
 ): Promise<T> {
   const client = await apiPool.connect();
@@ -120,18 +139,32 @@ async function asTenant<T>(
   }
 }
 
+// One neutral placeholder entity per organization; every dataset attaches to exactly one.
+async function createLegalEntity(tenant: TenantContext): Promise<string> {
+  return asTenant(tenant, async (transaction) => {
+    const created = await transaction.query<{ id: string }>(
+      `insert into app.legal_entity (organization_id, name, kind, created_by)
+       values ($1, 'Placeholder Holding', 'company', $2)
+       returning id`,
+      [tenant.organizationId, tenant.userId],
+    );
+    return created.rows[0]?.id ?? '';
+  });
+}
+
 // Neutral placeholder metadata; alpha and foreign are identical so their vectors collide by construction.
 async function createDataset(
-  tenant: { organizationId: string; userId: string },
+  tenant: TenantContext,
+  legalEntityId: string,
   name: string,
   description: string,
 ): Promise<string> {
   return asTenant(tenant, async (transaction) => {
     const created = await transaction.query<{ id: string }>(
-      `insert into app.dataset (organization_id, name, description, status, created_by)
-       values ($1, $2, $3, 'ready', $4)
+      `insert into app.dataset (organization_id, legal_entity_id, name, description, status, created_by)
+       values ($1, $2, $3, $4, 'ready', $5)
        returning id`,
-      [tenant.organizationId, name, description, tenant.userId],
+      [tenant.organizationId, legalEntityId, name, description, tenant.userId],
     );
     const datasetId = created.rows[0]?.id ?? '';
     await transaction.query(
@@ -191,18 +224,24 @@ beforeAll(async () => {
   await rootPool.end();
   apiPool = createDatabasePool(configurationFor('bap_api'));
   metrics = new WorkerMetrics();
+  alpha.legalEntityId = await createLegalEntity(alpha);
+  beta.legalEntityId = alpha.legalEntityId;
+  foreign.legalEntityId = await createLegalEntity(foreign);
   alpha.datasetId = await createDataset(
     alpha,
+    alpha.legalEntityId,
     'alpha container',
     'placeholder description',
   );
   beta.datasetId = await createDataset(
     beta,
+    beta.legalEntityId,
     'beta container',
     'another placeholder description',
   );
   foreign.datasetId = await createDataset(
     foreign,
+    foreign.legalEntityId,
     'alpha container',
     'placeholder description',
   );
@@ -288,14 +327,18 @@ describe('dataset embedding agents against PostgreSQL', () => {
     );
     const owner = await searchDatasetsByEmbedding(apiPool, {
       embedding: probe,
+      legalEntityIds: null,
       limit: 10,
       organizationId: alpha.organizationId,
+      role: alpha.role,
       userId: alpha.userId,
     });
     const stranger = await searchDatasetsByEmbedding(apiPool, {
       embedding: probe,
+      legalEntityIds: null,
       limit: 10,
       organizationId: foreign.organizationId,
+      role: foreign.role,
       userId: foreign.userId,
     });
 
@@ -311,11 +354,47 @@ describe('dataset embedding agents against PostgreSQL', () => {
     expect(stranger[0]?.datasetId).toBe(foreign.datasetId);
   });
 
+  it('applies the entity scope to similarity queries', async () => {
+    const probe = vectorFor(
+      'name: alpha container\ndescription: placeholder description\ncolumns: column_a (text)',
+    );
+    const scoped = await searchDatasetsByEmbedding(apiPool, {
+      embedding: probe,
+      legalEntityIds: [alpha.legalEntityId],
+      limit: 10,
+      organizationId: alpha.organizationId,
+      role: alpha.role,
+      userId: alpha.userId,
+    });
+    const nothing = await searchDatasetsByEmbedding(apiPool, {
+      embedding: probe,
+      legalEntityIds: [],
+      limit: 10,
+      organizationId: alpha.organizationId,
+      role: alpha.role,
+      userId: alpha.userId,
+    });
+    const noNeighbours = await findDatasetsNearDataset(apiPool, {
+      datasetId: alpha.datasetId,
+      legalEntityIds: [],
+      limit: 10,
+      organizationId: alpha.organizationId,
+      role: alpha.role,
+      userId: alpha.userId,
+    });
+
+    expect(scoped.map(({ datasetId }) => datasetId)).toContain(alpha.datasetId);
+    expect(nothing).toEqual([]);
+    expect(noNeighbours).toEqual([]);
+  });
+
   it('finds neighbours of a stored vector inside the tenant only', async () => {
     const neighbours = await findDatasetsNearDataset(apiPool, {
       datasetId: alpha.datasetId,
+      legalEntityIds: null,
       limit: 10,
       organizationId: alpha.organizationId,
+      role: alpha.role,
       userId: alpha.userId,
     });
 

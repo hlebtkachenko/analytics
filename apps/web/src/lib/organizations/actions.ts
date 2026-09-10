@@ -7,7 +7,13 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
 import { getAuth } from '../auth/server';
-import { resolveOrganizationRouteForRequest } from './resolver';
+import {
+  formValue,
+  invalidScopedActionPath,
+  organizationPath,
+  resolveActionOrganization,
+  resultPath,
+} from './action-support';
 import { normalizeOrganizationSlug, organizationSlugSchema } from './slug';
 
 const organizationNameSchema = z.string().trim().min(1);
@@ -28,33 +34,6 @@ const memberRoleInputSchema = z.object({
   role: organizationRoleSchema,
 });
 const memberRemovalInputSchema = z.object({ memberId: z.string().min(1) });
-const invalidScopedActionPath = '/organizations?result=error';
-
-function formValue(formData: FormData, name: string): unknown {
-  return formData.get(name);
-}
-
-function organizationPath(slug: string, suffix = ''): string {
-  return `/${slug}${suffix}`;
-}
-
-function resultPath(path: string, result: 'error' | 'success'): string {
-  return `${path}?result=${result}`;
-}
-
-async function resolveActionOrganization(slug: string) {
-  const parsed = organizationSlugSchema.safeParse(slug);
-  if (!parsed.success) {
-    throw new Error('Organization action unavailable.');
-  }
-
-  const organization = await resolveOrganizationRouteForRequest(parsed.data);
-  if (organization === null) {
-    throw new Error('Organization action unavailable.');
-  }
-
-  return organization;
-}
 
 export async function createOrganizationAction(
   formData: FormData,
@@ -117,7 +96,10 @@ export async function inviteOrganizationMemberAction(
 
   if (input.success) {
     try {
-      const organization = await resolveActionOrganization(routeSlug.data);
+      const organization = await resolveActionOrganization(
+        routeSlug.data,
+        'owner',
+      );
       fallback = resultPath(
         organizationPath(organization.slug, '/members'),
         'error',
@@ -166,7 +148,10 @@ export async function updateOrganizationMemberRoleAction(
 
   if (input.success) {
     try {
-      const organization = await resolveActionOrganization(routeSlug.data);
+      const organization = await resolveActionOrganization(
+        routeSlug.data,
+        'owner',
+      );
       fallback = resultPath(
         organizationPath(organization.slug, '/members'),
         'error',
@@ -234,7 +219,10 @@ export async function removeOrganizationMemberAction(
 
   if (input.success) {
     try {
-      const organization = await resolveActionOrganization(routeSlug.data);
+      const organization = await resolveActionOrganization(
+        routeSlug.data,
+        'owner',
+      );
       fallback = resultPath(
         organizationPath(organization.slug, '/members'),
         'error',
@@ -312,7 +300,10 @@ export async function updateOrganizationAction(
     );
     if (slug.success) {
       try {
-        const organization = await resolveActionOrganization(routeSlug.data);
+        const organization = await resolveActionOrganization(
+          routeSlug.data,
+          'owner',
+        );
         fallback = resultPath(
           organizationPath(organization.slug, '/settings'),
           'error',

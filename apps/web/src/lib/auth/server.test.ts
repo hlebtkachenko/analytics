@@ -38,6 +38,7 @@ import {
   organizationIdRequiredErrorCode,
   organizationIdRequiredPaths,
   organizationLimitReached,
+  organizationRoles,
   publicSignUpAllowed,
   publicSignUpErrorCode,
   readAuthSecret,
@@ -619,6 +620,53 @@ describe('organization creation policy', () => {
   function poolWithQuery(query: ReturnType<typeof vi.fn>): DatabasePool {
     return { query } as unknown as DatabasePool;
   }
+
+  it('gives every organization write statement to the owner alone', () => {
+    expect(organizationRoles.owner.statements).toEqual({
+      ac: [],
+      invitation: ['create', 'cancel'],
+      member: ['create', 'update', 'delete'],
+      organization: ['update'],
+      team: [],
+    });
+    expect(organizationRoles.admin.statements).toEqual(
+      organizationRoles.member.statements,
+    );
+    expect(organizationRoles.admin.statements).toEqual({
+      ac: [],
+      invitation: [],
+      member: [],
+      organization: [],
+      team: [],
+    });
+
+    const gatedRequests = [
+      { organization: ['update'] },
+      { organization: ['delete'] },
+      { member: ['create'] },
+      { member: ['update'] },
+      { member: ['delete'] },
+      { invitation: ['create'] },
+      { invitation: ['cancel'] },
+    ] as const;
+
+    for (const request of gatedRequests) {
+      const ownerAllowed =
+        'organization' in request ? request.organization[0] === 'update' : true;
+      expect(
+        organizationRoles.owner.authorize(request).success,
+        JSON.stringify(request),
+      ).toBe(ownerAllowed);
+      expect(
+        organizationRoles.admin.authorize(request).success,
+        JSON.stringify(request),
+      ).toBe(false);
+      expect(
+        organizationRoles.member.authorize(request).success,
+        JSON.stringify(request),
+      ).toBe(false);
+    }
+  });
 
   it('pins creation, ownership, membership, and deletion semantics', () => {
     expect(organizationCreationConfiguration).toEqual({

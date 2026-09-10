@@ -5,8 +5,7 @@ type Environment = Record<string, string | undefined>;
 
 export type AiRegistryProvider = () => Promise<AiRegistry>;
 
-// Built on first use, like the ingestion queue client, so the worker still boots without a usable credential.
-// A missing or placeholder credential then fails one agent job loudly instead of killing every queue at startup.
+// Built on first use, like the ingestion queue client, so the worker still boots without a usable credential. A missing or placeholder credential then fails one agent job loudly instead of killing every queue at startup.
 export function createLazyAiRegistry(
   environment: Environment,
 ): AiRegistryProvider {

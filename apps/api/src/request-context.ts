@@ -9,6 +9,8 @@ export interface ReceivedFile {
 }
 
 export interface AuthenticatedRequest {
+  // Multipart text fields multer parsed; every value is untrusted input.
+  body?: Record<string, unknown>;
   file?: ReceivedFile;
   headers: Record<string, string | string[] | undefined>;
   method: string;

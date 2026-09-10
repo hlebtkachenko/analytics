@@ -17,8 +17,7 @@ export interface AgentChain {
   registry: AiRegistryProvider;
 }
 
-// A credential that names no model for the role leaves that agent off, so its queue stays empty.
-// A missing, placeholder or unreadable credential is the same answer: nothing is enqueued.
+// A credential that names no model for the role leaves that agent off, so its queue stays empty. A missing, placeholder or unreadable credential is the same answer: nothing is enqueued.
 async function namesModel(
   registry: AiRegistryProvider,
   role: string,
@@ -31,8 +30,7 @@ async function namesModel(
   }
 }
 
-// Identifiers only, exactly like the ingestion payload: pgboss.job is cross-tenant readable.
-// Membership is not checked here; every agent job re-resolves it at dequeue through runTenantJob.
+// Identifiers only, exactly like the ingestion payload: pgboss.job is cross-tenant readable. Membership is not checked here; every agent job re-resolves it at dequeue through runTenantJob.
 export async function enqueueDatasetSummary(
   chain: AgentChain,
   job: SummarizeDatasetJob,

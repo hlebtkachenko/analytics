@@ -15,8 +15,7 @@ const BYTE_ORDER_MARK = '\uFEFF';
 // Every XLSX file is a zip archive, so its first four bytes are the local file header signature.
 const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 
-// PostgreSQL stores neither U+0000 nor an unpaired surrogate in a jsonb or text column.
-// The u flag makes the range match lone surrogates only, so a valid astral pair is kept.
+// PostgreSQL stores neither U+0000 nor an unpaired surrogate in a jsonb or text column. The u flag makes the range match lone surrogates only, so a valid astral pair is kept.
 // eslint-disable-next-line no-control-regex
 const UNSTORABLE_TEXT = /[\u0000\uD800-\uDFFF]/gu;
 
@@ -364,8 +363,7 @@ function classify(value: DatasetValue): InferredColumnType | null {
   return 'text';
 }
 
-// A parse and display hint drawn from a bounded sample, never a guarantee about any value.
-// One disagreeing value collapses the column to text so the hint cannot over-promise.
+// A parse and display hint drawn from a bounded sample, never a guarantee about any value. One disagreeing value collapses the column to text so the hint cannot over-promise.
 export function inferColumnTypes(
   sample: readonly (readonly DatasetValue[])[],
   width: number,

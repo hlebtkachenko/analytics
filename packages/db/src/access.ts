@@ -35,11 +35,8 @@ export interface ResolveOrganizationRouteInput {
   subjectId: string;
 }
 
-// Exact match against the version recorded by the migration runner.
-// Bump it to the newest migration id in the same pull request as that migration.
-// Rollback consequence: application code rolled back after the migration is
-// applied makes /ready return 503 on every service until this is bumped again.
-export const DATABASE_MIGRATION_COMPATIBILITY = '20260831.0004';
+// Exact match against the version recorded by the migration runner. Bump it to the newest migration id in the same pull request as that migration. Rollback consequence: application code rolled back after the migration is applied makes /ready return 503 on every service until this is bumped again.
+export const DATABASE_MIGRATION_COMPATIBILITY = '20260910.0001';
 
 export const PUBLIC_SIGNUP_EDGE_RATE_LIMIT = {
   max: 3,
@@ -428,6 +425,19 @@ export async function resolveMembership(
   }
 
   return { emailVerified: row.email_verified, role: role.data };
+}
+
+// Slug-only lookup for the gated synthetic setup path, never a request-time resolver.
+export async function findOrganizationIdBySlug(
+  pool: DatabasePool,
+  organizationSlug: string,
+): Promise<string | null> {
+  const result = await pool.query<{ id: string }>(
+    'select id from auth.organization where slug = $1 limit 1',
+    [organizationSlug],
+  );
+
+  return result.rows[0]?.id ?? null;
 }
 
 export async function resolveOrganizationRoute(

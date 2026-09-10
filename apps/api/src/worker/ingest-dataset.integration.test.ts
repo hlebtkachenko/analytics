@@ -29,6 +29,9 @@ const postgresImage =
 const testPassword = 'test-only-database-credential';
 const organizationId = 'org-1';
 const userId = 'user-1';
+// The worker resolves this role from the membership on every dequeue; the payload never carries it.
+const tenant = { organizationId, role: 'owner' as const, userId };
+let legalEntityId = '';
 
 let apiPool: DatabasePool;
 let boss: PgBoss;
@@ -56,11 +59,7 @@ async function asTenant<T>(
   const client = await apiPool.connect();
 
   try {
-    return await withTenantContext(
-      client,
-      { organizationId, userId },
-      operation,
-    );
+    return await withTenantContext(client, tenant, operation);
   } finally {
     client.release();
   }
@@ -73,10 +72,10 @@ async function stageUpload(
 ): Promise<string> {
   const uploadId = await asTenant(async (transaction) => {
     const inserted = await transaction.query<{ id: string }>(
-      `insert into app.upload (organization_id, filename, byte_size, status)
-       values ($1, $2, $3, 'pending')
+      `insert into app.upload (organization_id, legal_entity_id, filename, byte_size, status)
+       values ($1, $2, $3, $4, 'pending')
        returning id`,
-      [organizationId, filename, Buffer.byteLength(content)],
+      [organizationId, legalEntityId, filename, Buffer.byteLength(content)],
     );
     return inserted.rows[0]?.id ?? '';
   });
@@ -137,6 +136,15 @@ beforeAll(async () => {
 
   await rootPool.end();
   apiPool = createDatabasePool(configurationFor('bap_api'));
+  legalEntityId = await asTenant(async (transaction) => {
+    const created = await transaction.query<{ id: string }>(
+      `insert into app.legal_entity (organization_id, name, kind, created_by)
+       values ($1, 'Placeholder Holding', 'company', $2)
+       returning id`,
+      [organizationId, userId],
+    );
+    return created.rows[0]?.id ?? '';
+  });
   metrics = new WorkerMetrics();
   boss = createQueueClientFromConfiguration(configurationFor('bap_api'));
   boss.on('error', () => undefined);
@@ -210,10 +218,11 @@ describe('dataset ingestion through the real queue', () => {
     const stored = await asTenant(async (transaction) => {
       const dataset = await transaction.query<{
         id: string;
+        legal_entity_id: string;
         name: string;
         status: string;
       }>(
-        'select id, name, status from app.dataset where id = (select dataset_id from app.upload where id = $1)',
+        'select id, legal_entity_id, name, status from app.dataset where id = (select dataset_id from app.upload where id = $1)',
         [uploadId],
       );
       const columns = await transaction.query<{
@@ -242,7 +251,9 @@ describe('dataset ingestion through the real queue', () => {
       return { audit, columns, dataset, rows, upload };
     });
 
+    // The entity is copied from the upload row, so the queue payload never decides it.
     expect(stored.dataset.rows[0]).toMatchObject({
+      legal_entity_id: legalEntityId,
       name: 'measurements.csv',
       status: 'ready',
     });

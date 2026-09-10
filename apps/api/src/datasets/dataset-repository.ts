@@ -1,5 +1,6 @@
 import { Injectable, type OnModuleDestroy } from '@nestjs/common';
-import { withTenantContext } from '@bap/db';
+import { runInTenantContext } from '@bap/db';
+import type { TenantContext } from '@bap/db';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 import type { DatabasePool } from '@bap/db/pool';
@@ -9,15 +10,18 @@ import { MAX_DATASET_LIST_SIZE } from './contract.js';
 
 export type DatasetCellValue = boolean | number | string | null;
 
-export interface TenantSelector {
-  organizationId: string;
-  userId: string;
+export type { TenantContext };
+
+// null is the absence of an entity filter; an empty array is a caller who may see nothing.
+export interface EntityScopeSelector extends TenantContext {
+  legalEntityIds: readonly string[] | null;
 }
 
 export interface DatasetSummaryRecord {
   createdAt: string;
   description: string | null;
   id: string;
+  legalEntityId: string;
   name: string;
   rowCount: number;
   status: string;
@@ -40,7 +44,7 @@ export interface DatasetRowPage {
   rows: DatasetRowRecord[];
 }
 
-export interface ReadDatasetColumnsInput extends TenantSelector {
+export interface ReadDatasetColumnsInput extends EntityScopeSelector {
   datasetId: string;
 }
 
@@ -67,28 +71,18 @@ interface RowQueryRow {
   row_number: number;
 }
 
-async function inTenantContext<T>(
-  pool: DatabasePool,
-  tenant: TenantSelector,
-  operation: (transaction: PoolClient) => Promise<T>,
-): Promise<T> {
-  const client = await pool.connect();
-
-  try {
-    return await withTenantContext(client, tenant, operation);
-  } finally {
-    client.release();
-  }
-}
-
-// Returns null when row level security hides the dataset, so a stranger and a missing id look identical.
+// Returns null when row level security hides the dataset or the entity is out of scope, so a stranger, a restricted member and a missing id all get the same answer.
 async function loadColumns(
   transaction: PoolClient,
   datasetId: string,
+  legalEntityIds: readonly string[] | null,
 ): Promise<DatasetColumnRecord[] | null> {
   const visible = await transaction.query<{ id: string }>(
-    'select id from app.dataset where id = $1',
-    [datasetId],
+    `select id
+     from app.dataset
+     where id = $1
+       and ($2::uuid[] is null or legal_entity_id = any($2::uuid[]))`,
+    [datasetId, legalEntityIds === null ? null : [...legalEntityIds]],
   );
 
   if (visible.rows.length === 0) {
@@ -118,16 +112,17 @@ function toRowRecords(rows: readonly RowQueryRow[]): DatasetRowRecord[] {
   return rows.map((row) => ({ data: row.data, rowNumber: row.row_number }));
 }
 
-// No authorization clause here on purpose: the dataset_select policy already resolves creator or grant.
+// Row level security decides the organization; the entity list is the application scope filter ADR 0011 requires.
 export async function listDatasets(
   pool: DatabasePool,
-  input: TenantSelector,
+  input: EntityScopeSelector,
 ): Promise<DatasetSummaryRecord[]> {
-  return inTenantContext(pool, input, async (transaction) => {
+  return runInTenantContext(pool, input, async (transaction) => {
     const result = await transaction.query<{
       created_at: Date;
       description: string | null;
       id: string;
+      legal_entity_id: string;
       name: string;
       row_count: string;
       status: string;
@@ -137,19 +132,25 @@ export async function listDatasets(
               d.name,
               d.description,
               d.status,
+              d.legal_entity_id,
               d.created_at,
               d.updated_at,
               (select count(*) from app.dataset_row as r where r.dataset_id = d.id) as row_count
        from app.dataset as d
+       where ($1::uuid[] is null or d.legal_entity_id = any($1::uuid[]))
        order by d.created_at desc, d.id desc
-       limit $1`,
-      [MAX_DATASET_LIST_SIZE],
+       limit $2`,
+      [
+        input.legalEntityIds === null ? null : [...input.legalEntityIds],
+        MAX_DATASET_LIST_SIZE,
+      ],
     );
 
     return result.rows.map((row) => ({
       createdAt: row.created_at.toISOString(),
       description: row.description,
       id: row.id,
+      legalEntityId: row.legal_entity_id,
       name: row.name,
       // count(*) is a bigint, which pg hands over as a string.
       rowCount: Number(row.row_count),
@@ -163,8 +164,8 @@ export async function readDatasetColumns(
   pool: DatabasePool,
   input: ReadDatasetColumnsInput,
 ): Promise<DatasetColumnRecord[] | null> {
-  return inTenantContext(pool, input, (transaction) =>
-    loadColumns(transaction, input.datasetId),
+  return runInTenantContext(pool, input, (transaction) =>
+    loadColumns(transaction, input.datasetId, input.legalEntityIds),
   );
 }
 
@@ -172,8 +173,12 @@ export async function readDatasetRowPage(
   pool: DatabasePool,
   input: ReadDatasetRowPageInput,
 ): Promise<DatasetRowPage | null> {
-  return inTenantContext(pool, input, async (transaction) => {
-    const columns = await loadColumns(transaction, input.datasetId);
+  return runInTenantContext(pool, input, async (transaction) => {
+    const columns = await loadColumns(
+      transaction,
+      input.datasetId,
+      input.legalEntityIds,
+    );
 
     if (columns === null) {
       return null;
@@ -197,7 +202,7 @@ export async function* streamDatasetRows(
   let cursor = FIRST_ROW_CURSOR;
 
   for (;;) {
-    const batch = await inTenantContext(pool, input, async (transaction) => {
+    const batch = await runInTenantContext(pool, input, async (transaction) => {
       const rows = await transaction.query<RowQueryRow>(ROW_PAGE_QUERY, [
         input.datasetId,
         cursor,
@@ -222,7 +227,9 @@ export async function* streamDatasetRows(
 }
 
 export abstract class DatasetRepository {
-  abstract listDatasets(input: TenantSelector): Promise<DatasetSummaryRecord[]>;
+  abstract listDatasets(
+    input: EntityScopeSelector,
+  ): Promise<DatasetSummaryRecord[]>;
   abstract readColumns(
     input: ReadDatasetColumnsInput,
   ): Promise<DatasetColumnRecord[] | null>;
@@ -241,7 +248,9 @@ export class DatabaseDatasetRepository
 {
   private poolPromise: Promise<DatabasePool> | undefined;
 
-  async listDatasets(input: TenantSelector): Promise<DatasetSummaryRecord[]> {
+  async listDatasets(
+    input: EntityScopeSelector,
+  ): Promise<DatasetSummaryRecord[]> {
     return listDatasets(await this.getPool(), input);
   }
 

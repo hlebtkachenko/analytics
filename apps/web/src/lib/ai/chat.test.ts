@@ -71,11 +71,16 @@ function signedInAuth(id = 'user_1'): ChatAuth {
 // The access contract the application API returns for a member of org_1.
 const memberAccess = {
   capabilities: {
-    manageGrants: false,
+    createEntities: false,
+    deleteEntities: false,
+    manageEntityAccess: false,
     manageMembers: false,
-    uploadData: true,
+    manageOrganization: false,
+    updateEntities: false,
+    uploadData: false,
     useAi: true,
   },
+  entityScope: { mode: 'all' },
   organizationId: 'org_1',
   role: 'member',
   service: 'application-api',
@@ -136,6 +141,7 @@ const visibleDataset = {
   createdAt: '2026-01-01T00:00:00.000Z',
   description: 'Weekly totals per region.',
   id: datasetId,
+  legalEntityId: '9b7d1c30-6a4b-4d1f-9c2e-7a5f0e3b8d21',
   name: 'Weekly revenue',
   rowCount: 2,
   status: 'ready',

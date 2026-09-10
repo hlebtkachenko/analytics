@@ -46,6 +46,7 @@ interface TenantIdentity {
 
 interface ClaimedUpload {
   filename: string;
+  legalEntityId: string;
 }
 
 function toRecords(
@@ -69,10 +70,12 @@ async function claimUpload(
   const found = await transaction.query<{
     dataset_id: string | null;
     filename: string;
+    legal_entity_id: string;
     status: string;
-  }>('select dataset_id, filename, status from app.upload where id = $1', [
-    uploadId,
-  ]);
+  }>(
+    'select dataset_id, filename, legal_entity_id, status from app.upload where id = $1',
+    [uploadId],
+  );
   const row = found.rows[0];
 
   if (row === undefined) {
@@ -89,11 +92,17 @@ async function claimUpload(
     ]);
   }
 
-  await transaction.query(
+  const claimed = await transaction.query(
     "update app.upload set status = 'processing', error = null, dataset_id = null, updated_at = now() where id = $1",
     [uploadId],
   );
-  return { filename: row.filename };
+
+  // A write policy that filtered this update would leave the upload 'pending' with no trace, so it fails loudly instead.
+  if (claimed.rowCount !== 1) {
+    throw new Error('The upload named by the job could not be claimed.');
+  }
+
+  return { filename: row.filename, legalEntityId: row.legal_entity_id };
 }
 
 async function insertRows(
@@ -123,17 +132,19 @@ async function createDataset(
     columns: readonly string[];
     first: readonly (readonly DatasetValue[])[];
     inferred: readonly InferredColumnType[];
+    legalEntityId: string;
     name: string;
     organizationId: string;
     uploadId: string;
     userId: string;
   },
 ): Promise<string> {
+  // The entity comes from the upload row, never from the job payload, so it cannot be steered from the queue.
   const created = await transaction.query<{ id: string }>(
-    `insert into app.dataset (organization_id, name, status, created_by)
-     values ($1, $2, 'importing', $3)
+    `insert into app.dataset (organization_id, legal_entity_id, name, status, created_by)
+     values ($1, $2, $3, 'importing', $4)
      returning id`,
-    [input.organizationId, input.name, input.userId],
+    [input.organizationId, input.legalEntityId, input.name, input.userId],
   );
   const datasetId = created.rows[0]?.id;
 
@@ -190,8 +201,7 @@ async function completeDataset(
     "update app.upload set status = 'completed', error = null, updated_at = now() where id = $1",
     [input.uploadId],
   );
-  // Attribution is derived from the transaction context, so this must run inside it.
-  // sanitized_values is a count only, so the removal is auditable without quoting cell content.
+  // Attribution is derived from the transaction context, so this must run inside it. sanitized_values is a count only, so the removal is auditable without quoting cell content.
   await transaction.query(
     "select app.record_audit('dataset.ingested', 'dataset', $1, $2::jsonb)",
     [
@@ -281,6 +291,7 @@ async function parseAndStore(
           columns: dataset.columns,
           first,
           inferred,
+          legalEntityId: upload.legalEntityId,
           name: upload.filename,
           organizationId: tenant.organizationId,
           uploadId: job.uploadId,
@@ -376,9 +387,20 @@ export async function ingestDataset(
     options.metrics.recordJob(INGEST_DATASET_QUEUE, 'completed');
     return ingested;
   } catch (error) {
-    // Recording the failure needs the same tenant gate, which a revoked membership refuses.
-    await recordFailure(options, job, tenant, error).catch(() => undefined);
     options.metrics.recordJob(INGEST_DATASET_QUEUE, 'failed');
+    const recording = await recordFailure(options, job, tenant, error).then(
+      () => undefined,
+      (failure: unknown) => failure,
+    );
+
+    // Recording the failure needs the same tenant gate, so a refused write travels with the original error instead of vanishing.
+    if (recording !== undefined) {
+      throw new AggregateError(
+        [error, recording],
+        'Ingestion failed and the failure could not be recorded.',
+      );
+    }
+
     throw error;
   } finally {
     await deleteStagedFile(options.stagingDirectory, job.uploadId);

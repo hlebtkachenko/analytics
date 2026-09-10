@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   bootstrapDatabaseRoles,
   checkMigrationCompatibility,
+  readEntityScope,
   countSoleOwnedOrganizations,
   consumePublicSignupEdgeRateLimit,
   ensureInitialOrganizationQuota,
@@ -31,12 +32,38 @@ const postgresImage =
   'pgvector/pgvector:pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a';
 const testPassword = 'test-only-database-credential';
 
-// Neutral dataset fixtures: fixed identifiers keep grant assertions exact.
+// Neutral dataset fixtures: fixed identifiers keep the policy assertions exact.
 const ownedDatasetId = '00000000-0000-4000-8000-000000000001';
 const sharedDatasetId = '00000000-0000-4000-8000-000000000002';
 const privateDatasetId = '00000000-0000-4000-8000-000000000003';
 const foreignDatasetId = '00000000-0000-4000-8000-000000000004';
-const unrelatedDatasetId = '00000000-0000-4000-8000-000000000009';
+
+// Neutral legal entity fixtures: two inside org-1, one inside org-2.
+const ownedEntityId = '00000000-0000-4000-8000-0000000000e1';
+const secondEntityId = '00000000-0000-4000-8000-0000000000e2';
+const foreignEntityId = '00000000-0000-4000-8000-0000000000e3';
+
+// Tenant contexts carry the role the application resolved; the database gates every write on it.
+const orgOneOwner: TenantContext = {
+  organizationId: 'org-1',
+  role: 'owner',
+  userId: 'user-1',
+};
+const orgOneAdmin: TenantContext = {
+  organizationId: 'org-1',
+  role: 'admin',
+  userId: 'user-3',
+};
+const orgOneMember: TenantContext = {
+  organizationId: 'org-1',
+  role: 'member',
+  userId: 'user-3',
+};
+const orgTwoMember: TenantContext = {
+  organizationId: 'org-2',
+  role: 'member',
+  userId: 'user-2',
+};
 
 let apiPool: Pool;
 let authPool: Pool;
@@ -230,17 +257,18 @@ beforeAll(async () => {
     values ('record-1', 'org-1', 'first'), ('record-2', 'org-2', 'second')
   `);
   await rootPool.query(`
-    insert into app.data_grants (organization_id, user_id, resource_type, resource_id, scope)
-    values ('org-1', 'user-1', 'dataset', 'dataset-1', 'read'),
-           ('org-2', 'user-2', 'dataset', 'dataset-2', 'read')
+    insert into app.legal_entity (id, organization_id, name, kind, registration_number, created_by)
+    values ('${ownedEntityId}', 'org-1', 'Placeholder Holding', 'company', 'AB-123456', 'user-1'),
+           ('${secondEntityId}', 'org-1', 'Placeholder Trader', 'sole_trader', null, 'user-1'),
+           ('${foreignEntityId}', 'org-2', 'Placeholder Foreign', 'company', null, 'user-2')
   `);
   // user-3 is a second subject inside org-1: app.dataset.created_by carries no foreign key to auth."user".
   await rootPool.query(`
-    insert into app.dataset (id, organization_id, name, description, status, created_by)
-    values ('${ownedDatasetId}', 'org-1', 'alpha container', 'orbit placeholder text', 'ready', 'user-1'),
-           ('${sharedDatasetId}', 'org-1', 'beta container', 'meridian placeholder text', 'ready', 'user-3'),
-           ('${privateDatasetId}', 'org-1', 'gamma container', 'lattice placeholder text', 'importing', 'user-3'),
-           ('${foreignDatasetId}', 'org-2', 'delta container', 'nimbus placeholder text', 'ready', 'user-2')
+    insert into app.dataset (id, organization_id, legal_entity_id, name, description, status, created_by)
+    values ('${ownedDatasetId}', 'org-1', '${ownedEntityId}', 'alpha container', 'orbit placeholder text', 'ready', 'user-1'),
+           ('${sharedDatasetId}', 'org-1', '${secondEntityId}', 'beta container', 'meridian placeholder text', 'ready', 'user-3'),
+           ('${privateDatasetId}', 'org-1', '${ownedEntityId}', 'gamma container', 'lattice placeholder text', 'importing', 'user-3'),
+           ('${foreignDatasetId}', 'org-2', '${foreignEntityId}', 'delta container', 'nimbus placeholder text', 'ready', 'user-2')
   `);
   await rootPool.query(`
     insert into app.dataset_column (dataset_id, name, position, inferred_type)
@@ -257,9 +285,9 @@ beforeAll(async () => {
            ('${foreignDatasetId}', 'org-2', 0, '{"column_d": "value-d"}')
   `);
   await rootPool.query(`
-    insert into app.upload (organization_id, dataset_id, filename, byte_size, status)
-    values ('org-1', '${ownedDatasetId}', 'upload-one.csv', 128, 'completed'),
-           ('org-2', '${foreignDatasetId}', 'upload-two.csv', 256, 'completed')
+    insert into app.upload (organization_id, legal_entity_id, dataset_id, filename, byte_size, status)
+    values ('org-1', '${ownedEntityId}', '${ownedDatasetId}', 'upload-one.csv', 128, 'completed'),
+           ('org-2', '${foreignEntityId}', '${foreignDatasetId}', 'upload-two.csv', 256, 'completed')
   `);
 });
 
@@ -1511,7 +1539,11 @@ describe('PostgreSQL 18 isolation', () => {
        where table_schema = 'app'
          and grantee = 'bap_eraser'
        order by table_name, privilege_type`);
-    expect(eraserTableAcl.rows).toEqual([]);
+    // DELETE has no column form, so the two scope tables are the only table-wide eraser privilege.
+    expect(eraserTableAcl.rows).toEqual([
+      { privilege_type: 'DELETE', table_name: 'legal_entity_access' },
+      { privilege_type: 'DELETE', table_name: 'member_entity_scope' },
+    ]);
 
     const eraserColumns = await rootPool.query<{
       column_name: string;
@@ -1534,16 +1566,6 @@ describe('PostgreSQL 18 isolation', () => {
         table_name: 'audit_log',
       },
       {
-        column_name: 'user_id',
-        privilege_type: 'SELECT',
-        table_name: 'data_grants',
-      },
-      {
-        column_name: 'user_id',
-        privilege_type: 'UPDATE',
-        table_name: 'data_grants',
-      },
-      {
         column_name: 'created_by',
         privilege_type: 'SELECT',
         table_name: 'dataset',
@@ -1552,6 +1574,46 @@ describe('PostgreSQL 18 isolation', () => {
         column_name: 'created_by',
         privilege_type: 'UPDATE',
         table_name: 'dataset',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'legal_entity',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'legal_entity',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'legal_entity_access',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'legal_entity_access',
+      },
+      {
+        column_name: 'user_id',
+        privilege_type: 'SELECT',
+        table_name: 'legal_entity_access',
+      },
+      {
+        column_name: 'updated_by',
+        privilege_type: 'SELECT',
+        table_name: 'member_entity_scope',
+      },
+      {
+        column_name: 'updated_by',
+        privilege_type: 'UPDATE',
+        table_name: 'member_entity_scope',
+      },
+      {
+        column_name: 'user_id',
+        privilege_type: 'SELECT',
+        table_name: 'member_entity_scope',
       },
     ]);
 
@@ -1566,7 +1628,7 @@ describe('PostgreSQL 18 isolation', () => {
     ).rejects.toThrow(/permission denied/);
     for (const statement of [
       'select * from app.audit_log',
-      "insert into app.data_grants (organization_id, user_id, resource_type, resource_id, scope) values ('org-1', 'denied', 'dataset', 'denied', 'read')",
+      "insert into app.legal_entity (organization_id, name, kind, created_by) values ('org-1', 'Denied Placeholder', 'company', 'denied')",
       "update app.dataset set created_by = 'denied' where false",
       'delete from app.audit_log where false',
     ]) {
@@ -1707,6 +1769,7 @@ describe('PostgreSQL 18 isolation', () => {
 
   it('erases only the requested absent identity with one opaque tombstone', async () => {
     const datasetId = '00000000-0000-4000-8000-000000000101';
+    const erasureEntityId = '00000000-0000-4000-8000-0000000001e1';
     await asOwner((client) =>
       client.query(`
         insert into auth."user" (id, name, email, email_verified)
@@ -1718,13 +1781,26 @@ describe('PostgreSQL 18 isolation', () => {
        values ('erasure-org', 'erasure-user', 'account.test', 'user', '{"subject_id":"erasure-user"}')`,
     );
     await rootPool.query(
-      `insert into app.data_grants (organization_id, user_id, resource_type, resource_id, scope)
-       values ('erasure-org', 'erasure-user', 'dataset', 'erasure-resource', 'read')`,
+      `insert into app.legal_entity (id, organization_id, name, kind, created_by)
+       values ($1, 'erasure-org', 'Erasure Placeholder', 'company', 'erasure-user')`,
+      [erasureEntityId],
     );
     await rootPool.query(
-      `insert into app.dataset (id, organization_id, name, status, created_by)
-       values ($1, 'erasure-org', 'erasure container', 'ready', 'erasure-user')`,
-      [datasetId],
+      `insert into app.dataset (id, organization_id, legal_entity_id, name, status, created_by)
+       values ($1, 'erasure-org', $2, 'erasure container', 'ready', 'erasure-user')`,
+      [datasetId, erasureEntityId],
+    );
+    // One scope the subject owns and one it wrote for a peer: the first is deleted, the second is tombstoned.
+    await rootPool.query(
+      `insert into app.member_entity_scope (organization_id, user_id, mode, updated_by)
+       values ('erasure-org', 'erasure-user', 'restricted', 'erasure-owner'),
+              ('erasure-org', 'erasure-peer', 'restricted', 'erasure-user')`,
+    );
+    await rootPool.query(
+      `insert into app.legal_entity_access (organization_id, user_id, legal_entity_id, created_by)
+       values ('erasure-org', 'erasure-user', $1, 'erasure-owner'),
+              ('erasure-org', 'erasure-peer', $1, 'erasure-user')`,
+      [erasureEntityId],
     );
     await recordUserErasureRequest(authPool, 'erasure-user');
 
@@ -1749,25 +1825,49 @@ describe('PostgreSQL 18 isolation', () => {
       audit_metadata: { subject_id: string };
       audit_user_id: string;
       dataset_created_by: string;
-      grant_user_id: string;
+      entity_created_by: string;
     }>(
       `select
       audit.user_id as audit_user_id,
       audit.metadata as audit_metadata,
-      data_grant.user_id as grant_user_id,
-      dataset.created_by as dataset_created_by
+      dataset.created_by as dataset_created_by,
+      entity.created_by as entity_created_by
     from app.audit_log as audit
-    inner join app.data_grants as data_grant on data_grant.resource_id = 'erasure-resource'
     inner join app.dataset as dataset on dataset.id = $1
+    inner join app.legal_entity as entity on entity.id = $2
     where audit.action = 'account.test'`,
-      [datasetId],
+      [datasetId, erasureEntityId],
     );
     expect(stored.rows).toEqual([
       {
         audit_metadata: { subject_id: 'erasure-user' },
         audit_user_id: result.tombstone,
         dataset_created_by: result.tombstone,
-        grant_user_id: result.tombstone,
+        entity_created_by: result.tombstone,
+      },
+    ]);
+
+    const scopes = await rootPool.query<{
+      created_by: string | null;
+      mode: string | null;
+      updated_by: string | null;
+      user_id: string;
+    }>(
+      `select scope.user_id, scope.mode, scope.updated_by, access.created_by
+       from app.member_entity_scope as scope
+       full join app.legal_entity_access as access
+         on access.user_id = scope.user_id
+       where scope.organization_id = 'erasure-org'
+       order by scope.user_id`,
+    );
+
+    // The subject's own scope and access rows are gone; the ones it wrote for a peer survive as the tombstone.
+    expect(scopes.rows).toEqual([
+      {
+        created_by: result.tombstone,
+        mode: 'restricted',
+        updated_by: result.tombstone,
+        user_id: 'erasure-peer',
       },
     ]);
     await expect(
@@ -1806,7 +1906,7 @@ describe('PostgreSQL 18 isolation', () => {
     try {
       const rows = await withTenantContext(
         client,
-        { organizationId: 'org-1', userId: 'user-1' },
+        orgOneOwner,
         async (transaction) => {
           const result = await transaction.query<{ id: string }>(
             'select id from app.tenant_test order by id',
@@ -1817,7 +1917,7 @@ describe('PostgreSQL 18 isolation', () => {
       expect(rows).toEqual([{ id: 'record-1' }]);
       const otherRows = await withTenantContext(
         client,
-        { organizationId: 'org-2', userId: 'user-2' },
+        orgTwoMember,
         async (transaction) => {
           const result = await transaction.query<{ id: string }>(
             'select id from app.tenant_test order by id',
@@ -1834,94 +1934,381 @@ describe('PostgreSQL 18 isolation', () => {
     }
   });
 
-  it('isolates data grants for reads and rejects cross-tenant writes', async () => {
-    const client = await apiPool.connect();
+  it('gates every write on the role bound to the tenant transaction', async () => {
+    // A read-only member may read the whole organization and write nothing in it.
+    const memberReads = await asTenant(
+      apiPool,
+      orgOneMember,
+      async (transaction) => {
+        const entities = await transaction.query<{ name: string }>(
+          'select name from app.legal_entity order by name',
+        );
+        const datasets = await transaction.query<{ name: string }>(
+          'select name from app.dataset order by name',
+        );
+        return { datasets: datasets.rows, entities: entities.rows };
+      },
+    );
 
-    try {
-      const visible = await withTenantContext(
-        client,
-        { organizationId: 'org-1', userId: 'user-1' },
-        async (transaction) => {
-          const result = await transaction.query<{ resource_id: string }>(
-            'select resource_id from app.data_grants order by resource_id',
-          );
-          return result.rows;
-        },
+    expect(memberReads.entities).toEqual([
+      { name: 'Placeholder Holding' },
+      { name: 'Placeholder Trader' },
+    ]);
+    expect(memberReads.datasets).toEqual([
+      { name: 'alpha container' },
+      { name: 'beta container' },
+      { name: 'gamma container' },
+    ]);
+    await expect(
+      asTenant(apiPool, orgOneMember, (transaction) =>
+        transaction.query(
+          `insert into app.legal_entity (organization_id, name, kind, created_by)
+           values ('org-1', 'Member Placeholder', 'company', 'user-3')`,
+        ),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    await expect(
+      asTenant(apiPool, orgOneMember, (transaction) =>
+        transaction.query(
+          `insert into app.dataset (organization_id, legal_entity_id, name, created_by)
+           values ('org-1', $1, 'member container', 'user-3')`,
+          [ownedEntityId],
+        ),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    const memberWrites = await asTenant(
+      apiPool,
+      orgOneMember,
+      async (transaction) => {
+        const renamedEntity = await transaction.query(
+          'update app.legal_entity set name = $2 where id = $1',
+          [ownedEntityId, 'Renamed Placeholder'],
+        );
+        const renamedDataset = await transaction.query(
+          'update app.dataset set name = $2 where id = $1',
+          [ownedDatasetId, 'renamed container'],
+        );
+        const removed = await transaction.query(
+          'delete from app.dataset where id = $1',
+          [ownedDatasetId],
+        );
+        return {
+          removed: removed.rowCount,
+          renamedDataset: renamedDataset.rowCount,
+          renamedEntity: renamedEntity.rowCount,
+        };
+      },
+    );
+
+    // The USING clauses match no row for a member, so every write is a silent no-op.
+    expect(memberWrites).toEqual({
+      removed: 0,
+      renamedDataset: 0,
+      renamedEntity: 0,
+    });
+
+    // An admin creates and edits entities and may never delete one.
+    const adminEntityId = await asTenant(
+      apiPool,
+      orgOneAdmin,
+      async (transaction) => {
+        const created = await transaction.query<{ id: string }>(
+          `insert into app.legal_entity (organization_id, name, kind, created_by)
+           values ('org-1', 'Admin Placeholder', 'company', 'user-3')
+           returning id`,
+        );
+        return created.rows[0]?.id ?? '';
+      },
+    );
+    const adminWrites = await asTenant(
+      apiPool,
+      orgOneAdmin,
+      async (transaction) => {
+        const renamed = await transaction.query(
+          'update app.legal_entity set name = $2 where id = $1',
+          [adminEntityId, 'Admin Placeholder Renamed'],
+        );
+        const removed = await transaction.query(
+          'delete from app.legal_entity where id = $1',
+          [adminEntityId],
+        );
+        const scoped = await transaction.query(
+          `insert into app.member_entity_scope (organization_id, user_id, mode, updated_by)
+           values ('org-1', 'user-9', 'restricted', 'user-3')
+           on conflict (organization_id, user_id) do nothing`,
+        );
+        return {
+          removed: removed.rowCount,
+          renamed: renamed.rowCount,
+          scoped: scoped.rowCount,
+        };
+      },
+    ).catch((error: unknown) => error);
+
+    // The scope insert is refused outright, so the whole admin transaction fails on it.
+    expect(String(adminWrites)).toMatch(/row-level security/);
+    const adminEdits = await asTenant(
+      apiPool,
+      orgOneAdmin,
+      async (transaction) => {
+        const renamed = await transaction.query(
+          'update app.legal_entity set name = $2 where id = $1',
+          [adminEntityId, 'Admin Placeholder Renamed'],
+        );
+        const removed = await transaction.query(
+          'delete from app.legal_entity where id = $1',
+          [adminEntityId],
+        );
+        return { removed: removed.rowCount, renamed: renamed.rowCount };
+      },
+    );
+
+    expect(adminEdits).toEqual({ removed: 0, renamed: 1 });
+
+    // Deleting an entity is an owner action and takes its datasets and uploads with it.
+    const cascade = await asTenant(
+      apiPool,
+      orgOneOwner,
+      async (transaction) => {
+        const dataset = await transaction.query<{ id: string }>(
+          `insert into app.dataset (organization_id, legal_entity_id, name, created_by)
+         values ('org-1', $1, 'admin container', 'user-1')
+         returning id`,
+          [adminEntityId],
+        );
+        const datasetId = dataset.rows[0]?.id;
+        await transaction.query(
+          `insert into app.upload (organization_id, legal_entity_id, dataset_id, filename, byte_size)
+         values ('org-1', $1, $2, 'upload-admin.csv', 32)`,
+          [adminEntityId, datasetId],
+        );
+        const removed = await transaction.query(
+          'delete from app.legal_entity where id = $1',
+          [adminEntityId],
+        );
+        const datasets = await transaction.query(
+          'select id from app.dataset where legal_entity_id = $1',
+          [adminEntityId],
+        );
+        const uploads = await transaction.query(
+          'select id from app.upload where legal_entity_id = $1',
+          [adminEntityId],
+        );
+        return {
+          datasets: datasets.rows,
+          removed: removed.rowCount,
+          uploads: uploads.rows,
+        };
+      },
+    );
+
+    expect(cascade).toEqual({ datasets: [], removed: 1, uploads: [] });
+  });
+
+  it('resolves the stored entity scope of a member and never of an owner', async () => {
+    await asTenant(apiPool, orgOneOwner, async (transaction) => {
+      await transaction.query(
+        `insert into app.member_entity_scope (organization_id, user_id, mode, updated_by)
+         values ('org-1', 'user-3', 'restricted', 'user-1')`,
+      );
+      await transaction.query(
+        `insert into app.legal_entity_access (organization_id, user_id, legal_entity_id, created_by)
+         values ('org-1', 'user-3', $1, 'user-1')`,
+        [secondEntityId],
+      );
+    });
+    const scopes = await asTenant(
+      apiPool,
+      orgOneOwner,
+      async (transaction) => ({
+        // The owner is never restricted, even with a stored row claiming otherwise.
+        owner: await readEntityScope(transaction, {
+          organizationId: 'org-1',
+          role: 'owner',
+          userId: 'user-3',
+        }),
+        restricted: await readEntityScope(transaction, {
+          organizationId: 'org-1',
+          role: 'member',
+          userId: 'user-3',
+        }),
+        unscoped: await readEntityScope(transaction, {
+          organizationId: 'org-1',
+          role: 'member',
+          userId: 'user-4',
+        }),
+      }),
+    );
+
+    expect(scopes).toEqual({
+      owner: { mode: 'all' },
+      restricted: { legalEntityIds: [secondEntityId], mode: 'restricted' },
+      unscoped: { mode: 'all' },
+    });
+
+    // The scope tables are tenant scoped like every other app table.
+    const foreign = await asTenant(
+      apiPool,
+      orgTwoMember,
+      async (transaction) => ({
+        access: (
+          await transaction.query('select user_id from app.legal_entity_access')
+        ).rows,
+        entities: (
+          await transaction.query<{ name: string }>(
+            'select name from app.legal_entity order by name',
+          )
+        ).rows,
+        scopes: (
+          await transaction.query('select user_id from app.member_entity_scope')
+        ).rows,
+      }),
+    );
+
+    expect(foreign).toEqual({
+      access: [],
+      entities: [{ name: 'Placeholder Foreign' }],
+      scopes: [],
+    });
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.legal_entity (organization_id, name, kind, created_by)
+           values ('org-2', 'Intruder Placeholder', 'company', 'user-1')`,
+        ),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    await asTenant(apiPool, orgOneOwner, (transaction) =>
+      transaction.query(
+        "delete from app.member_entity_scope where user_id = 'user-3'",
+      ),
+    );
+  });
+
+  it('clears a stored entity scope when the membership ends or becomes an owner', async () => {
+    const storeScope = async (): Promise<void> => {
+      await asTenant(apiPool, orgOneOwner, async (transaction) => {
+        await transaction.query(
+          `insert into app.member_entity_scope (organization_id, user_id, mode, updated_by)
+           values ('org-1', 'scope-user', 'restricted', 'user-1')`,
+        );
+        await transaction.query(
+          `insert into app.legal_entity_access (organization_id, user_id, legal_entity_id, created_by)
+           values ('org-1', 'scope-user', $1, 'user-1')`,
+          [ownedEntityId],
+        );
+      });
+    };
+    const storedRows = async (): Promise<Record<string, number>> => {
+      const counted = await rootPool.query<{ access: number; scopes: number }>(
+        `select
+           (select count(*)::int from app.member_entity_scope where user_id = 'scope-user') as scopes,
+           (select count(*)::int from app.legal_entity_access where user_id = 'scope-user') as access`,
       );
 
-      expect(visible).toEqual([{ resource_id: 'dataset-1' }]);
-      await expect(
-        withTenantContext(
-          client,
-          { organizationId: 'org-1', userId: 'user-1' },
-          async (transaction) =>
-            transaction.query(
-              "insert into app.data_grants (organization_id, user_id, resource_type, resource_id, scope) values ('org-2', 'user-2', 'dataset', 'dataset-3', 'read')",
-            ),
-        ),
-      ).rejects.toThrow(/row-level security/);
-      const inserted = await withTenantContext(
-        client,
-        { organizationId: 'org-1', userId: 'user-1' },
-        async (transaction) => {
-          const result = await transaction.query<{ resource_id: string }>(
-            "insert into app.data_grants (organization_id, user_id, resource_type, resource_id, scope) values ('org-1', 'user-1', 'dataset', 'dataset-4', 'read') returning resource_id",
-          );
-          return result.rows;
-        },
-      );
+      return counted.rows[0] ?? {};
+    };
 
-      expect(inserted).toEqual([{ resource_id: 'dataset-4' }]);
-      await expect(
-        reportingPool.query(
-          "insert into app.data_grants (organization_id, user_id, resource_type, resource_id, scope) values ('org-1', 'user-1', 'dataset', 'dataset-5', 'read')",
-        ),
-      ).rejects.toThrow(/permission denied/);
-    } finally {
-      client.release();
+    await authPool.query(
+      `insert into auth."user" (id, name, email, email_verified)
+       values ('scope-user', 'Scoped', 'scoped@example.test', true)`,
+    );
+    await authPool.query(
+      `insert into auth.member (id, organization_id, user_id, role)
+       values ('member-scope', 'org-1', 'scope-user', 'member')`,
+    );
+    await storeScope();
+    expect(await storedRows()).toEqual({ access: 1, scopes: 1 });
+
+    // Better Auth removes the membership as bap_auth, which holds nothing in schema app; the definer trigger clears the scope.
+    await authPool.query("delete from auth.member where id = 'member-scope'");
+    expect(await storedRows()).toEqual({ access: 0, scopes: 0 });
+
+    await authPool.query(
+      `insert into auth.member (id, organization_id, user_id, role)
+       values ('member-scope', 'org-1', 'scope-user', 'member')`,
+    );
+
+    // A re-invited subject starts unrestricted instead of inheriting the restriction of its former membership.
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        readEntityScope(transaction, {
+          organizationId: 'org-1',
+          role: 'member',
+          userId: 'scope-user',
+        }),
+      ),
+    ).resolves.toEqual({ mode: 'all' });
+
+    await storeScope();
+    await authPool.query(
+      "update auth.member set role = 'owner' where id = 'member-scope'",
+    );
+    expect(await storedRows()).toEqual({ access: 0, scopes: 0 });
+    await authPool.query(`delete from auth."user" where id = 'scope-user'`);
+  });
+
+  it('grants entity, scope and access writes to the application role and reads to reporting and backup', async () => {
+    await expect(
+      reportingPool.query('select id from app.legal_entity'),
+    ).resolves.toMatchObject({ rows: [] });
+    for (const statement of [
+      `insert into app.legal_entity (organization_id, name, kind, created_by) values ('org-1', 'Reporting Placeholder', 'company', 'user-1')`,
+      `insert into app.member_entity_scope (organization_id, user_id, mode, updated_by) values ('org-1', 'user-1', 'all', 'user-1')`,
+      'delete from app.legal_entity_access',
+    ]) {
+      await expect(reportingPool.query(statement)).rejects.toThrow(
+        /permission denied/,
+      );
     }
+    for (const table of [
+      'app.legal_entity',
+      'app.member_entity_scope',
+      'app.legal_entity_access',
+    ]) {
+      // bap_backup holds BYPASSRLS, so a dump sees every tenant's rows and may change none of them.
+      await expect(
+        backupPool.query(`select count(*)::int as total from ${table}`),
+      ).resolves.toBeDefined();
+      await expect(backupPool.query(`delete from ${table}`)).rejects.toThrow();
+    }
+    const grantsGone = await rootPool.query<{ present: boolean }>(
+      `select to_regclass('app.data_grants') is not null as present`,
+    );
+
+    // Per dataset grants are gone with ADR 0011, so nothing can consult them any more.
+    expect(grantsGone.rows).toEqual([{ present: false }]);
   });
 
   it('keeps the audit log append only for the application role', async () => {
     const client = await apiPool.connect();
 
     try {
-      await withTenantContext(
-        client,
-        { organizationId: 'org-1', userId: 'user-1' },
-        async (transaction) =>
-          transaction.query(
-            "select app.record_audit('grant.created', 'data_grant', 'dataset-1')",
-          ),
+      await withTenantContext(client, orgOneOwner, async (transaction) =>
+        transaction.query(
+          "select app.record_audit('dataset.read', 'dataset', 'dataset-1')",
+        ),
       );
       await expect(
-        withTenantContext(
-          client,
-          { organizationId: 'org-1', userId: 'user-1' },
-          async (transaction) =>
-            transaction.query(
-              "insert into app.audit_log (organization_id, user_id, action, resource_type) values ('org-1', 'user-1', 'forged', 'data_grant')",
-            ),
+        withTenantContext(client, orgOneOwner, async (transaction) =>
+          transaction.query(
+            "insert into app.audit_log (organization_id, user_id, action, resource_type) values ('org-1', 'user-1', 'forged', 'dataset')",
+          ),
         ),
       ).rejects.toThrow(/permission denied/);
       await expect(
-        withTenantContext(
-          client,
-          { organizationId: 'org-1', userId: 'user-1' },
-          async (transaction) =>
-            transaction.query("update app.audit_log set action = 'edited'"),
+        withTenantContext(client, orgOneOwner, async (transaction) =>
+          transaction.query("update app.audit_log set action = 'edited'"),
         ),
       ).rejects.toThrow(/permission denied/);
       await expect(
-        withTenantContext(
-          client,
-          { organizationId: 'org-1', userId: 'user-1' },
-          async (transaction) => transaction.query('delete from app.audit_log'),
+        withTenantContext(client, orgOneOwner, async (transaction) =>
+          transaction.query('delete from app.audit_log'),
         ),
       ).rejects.toThrow(/permission denied/);
       const remaining = await withTenantContext(
         client,
-        { organizationId: 'org-1', userId: 'user-1' },
+        orgOneOwner,
         async (transaction) => {
           const result = await transaction.query<{ action: string }>(
             'select action from app.audit_log order by created_at',
@@ -1930,7 +2317,7 @@ describe('PostgreSQL 18 isolation', () => {
         },
       );
 
-      expect(remaining).toEqual([{ action: 'grant.created' }]);
+      expect(remaining).toEqual([{ action: 'dataset.read' }]);
     } finally {
       client.release();
     }
@@ -1960,7 +2347,7 @@ describe('PostgreSQL 18 isolation', () => {
     try {
       const recordedId = await withTenantContext(
         client,
-        { organizationId: 'org-1', userId: 'user-1' },
+        orgOneOwner,
         async (transaction) => {
           const result = await transaction.query<{ id: string }>(
             "select app.record_audit('dataset.read', 'dataset', 'dataset-1', jsonb_build_object('organization_id', 'org-2', 'user_id', 'user-2')) as id",
@@ -1972,7 +2359,7 @@ describe('PostgreSQL 18 isolation', () => {
       expect(typeof recordedId).toBe('string');
       const attribution = await withTenantContext(
         client,
-        { organizationId: 'org-1', userId: 'user-1' },
+        orgOneOwner,
         async (transaction) => {
           const result = await transaction.query<{
             organization_id: string;
@@ -1991,7 +2378,7 @@ describe('PostgreSQL 18 isolation', () => {
       ]);
       const otherTenantRows = await withTenantContext(
         client,
-        { organizationId: 'org-2', userId: 'user-2' },
+        orgTwoMember,
         async (transaction) => {
           const result = await transaction.query<{ id: string }>(
             'select id from app.audit_log',
@@ -2003,13 +2390,10 @@ describe('PostgreSQL 18 isolation', () => {
       // Nothing reached org-2, so the call is not a cross-tenant write primitive.
       expect(otherTenantRows).toEqual([]);
       await expect(
-        withTenantContext(
-          client,
-          { organizationId: 'org-1', userId: 'user-1' },
-          async (transaction) =>
-            transaction.query(
-              "select app.record_audit('dataset.read', 'dataset', 'dataset-1', '{}'::jsonb, 'org-2')",
-            ),
+        withTenantContext(client, orgOneOwner, async (transaction) =>
+          transaction.query(
+            "select app.record_audit('dataset.read', 'dataset', 'dataset-1', '{}'::jsonb, 'org-2')",
+          ),
         ),
       ).rejects.toThrow(/does not exist/);
       await expect(
@@ -2025,7 +2409,7 @@ describe('PostgreSQL 18 isolation', () => {
   it('isolates datasets, dataset rows, and uploads across tenants', async () => {
     const firstTenant = await asTenant(
       apiPool,
-      { organizationId: 'org-1', userId: 'user-1' },
+      orgOneOwner,
       async (transaction) => ({
         datasets: (
           await transaction.query<{ name: string }>(
@@ -2045,13 +2429,21 @@ describe('PostgreSQL 18 isolation', () => {
       }),
     );
 
-    // org-2 rows never appear, and inside org-1 only the subject's own dataset does.
-    expect(firstTenant.datasets).toEqual([{ name: 'alpha container' }]);
-    expect(firstTenant.rows).toEqual([{ dataset_id: ownedDatasetId }]);
+    // org-2 rows never appear, and inside org-1 every dataset does, whoever created it.
+    expect(firstTenant.datasets).toEqual([
+      { name: 'alpha container' },
+      { name: 'beta container' },
+      { name: 'gamma container' },
+    ]);
+    expect(firstTenant.rows).toEqual(
+      [ownedDatasetId, sharedDatasetId, privateDatasetId]
+        .sort()
+        .map((dataset_id) => ({ dataset_id })),
+    );
     expect(firstTenant.uploads).toEqual([{ filename: 'upload-one.csv' }]);
     const secondTenant = await asTenant(
       apiPool,
-      { organizationId: 'org-2', userId: 'user-2' },
+      orgTwoMember,
       async (transaction) => ({
         datasets: (
           await transaction.query<{ name: string }>(
@@ -2075,33 +2467,24 @@ describe('PostgreSQL 18 isolation', () => {
     expect(secondTenant.rows).toEqual([{ dataset_id: foreignDatasetId }]);
     expect(secondTenant.uploads).toEqual([{ filename: 'upload-two.csv' }]);
     await expect(
-      asTenant(
-        apiPool,
-        { organizationId: 'org-1', userId: 'user-1' },
-        async (transaction) =>
-          transaction.query(
-            "insert into app.dataset (organization_id, name, created_by) values ('org-2', 'intruder container', 'user-1')",
-          ),
+      asTenant(apiPool, orgOneOwner, async (transaction) =>
+        transaction.query(
+          `insert into app.dataset (organization_id, legal_entity_id, name, created_by) values ('org-2', '${foreignEntityId}', 'intruder container', 'user-1')`,
+        ),
       ),
     ).rejects.toThrow(/row-level security/);
     await expect(
-      asTenant(
-        apiPool,
-        { organizationId: 'org-1', userId: 'user-1' },
-        async (transaction) =>
-          transaction.query(
-            `insert into app.dataset_row (dataset_id, organization_id, row_number, data) values ('${foreignDatasetId}', 'org-2', 1, '{}')`,
-          ),
+      asTenant(apiPool, orgOneOwner, async (transaction) =>
+        transaction.query(
+          `insert into app.dataset_row (dataset_id, organization_id, row_number, data) values ('${foreignDatasetId}', 'org-2', 1, '{}')`,
+        ),
       ),
     ).rejects.toThrow(/row-level security/);
     await expect(
-      asTenant(
-        apiPool,
-        { organizationId: 'org-1', userId: 'user-1' },
-        async (transaction) =>
-          transaction.query(
-            "insert into app.upload (organization_id, filename, byte_size) values ('org-2', 'upload-three.csv', 1)",
-          ),
+      asTenant(apiPool, orgOneOwner, async (transaction) =>
+        transaction.query(
+          `insert into app.upload (organization_id, legal_entity_id, filename, byte_size) values ('org-2', '${foreignEntityId}', 'upload-three.csv', 1)`,
+        ),
       ),
     ).rejects.toThrow(/row-level security/);
   });
@@ -2109,7 +2492,7 @@ describe('PostgreSQL 18 isolation', () => {
   it('never exposes dataset columns across tenants', async () => {
     const visible = await asTenant(
       apiPool,
-      { organizationId: 'org-2', userId: 'user-2' },
+      orgTwoMember,
       async (transaction) => ({
         all: (
           await transaction.query<{ name: string }>(
@@ -2128,72 +2511,28 @@ describe('PostgreSQL 18 isolation', () => {
     // app.dataset_column carries no organization_id, so the parent lookup is the only tenant boundary it has.
     expect(visible.all).toEqual([{ name: 'column_d' }]);
     expect(visible.targeted).toEqual([]);
-    const owner = await asTenant(
-      apiPool,
-      { organizationId: 'org-1', userId: 'user-1' },
-      async (transaction) => {
-        const result = await transaction.query<{ name: string }>(
-          'select name from app.dataset_column where dataset_id = $1',
-          [ownedDatasetId],
-        );
-        return result.rows;
-      },
-    );
+    const owner = await asTenant(apiPool, orgOneOwner, async (transaction) => {
+      const result = await transaction.query<{ name: string }>(
+        'select name from app.dataset_column where dataset_id = $1',
+        [ownedDatasetId],
+      );
+      return result.rows;
+    });
 
     expect(owner).toEqual([{ name: 'column_a' }]);
     await expect(
-      asTenant(
-        apiPool,
-        { organizationId: 'org-1', userId: 'user-1' },
-        async (transaction) =>
-          transaction.query(
-            `insert into app.dataset_column (dataset_id, name, position, inferred_type) values ('${foreignDatasetId}', 'column_e', 1, 'text')`,
-          ),
+      asTenant(apiPool, orgOneOwner, async (transaction) =>
+        transaction.query(
+          `insert into app.dataset_column (dataset_id, name, position, inferred_type) values ('${foreignDatasetId}', 'column_e', 1, 'text')`,
+        ),
       ),
     ).rejects.toThrow(/row-level security/);
   });
 
-  it('hides another subject dataset in the same organization until a grant exists', async () => {
-    const before = await asTenant(
+  it('shows every dataset in the organization whoever created it', async () => {
+    const visible = await asTenant(
       apiPool,
-      { organizationId: 'org-1', userId: 'user-1' },
-      async (transaction) => ({
-        columns: (
-          await transaction.query(
-            'select name from app.dataset_column where dataset_id = $1',
-            [sharedDatasetId],
-          )
-        ).rows,
-        datasets: (
-          await transaction.query('select id from app.dataset where id = $1', [
-            sharedDatasetId,
-          ])
-        ).rows,
-        rows: (
-          await transaction.query(
-            'select id from app.dataset_row where dataset_id = $1',
-            [sharedDatasetId],
-          )
-        ).rows,
-      }),
-    );
-
-    // Same tenant, different creator, no grant: the dataset and everything under it stay invisible.
-    expect(before.datasets).toEqual([]);
-    expect(before.rows).toEqual([]);
-    expect(before.columns).toEqual([]);
-    await asTenant(
-      apiPool,
-      { organizationId: 'org-1', userId: 'user-1' },
-      async (transaction) =>
-        transaction.query(
-          'insert into app.data_grants (organization_id, user_id, resource_type, resource_id, scope) values ($1, $2, $3, $4, $5)',
-          ['org-1', 'user-1', 'dataset', sharedDatasetId, 'read'],
-        ),
-    );
-    const after = await asTenant(
-      apiPool,
-      { organizationId: 'org-1', userId: 'user-1' },
+      orgOneOwner,
       async (transaction) => ({
         columns: (
           await transaction.query<{ name: string }>(
@@ -2216,14 +2555,15 @@ describe('PostgreSQL 18 isolation', () => {
       }),
     );
 
-    // The single new app.data_grants row is the only thing that changed.
-    expect(after.datasets).toEqual([{ id: sharedDatasetId }]);
-    expect(after.rows).toEqual([{ dataset_id: sharedDatasetId }]);
-    expect(after.columns).toEqual([{ name: 'column_b' }]);
-    // A read grant must not confer writing. The write policies match no row, so nothing changes.
-    const write = await asTenant(
+    // Same tenant, different creator: reading follows the organization only, so all of it is visible.
+    expect(visible.datasets).toEqual([{ id: sharedDatasetId }]);
+    expect(visible.rows).toEqual([{ dataset_id: sharedDatasetId }]);
+    expect(visible.columns).toEqual([{ name: 'column_b' }]);
+
+    // A read-only member sees the same rows and changes none of them.
+    const memberWrite = await asTenant(
       apiPool,
-      { organizationId: 'org-1', userId: 'user-1' },
+      orgOneMember,
       async (transaction) => {
         const renamed = await transaction.query(
           'update app.dataset set name = $1 where id = $2',
@@ -2233,8 +2573,8 @@ describe('PostgreSQL 18 isolation', () => {
           'delete from app.dataset_row where dataset_id = $1',
           [sharedDatasetId],
         );
-        const removed = await transaction.query(
-          'delete from app.dataset where id = $1',
+        const removedColumns = await transaction.query(
+          'delete from app.dataset_column where dataset_id = $1',
           [sharedDatasetId],
         );
         const survivors = await transaction.query<{ name: string }>(
@@ -2242,7 +2582,7 @@ describe('PostgreSQL 18 isolation', () => {
           [sharedDatasetId],
         );
         return {
-          removed: removed.rowCount,
+          removedColumns: removedColumns.rowCount,
           removedRows: removedRows.rowCount,
           renamed: renamed.rowCount,
           survivors: survivors.rows,
@@ -2250,63 +2590,33 @@ describe('PostgreSQL 18 isolation', () => {
       },
     );
 
-    expect(write).toEqual({
-      removed: 0,
+    expect(memberWrite).toEqual({
+      removedColumns: 0,
       removedRows: 0,
       renamed: 0,
       survivors: [{ name: 'beta container' }],
     });
-  });
 
-  it('ignores grants for another resource type and for another dataset', async () => {
-    await asTenant(
+    // An admin who did not create the dataset may still edit it, because authorship confers nothing.
+    const adminWrite = await asTenant(
       apiPool,
-      { organizationId: 'org-1', userId: 'user-1' },
+      orgOneAdmin,
       async (transaction) => {
-        await transaction.query(
-          'insert into app.data_grants (organization_id, user_id, resource_type, resource_id, scope) values ($1, $2, $3, $4, $5)',
-          ['org-1', 'user-1', 'report', privateDatasetId, 'read'],
+        const renamed = await transaction.query(
+          'update app.dataset set name = $1 where id = $2',
+          ['beta container', sharedDatasetId],
         );
-        await transaction.query(
-          'insert into app.data_grants (organization_id, user_id, resource_type, resource_id, scope) values ($1, $2, $3, $4, $5)',
-          ['org-1', 'user-1', 'dataset', unrelatedDatasetId, 'read'],
-        );
+        return renamed.rowCount;
       },
     );
-    const visible = await asTenant(
-      apiPool,
-      { organizationId: 'org-1', userId: 'user-1' },
-      async (transaction) => ({
-        columns: (
-          await transaction.query(
-            'select name from app.dataset_column where dataset_id = $1',
-            [privateDatasetId],
-          )
-        ).rows,
-        datasets: (
-          await transaction.query('select id from app.dataset where id = $1', [
-            privateDatasetId,
-          ])
-        ).rows,
-        rows: (
-          await transaction.query(
-            'select id from app.dataset_row where dataset_id = $1',
-            [privateDatasetId],
-          )
-        ).rows,
-      }),
-    );
 
-    // Only resource_type 'dataset' pointing at this exact dataset id can lift the veil.
-    expect(visible.datasets).toEqual([]);
-    expect(visible.rows).toEqual([]);
-    expect(visible.columns).toEqual([]);
+    expect(adminWrite).toBe(1);
   });
 
   it('finds datasets by a word from the name or the description', async () => {
     const matches = await asTenant(
       apiPool,
-      { organizationId: 'org-1', userId: 'user-1' },
+      orgOneOwner,
       async (transaction) => ({
         byDescription: (
           await transaction.query<{ name: string }>(
@@ -2325,7 +2635,7 @@ describe('PostgreSQL 18 isolation', () => {
     expect(matches.byDescription).toEqual([{ name: 'alpha container' }]);
     const foreignMatches = await asTenant(
       apiPool,
-      { organizationId: 'org-2', userId: 'user-2' },
+      orgTwoMember,
       async (transaction) => {
         const result = await transaction.query<{ name: string }>(
           "select name from app.dataset where search_vector @@ plainto_tsquery('simple', 'alpha')",
@@ -2346,10 +2656,10 @@ describe('PostgreSQL 18 isolation', () => {
   it('grants dataset writes to the application role and reads to reporting and backup', async () => {
     const written = await asTenant(
       apiPool,
-      { organizationId: 'org-1', userId: 'user-1' },
+      orgOneOwner,
       async (transaction) => {
         const dataset = await transaction.query<{ id: string }>(
-          "insert into app.dataset (organization_id, name, description, created_by) values ('org-1', 'epsilon container', 'zenith placeholder text', 'user-1') returning id",
+          `insert into app.dataset (organization_id, legal_entity_id, name, description, created_by) values ('org-1', '${ownedEntityId}', 'epsilon container', 'zenith placeholder text', 'user-1') returning id`,
         );
         const datasetId = dataset.rows[0]?.id;
         await transaction.query(
@@ -2361,7 +2671,7 @@ describe('PostgreSQL 18 isolation', () => {
           [datasetId],
         );
         await transaction.query(
-          "insert into app.upload (organization_id, dataset_id, filename, byte_size) values ('org-1', $1, 'upload-four.csv', 64)",
+          `insert into app.upload (organization_id, legal_entity_id, dataset_id, filename, byte_size) values ('org-1', '${ownedEntityId}', $1, 'upload-four.csv', 64)`,
           [datasetId],
         );
         const reread = await transaction.query<{ data: unknown }>(
@@ -2390,7 +2700,7 @@ describe('PostgreSQL 18 isolation', () => {
     ).resolves.toMatchObject({ rows: [] });
     await expect(
       reportingPool.query(
-        "insert into app.dataset (organization_id, name, created_by) values ('org-1', 'denied container', 'user-1')",
+        `insert into app.dataset (organization_id, legal_entity_id, name, created_by) values ('org-1', '${ownedEntityId}', 'denied container', 'user-1')`,
       ),
     ).rejects.toThrow(/permission denied/);
     for (const table of [
@@ -2440,19 +2750,15 @@ describe('PostgreSQL 18 isolation', () => {
         vectorLiteral([0, 1, 0]),
       ],
     );
-    const first = await asTenant(
-      apiPool,
-      { organizationId: 'org-1', userId: 'user-1' },
-      async (transaction) => {
-        const result = await transaction.query<{ dataset_id: string }>(
-          'select dataset_id from app.dataset_embedding order by dataset_id',
-        );
-        return result.rows;
-      },
-    );
+    const first = await asTenant(apiPool, orgOneOwner, async (transaction) => {
+      const result = await transaction.query<{ dataset_id: string }>(
+        'select dataset_id from app.dataset_embedding order by dataset_id',
+      );
+      return result.rows;
+    });
     const second = await asTenant(
       apiPool,
-      { organizationId: 'org-2', userId: 'user-2' },
+      orgTwoMember,
       async (transaction) => {
         const result = await transaction.query<{ dataset_id: string }>(
           'select dataset_id from app.dataset_embedding order by dataset_id',
@@ -2461,55 +2767,48 @@ describe('PostgreSQL 18 isolation', () => {
       },
     );
 
-    // user-1 created the first dataset and holds a read grant on the second, so both are visible.
+    // Reading is organization wide, so both org-1 vectors are visible whoever created their dataset.
     expect(first).toEqual([
       { dataset_id: ownedDatasetId },
       { dataset_id: sharedDatasetId },
     ]);
     expect(second).toEqual([{ dataset_id: foreignDatasetId }]);
     await expect(
-      asTenant(
-        apiPool,
-        { organizationId: 'org-1', userId: 'user-1' },
-        async (transaction) =>
-          transaction.query(
-            `insert into app.dataset_embedding (organization_id, dataset_id, model, content_hash, embedding)
+      asTenant(apiPool, orgOneOwner, async (transaction) =>
+        transaction.query(
+          `insert into app.dataset_embedding (organization_id, dataset_id, model, content_hash, embedding)
              values ('org-2', $1, 'openai:test-embedding', $2, $3::vector)`,
-            [foreignDatasetId, 'c'.repeat(64), vectorLiteral([1, 0, 0])],
-          ),
+          [foreignDatasetId, 'c'.repeat(64), vectorLiteral([1, 0, 0])],
+        ),
       ),
     ).rejects.toThrow(/row-level security/);
   });
 
   it('never returns another tenant row from a similarity query', async () => {
     const probe = vectorLiteral([1, 0, 0]);
-    const owner = await asTenant(
-      apiPool,
-      { organizationId: 'org-1', userId: 'user-1' },
-      async (transaction) => {
-        // pgvector 0.8 introduced this setting; without it a filtered approximate scan can under-return.
-        const scan = await transaction.query<{ mode: string }>(
-          "select set_config('hnsw.iterative_scan', 'strict_order', true) as mode",
-        );
+    const owner = await asTenant(apiPool, orgOneOwner, async (transaction) => {
+      // pgvector 0.8 introduced this setting; without it a filtered approximate scan can under-return.
+      const scan = await transaction.query<{ mode: string }>(
+        "select set_config('hnsw.iterative_scan', 'strict_order', true) as mode",
+      );
 
-        expect(scan.rows[0]?.mode).toBe('strict_order');
-        const result = await transaction.query<{
-          dataset_id: string;
-          distance: number;
-        }>(
-          `select e.dataset_id, (e.embedding <=> $1::vector)::float8 as distance
+      expect(scan.rows[0]?.mode).toBe('strict_order');
+      const result = await transaction.query<{
+        dataset_id: string;
+        distance: number;
+      }>(
+        `select e.dataset_id, (e.embedding <=> $1::vector)::float8 as distance
            from app.dataset_embedding as e
            join app.dataset as d on d.id = e.dataset_id
            order by e.embedding <=> $1::vector
            limit 10`,
-          [probe],
-        );
-        return result.rows;
-      },
-    );
+        [probe],
+      );
+      return result.rows;
+    });
     const stranger = await asTenant(
       apiPool,
-      { organizationId: 'org-2', userId: 'user-2' },
+      orgTwoMember,
       async (transaction) => {
         const result = await transaction.query<{ dataset_id: string }>(
           `select e.dataset_id
@@ -2548,80 +2847,69 @@ describe('PostgreSQL 18 isolation', () => {
     expect(extension.rows[0]?.extversion).toMatch(/^0\.(8|9)\.|^[1-9]/);
   });
 
-  it('lets a read grant read an embedding and never delete, update or replace it', async () => {
-    const write = await asTenant(
-      apiPool,
-      { organizationId: 'org-1', userId: 'user-1' },
-      async (transaction) => {
-        const removed = await transaction.query(
-          'delete from app.dataset_embedding where dataset_id = $1',
-          [sharedDatasetId],
-        );
-        const replaced = await transaction.query(
-          'update app.dataset_embedding set model = $2 where dataset_id = $1',
-          [sharedDatasetId, 'openai:hijacked-embedding'],
-        );
-        const survivors = await transaction.query<{ model: string }>(
-          'select model from app.dataset_embedding where dataset_id = $1',
-          [sharedDatasetId],
-        );
-        return {
-          removed: removed.rowCount,
-          replaced: replaced.rowCount,
-          survivors: survivors.rows,
-        };
-      },
-    );
+  it('lets a read-only member read an embedding and never delete, update or replace it', async () => {
+    const write = await asTenant(apiPool, orgOneMember, async (transaction) => {
+      const removed = await transaction.query(
+        'delete from app.dataset_embedding where dataset_id = $1',
+        [sharedDatasetId],
+      );
+      const replaced = await transaction.query(
+        'update app.dataset_embedding set model = $2 where dataset_id = $1',
+        [sharedDatasetId, 'openai:hijacked-embedding'],
+      );
+      const survivors = await transaction.query<{ model: string }>(
+        'select model from app.dataset_embedding where dataset_id = $1',
+        [sharedDatasetId],
+      );
+      return {
+        removed: removed.rowCount,
+        replaced: replaced.rowCount,
+        survivors: survivors.rows,
+      };
+    });
 
-    // A read grant widens SELECT only, so the per command policies leave the row untouched.
+    // Reading is organization wide, so the member sees the row; writing needs a role it does not hold.
     expect(write).toEqual({
       removed: 0,
       replaced: 0,
       survivors: [{ model: 'openai:test-embedding' }],
     });
     await expect(
-      asTenant(
-        apiPool,
-        { organizationId: 'org-1', userId: 'user-1' },
-        async (transaction) =>
-          transaction.query(
-            `insert into app.dataset_embedding (organization_id, dataset_id, model, content_hash, embedding)
-             values ('org-1', $1, 'openai:test-embedding', $2, $3::vector)
-             on conflict (dataset_id) do update set model = excluded.model`,
-            [sharedDatasetId, 'd'.repeat(64), vectorLiteral([0, 0, 1])],
-          ),
+      asTenant(apiPool, orgOneMember, async (transaction) =>
+        transaction.query(
+          `insert into app.dataset_embedding (organization_id, dataset_id, model, content_hash, embedding)
+           values ('org-1', $1, 'openai:test-embedding', $2, $3::vector)
+           on conflict (dataset_id) do update set model = excluded.model`,
+          [sharedDatasetId, 'd'.repeat(64), vectorLiteral([0, 0, 1])],
+        ),
       ),
     ).rejects.toThrow(/row-level security/);
-    // The creator of a dataset keeps every command on its embedding.
-    const creator = await asTenant(
-      apiPool,
-      { organizationId: 'org-1', userId: 'user-1' },
-      async (transaction) => {
-        const created = await transaction.query<{ id: string }>(
-          "insert into app.dataset (organization_id, name, status, created_by) values ('org-1', 'zeta container', 'ready', 'user-1') returning id",
-        );
-        const datasetId = created.rows[0]?.id;
-        await transaction.query(
-          `insert into app.dataset_embedding (organization_id, dataset_id, model, content_hash, embedding)
-           values ('org-1', $1, 'openai:test-embedding', $2, $3::vector)`,
-          [datasetId, 'e'.repeat(64), vectorLiteral([0, 0, 1])],
-        );
-        const updated = await transaction.query(
-          'update app.dataset_embedding set content_hash = $2 where dataset_id = $1',
-          [datasetId, 'f'.repeat(64)],
-        );
-        const removed = await transaction.query(
-          'delete from app.dataset_embedding where dataset_id = $1',
-          [datasetId],
-        );
-        await transaction.query('delete from app.dataset where id = $1', [
-          datasetId,
-        ]);
-        return { removed: removed.rowCount, updated: updated.rowCount };
-      },
-    );
+    // An owner keeps every command on the embedding of any dataset in the organization.
+    const owner = await asTenant(apiPool, orgOneOwner, async (transaction) => {
+      const created = await transaction.query<{ id: string }>(
+        `insert into app.dataset (organization_id, legal_entity_id, name, status, created_by) values ('org-1', '${ownedEntityId}', 'zeta container', 'ready', 'user-1') returning id`,
+      );
+      const datasetId = created.rows[0]?.id;
+      await transaction.query(
+        `insert into app.dataset_embedding (organization_id, dataset_id, model, content_hash, embedding)
+         values ('org-1', $1, 'openai:test-embedding', $2, $3::vector)`,
+        [datasetId, 'e'.repeat(64), vectorLiteral([0, 0, 1])],
+      );
+      const updated = await transaction.query(
+        'update app.dataset_embedding set content_hash = $2 where dataset_id = $1',
+        [datasetId, 'f'.repeat(64)],
+      );
+      const removed = await transaction.query(
+        'delete from app.dataset_embedding where dataset_id = $1',
+        [datasetId],
+      );
+      await transaction.query('delete from app.dataset where id = $1', [
+        datasetId,
+      ]);
+      return { removed: removed.rowCount, updated: updated.rowCount };
+    });
 
-    expect(creator).toEqual({ removed: 1, updated: 1 });
+    expect(owner).toEqual({ removed: 1, updated: 1 });
   });
 
   it('grants embedding writes to the application role and reads to reporting and backup', async () => {
@@ -2676,8 +2964,12 @@ describe('PostgreSQL 18 isolation', () => {
 
       expect(contents.exitCode).toBe(0);
       // The dump must carry every tenant table and its rows, not only the schema.
-      expect(contents.output).toContain('TABLE app data_grants');
-      expect(contents.output).toContain('TABLE DATA app data_grants');
+      expect(contents.output).toContain('TABLE app legal_entity');
+      expect(contents.output).toContain('TABLE DATA app legal_entity');
+      expect(contents.output).toContain('TABLE app legal_entity_access');
+      expect(contents.output).toContain('TABLE app member_entity_scope');
+      // The dropped grant table must be absent from the dump entirely.
+      expect(contents.output).not.toContain('data_grants');
       expect(contents.output).toContain('TABLE app audit_log');
       expect(contents.output).toContain('TABLE DATA app audit_log');
       // Word boundaries keep 'dataset' from matching the 'dataset_column' and 'dataset_row' entries.

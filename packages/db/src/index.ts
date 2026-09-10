@@ -4,6 +4,7 @@ export {
   consumePublicSignupEdgeRateLimit,
   DATABASE_MIGRATION_COMPATIBILITY,
   ensureInitialOrganizationQuota,
+  findOrganizationIdBySlug,
   getOrganizationCreationQuota,
   organizationCreationLimitReached,
   PUBLIC_SIGNUP_EDGE_RATE_LIMIT,
@@ -45,5 +46,9 @@ export type { CreateDatabasePoolOptions, DatabasePool } from './pool.js';
 export { bootstrapDatabaseRoles, getLoginRoles } from './role-bootstrap.js';
 export type { RolePasswords } from './role-bootstrap.js';
 export { schema } from './schema.js';
-export { withTenantContext } from './tenant.js';
-export type { TenantContext } from './tenant.js';
+export {
+  readEntityScope,
+  runInTenantContext,
+  withTenantContext,
+} from './tenant.js';
+export type { EntityScope, TenantContext, TenantRole } from './tenant.js';

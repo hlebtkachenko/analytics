@@ -17,8 +17,7 @@ const BAR_HEIGHT = 16;
 const BAR_GAP = 8;
 const CHART_WIDTH = 100;
 
-// A CSV cell arrives as text, so a column inferred as number is parsed rather than assumed.
-// inferredType is a parser hint about the column, never a guarantee about one value.
+// inferredType is only a hint, so a CSV cell is parsed from text rather than assumed numeric.
 function toNumber(value: unknown): number | undefined {
   const parsed =
     typeof value === 'string' && value.trim() !== ''

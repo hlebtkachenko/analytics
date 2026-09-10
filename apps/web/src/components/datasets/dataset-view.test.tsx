@@ -23,6 +23,7 @@ const dataset = {
   createdAt: '2026-01-01T00:00:00.000Z',
   description: null,
   id: datasetId,
+  legalEntityId: '9b7d1c30-6a4b-4d1f-9c2e-7a5f0e3b8d21',
   name: 'Placeholder dataset',
   rowCount: 4,
   status: 'ready' as const,

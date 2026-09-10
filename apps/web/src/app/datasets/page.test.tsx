@@ -16,10 +16,46 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const LEGAL_ENTITY_ID = '9b7d1c30-6a4b-4d1f-9c2e-7a5f0e3b8d21';
+const OTHER_LEGAL_ENTITY_ID = '4c2f8b11-8c35-4a2e-9f61-1de2f0a7c934';
+
+const legalEntities = {
+  legalEntities: [
+    {
+      createdAt: '2026-01-01T00:00:00.000Z',
+      id: LEGAL_ENTITY_ID,
+      kind: 'company',
+      name: 'Placeholder Holding',
+      registrationNumber: null,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      createdAt: '2026-01-01T00:00:00.000Z',
+      id: OTHER_LEGAL_ENTITY_ID,
+      kind: 'sole_trader',
+      name: 'Placeholder Trader',
+      registrationNumber: null,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+  ],
+};
+
+const capabilities = {
+  createEntities: false,
+  deleteEntities: false,
+  manageEntityAccess: false,
+  manageMembers: false,
+  manageOrganization: false,
+  updateEntities: false,
+  uploadData: true,
+  useAi: true,
+};
+
 const dataset = {
   createdAt: '2026-01-01T00:00:00.000Z',
   description: null,
   id: '00000000-0000-4000-8000-000000000001',
+  legalEntityId: LEGAL_ENTITY_ID,
   name: 'Placeholder dataset',
   rowCount: 2,
   status: 'ready',
@@ -58,20 +94,27 @@ function respondWithUpload(uploadData: boolean) {
 
     if (input.endsWith('/access')) {
       return Response.json({
-        capabilities: {
-          manageGrants: false,
-          manageMembers: false,
-          uploadData,
-          useAi: true,
-        },
+        capabilities: { ...capabilities, uploadData },
+        entityScope: { mode: 'all' },
         organizationId: 'organization_1',
         role: 'member',
         service: 'application-api',
       });
     }
 
-    if (input.endsWith('/datasets')) {
-      return Response.json({ datasets: [dataset] });
+    if (input.endsWith('/legal-entities')) {
+      return Response.json(legalEntities);
+    }
+
+    if (input.includes('/datasets')) {
+      const filter = new URL(input, 'http://localhost').searchParams.get(
+        'legalEntityId',
+      );
+      return Response.json({
+        datasets: [dataset].filter(
+          (summary) => filter === null || summary.legalEntityId === filter,
+        ),
+      });
     }
 
     return new Response(null, { status: 404 });
@@ -82,6 +125,7 @@ const secondDataset = {
   createdAt: '2026-01-01T00:00:00.000Z',
   description: null,
   id: '00000000-0000-4000-8000-000000000002',
+  legalEntityId: OTHER_LEGAL_ENTITY_ID,
   name: 'Second dataset',
   rowCount: 4,
   status: 'ready',
@@ -131,16 +175,16 @@ function respondWithTwoDatasets() {
 
     if (input.endsWith('/access')) {
       return Response.json({
-        capabilities: {
-          manageGrants: false,
-          manageMembers: false,
-          uploadData: true,
-          useAi: true,
-        },
+        capabilities,
+        entityScope: { mode: 'all' },
         organizationId: 'organization_1',
         role: 'member',
         service: 'application-api',
       });
+    }
+
+    if (input.endsWith('/legal-entities')) {
+      return Response.json(legalEntities);
     }
 
     if (input.endsWith('/datasets')) {
@@ -306,6 +350,10 @@ describe('DatasetsPage', () => {
           return new Response(null, { status: 403 });
         }
 
+        if (input.endsWith('/legal-entities')) {
+          return Response.json(legalEntities);
+        }
+
         if (input.endsWith('/datasets')) {
           return Response.json({ datasets: [dataset] });
         }
@@ -324,6 +372,88 @@ describe('DatasetsPage', () => {
     expect(
       screen.queryByRole('button', { name: 'Upload data' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('names each dataset legal entity and filters the list by the page scope', async () => {
+    const fetchMock = respondWithUpload(true);
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderDatasetsPage();
+
+    const list = await screen.findByRole('table', {
+      name: 'Available datasets',
+    });
+    expect(within(list).getByText('Placeholder Holding')).toBeVisible();
+    expect(
+      within(list).getByRole('columnheader', { name: 'Legal entity' }),
+    ).toBeVisible();
+
+    const scope = screen.getByLabelText('Legal entity scope');
+    expect(
+      within(scope).getByRole('option', { name: 'All legal entities' }),
+    ).toBeVisible();
+
+    fireEvent.change(scope, { target: { value: OTHER_LEGAL_ENTITY_ID } });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/bff/application/organizations/organization_1/datasets?legalEntityId=${OTHER_LEGAL_ENTITY_ID}`,
+        expect.any(Object),
+      );
+    });
+    expect(
+      await screen.findByText(
+        'No datasets are available for this organization.',
+      ),
+    ).toBeVisible();
+  });
+
+  it('uploads into the selected legal entity only', async () => {
+    const uploads: FormData[] = [];
+    const respond = respondWithUpload(true);
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input.endsWith('/uploads')) {
+        uploads.push(init?.body as FormData);
+        return Response.json(
+          { status: 'accepted', uploadId: dataset.id },
+          { status: 202 },
+        );
+      }
+
+      return await respond(input);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderDatasetsPage();
+
+    const uploadButton = await screen.findByRole('button', {
+      name: 'Upload data',
+    });
+    const fileInput = document.querySelector('input[type="file"]');
+    fireEvent.change(fileInput!, {
+      target: {
+        files: [new File(['label\nvalue'], 'rows.csv', { type: 'text/csv' })],
+      },
+    });
+
+    // A file without an entity cannot be sent: every upload belongs to exactly one entity.
+    expect(uploadButton).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Legal entity'), {
+      target: { value: LEGAL_ENTITY_ID },
+    });
+    expect(uploadButton).toBeEnabled();
+    fireEvent.click(uploadButton);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/bff/application/organizations/organization_1/uploads',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0]?.get('legalEntityId')).toBe(LEGAL_ENTITY_ID);
+    expect(uploads[0]?.get('file')).toBeInstanceOf(File);
   });
 
   it('hides the upload control from an account without the capability', async () => {

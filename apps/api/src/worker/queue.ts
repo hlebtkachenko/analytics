@@ -8,10 +8,7 @@ type Environment = Record<string, string | undefined>;
 // The queue lives in the pgboss schema installed by the checksummed migration runner.
 export const QUEUE_SCHEMA = 'pgboss';
 
-// bap_api holds no CREATE privilege, so pg-boss must never issue DDL at runtime.
-// migrate and createSchema off keep schema ownership with the migration runner.
-// persistQueueStats off suppresses the daily queue_stats partition DDL inside supervise.
-// supervise and schedule on make pg-boss cron the only scheduler in the platform.
+// bap_api holds no CREATE privilege, so pg-boss must never issue DDL at runtime. migrate and createSchema off keep schema ownership with the migration runner. persistQueueStats off suppresses the daily queue_stats partition DDL inside supervise. supervise and schedule on make pg-boss cron the only scheduler in the platform.
 export const QUEUE_MAINTENANCE_OPTIONS = {
   createSchema: false,
   migrate: false,

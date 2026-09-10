@@ -71,6 +71,9 @@ financial, operational, or development data.
 - `pnpm test:integration`: verify PostgreSQL roles, migrations, RLS, and the
   worker queue boundary
 - `pnpm secrets:local`: create disposable ignored local credential files
+- `pnpm demo:tenancy`: build and start a disposable local stack, create its
+  owner, admin, and member accounts, and narrate the legal entity browser proof
+- `pnpm demo:tenancy:down`: stop that demo stack and remove its volumes
 - `pnpm compose:config`: validate development Compose without starting anything
 - `pnpm compose:verify`: verify development, production, and operations topology
 - `pnpm compose:config:production`: validate production Compose with synthetic

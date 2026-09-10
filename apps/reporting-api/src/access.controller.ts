@@ -16,6 +16,8 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import {
+  entityScopeOpenApiSchema,
+  organizationCapabilityNames,
   organizationIdentifierSchema,
   resolveOrganizationAccess,
   type OrganizationAccessResponse,
@@ -43,20 +45,27 @@ export class AccessController {
       properties: {
         capabilities: {
           additionalProperties: false,
-          properties: {
-            manageGrants: { type: 'boolean' },
-            manageMembers: { type: 'boolean' },
-            uploadData: { type: 'boolean' },
-            useAi: { type: 'boolean' },
-          },
-          required: ['manageGrants', 'manageMembers', 'uploadData', 'useAi'],
+          properties: Object.fromEntries(
+            organizationCapabilityNames.map((name) => [
+              name,
+              { type: 'boolean' },
+            ]),
+          ),
+          required: organizationCapabilityNames,
           type: 'object',
         },
+        entityScope: entityScopeOpenApiSchema,
         organizationId: { type: 'string' },
         role: { enum: ['owner', 'admin', 'member'], type: 'string' },
         service: { enum: ['reporting-api'], type: 'string' },
       },
-      required: ['service', 'organizationId', 'role', 'capabilities'],
+      required: [
+        'service',
+        'organizationId',
+        'role',
+        'capabilities',
+        'entityScope',
+      ],
       type: 'object',
     },
   })
@@ -77,10 +86,22 @@ export class AccessController {
       principal.subject,
       organizationId,
     );
+
+    if (!membership.emailVerified || membership.role === null) {
+      throw new ForbiddenException();
+    }
+
+    // The scope needs the role, so it is read only once membership has been proven.
+    const entityScope = await this.memberships.readEntityScope({
+      organizationId,
+      role: membership.role,
+      userId: principal.subject,
+    });
     const access = resolveOrganizationAccess(
       'reporting-api',
       organizationId,
       membership,
+      entityScope,
     );
 
     if (access === null) {

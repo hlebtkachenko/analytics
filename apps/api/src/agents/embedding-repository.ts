@@ -1,4 +1,5 @@
-import { withTenantContext } from '@bap/db';
+import { runInTenantContext } from '@bap/db';
+import type { TenantContext } from '@bap/db';
 import type { DatabasePool } from '@bap/db/pool';
 import type { PoolClient } from 'pg';
 
@@ -45,18 +46,17 @@ export interface SimilarDataset {
   name: string;
 }
 
-export interface SearchDatasetsByEmbeddingInput {
+// null means every entity in scope; an empty array means nothing, exactly like the dataset repository.
+export interface SearchDatasetsByEmbeddingInput extends TenantContext {
   embedding: readonly number[];
+  legalEntityIds: readonly string[] | null;
   limit: number;
-  organizationId: string;
-  userId: string;
 }
 
-export interface FindDatasetsNearDatasetInput {
+export interface FindDatasetsNearDatasetInput extends TenantContext {
   datasetId: string;
+  legalEntityIds: readonly string[] | null;
   limit: number;
-  organizationId: string;
-  userId: string;
 }
 
 // The vector crosses as one bound parameter, never as SQL text, and the provider answer is validated first.
@@ -74,7 +74,7 @@ export function toVectorLiteral(embedding: readonly number[]): string {
   return `[${embedding.join(',')}]`;
 }
 
-// Only datasets this subject created are listed: app.dataset_embedding writes follow app.dataset_is_writable.
+// Only datasets this subject created are listed, which keeps one backfill bounded; writing them also needs app.dataset_is_writable, so a read-only member embeds nothing.
 export async function loadEmbeddingCandidates(
   transaction: PoolClient,
   input: LoadEmbeddingCandidatesInput,
@@ -144,8 +144,7 @@ export async function storeDatasetEmbeddings(
       input.embeddings.map((entry) => toVectorLiteral(entry.embedding)),
     ],
   );
-  // Attribution is derived from the transaction context, so the audit call must run inside it.
-  // The metadata names the model only; the embedded text and the vector never enter the audit log.
+  // Attribution is derived from the transaction context, so the audit call must run inside it. The metadata names the model only; the embedded text and the vector never enter the audit log.
   await transaction.query(
     `select app.record_audit('dataset.embedded', 'dataset', staged.dataset_id, $2::jsonb)
      from unnest($1::text[]) as staged(dataset_id)`,
@@ -158,45 +157,42 @@ export async function storeDatasetEmbeddings(
   return written.rowCount ?? 0;
 }
 
-// Row level security confines the search: the tenant transaction is the only place it may run.
+// pg maps null to SQL NULL and an array to a uuid[] parameter, so the filter is one bound value.
+function entityFilter(ids: readonly string[] | null): string[] | null {
+  return ids === null ? null : [...ids];
+}
+
+// Row level security confines the organization; the entity scope is applied here, as ADR 0011 decided.
 export async function searchDatasetsByEmbedding(
   pool: DatabasePool,
   input: SearchDatasetsByEmbeddingInput,
 ): Promise<SimilarDataset[]> {
   const literal = toVectorLiteral(input.embedding);
-  const client = await pool.connect();
 
-  try {
-    return await withTenantContext(
-      client,
-      { organizationId: input.organizationId, userId: input.userId },
-      async (transaction) => {
-        await transaction.query(ENABLE_ITERATIVE_SCAN);
-        const result = await transaction.query<{
-          dataset_id: string;
-          distance: number;
-          name: string;
-        }>(
-          `select d.id as dataset_id,
-                  d.name,
-                  (e.embedding <=> $1::vector)::float8 as distance
-           from app.dataset_embedding as e
-           join app.dataset as d on d.id = e.dataset_id
-           order by e.embedding <=> $1::vector
-           limit $2`,
-          [literal, input.limit],
-        );
-
-        return result.rows.map((row) => ({
-          datasetId: row.dataset_id,
-          distance: Number(row.distance),
-          name: row.name,
-        }));
-      },
+  return runInTenantContext(pool, input, async (transaction) => {
+    await transaction.query(ENABLE_ITERATIVE_SCAN);
+    const result = await transaction.query<{
+      dataset_id: string;
+      distance: number;
+      name: string;
+    }>(
+      `select d.id as dataset_id,
+              d.name,
+              (e.embedding <=> $1::vector)::float8 as distance
+       from app.dataset_embedding as e
+       join app.dataset as d on d.id = e.dataset_id
+       where ($3::uuid[] is null or d.legal_entity_id = any($3::uuid[]))
+       order by e.embedding <=> $1::vector
+       limit $2`,
+      [literal, input.limit, entityFilter(input.legalEntityIds)],
     );
-  } finally {
-    client.release();
-  }
+
+    return result.rows.map((row) => ({
+      datasetId: row.dataset_id,
+      distance: Number(row.distance),
+      name: row.name,
+    }));
+  });
 }
 
 // Neighbours of a stored vector: the query vector never leaves the database, so nothing crosses the wire.
@@ -204,39 +200,30 @@ export async function findDatasetsNearDataset(
   pool: DatabasePool,
   input: FindDatasetsNearDatasetInput,
 ): Promise<SimilarDataset[]> {
-  const client = await pool.connect();
-
-  try {
-    return await withTenantContext(
-      client,
-      { organizationId: input.organizationId, userId: input.userId },
-      async (transaction) => {
-        await transaction.query(ENABLE_ITERATIVE_SCAN);
-        const result = await transaction.query<{
-          dataset_id: string;
-          distance: number;
-          name: string;
-        }>(
-          `select other.dataset_id,
-                  d.name,
-                  (other.embedding <=> source.embedding)::float8 as distance
-           from app.dataset_embedding as source
-           join app.dataset_embedding as other on other.dataset_id <> source.dataset_id
-           join app.dataset as d on d.id = other.dataset_id
-           where source.dataset_id = $1::uuid
-           order by other.embedding <=> source.embedding
-           limit $2`,
-          [input.datasetId, input.limit],
-        );
-
-        return result.rows.map((row) => ({
-          datasetId: row.dataset_id,
-          distance: Number(row.distance),
-          name: row.name,
-        }));
-      },
+  return runInTenantContext(pool, input, async (transaction) => {
+    await transaction.query(ENABLE_ITERATIVE_SCAN);
+    const result = await transaction.query<{
+      dataset_id: string;
+      distance: number;
+      name: string;
+    }>(
+      `select other.dataset_id,
+              d.name,
+              (other.embedding <=> source.embedding)::float8 as distance
+       from app.dataset_embedding as source
+       join app.dataset_embedding as other on other.dataset_id <> source.dataset_id
+       join app.dataset as d on d.id = other.dataset_id
+       where source.dataset_id = $1::uuid
+         and ($3::uuid[] is null or d.legal_entity_id = any($3::uuid[]))
+       order by other.embedding <=> source.embedding
+       limit $2`,
+      [input.datasetId, input.limit, entityFilter(input.legalEntityIds)],
     );
-  } finally {
-    client.release();
-  }
+
+    return result.rows.map((row) => ({
+      datasetId: row.dataset_id,
+      distance: Number(row.distance),
+      name: row.name,
+    }));
+  });
 }

@@ -16,6 +16,7 @@ describe('reporting OpenAPI', () => {
       .useValue({
         checkReadiness: async () => true,
         getPoolStatistics: () => ({ idle: 0, total: 0, waiting: 0 }),
+        readEntityScope: async () => ({ mode: 'all' as const }),
         resolve: async () => ({ emailVerified: false, role: null }),
       })
       .compile();
@@ -42,5 +43,25 @@ describe('reporting OpenAPI', () => {
     expect(response.body.components.securitySchemes).toHaveProperty(
       'resource-token',
     );
+
+    const access =
+      response.body.paths['/v1/organizations/{organizationId}/access'].get
+        .responses['200'].content['application/json'].schema;
+
+    // The published contract must carry the scope and the whole capability set, or the BFF mirrors a lie.
+    expect(access.required).toContain('entityScope');
+    expect(
+      Object.keys(access.properties.capabilities.properties).sort(),
+    ).toEqual([
+      'createEntities',
+      'deleteEntities',
+      'manageEntityAccess',
+      'manageMembers',
+      'manageOrganization',
+      'updateEntities',
+      'uploadData',
+      'useAi',
+    ]);
+    expect(access.properties.entityScope.oneOf).toHaveLength(2);
   });
 });

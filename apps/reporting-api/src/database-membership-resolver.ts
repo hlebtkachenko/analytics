@@ -1,9 +1,11 @@
+import { readEntityScope, runInTenantContext } from '@bap/db';
+import type { TenantContext } from '@bap/db';
 import { checkMigrationCompatibility, resolveMembership } from '@bap/db/access';
 import type { DatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool, type DatabasePool } from '@bap/db/pool';
 import { Injectable } from '@nestjs/common';
 import type { OnApplicationShutdown } from '@nestjs/common';
-import type { MembershipResolution } from '@bap/security';
+import type { EntityScope, MembershipResolution } from '@bap/security';
 
 import { MembershipResolver } from './membership-resolver.js';
 
@@ -41,6 +43,17 @@ export class DatabaseMembershipResolver
 
   async onApplicationShutdown(): Promise<void> {
     await this.pool?.end();
+  }
+
+  async readEntityScope(tenant: TenantContext): Promise<EntityScope> {
+    // An owner is never restricted, so the unrestricted answer needs no connection at all.
+    if (tenant.role === 'owner') {
+      return { mode: 'all' };
+    }
+
+    return runInTenantContext(this.getPool(), tenant, (transaction) =>
+      readEntityScope(transaction, tenant),
+    );
   }
 
   async resolve(

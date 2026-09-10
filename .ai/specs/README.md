@@ -2,6 +2,7 @@
 
 ## Delivered and historical records
 
+- [Workspace legal entities](2026-09-10-workspace-legal-entities.md)
 - [Authenticated navigation and invitation onboarding](2026-09-01-authenticated-navigation-and-invitation-onboarding.md)
 - [Conductor and CI source-of-truth reconciliation](2026-09-01-conductor-ci-source-truth.md)
 - [Identity and organization integration closure](2026-09-01-identity-organization-integration-closure.md)
