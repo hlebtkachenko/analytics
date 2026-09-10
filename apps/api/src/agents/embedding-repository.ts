@@ -46,13 +46,16 @@ export interface SimilarDataset {
   name: string;
 }
 
+// null means every entity in scope; an empty array means nothing, exactly like the dataset repository.
 export interface SearchDatasetsByEmbeddingInput extends TenantContext {
   embedding: readonly number[];
+  legalEntityIds: readonly string[] | null;
   limit: number;
 }
 
 export interface FindDatasetsNearDatasetInput extends TenantContext {
   datasetId: string;
+  legalEntityIds: readonly string[] | null;
   limit: number;
 }
 
@@ -154,7 +157,12 @@ export async function storeDatasetEmbeddings(
   return written.rowCount ?? 0;
 }
 
-// Row level security confines the search: the tenant transaction is the only place it may run.
+// pg maps null to SQL NULL and an array to a uuid[] parameter, so the filter is one bound value.
+function entityFilter(ids: readonly string[] | null): string[] | null {
+  return ids === null ? null : [...ids];
+}
+
+// Row level security confines the organization; the entity scope is applied here, as ADR 0011 decided.
 export async function searchDatasetsByEmbedding(
   pool: DatabasePool,
   input: SearchDatasetsByEmbeddingInput,
@@ -173,9 +181,10 @@ export async function searchDatasetsByEmbedding(
               (e.embedding <=> $1::vector)::float8 as distance
        from app.dataset_embedding as e
        join app.dataset as d on d.id = e.dataset_id
+       where ($3::uuid[] is null or d.legal_entity_id = any($3::uuid[]))
        order by e.embedding <=> $1::vector
        limit $2`,
-      [literal, input.limit],
+      [literal, input.limit, entityFilter(input.legalEntityIds)],
     );
 
     return result.rows.map((row) => ({
@@ -205,9 +214,10 @@ export async function findDatasetsNearDataset(
        join app.dataset_embedding as other on other.dataset_id <> source.dataset_id
        join app.dataset as d on d.id = other.dataset_id
        where source.dataset_id = $1::uuid
+         and ($3::uuid[] is null or d.legal_entity_id = any($3::uuid[]))
        order by other.embedding <=> source.embedding
        limit $2`,
-      [input.datasetId, input.limit],
+      [input.datasetId, input.limit, entityFilter(input.legalEntityIds)],
     );
 
     return result.rows.map((row) => ({

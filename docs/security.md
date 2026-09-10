@@ -475,14 +475,13 @@ There is no blind orphan sweep.
 
 The function generates 1 opaque `erased_<uuid>` only when a matching row exists,
 never derives it from the user id, and applies it to audit attribution and
-dataset creators. A repeat leaves stored state unchanged. Retained or granted
-datasets can remain readable after `dataset.created_by` is tombstoned, but
-`dataset_is_writable` no longer recognizes a live creator. They remain
-unwritable until later ownership or delegation work. `app.audit_log.metadata` is
-deliberately not rewritten and can retain user ids. Identifiers can also remain
-in `auth.rate_limit`, `auth.verification`, and pg-boss job payloads. Access and
-portability are not implemented. This is a narrow erasure mechanism, not a claim
-of complete GDPR compliance.
+dataset creators. A repeat leaves stored state unchanged. Datasets stay readable
+and writable by the organization's owners and admins after `dataset.created_by`
+is tombstoned, because authorship confers nothing under ADR 0011.
+`app.audit_log.metadata` is deliberately not rewritten and can retain user ids.
+Identifiers can also remain in `auth.rate_limit`, `auth.verification`, and
+pg-boss job payloads. Access and portability are not implemented. This is a
+narrow erasure mechanism, not a claim of complete GDPR compliance.
 
 ## Admin HTTP boundary
 

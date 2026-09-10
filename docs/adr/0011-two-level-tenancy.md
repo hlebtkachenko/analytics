@@ -7,10 +7,10 @@
 
 The 2026-09-08 product brainstorm redefined what an organization means in BAP.
 It is a workspace, not a legal entity. A workspace owner connects many legal
-entities, companies and sole traders, and every member analyses them together
-or one at a time. Owners change workspace settings, admins change what lives
-inside the entities, and members only read. Admins and members may be limited
-to a subset of entities.
+entities, companies and sole traders, and every member analyses them together or
+one at a time. Owners change workspace settings, admins change what lives inside
+the entities, and members only read. Admins and members may be limited to a
+subset of entities.
 
 Until now the organization was the single tenant unit, the `member` role could
 upload data, dataset visibility depended on the creator or a per-dataset grant,
@@ -39,9 +39,9 @@ The user, membership, invitation, slug, route and resource-token boundaries are
 unchanged. Existing RLS proofs keep passing with the role setting added.
 
 A restricted member sees an out-of-scope dataset as not found, the same answer a
-stranger gets. Because entity filtering lives in the application, every new
-data path must go through the shared scope resolver; the integration suite and
-the operational proof exist to keep that promise visible.
+stranger gets. Because entity filtering lives in the application, every new data
+path must go through the shared scope resolver; the integration suite and the
+operational proof exist to keep that promise visible.
 
 Admins no longer manage members or organization settings; that moved to owners
 with this decision and can be revisited without a schema change.

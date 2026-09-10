@@ -327,6 +327,7 @@ describe('dataset embedding agents against PostgreSQL', () => {
     );
     const owner = await searchDatasetsByEmbedding(apiPool, {
       embedding: probe,
+      legalEntityIds: null,
       limit: 10,
       organizationId: alpha.organizationId,
       role: alpha.role,
@@ -334,6 +335,7 @@ describe('dataset embedding agents against PostgreSQL', () => {
     });
     const stranger = await searchDatasetsByEmbedding(apiPool, {
       embedding: probe,
+      legalEntityIds: null,
       limit: 10,
       organizationId: foreign.organizationId,
       role: foreign.role,
@@ -352,9 +354,44 @@ describe('dataset embedding agents against PostgreSQL', () => {
     expect(stranger[0]?.datasetId).toBe(foreign.datasetId);
   });
 
+  it('applies the entity scope to similarity queries', async () => {
+    const probe = vectorFor(
+      'name: alpha container\ndescription: placeholder description\ncolumns: column_a (text)',
+    );
+    const scoped = await searchDatasetsByEmbedding(apiPool, {
+      embedding: probe,
+      legalEntityIds: [alpha.legalEntityId],
+      limit: 10,
+      organizationId: alpha.organizationId,
+      role: alpha.role,
+      userId: alpha.userId,
+    });
+    const nothing = await searchDatasetsByEmbedding(apiPool, {
+      embedding: probe,
+      legalEntityIds: [],
+      limit: 10,
+      organizationId: alpha.organizationId,
+      role: alpha.role,
+      userId: alpha.userId,
+    });
+    const noNeighbours = await findDatasetsNearDataset(apiPool, {
+      datasetId: alpha.datasetId,
+      legalEntityIds: [],
+      limit: 10,
+      organizationId: alpha.organizationId,
+      role: alpha.role,
+      userId: alpha.userId,
+    });
+
+    expect(scoped.map(({ datasetId }) => datasetId)).toContain(alpha.datasetId);
+    expect(nothing).toEqual([]);
+    expect(noNeighbours).toEqual([]);
+  });
+
   it('finds neighbours of a stored vector inside the tenant only', async () => {
     const neighbours = await findDatasetsNearDataset(apiPool, {
       datasetId: alpha.datasetId,
+      legalEntityIds: null,
       limit: 10,
       organizationId: alpha.organizationId,
       role: alpha.role,
