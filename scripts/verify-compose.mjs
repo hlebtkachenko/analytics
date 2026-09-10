@@ -33,7 +33,7 @@ const developmentCompose = readFileSync(
 const postgresImageDigest =
   'sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a';
 const mailpitImageDigest =
-  'sha256:7f33095f80e901f6ad08028f06ca284aa58fe84942be5496008d041d3b9f4d4d';
+  'sha256:98b916bd3c8d61f7633a52d3ea2f58d00620cb01ca57ab59edde68c347a95365';
 
 function invariant(condition, message) {
   if (!condition) {
