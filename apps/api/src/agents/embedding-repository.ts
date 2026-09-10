@@ -1,8 +1,7 @@
-import { withTenantContext } from '@bap/db';
+import { runInTenantContext } from '@bap/db';
+import type { TenantContext } from '@bap/db';
 import type { DatabasePool } from '@bap/db/pool';
 import type { PoolClient } from 'pg';
-
-import type { TenantSelector } from '../tenant-access.js';
 
 // Must equal the width of app.dataset_embedding.embedding; a provider answer of any other width is rejected here.
 export const EMBEDDING_DIMENSIONS = 1_536;
@@ -47,12 +46,12 @@ export interface SimilarDataset {
   name: string;
 }
 
-export interface SearchDatasetsByEmbeddingInput extends TenantSelector {
+export interface SearchDatasetsByEmbeddingInput extends TenantContext {
   embedding: readonly number[];
   limit: number;
 }
 
-export interface FindDatasetsNearDatasetInput extends TenantSelector {
+export interface FindDatasetsNearDatasetInput extends TenantContext {
   datasetId: string;
   limit: number;
 }
@@ -72,8 +71,7 @@ export function toVectorLiteral(embedding: readonly number[]): string {
   return `[${embedding.join(',')}]`;
 }
 
-// Only datasets this subject created are listed, which keeps one backfill bounded;
-// writing them also needs app.dataset_is_writable, so a read-only member embeds nothing.
+// Only datasets this subject created are listed, which keeps one backfill bounded; writing them also needs app.dataset_is_writable, so a read-only member embeds nothing.
 export async function loadEmbeddingCandidates(
   transaction: PoolClient,
   input: LoadEmbeddingCandidatesInput,
@@ -143,8 +141,7 @@ export async function storeDatasetEmbeddings(
       input.embeddings.map((entry) => toVectorLiteral(entry.embedding)),
     ],
   );
-  // Attribution is derived from the transaction context, so the audit call must run inside it.
-  // The metadata names the model only; the embedded text and the vector never enter the audit log.
+  // Attribution is derived from the transaction context, so the audit call must run inside it. The metadata names the model only; the embedded text and the vector never enter the audit log.
   await transaction.query(
     `select app.record_audit('dataset.embedded', 'dataset', staged.dataset_id, $2::jsonb)
      from unnest($1::text[]) as staged(dataset_id)`,
@@ -163,35 +160,30 @@ export async function searchDatasetsByEmbedding(
   input: SearchDatasetsByEmbeddingInput,
 ): Promise<SimilarDataset[]> {
   const literal = toVectorLiteral(input.embedding);
-  const client = await pool.connect();
 
-  try {
-    return await withTenantContext(client, input, async (transaction) => {
-      await transaction.query(ENABLE_ITERATIVE_SCAN);
-      const result = await transaction.query<{
-        dataset_id: string;
-        distance: number;
-        name: string;
-      }>(
-        `select d.id as dataset_id,
-                  d.name,
-                  (e.embedding <=> $1::vector)::float8 as distance
-           from app.dataset_embedding as e
-           join app.dataset as d on d.id = e.dataset_id
-           order by e.embedding <=> $1::vector
-           limit $2`,
-        [literal, input.limit],
-      );
+  return runInTenantContext(pool, input, async (transaction) => {
+    await transaction.query(ENABLE_ITERATIVE_SCAN);
+    const result = await transaction.query<{
+      dataset_id: string;
+      distance: number;
+      name: string;
+    }>(
+      `select d.id as dataset_id,
+              d.name,
+              (e.embedding <=> $1::vector)::float8 as distance
+       from app.dataset_embedding as e
+       join app.dataset as d on d.id = e.dataset_id
+       order by e.embedding <=> $1::vector
+       limit $2`,
+      [literal, input.limit],
+    );
 
-      return result.rows.map((row) => ({
-        datasetId: row.dataset_id,
-        distance: Number(row.distance),
-        name: row.name,
-      }));
-    });
-  } finally {
-    client.release();
-  }
+    return result.rows.map((row) => ({
+      datasetId: row.dataset_id,
+      distance: Number(row.distance),
+      name: row.name,
+    }));
+  });
 }
 
 // Neighbours of a stored vector: the query vector never leaves the database, so nothing crosses the wire.
@@ -199,35 +191,29 @@ export async function findDatasetsNearDataset(
   pool: DatabasePool,
   input: FindDatasetsNearDatasetInput,
 ): Promise<SimilarDataset[]> {
-  const client = await pool.connect();
+  return runInTenantContext(pool, input, async (transaction) => {
+    await transaction.query(ENABLE_ITERATIVE_SCAN);
+    const result = await transaction.query<{
+      dataset_id: string;
+      distance: number;
+      name: string;
+    }>(
+      `select other.dataset_id,
+              d.name,
+              (other.embedding <=> source.embedding)::float8 as distance
+       from app.dataset_embedding as source
+       join app.dataset_embedding as other on other.dataset_id <> source.dataset_id
+       join app.dataset as d on d.id = other.dataset_id
+       where source.dataset_id = $1::uuid
+       order by other.embedding <=> source.embedding
+       limit $2`,
+      [input.datasetId, input.limit],
+    );
 
-  try {
-    return await withTenantContext(client, input, async (transaction) => {
-      await transaction.query(ENABLE_ITERATIVE_SCAN);
-      const result = await transaction.query<{
-        dataset_id: string;
-        distance: number;
-        name: string;
-      }>(
-        `select other.dataset_id,
-                  d.name,
-                  (other.embedding <=> source.embedding)::float8 as distance
-           from app.dataset_embedding as source
-           join app.dataset_embedding as other on other.dataset_id <> source.dataset_id
-           join app.dataset as d on d.id = other.dataset_id
-           where source.dataset_id = $1::uuid
-           order by other.embedding <=> source.embedding
-           limit $2`,
-        [input.datasetId, input.limit],
-      );
-
-      return result.rows.map((row) => ({
-        datasetId: row.dataset_id,
-        distance: Number(row.distance),
-        name: row.name,
-      }));
-    });
-  } finally {
-    client.release();
-  }
+    return result.rows.map((row) => ({
+      datasetId: row.dataset_id,
+      distance: Number(row.distance),
+      name: row.name,
+    }));
+  });
 }

@@ -1,4 +1,5 @@
 import {
+  entityScopeOpenApiSchema,
   entityScopeSchema,
   legalEntityKindSchema,
   legalEntityNameSchema,
@@ -6,6 +7,8 @@ import {
   legalEntitySchema,
 } from '@bap/security';
 import { z } from 'zod';
+
+import { subjectIdentifierSchema } from '../worker/job-context.js';
 
 // The whole list is bounded on the server; no client parameter widens it.
 export const MAX_LEGAL_ENTITY_LIST_SIZE = 200;
@@ -52,6 +55,24 @@ export const entityScopeRequestSchema = entityScopeSchema;
 
 export type EntityScopeRequest = z.infer<typeof entityScopeRequestSchema>;
 
+// One entry per stored scope row: a member without a row is implicitly unrestricted and is left out.
+export const memberEntityScopeListResponseSchema = z
+  .object({
+    entityScopes: z.array(
+      z
+        .object({
+          entityScope: entityScopeSchema,
+          userId: subjectIdentifierSchema,
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
+export type MemberEntityScopeListResponse = z.infer<
+  typeof memberEntityScopeListResponseSchema
+>;
+
 export const legalEntityOpenApiSchema = {
   additionalProperties: false,
   properties: {
@@ -89,25 +110,25 @@ export const legalEntityBodyOpenApiSchema = {
   type: 'object',
 };
 
-export const entityScopeOpenApiSchema = {
-  oneOf: [
-    {
-      additionalProperties: false,
-      properties: { mode: { enum: ['all'], type: 'string' } },
-      required: ['mode'],
-      type: 'object',
-    },
-    {
-      additionalProperties: false,
-      properties: {
-        legalEntityIds: {
-          items: { format: 'uuid', type: 'string' },
-          type: 'array',
+// The scope shape is published by the shared contract, so both services and every scope route agree.
+export { entityScopeOpenApiSchema };
+
+export const memberEntityScopeListOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    entityScopes: {
+      items: {
+        additionalProperties: false,
+        properties: {
+          entityScope: entityScopeOpenApiSchema,
+          userId: { type: 'string' },
         },
-        mode: { enum: ['restricted'], type: 'string' },
+        required: ['entityScope', 'userId'],
+        type: 'object',
       },
-      required: ['legalEntityIds', 'mode'],
-      type: 'object',
+      type: 'array',
     },
-  ],
+  },
+  required: ['entityScopes'],
+  type: 'object',
 };

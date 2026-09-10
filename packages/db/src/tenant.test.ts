@@ -1,7 +1,11 @@
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { describe, expect, it } from 'vitest';
 
-import { readEntityScope, withTenantContext } from './tenant.js';
+import {
+  readEntityScope,
+  runInTenantContext,
+  withTenantContext,
+} from './tenant.js';
 
 interface RecordedQuery {
   text: string;
@@ -26,6 +30,40 @@ function createClient(results: Record<string, Record<string, unknown>[]>): {
 
   return { client: client as unknown as PoolClient, queries };
 }
+
+describe('runInTenantContext', () => {
+  it('releases the connection whether the operation succeeds or fails', async () => {
+    const { client, queries } = createClient({});
+    let released = 0;
+    const pool = {
+      connect: async () => ({ ...client, release: () => (released += 1) }),
+    } as unknown as Pool;
+    const tenant = {
+      organizationId: 'org-1',
+      role: 'owner' as const,
+      userId: 'user-1',
+    };
+
+    await expect(
+      runInTenantContext(pool, tenant, async () => 'done'),
+    ).resolves.toBe('done');
+    await expect(
+      runInTenantContext(pool, tenant, async () => {
+        throw new Error('operation failed');
+      }),
+    ).rejects.toThrow('operation failed');
+
+    expect(released).toBe(2);
+    expect(
+      queries.map(({ text }) => text).filter((text) => text !== 'begin'),
+    ).toEqual([
+      "select set_config('bap.user_id', $1, true), set_config('bap.organization_id', $2, true), set_config('bap.role', $3, true)",
+      'commit',
+      "select set_config('bap.user_id', $1, true), set_config('bap.organization_id', $2, true), set_config('bap.role', $3, true)",
+      'rollback',
+    ]);
+  });
+});
 
 describe('withTenantContext', () => {
   it('binds the organization, the subject and the role in one transaction', async () => {

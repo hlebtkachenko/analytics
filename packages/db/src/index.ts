@@ -45,10 +45,9 @@ export type { CreateDatabasePoolOptions, DatabasePool } from './pool.js';
 export { bootstrapDatabaseRoles, getLoginRoles } from './role-bootstrap.js';
 export type { RolePasswords } from './role-bootstrap.js';
 export { schema } from './schema.js';
-export { readEntityScope, withTenantContext } from './tenant.js';
-export type {
-  EntityScope,
-  ReadEntityScopeInput,
-  TenantContext,
-  TenantRole,
+export {
+  readEntityScope,
+  runInTenantContext,
+  withTenantContext,
 } from './tenant.js';
+export type { EntityScope, TenantContext, TenantRole } from './tenant.js';

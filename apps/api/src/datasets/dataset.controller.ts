@@ -23,6 +23,7 @@ import {
 import {
   legalEntityInScope,
   organizationIdentifierSchema,
+  type EntityScope,
 } from '@bap/security';
 
 import { datasetIdentifierSchema } from '../agents/contract.js';
@@ -104,25 +105,6 @@ const datasetRowSchema = {
 
 const binaryDownloadSchema = { format: 'binary', type: 'string' };
 
-// A requested entity outside the scope narrows the list to nothing instead of widening it.
-function narrowToEntity(
-  scoped: readonly string[] | null,
-  requested: string | undefined,
-): readonly string[] | null {
-  if (requested === undefined) {
-    return scoped;
-  }
-
-  return legalEntityInScope(
-    scoped === null
-      ? { mode: 'all' }
-      : { legalEntityIds: [...scoped], mode: 'restricted' },
-    requested,
-  )
-    ? [requested]
-    : [];
-}
-
 @ApiBearerAuth('resource-token')
 @Controller({ path: 'organizations', version: '1' })
 export class DatasetController {
@@ -160,7 +142,7 @@ export class DatasetController {
     @Query({ schema: datasetExportQuerySchema }) query: DatasetExportQuery,
     @Req() request: AuthenticatedRequest,
   ): Promise<StreamableFile> {
-    const selector = await this.resolveSelector(request, organizationId);
+    const { selector } = await this.resolveScope(request, organizationId);
     const columns = await this.datasets.readColumns({ ...selector, datasetId });
 
     if (columns === null) {
@@ -239,7 +221,7 @@ export class DatasetController {
     @Query({ schema: datasetRowQuerySchema }) query: DatasetRowQuery,
     @Req() request: AuthenticatedRequest,
   ): Promise<DatasetRowPageResponse> {
-    const selector = await this.resolveSelector(request, organizationId);
+    const { selector } = await this.resolveScope(request, organizationId);
     const page = await this.datasets.readRowPage({
       ...selector,
       after: query.after ?? null,
@@ -294,29 +276,38 @@ export class DatasetController {
     @Query({ schema: datasetListQuerySchema }) query: DatasetListQuery,
     @Req() request: AuthenticatedRequest,
   ): Promise<DatasetListResponse> {
-    const selector = await this.resolveSelector(request, organizationId);
+    const { entityScope, selector } = await this.resolveScope(
+      request,
+      organizationId,
+    );
+    // A requested entity outside the scope narrows the list to nothing instead of widening it.
+    const legalEntityIds =
+      query.legalEntityId === undefined
+        ? selector.legalEntityIds
+        : legalEntityInScope(entityScope, query.legalEntityId)
+          ? [query.legalEntityId]
+          : [];
     const datasets = await this.datasets.listDatasets({
       ...selector,
-      legalEntityIds: narrowToEntity(
-        selector.legalEntityIds,
-        query.legalEntityId,
-      ),
+      legalEntityIds,
     });
     return datasetListResponseSchema.parse({ datasets });
   }
 
-  // Reading is a member level action: the access contract holds no narrower read flag,
-  // row level security decides the organization, and the entity scope decides the entities.
-  private async resolveSelector(
+  // Reading is a member level action: the access contract holds no narrower read flag, row level security decides the organization, and the entity scope decides the entities.
+  private async resolveScope(
     request: AuthenticatedRequest,
     organizationId: string,
-  ): Promise<EntityScopeSelector> {
+  ): Promise<{ entityScope: EntityScope; selector: EntityScopeSelector }> {
     const { entityScope, tenant } = await resolveTenantAccess({
       memberships: this.memberships,
       organizationId,
       request,
     });
 
-    return { ...tenant, legalEntityIds: allowedEntityIds(entityScope) };
+    return {
+      entityScope,
+      selector: { ...tenant, legalEntityIds: allowedEntityIds(entityScope) },
+    };
   }
 }

@@ -108,6 +108,20 @@ describe('runTenantJob', () => {
     expect(fake.queries).toEqual([]);
   });
 
+  it('aborts without opening a transaction when the role can no longer write', async () => {
+    const fake = createFakePool([{ email_verified: true, role: 'member' }]);
+
+    await expect(
+      runTenantJob({
+        data: { organizationId: 'org-1', userId: 'user-1' },
+        pool: fake.pool,
+        work: async () => 'unreachable',
+      }),
+    ).rejects.toThrow('Job subject can no longer write in the organization.');
+    expect(fake.connects).toBe(0);
+    expect(fake.queries).toEqual([]);
+  });
+
   it('runs the unit of work inside a tenant transaction and releases the client', async () => {
     const fake = createFakePool(membership);
 

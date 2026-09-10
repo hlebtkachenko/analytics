@@ -130,11 +130,44 @@ describe('legal entity server actions', () => {
     expect(mocks.updateLegalEntity).toHaveBeenCalledWith(
       'organization-1',
       LEGAL_ENTITY_ID,
-      { kind: 'company', name: 'Renamed Holding' },
+      { kind: 'company', name: 'Renamed Holding', registrationNumber: null },
     );
     expect(mocks.removeLegalEntity).toHaveBeenCalledWith(
       'organization-1',
       LEGAL_ENTITY_ID,
+    );
+  });
+
+  it('clears the registration number when the update field is blank', async () => {
+    await updateLegalEntityAction(
+      'organization-one',
+      form({
+        kind: 'company',
+        legalEntityId: LEGAL_ENTITY_ID,
+        name: 'Renamed Holding',
+        registrationNumber: '   ',
+      }),
+    );
+    await updateLegalEntityAction(
+      'organization-one',
+      form({
+        kind: 'company',
+        legalEntityId: LEGAL_ENTITY_ID,
+        name: 'Renamed Holding',
+        registrationNumber: '  HRB-42  ',
+      }),
+    );
+
+    expect(mocks.updateLegalEntity.mock.calls.map((call) => call[2])).toEqual([
+      { kind: 'company', name: 'Renamed Holding', registrationNumber: null },
+      {
+        kind: 'company',
+        name: 'Renamed Holding',
+        registrationNumber: 'HRB-42',
+      },
+    ]);
+    expect(mocks.redirect).toHaveBeenLastCalledWith(
+      '/organization-one/entities?result=success',
     );
   });
 

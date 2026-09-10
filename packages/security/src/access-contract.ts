@@ -11,7 +11,12 @@ export const organizationRoleSchema = z.enum(['owner', 'admin', 'member']);
 
 export const accessServiceSchema = z.enum(['application-api', 'reporting-api']);
 
-export const legalEntityIdentifierSchema = z.string().uuid();
+// Lower-cased at the boundary: PostgreSQL emits lower-case uuids, so scope comparisons stay textual and exact.
+export const legalEntityIdentifierSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .uuid();
 
 export const legalEntityKindSchema = z.enum(['company', 'sole_trader']);
 
@@ -60,6 +65,35 @@ export const organizationCapabilitiesSchema = z
     useAi: z.boolean(),
   })
   .strict();
+
+// Derived from the schema so a new capability cannot be forgotten in an OpenAPI document.
+export const organizationCapabilityNames = Object.keys(
+  organizationCapabilitiesSchema.shape,
+);
+
+// The published entity scope shape; both services and every scope route document the same one.
+export const entityScopeOpenApiSchema = {
+  oneOf: [
+    {
+      additionalProperties: false,
+      properties: { mode: { enum: ['all'], type: 'string' } },
+      required: ['mode'],
+      type: 'object',
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        legalEntityIds: {
+          items: { format: 'uuid', type: 'string' },
+          type: 'array',
+        },
+        mode: { enum: ['restricted'], type: 'string' },
+      },
+      required: ['legalEntityIds', 'mode'],
+      type: 'object',
+    },
+  ],
+};
 
 export const organizationAccessResponseSchema = z
   .object({
@@ -148,8 +182,15 @@ export function resolveOrganizationAccess(
     return null;
   }
 
+  const capabilities = resolveCapabilities(membership.role);
+
+  // A restricted caller could not see what it created, so entity creation leaves the capability set.
+  if (entityScope.mode === 'restricted') {
+    capabilities.createEntities = false;
+  }
+
   return organizationAccessResponseSchema.parse({
-    capabilities: resolveCapabilities(membership.role),
+    capabilities,
     entityScope,
     organizationId,
     role: membership.role,

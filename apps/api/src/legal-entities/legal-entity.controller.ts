@@ -202,12 +202,12 @@ export class LegalEntityController {
     try {
       const updated = await this.entities.updateEntity({
         ...tenant,
-        kind: body.kind ?? null,
+        kind: body.kind,
         legalEntityId,
         legalEntityIds: allowedEntityIds(entityScope),
-        name: body.name ?? null,
-        registrationNumber: body.registrationNumber ?? null,
-        updatesRegistrationNumber: 'registrationNumber' in body,
+        name: body.name,
+        // An absent number leaves the stored one alone; an explicit null clears it.
+        registrationNumber: body.registrationNumber,
       });
 
       if (updated === null) {

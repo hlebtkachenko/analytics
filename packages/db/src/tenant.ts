@@ -1,4 +1,4 @@
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
 export type TenantRole = 'owner' | 'admin' | 'member';
 
@@ -12,12 +12,6 @@ export interface TenantContext {
 // 'all' is the absence of an entity filter, never a cross-organization query.
 export type EntityScope =
   { mode: 'all' } | { legalEntityIds: string[]; mode: 'restricted' };
-
-export interface ReadEntityScopeInput {
-  organizationId: string;
-  role: TenantRole;
-  userId: string;
-}
 
 export async function withTenantContext<T>(
   client: PoolClient,
@@ -40,11 +34,25 @@ export async function withTenantContext<T>(
   }
 }
 
-// The single entity scope resolver: every data path that reads a dataset or an upload goes through it,
-// because row level security deliberately does not filter by entity.
+// One tenant transaction on a checked out connection: the only way a pool holder should reach tenant data.
+export async function runInTenantContext<T>(
+  pool: Pool,
+  context: TenantContext,
+  operation: (transaction: PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+
+  try {
+    return await withTenantContext(client, context, operation);
+  } finally {
+    client.release();
+  }
+}
+
+// The single entity scope resolver: every data path that reads a dataset or an upload goes through it, because row level security deliberately does not filter by entity.
 export async function readEntityScope(
   transaction: PoolClient,
-  input: ReadEntityScopeInput,
+  input: TenantContext,
 ): Promise<EntityScope> {
   // Owners are never restricted, so their scope needs no lookup at all.
   if (input.role === 'owner') {

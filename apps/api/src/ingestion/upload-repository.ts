@@ -1,19 +1,19 @@
 import { Injectable, type OnModuleDestroy } from '@nestjs/common';
-import { withTenantContext } from '@bap/db';
+import { runInTenantContext } from '@bap/db';
+import type { TenantContext } from '@bap/db';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 import type { DatabasePool } from '@bap/db/pool';
+import type { PoolClient } from 'pg';
 
-import type { TenantSelector } from '../tenant-access.js';
-
-export interface RecordUploadInput extends TenantSelector {
+export interface RecordUploadInput extends TenantContext {
   byteSize: number;
   filename: string;
   legalEntityId: string;
   uploadId: string;
 }
 
-export interface FailUploadInput extends TenantSelector {
+export interface FailUploadInput extends TenantContext {
   uploadId: string;
 }
 
@@ -47,8 +47,7 @@ export class DatabaseUploadRepository
 
   async record(input: RecordUploadInput): Promise<boolean> {
     return this.inTenantContext(input, async (transaction) => {
-      // Metadata only: the raw bytes stay on the staging volume and never enter the database.
-      // The entity is resolved through row level security, so an id from another organization inserts nothing.
+      // Metadata only: the raw bytes stay on the staging volume and never enter the database. The entity is resolved through row level security, so an id from another organization inserts nothing.
       const recorded = await transaction.query(
         `insert into app.upload (id, organization_id, legal_entity_id, filename, byte_size, status)
          select $1, $2, entity.id, $4, $5, 'pending'
@@ -83,16 +82,9 @@ export class DatabaseUploadRepository
   }
 
   private async inTenantContext<T>(
-    tenant: TenantSelector,
-    operation: Parameters<typeof withTenantContext<T>>[2],
+    tenant: TenantContext,
+    operation: (transaction: PoolClient) => Promise<T>,
   ): Promise<T> {
-    const pool = await this.getPool();
-    const client = await pool.connect();
-
-    try {
-      return await withTenantContext(client, tenant, operation);
-    } finally {
-      client.release();
-    }
+    return runInTenantContext(await this.getPool(), tenant, operation);
   }
 }

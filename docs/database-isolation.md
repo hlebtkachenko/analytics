@@ -213,6 +213,20 @@ and `DELETE` policies: `SELECT` is organization-wide, and writing requires
 `app.role_can_write()` rather than matching the creator, since ADR 0011 made
 `member` read-only and dropped the per-dataset grant.
 
+A stored entity scope must not outlive the membership it describes. Migration
+`20260910.0001` therefore adds `app.clear_member_entity_scope()`, a
+`SECURITY DEFINER` trigger function owned by `bap_owner` with a fixed
+`search_path`, fired `AFTER DELETE` on `auth.member` and `AFTER UPDATE OF role`
+when the new role is `owner`. It deletes the `app.member_entity_scope` and
+`app.legal_entity_access` rows of that exact `(organization_id, user_id)` pair,
+taken from the row itself rather than from an argument, so a re-invited subject
+starts unrestricted and a promoted owner keeps no stale restriction. Because
+`FORCE ROW LEVEL SECURITY` applies to the definer too, and a `DELETE` reads its
+own `WHERE` clause through the `SELECT` policies, both tables carry a `SELECT`
+and a `DELETE` maintenance policy granted to `bap_owner` alone; Better Auth
+itself writes `auth.member` as `bap_auth`, which still holds nothing in schema
+`app`.
+
 Tenant context is set with `SET LOCAL` inside one transaction. It cannot persist
 through pooled connections after commit or rollback. Missing context fails
 closed. Production migrations never enumerate disposable RLS test fixtures.
@@ -272,7 +286,9 @@ gate exactly the write policies described above, that an entity delete by an
 admin is rejected, that an entity insert or dataset upload naming an entity from
 another organization is rejected by the composite foreign key, and that a
 restricted member's out-of-scope dataset read returns the same absence as a
-nonmember's.
+nonmember's. It also proves the scope maintenance trigger end to end as
+`bap_auth`: removing a membership and promoting one to `owner` each delete the
+subject's scope and access rows, and a re-added member resolves as unrestricted.
 
 It also proves the phase 3 embedding table. `app.dataset_embedding` stores one
 `vector(1536)` per dataset, keyed to its parent by a composite foreign key that

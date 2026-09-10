@@ -18,8 +18,7 @@ export function loadStagingDirectory(environment: Environment): string {
   return parsed.BAP_UPLOAD_STAGING_DIR ?? DEFAULT_STAGING_DIRECTORY;
 }
 
-// The staged path is derived from the server generated upload id and never from the uploaded filename.
-// A uuid matches [0-9a-fA-F-] only, so it can carry no separator, no traversal segment and no null byte.
+// The staged path is derived from the server generated upload id and never from the uploaded filename. A uuid matches [0-9a-fA-F-] only, so it can carry no separator, no traversal segment and no null byte.
 export function resolveStagedFilePath(
   directory: string,
   uploadId: string,
@@ -57,8 +56,7 @@ export async function deleteTemporaryUpload(
   await unlink(join(directory, contained)).catch(() => undefined);
 }
 
-// Takes the id rather than a path so the only way to name the file is through the validated derivation.
-// Called on the success and the failure path; an already missing file is the intended end state.
+// Takes the id rather than a path so the only way to name the file is through the validated derivation. Called on the success and the failure path; an already missing file is the intended end state.
 export async function deleteStagedFile(
   directory: string,
   uploadId: string,

@@ -16,6 +16,8 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import {
+  entityScopeOpenApiSchema,
+  organizationCapabilityNames,
   organizationIdentifierSchema,
   resolveOrganizationAccess,
   type OrganizationAccessResponse,
@@ -25,41 +27,6 @@ import { MembershipResolver } from './membership-resolver.js';
 import type { AuthenticatedRequest } from './request-context.js';
 import { ResourceJwtGuard } from './resource-jwt.guard.js';
 import { SubjectRateLimitGuard } from './subject-rate-limit.guard.js';
-
-const capabilityNames = [
-  'createEntities',
-  'deleteEntities',
-  'manageEntityAccess',
-  'manageMembers',
-  'manageOrganization',
-  'updateEntities',
-  'uploadData',
-  'useAi',
-];
-
-// Mirrors the entityScope member of the shared access contract; both services publish the same shape.
-const entityScopeOpenApiSchema = {
-  oneOf: [
-    {
-      additionalProperties: false,
-      properties: { mode: { enum: ['all'], type: 'string' } },
-      required: ['mode'],
-      type: 'object',
-    },
-    {
-      additionalProperties: false,
-      properties: {
-        legalEntityIds: {
-          items: { format: 'uuid', type: 'string' },
-          type: 'array',
-        },
-        mode: { enum: ['restricted'], type: 'string' },
-      },
-      required: ['legalEntityIds', 'mode'],
-      type: 'object',
-    },
-  ],
-};
 
 @ApiBearerAuth('resource-token')
 @Controller({ path: 'organizations', version: '1' })
@@ -79,9 +46,12 @@ export class AccessController {
         capabilities: {
           additionalProperties: false,
           properties: Object.fromEntries(
-            capabilityNames.map((name) => [name, { type: 'boolean' }]),
+            organizationCapabilityNames.map((name) => [
+              name,
+              { type: 'boolean' },
+            ]),
           ),
-          required: capabilityNames,
+          required: organizationCapabilityNames,
           type: 'object',
         },
         entityScope: entityScopeOpenApiSchema,

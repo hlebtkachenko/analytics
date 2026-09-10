@@ -1,31 +1,24 @@
 import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import type { TenantContext } from '@bap/db';
 import {
   resolveCapabilities,
   resolveOrganizationAccess,
   type EntityScope,
   type OrganizationAccessResponse,
   type OrganizationCapabilities,
-  type OrganizationRole,
 } from '@bap/security';
 
 import type { MembershipResolver } from './membership-resolver.js';
 import type { AuthenticatedRequest } from './request-context.js';
 
-// What a tenant transaction binds: the organization, the acting subject, and the freshly resolved role.
-export interface TenantSelector {
-  organizationId: string;
-  role: OrganizationRole;
-  userId: string;
-}
-
 export interface TenantAccess {
   access: OrganizationAccessResponse;
   entityScope: EntityScope;
-  tenant: TenantSelector;
+  tenant: TenantContext;
 }
 
 export interface ResolveTenantAccessInput {
-  // Checked before any transaction opens, exactly as ADR 0011 requires.
+  // Checked on the role before any transaction opens, as ADR 0011 requires, then again on the scope-narrowed set.
   capability?: keyof OrganizationCapabilities;
   memberships: MembershipResolver;
   organizationId: string;
@@ -58,7 +51,7 @@ export async function resolveTenantAccess(
     throw new ForbiddenException();
   }
 
-  const tenant: TenantSelector = {
+  const tenant: TenantContext = {
     organizationId: input.organizationId,
     role: membership.role,
     userId: principal.subject,
@@ -72,6 +65,14 @@ export async function resolveTenantAccess(
   );
 
   if (access === null) {
+    throw new ForbiddenException();
+  }
+
+  // The scope can only narrow the role capabilities, so the resolved set is the one that decides.
+  if (
+    input.capability !== undefined &&
+    !access.capabilities[input.capability]
+  ) {
     throw new ForbiddenException();
   }
 

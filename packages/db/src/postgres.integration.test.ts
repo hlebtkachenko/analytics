@@ -2185,6 +2185,69 @@ describe('PostgreSQL 18 isolation', () => {
     );
   });
 
+  it('clears a stored entity scope when the membership ends or becomes an owner', async () => {
+    const storeScope = async (): Promise<void> => {
+      await asTenant(apiPool, orgOneOwner, async (transaction) => {
+        await transaction.query(
+          `insert into app.member_entity_scope (organization_id, user_id, mode, updated_by)
+           values ('org-1', 'scope-user', 'restricted', 'user-1')`,
+        );
+        await transaction.query(
+          `insert into app.legal_entity_access (organization_id, user_id, legal_entity_id, created_by)
+           values ('org-1', 'scope-user', $1, 'user-1')`,
+          [ownedEntityId],
+        );
+      });
+    };
+    const storedRows = async (): Promise<Record<string, number>> => {
+      const counted = await rootPool.query<{ access: number; scopes: number }>(
+        `select
+           (select count(*)::int from app.member_entity_scope where user_id = 'scope-user') as scopes,
+           (select count(*)::int from app.legal_entity_access where user_id = 'scope-user') as access`,
+      );
+
+      return counted.rows[0] ?? {};
+    };
+
+    await authPool.query(
+      `insert into auth."user" (id, name, email, email_verified)
+       values ('scope-user', 'Scoped', 'scoped@example.test', true)`,
+    );
+    await authPool.query(
+      `insert into auth.member (id, organization_id, user_id, role)
+       values ('member-scope', 'org-1', 'scope-user', 'member')`,
+    );
+    await storeScope();
+    expect(await storedRows()).toEqual({ access: 1, scopes: 1 });
+
+    // Better Auth removes the membership as bap_auth, which holds nothing in schema app; the definer trigger clears the scope.
+    await authPool.query("delete from auth.member where id = 'member-scope'");
+    expect(await storedRows()).toEqual({ access: 0, scopes: 0 });
+
+    await authPool.query(
+      `insert into auth.member (id, organization_id, user_id, role)
+       values ('member-scope', 'org-1', 'scope-user', 'member')`,
+    );
+
+    // A re-invited subject starts unrestricted instead of inheriting the restriction of its former membership.
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        readEntityScope(transaction, {
+          organizationId: 'org-1',
+          role: 'member',
+          userId: 'scope-user',
+        }),
+      ),
+    ).resolves.toEqual({ mode: 'all' });
+
+    await storeScope();
+    await authPool.query(
+      "update auth.member set role = 'owner' where id = 'member-scope'",
+    );
+    expect(await storedRows()).toEqual({ access: 0, scopes: 0 });
+    await authPool.query(`delete from auth."user" where id = 'scope-user'`);
+  });
+
   it('grants entity, scope and access writes to the application role and reads to reporting and backup', async () => {
     await expect(
       reportingPool.query('select id from app.legal_entity'),

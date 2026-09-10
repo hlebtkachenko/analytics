@@ -60,12 +60,12 @@ C4Container
 ```
 
 The browser receives only opaque Better Auth cookies. Resource JWTs exist only
-inside the 12 fixed BFF-to-service route shapes: application access, legal
-entity list/create/update/delete, member entity-scope read/update, upload,
-dataset list, dataset rows, dataset export, and reporting access. They contain
-`iss`, `aud`, `sub`, `iat`, and `exp`. The web route validates and allow-lists
-each upstream response or stream. No catch-all service proxy or browser
-Bearer-token flow exists.
+inside the 13 fixed BFF-to-service route shapes: application access, legal
+entity list/create/update/delete, member entity-scope read/update, the bulk
+entity-scope read, upload, dataset list, dataset rows, dataset export, and
+reporting access. They contain `iss`, `aud`, `sub`, `iat`, and `exp`. The web
+route validates and allow-lists each upstream response or stream. No catch-all
+service proxy or browser Bearer-token flow exists.
 
 The web-local chat route requires a verified session, resolves application
 access through the same fixed BFF boundary, and can optionally resolve one
@@ -124,9 +124,10 @@ removed.
 
 `apps/api` adds `GET`/`POST /v1/organizations/:organizationId/legal-entities`,
 `PATCH`/`DELETE .../legal-entities/:legalEntityId`, and
-`GET`/`PUT .../members/:userId/entity-scope`, and extends `GET .../datasets`
-with an optional `legalEntityId` filter and `POST .../uploads` with a required
-`legalEntityId` field. `apps/web` mirrors every route through the BFF and adds
+`GET`/`PUT .../members/:userId/entity-scope`, `GET .../entity-scopes` for every
+stored scope at once, and extends `GET .../datasets` with an optional
+`legalEntityId` filter and `POST .../uploads` with a required `legalEntityId`
+field. `apps/web` mirrors every route through the BFF and adds
 `/[orgSlug]/entities` to list, create, edit, and delete legal entities by
 capability, an owner-only entity scope editor on `/[orgSlug]/members`, and an
 entity scope switch plus upload entity selector on `/datasets`.

@@ -20,8 +20,7 @@ const MAX_OUTPUT_TOKENS = 200;
 const SYSTEM_PROMPT =
   'You describe tabular datasets for an analytics catalogue. Answer with one plain sentence and no preamble.';
 
-// Mirrors the ingestion sanitizer: a null byte or a lone surrogate would make PostgreSQL reject the update.
-// The u flag makes the range match lone surrogates only, so a valid astral pair is kept.
+// Mirrors the ingestion sanitizer: a null byte or a lone surrogate would make PostgreSQL reject the update. The u flag makes the range match lone surrogates only, so a valid astral pair is kept.
 // eslint-disable-next-line no-control-regex
 const UNSTORABLE_TEXT = /[\u0000\uD800-\uDFFF]/gu;
 
@@ -95,8 +94,7 @@ async function storeSummary(
     throw new Error('The dataset is not writable by the job subject.');
   }
 
-  // Attribution is derived from the transaction context, so the audit call must run inside it.
-  // Token counts and the model id only; neither the prompt nor the completion is copied.
+  // Attribution is derived from the transaction context, so the audit call must run inside it. Token counts and the model id only; neither the prompt nor the completion is copied.
   await transaction.query(
     "select app.record_audit('dataset.summarized', 'dataset', $1, $2::jsonb)",
     [input.datasetId, JSON.stringify(input.audit)],

@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   listInvitations: vi.fn(),
   listMembers: vi.fn(),
   readLegalEntities: vi.fn(),
-  readMemberEntityScope: vi.fn(),
+  readMemberEntityScopes: vi.fn(),
   removeOrganizationMemberAction: vi.fn(),
   resolveOrganizationRouteForRequest: vi.fn(),
   updateMemberEntityScopeAction: vi.fn(),
@@ -33,7 +33,7 @@ vi.mock('../../../lib/organizations/entity-actions', () => ({
 }));
 vi.mock('../../../lib/organizations/entities', () => ({
   readLegalEntities: mocks.readLegalEntities,
-  readMemberEntityScope: mocks.readMemberEntityScope,
+  readMemberEntityScopes: mocks.readMemberEntityScopes,
 }));
 vi.mock('../../../lib/organizations/resolver', () => ({
   resolveOrganizationRouteForRequest: mocks.resolveOrganizationRouteForRequest,
@@ -97,7 +97,7 @@ describe('OrganizationMembersPage', () => {
         updatedAt: '2026-09-10T06:00:00.000Z',
       },
     ]);
-    mocks.readMemberEntityScope.mockResolvedValue({ mode: 'all' });
+    mocks.readMemberEntityScopes.mockResolvedValue(new Map());
   });
 
   async function renderPage(): Promise<void> {
@@ -145,17 +145,20 @@ describe('OrganizationMembersPage', () => {
   });
 
   it('offers an owner an entity scope editor for every non-owner member only', async () => {
-    mocks.readMemberEntityScope.mockResolvedValue({
-      legalEntityIds: [OTHER_LEGAL_ENTITY_ID],
-      mode: 'restricted',
-    });
+    mocks.readMemberEntityScopes.mockResolvedValue(
+      new Map([
+        [
+          'user-2',
+          { legalEntityIds: [OTHER_LEGAL_ENTITY_ID], mode: 'restricted' },
+        ],
+      ]),
+    );
 
     await renderPage();
 
     expect(mocks.readLegalEntities).toHaveBeenCalledWith('organization-1');
-    expect(mocks.readMemberEntityScope).toHaveBeenCalledExactlyOnceWith(
+    expect(mocks.readMemberEntityScopes).toHaveBeenCalledExactlyOnceWith(
       'organization-1',
-      'user-2',
     );
     expect(
       screen.queryByRole('form', {
@@ -204,7 +207,7 @@ describe('OrganizationMembersPage', () => {
         screen.queryByRole('button', { name: 'Save entity access' }),
       ).not.toBeInTheDocument();
       expect(mocks.readLegalEntities).not.toHaveBeenCalled();
-      expect(mocks.readMemberEntityScope).not.toHaveBeenCalled();
+      expect(mocks.readMemberEntityScopes).not.toHaveBeenCalled();
     },
   );
 
@@ -219,16 +222,38 @@ describe('OrganizationMembersPage', () => {
     expect(document.body).not.toHaveTextContent('private provider detail');
   });
 
-  it('omits the scope editor when the entity list is unavailable', async () => {
-    mocks.readLegalEntities.mockResolvedValue(null);
-
+  it('treats a member without a stored scope row as unrestricted', async () => {
     await renderPage();
 
+    const scopeForm = screen.getByRole('form', {
+      name: 'Entity access for member@example.test',
+    });
+    expect(within(scopeForm).getByLabelText('All entities')).toBeChecked();
     expect(
-      screen.queryByRole('button', { name: 'Save entity access' }),
-    ).not.toBeInTheDocument();
+      within(scopeForm).getByLabelText('Selected entities'),
+    ).not.toBeChecked();
     expect(
-      screen.getByRole('form', { name: 'Change role for member@example.test' }),
-    ).toBeVisible();
+      within(scopeForm).getByLabelText('Placeholder Holding'),
+    ).not.toBeChecked();
   });
+
+  it.each(['readLegalEntities', 'readMemberEntityScopes'] as const)(
+    'reports the scope editor as unavailable when %s fails',
+    async (read) => {
+      mocks[read].mockResolvedValue(null);
+
+      await renderPage();
+
+      expect(
+        screen.queryByRole('button', { name: 'Save entity access' }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText('Entity access is unavailable.')).toBeVisible();
+      expect(document.body).not.toHaveTextContent('All entities');
+      expect(
+        screen.getByRole('form', {
+          name: 'Change role for member@example.test',
+        }),
+      ).toBeVisible();
+    },
+  );
 });

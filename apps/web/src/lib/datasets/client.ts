@@ -88,6 +88,29 @@ export function legalEntitiesPath(organizationId: string): string {
   return `${organizationPath(organizationId)}/legal-entities`;
 }
 
+export function legalEntityPath(
+  organizationId: string,
+  legalEntityId: string,
+): string {
+  return `${legalEntitiesPath(organizationId)}/${encodeURIComponent(legalEntityId)}`;
+}
+
+export function accessPath(organizationId: string): string {
+  return `${organizationPath(organizationId)}/access`;
+}
+
+// The owner-only bulk scope read, one request for the whole member list.
+export function entityScopesPath(organizationId: string): string {
+  return `${organizationPath(organizationId)}/entity-scopes`;
+}
+
+export function memberEntityScopePath(
+  organizationId: string,
+  userId: string,
+): string {
+  return `${organizationPath(organizationId)}/members/${encodeURIComponent(userId)}/entity-scope`;
+}
+
 export function datasetPath(organizationId: string, datasetId: string): string {
   return `${datasetsPath(organizationId)}/${encodeURIComponent(datasetId)}`;
 }

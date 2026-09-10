@@ -66,24 +66,39 @@ const legalEntityListSchema = z
   .object({ legalEntities: z.array(legalEntitySchema) })
   .strict();
 
+const registrationNumberSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(MAX_REGISTRATION_NUMBER_LENGTH)
+  .regex(registrationNumberPattern);
+
 const legalEntityCreateBodySchema = z
   .object({
     kind: legalEntityKindSchema,
     name: z.string().trim().min(1).max(MAX_LEGAL_ENTITY_NAME_LENGTH),
-    registrationNumber: z
-      .string()
-      .trim()
-      .min(1)
-      .max(MAX_REGISTRATION_NUMBER_LENGTH)
-      .regex(registrationNumberPattern)
-      .optional(),
+    registrationNumber: registrationNumberSchema.optional(),
   })
   .strict();
 
-// A patch carries only what changes, so an empty object is refused rather than sent.
+// A patch carries only what changes, an empty object is refused, and null clears the number.
 const legalEntityUpdateBodySchema = legalEntityCreateBodySchema
   .partial()
+  .extend({
+    registrationNumber: registrationNumberSchema.nullable().optional(),
+  })
   .refine((body) => Object.keys(body).length > 0);
+
+// The owner-only bulk read: one row per member with a stored scope, an omission meaning all.
+const memberEntityScopeListSchema = z
+  .object({
+    entityScopes: z.array(
+      z
+        .object({ entityScope: entityScopeSchema, userId: subjectIdSchema })
+        .strict(),
+    ),
+  })
+  .strict();
 
 export type BffService = 'application' | 'reporting';
 
@@ -163,9 +178,7 @@ const datasetRowQuerySchema = z
   .strict();
 
 // The only dataset filter the browser may ask for: one entity, or none at all.
-const datasetListQuerySchema = z
-  .object({ legalEntityId: legalEntityIdSchema.optional() })
-  .strict();
+const datasetListFilterSchema = legalEntityIdSchema.optional();
 
 const datasetListSchema = z
   .object({
@@ -459,9 +472,13 @@ export async function getDatasets(
   organizationId: string,
   fetchImplementation: typeof fetch = fetch,
 ): Promise<Response> {
+  // Only the entity filter is read, so an unrelated parameter is ignored rather than refused.
+  const requestedFilter = new URL(request.url).searchParams.get(
+    'legalEntityId',
+  );
   // A malformed entity filter is refused here, never widened into an unfiltered list.
-  const query = datasetListQuerySchema.safeParse(
-    Object.fromEntries(new URL(request.url).searchParams),
+  const query = datasetListFilterSchema.safeParse(
+    requestedFilter === null ? undefined : requestedFilter.toLowerCase(),
   );
 
   if (!query.success) {
@@ -476,9 +493,9 @@ export async function getDatasets(
 
   // Rebuilt from the validated value only, so no client query string is forwarded verbatim.
   const filter =
-    query.data.legalEntityId === undefined
+    query.data === undefined
       ? ''
-      : `?legalEntityId=${encodeURIComponent(query.data.legalEntityId)}`;
+      : `?legalEntityId=${encodeURIComponent(query.data)}`;
   let response: Response;
   try {
     response = await fetchImplementation(
@@ -687,12 +704,18 @@ export type EntityScope = z.infer<typeof entityScopeSchema>;
 export type LegalEntity = z.infer<typeof legalEntitySchema>;
 export type OrganizationAccess = z.infer<typeof accessResponseSchema>;
 
-// Exported so a server render parses exactly the contract this module already validated.
+// Exported so a server render and the entity actions reuse the contract validated here.
 export {
   accessResponseSchema,
   entityScopeSchema,
+  legalEntityCreateBodySchema,
+  legalEntityIdSchema,
+  legalEntityKindSchema,
   legalEntityListSchema,
   legalEntitySchema,
+  legalEntityUpdateBodySchema,
+  memberEntityScopeListSchema,
+  subjectIdSchema,
 };
 
 type ApplicationJsonCall = Readonly<{
@@ -950,6 +973,33 @@ export async function deleteLegalEntity(
       path: `legal-entities/${encodeURIComponent(selectedEntity.value)}`,
       schema: null,
       successStatus: 204,
+    },
+    fetchImplementation,
+  );
+}
+
+// One owner-only read for the whole member list, so a members page never fans out per member.
+export async function getMemberEntityScopes(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'entity_scopes_unavailable',
+      method: 'GET',
+      operation: 'getMemberEntityScopes',
+      path: 'entity-scopes',
+      schema: memberEntityScopeListSchema,
+      successStatus: 200,
     },
     fetchImplementation,
   );

@@ -6,6 +6,7 @@ import {
   createLegalEntity,
   readLegalEntities,
   readMemberEntityScope,
+  readMemberEntityScopes,
   readOrganizationAccess,
   removeLegalEntity,
   updateLegalEntity,
@@ -118,6 +119,51 @@ describe('server-side legal entity reads and writes', () => {
     );
   });
 
+  it('reads every stored member scope in one request', async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        entityScopes: [
+          {
+            entityScope: {
+              legalEntityIds: [LEGAL_ENTITY_ID],
+              mode: 'restricted',
+            },
+            userId: 'user-2',
+          },
+          { entityScope: { mode: 'all' }, userId: 'user-3' },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const scopes = await readMemberEntityScopes('organization-1');
+
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      'http://api:3001/v1/organizations/organization-1/entity-scopes',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer resource-token',
+        }),
+      }),
+    );
+    expect(scopes?.get('user-2')).toEqual({
+      legalEntityIds: [LEGAL_ENTITY_ID],
+      mode: 'restricted',
+    });
+    expect(scopes?.get('user-3')).toEqual({ mode: 'all' });
+    // A member without a stored row is simply absent, which the page reads as unrestricted.
+    expect(scopes?.has('user-4')).toBe(false);
+  });
+
+  it('reports an unavailable bulk scope read as null', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ detail: 'private' }, { status: 403 })),
+    );
+
+    await expect(readMemberEntityScopes('organization-1')).resolves.toBeNull();
+  });
+
   it('sends every write as JSON and reports a refusal as false', async () => {
     const fetchMock = vi.fn(async (_input: string, init: RequestInit) =>
       init.method === 'DELETE'
@@ -145,6 +191,15 @@ describe('server-side legal entity reads and writes', () => {
     ]);
     expect(fetchMock.mock.calls[0]?.[1].body).toBe(
       JSON.stringify({ kind: 'company', name: 'Placeholder Holding' }),
+    );
+
+    const cleared = await updateLegalEntity('organization-1', LEGAL_ENTITY_ID, {
+      registrationNumber: null,
+    });
+
+    expect(cleared).toBe(true);
+    expect(fetchMock.mock.calls[3]?.[1].body).toBe(
+      JSON.stringify({ registrationNumber: null }),
     );
 
     vi.stubGlobal(

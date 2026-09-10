@@ -15,8 +15,7 @@ export const SUMMARY_MODEL_ROLE = 'summary';
 
 export const datasetIdentifierSchema = z.string().uuid();
 
-// pgboss.job has no row level security and bap_api reads every tenant's jobs.
-// Both agent payloads therefore carry identifiers only: no dataset name, no column, no cell value, no prompt.
+// pgboss.job has no row level security and bap_api reads every tenant's jobs. Both agent payloads therefore carry identifiers only: no dataset name, no column, no cell value, no prompt.
 export const backfillEmbeddingsJobSchema = tenantJobPayloadSchema;
 
 export type BackfillEmbeddingsJob = z.infer<typeof backfillEmbeddingsJobSchema>;

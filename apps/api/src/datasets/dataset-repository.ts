@@ -1,19 +1,19 @@
 import { Injectable, type OnModuleDestroy } from '@nestjs/common';
-import { withTenantContext } from '@bap/db';
+import { runInTenantContext } from '@bap/db';
+import type { TenantContext } from '@bap/db';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 import type { DatabasePool } from '@bap/db/pool';
 import type { PoolClient } from 'pg';
 
-import type { TenantSelector } from '../tenant-access.js';
 import { MAX_DATASET_LIST_SIZE } from './contract.js';
 
 export type DatasetCellValue = boolean | number | string | null;
 
-export type { TenantSelector };
+export type { TenantContext };
 
 // null is the absence of an entity filter; an empty array is a caller who may see nothing.
-export interface EntityScopeSelector extends TenantSelector {
+export interface EntityScopeSelector extends TenantContext {
   legalEntityIds: readonly string[] | null;
 }
 
@@ -71,22 +71,7 @@ interface RowQueryRow {
   row_number: number;
 }
 
-async function inTenantContext<T>(
-  pool: DatabasePool,
-  tenant: TenantSelector,
-  operation: (transaction: PoolClient) => Promise<T>,
-): Promise<T> {
-  const client = await pool.connect();
-
-  try {
-    return await withTenantContext(client, tenant, operation);
-  } finally {
-    client.release();
-  }
-}
-
-// Returns null when row level security hides the dataset or the entity is out of scope,
-// so a stranger, a restricted member and a missing id all get the same answer.
+// Returns null when row level security hides the dataset or the entity is out of scope, so a stranger, a restricted member and a missing id all get the same answer.
 async function loadColumns(
   transaction: PoolClient,
   datasetId: string,
@@ -132,7 +117,7 @@ export async function listDatasets(
   pool: DatabasePool,
   input: EntityScopeSelector,
 ): Promise<DatasetSummaryRecord[]> {
-  return inTenantContext(pool, input, async (transaction) => {
+  return runInTenantContext(pool, input, async (transaction) => {
     const result = await transaction.query<{
       created_at: Date;
       description: string | null;
@@ -179,7 +164,7 @@ export async function readDatasetColumns(
   pool: DatabasePool,
   input: ReadDatasetColumnsInput,
 ): Promise<DatasetColumnRecord[] | null> {
-  return inTenantContext(pool, input, (transaction) =>
+  return runInTenantContext(pool, input, (transaction) =>
     loadColumns(transaction, input.datasetId, input.legalEntityIds),
   );
 }
@@ -188,7 +173,7 @@ export async function readDatasetRowPage(
   pool: DatabasePool,
   input: ReadDatasetRowPageInput,
 ): Promise<DatasetRowPage | null> {
-  return inTenantContext(pool, input, async (transaction) => {
+  return runInTenantContext(pool, input, async (transaction) => {
     const columns = await loadColumns(
       transaction,
       input.datasetId,
@@ -217,7 +202,7 @@ export async function* streamDatasetRows(
   let cursor = FIRST_ROW_CURSOR;
 
   for (;;) {
-    const batch = await inTenantContext(pool, input, async (transaction) => {
+    const batch = await runInTenantContext(pool, input, async (transaction) => {
       const rows = await transaction.query<RowQueryRow>(ROW_PAGE_QUERY, [
         input.datasetId,
         cursor,

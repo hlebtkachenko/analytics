@@ -200,6 +200,55 @@ CREATE POLICY legal_entity_access_delete ON app.legal_entity_access FOR DELETE
     AND app.role_is_owner()
   );
 
+-- FORCE row level security applies to the definer too, so the scope maintenance below needs its own policies.
+-- A DELETE reads its own WHERE clause through the SELECT policies, so the maintenance path needs both commands.
+CREATE POLICY member_entity_scope_maintenance_select ON app.member_entity_scope FOR SELECT
+  TO bap_owner USING (true);
+
+CREATE POLICY member_entity_scope_maintenance_delete ON app.member_entity_scope FOR DELETE
+  TO bap_owner USING (true);
+
+CREATE POLICY legal_entity_access_maintenance_select ON app.legal_entity_access FOR SELECT
+  TO bap_owner USING (true);
+
+CREATE POLICY legal_entity_access_maintenance_delete ON app.legal_entity_access FOR DELETE
+  TO bap_owner USING (true);
+
+-- A scope must not outlive the membership it describes: a removed member would inherit its old restriction when re-invited.
+-- SECURITY DEFINER because Better Auth writes auth.member as bap_auth, which holds nothing in schema app.
+CREATE OR REPLACE FUNCTION app.clear_member_entity_scope()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, app
+AS $$
+BEGIN
+  -- The subject comes from the row itself, never from an argument, so a caller cannot name another membership.
+  DELETE FROM app.legal_entity_access
+  WHERE organization_id = OLD.organization_id AND user_id = OLD.user_id;
+
+  DELETE FROM app.member_entity_scope
+  WHERE organization_id = OLD.organization_id AND user_id = OLD.user_id;
+
+  RETURN NULL;
+END;
+$$;
+
+ALTER FUNCTION app.clear_member_entity_scope() OWNER TO bap_owner;
+REVOKE ALL ON FUNCTION app.clear_member_entity_scope() FROM PUBLIC;
+
+CREATE OR REPLACE TRIGGER member_removed_clears_entity_scope
+AFTER DELETE ON auth.member
+FOR EACH ROW
+EXECUTE FUNCTION app.clear_member_entity_scope();
+
+-- An owner is never restricted, so promotion drops the stored scope instead of leaving a lie behind.
+CREATE OR REPLACE TRIGGER member_owner_clears_entity_scope
+AFTER UPDATE OF role ON auth.member
+FOR EACH ROW
+WHEN (NEW.role = 'owner')
+EXECUTE FUNCTION app.clear_member_entity_scope();
+
 -- Reading is organization wide now: the creator and grant conditions leave the dataset SELECT policy.
 -- Entity scope is deliberately absent here; the application resolver applies it, as ADR 0011 decided.
 DROP POLICY dataset_select ON app.dataset;

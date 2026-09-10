@@ -1,15 +1,5 @@
-import type {
-  EntityScope,
-  MembershipResolution,
-  OrganizationRole,
-} from '@bap/security';
-
-// What one tenant transaction binds: the organization, the acting subject and the resolved role.
-export interface TenantSelector {
-  organizationId: string;
-  role: OrganizationRole;
-  userId: string;
-}
+import type { TenantContext } from '@bap/db';
+import type { EntityScope, MembershipResolution } from '@bap/security';
 
 export abstract class MembershipResolver {
   abstract checkReadiness(): Promise<boolean>;
@@ -19,7 +9,7 @@ export abstract class MembershipResolver {
     waiting: number;
   };
   // Reads the stored scope inside one tenant transaction on the reporting pool.
-  abstract readEntityScope(tenant: TenantSelector): Promise<EntityScope>;
+  abstract readEntityScope(tenant: TenantContext): Promise<EntityScope>;
   abstract resolve(
     subjectId: string,
     organizationId: string,

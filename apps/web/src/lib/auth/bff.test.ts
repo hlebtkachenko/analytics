@@ -7,6 +7,7 @@ import {
   getDatasets,
   getLegalEntities,
   getMemberEntityScope,
+  getMemberEntityScopes,
   getOrganizationAccess,
   patchLegalEntity,
   postDatasetUpload,
@@ -440,18 +441,44 @@ describe('getDatasets', () => {
       'org_1',
       fetchImplementation,
     );
-    const unknownFilter = await getDatasets(
-      auth,
-      datasetRequest('datasets?drop=me'),
-      'org_1',
-      fetchImplementation,
-    );
 
     expect(filtered.status).toBe(200);
     expect(await filtered.json()).toEqual({ datasets: [datasetSummary] });
     expect(forgedFilter.status).toBe(400);
     expect(await forgedFilter.json()).toEqual({ error: 'invalid_filter' });
-    expect(unknownFilter.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+  });
+
+  it('ignores an unrelated query parameter instead of refusing the list', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe(
+        `http://api:3001/v1/organizations/org_1/datasets?legalEntityId=${LEGAL_ENTITY_ID}`,
+      );
+      return Response.json({ datasets: [datasetSummary] });
+    });
+
+    const unfiltered = await getDatasets(
+      auth,
+      datasetRequest('datasets?cacheBuster=1&utm_source=mail'),
+      'org_1',
+      async (input) => {
+        expect(String(input)).toBe(
+          'http://api:3001/v1/organizations/org_1/datasets',
+        );
+        return Response.json({ datasets: [datasetSummary] });
+      },
+    );
+    const filtered = await getDatasets(
+      auth,
+      datasetRequest(
+        `datasets?utm_source=mail&legalEntityId=${LEGAL_ENTITY_ID.toUpperCase()}`,
+      ),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(unfiltered.status).toBe(200);
+    expect(filtered.status).toBe(200);
     expect(fetchImplementation).toHaveBeenCalledOnce();
   });
 
@@ -843,6 +870,46 @@ describe('patchLegalEntity', () => {
     });
   });
 
+  it('forwards a null registration number so an update can clear it', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (_input, init) => {
+      expect(init?.body).toBe(JSON.stringify({ registrationNumber: null }));
+      return Response.json({ ...legalEntity, registrationNumber: null });
+    });
+
+    const response = await patchLegalEntity(
+      auth,
+      entityRequest(`legal-entities/${LEGAL_ENTITY_ID}`, {
+        body: JSON.stringify({ registrationNumber: null }),
+        method: 'PATCH',
+      }),
+      'org_1',
+      LEGAL_ENTITY_ID,
+      fetchImplementation,
+    );
+    const created = await postLegalEntity(
+      auth,
+      entityRequest('legal-entities', {
+        body: JSON.stringify({
+          kind: 'company',
+          name: 'Placeholder Holding',
+          registrationNumber: null,
+        }),
+        method: 'POST',
+      }),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ...legalEntity,
+      registrationNumber: null,
+    });
+    // Creation has nothing to clear, so a null there stays a rejected body.
+    expect(created.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+  });
+
   it('hides a malformed entity id and refuses an empty patch', async () => {
     const fetchImplementation = vi.fn<typeof fetch>();
     const missing = await patchLegalEntity(
@@ -917,6 +984,74 @@ describe('deleteLegalEntity', () => {
 
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: 'service_unavailable' });
+  });
+});
+
+describe('getMemberEntityScopes', () => {
+  it('reads every stored scope from one owner-only target', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/entity-scopes',
+      );
+      expect(init?.method).toBe('GET');
+      return Response.json({
+        entityScopes: [
+          {
+            entityScope: {
+              legalEntityIds: [LEGAL_ENTITY_ID],
+              mode: 'restricted',
+            },
+            userId: 'user_2',
+          },
+        ],
+      });
+    });
+
+    const response = await getMemberEntityScopes(
+      auth,
+      entityRequest('entity-scopes'),
+      'org_1',
+      fetchImplementation,
+    );
+    const forged = await getMemberEntityScopes(
+      auth,
+      entityRequest('entity-scopes'),
+      '../forged',
+      fetchImplementation,
+    );
+    const refused = await getMemberEntityScopes(
+      auth,
+      entityRequest('entity-scopes'),
+      'org_1',
+      async () => Response.json({ detail: 'private' }, { status: 403 }),
+    );
+    const malformed = await getMemberEntityScopes(
+      auth,
+      entityRequest('entity-scopes'),
+      'org_1',
+      async () =>
+        Response.json({ entityScopes: [{ entityScope: { mode: 'some' } }] }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      entityScopes: [
+        {
+          entityScope: {
+            legalEntityIds: [LEGAL_ENTITY_ID],
+            mode: 'restricted',
+          },
+          userId: 'user_2',
+        },
+      ],
+    });
+    expect(forged.status).toBe(403);
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({
+      error: 'entity_scopes_unavailable',
+    });
+    expect(malformed.status).toBe(502);
+    expect(fetchImplementation).toHaveBeenCalledOnce();
   });
 });
 

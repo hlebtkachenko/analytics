@@ -111,6 +111,16 @@ describe('application legal entity routes', () => {
         ? [entity]
         : [],
     ),
+    listMemberScopes: vi.fn(async () => [
+      { entityScope: { mode: 'all' as const }, userId: 'user_2' },
+      {
+        entityScope: {
+          legalEntityIds: [ENTITY_ID],
+          mode: 'restricted' as const,
+        },
+        userId: 'user_3',
+      },
+    ]),
     readMemberScope: vi.fn(async () => ({
       legalEntityIds: [ENTITY_ID],
       mode: 'restricted' as const,
@@ -245,25 +255,25 @@ describe('application legal entity routes', () => {
     expect(updated.body).toMatchObject({ id: ENTITY_ID });
     expect(updateCalls).toEqual([
       {
-        kind: null,
+        kind: undefined,
         legalEntityId: ENTITY_ID,
         legalEntityIds: null,
-        name: null,
+        name: undefined,
         organizationId: 'organization_2',
         registrationNumber: null,
         role: 'admin',
-        updatesRegistrationNumber: true,
         userId: 'user_1',
       },
     ]);
 
-    // An absent field leaves the stored number alone.
+    // An absent field leaves the stored number alone, which the repository reads as undefined.
     await request(application.getHttpServer())
       .patch(`/v1/organizations/organization_2/legal-entities/${ENTITY_ID}`)
       .set('Authorization', 'Bearer caller')
       .send({ name: 'Renamed Placeholder' })
       .expect(200);
-    expect(updateCalls[1]?.updatesRegistrationNumber).toBe(false);
+    expect(updateCalls[1]?.registrationNumber).toBeUndefined();
+    expect(updateCalls[1]?.name).toBe('Renamed Placeholder');
   });
 
   it('hides an entity outside the scope behind a not found answer', async () => {
@@ -296,6 +306,46 @@ describe('application legal entity routes', () => {
       )
       .set('Authorization', 'Bearer caller')
       .expect(404);
+  });
+
+  it('refuses entity creation to a restricted caller', async () => {
+    entityScope = { legalEntityIds: [ENTITY_ID], mode: 'restricted' };
+
+    // A restricted admin could not see the entity it created, so the capability is gone.
+    await request(application.getHttpServer())
+      .post('/v1/organizations/organization_2/legal-entities')
+      .set('Authorization', 'Bearer caller')
+      .send({ kind: 'company', name: 'Placeholder Holding' })
+      .expect(403);
+    expect(createCalls).toEqual([]);
+  });
+
+  it('reads every stored member scope in one call for the owner only', async () => {
+    const response = await request(application.getHttpServer())
+      .get('/v1/organizations/organization_1/entity-scopes')
+      .set('Authorization', 'Bearer caller')
+      .expect(200);
+
+    expect(response.body).toEqual({
+      entityScopes: [
+        { entityScope: { mode: 'all' }, userId: 'user_2' },
+        {
+          entityScope: { legalEntityIds: [ENTITY_ID], mode: 'restricted' },
+          userId: 'user_3',
+        },
+      ],
+    });
+    expect(entities.listMemberScopes).toHaveBeenCalledWith({
+      organizationId: 'organization_1',
+      role: 'owner',
+      userId: 'user_1',
+    });
+
+    // An admin holds no manageEntityAccess capability.
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_2/entity-scopes')
+      .set('Authorization', 'Bearer caller')
+      .expect(403);
   });
 
   it('reads and replaces a member entity scope for the owner only', async () => {
@@ -372,6 +422,7 @@ describe('application legal entity routes', () => {
     );
 
     expect(Object.keys(document.paths).sort()).toEqual([
+      '/v1/organizations/{organizationId}/entity-scopes',
       '/v1/organizations/{organizationId}/legal-entities',
       '/v1/organizations/{organizationId}/legal-entities/{legalEntityId}',
       '/v1/organizations/{organizationId}/members/{userId}/entity-scope',

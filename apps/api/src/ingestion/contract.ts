@@ -10,8 +10,7 @@ export const MAX_UPLOAD_BYTES = 25_000_000;
 
 export const uploadIdentifierSchema = z.string().uuid();
 
-// pgboss.job has no row level security and bap_api reads every tenant's jobs.
-// The payload therefore carries identifiers only: no path, no filename, no cell value.
+// pgboss.job has no row level security and bap_api reads every tenant's jobs. The payload therefore carries identifiers only: no path, no filename, no cell value.
 export const ingestDatasetJobSchema = z
   .object({
     organizationId: organizationIdentifierSchema,

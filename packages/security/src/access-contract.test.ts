@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   entityScopeSchema,
+  legalEntityIdentifierSchema,
   legalEntityInScope,
   legalEntityKindSchema,
   legalEntitySchema,
   organizationAccessResponseSchema,
+  organizationCapabilityNames,
   organizationIdentifierSchema,
   resolveCapabilities,
   resolveOrganizationAccess,
@@ -120,6 +122,7 @@ describe('organization access contract', () => {
   });
 
   it('derives capabilities from the generic role', () => {
+    expect(organizationCapabilityNames).toEqual(Object.keys(ownerCapabilities));
     expect(resolveCapabilities('owner')).toEqual(ownerCapabilities);
     expect(resolveCapabilities('admin')).toEqual(adminCapabilities);
     expect(resolveCapabilities('member')).toEqual(memberCapabilities);
@@ -141,12 +144,60 @@ describe('organization access contract', () => {
         { legalEntityIds: [entityId], mode: 'restricted' },
       ),
     ).toEqual({
-      capabilities: adminCapabilities,
+      // A restricted caller could not see what it created, so the scope takes createEntities away.
+      capabilities: { ...adminCapabilities, createEntities: false },
       entityScope: { legalEntityIds: [entityId], mode: 'restricted' },
       organizationId: 'organization_1',
       role: 'admin',
       service: 'reporting-api',
     });
+  });
+
+  it('takes entity creation away from every restricted scope', () => {
+    for (const role of ['admin', 'member'] as const) {
+      const access = resolveOrganizationAccess(
+        'application-api',
+        'organization_1',
+        { emailVerified: true, role },
+        { legalEntityIds: [], mode: 'restricted' },
+      );
+
+      expect(access?.capabilities.createEntities).toBe(false);
+    }
+
+    // An owner is never restricted, so its capability set is untouched.
+    expect(
+      resolveOrganizationAccess(
+        'application-api',
+        'organization_1',
+        { emailVerified: true, role: 'owner' },
+        { mode: 'all' },
+      )?.capabilities,
+    ).toEqual(ownerCapabilities);
+    expect(resolveCapabilities('admin')).toEqual(adminCapabilities);
+  });
+
+  it('lower-cases every legal entity id at the boundary', () => {
+    const upperCase = entityId.toUpperCase();
+
+    expect(legalEntityIdentifierSchema.parse(upperCase)).toBe(entityId);
+    expect(
+      entityScopeSchema.parse({
+        legalEntityIds: [upperCase],
+        mode: 'restricted',
+      }),
+    ).toEqual({ legalEntityIds: [entityId], mode: 'restricted' });
+
+    // PostgreSQL emits lower-case uuids, so a normalized request id compares exactly against a stored scope.
+    expect(
+      legalEntityInScope(
+        entityScopeSchema.parse({
+          legalEntityIds: [upperCase],
+          mode: 'restricted',
+        }),
+        legalEntityIdentifierSchema.parse(upperCase),
+      ),
+    ).toBe(true);
   });
 
   it('accepts only the two entity kinds and a bounded legal entity', () => {

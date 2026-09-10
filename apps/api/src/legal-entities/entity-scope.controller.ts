@@ -37,8 +37,13 @@ import { subjectIdentifierSchema } from '../worker/job-context.js';
 import {
   entityScopeOpenApiSchema,
   entityScopeRequestSchema,
+  memberEntityScopeListOpenApiSchema,
+  memberEntityScopeListResponseSchema,
 } from './contract.js';
-import type { EntityScopeRequest } from './contract.js';
+import type {
+  EntityScopeRequest,
+  MemberEntityScopeListResponse,
+} from './contract.js';
 import { LegalEntityRepository } from './legal-entity-repository.js';
 
 @ApiBearerAuth('resource-token')
@@ -50,6 +55,28 @@ export class EntityScopeController {
     @Inject(MembershipResolver)
     private readonly memberships: MembershipResolver,
   ) {}
+
+  @Get(':organizationId/entity-scopes')
+  @UseGuards(ResourceJwtGuard, SubjectRateLimitGuard)
+  @ApiOperation({ summary: 'Read every stored member entity scope at once' })
+  @ApiOkResponse({ schema: memberEntityScopeListOpenApiSchema })
+  @ApiUnauthorizedResponse({ description: 'The resource token is invalid' })
+  @ApiForbiddenResponse({ description: 'Organization access is denied' })
+  async getEntityScopes(
+    @Param('organizationId', { schema: organizationIdentifierSchema })
+    organizationId: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<MemberEntityScopeListResponse> {
+    const { tenant } = await resolveTenantAccess({
+      capability: 'manageEntityAccess',
+      memberships: this.memberships,
+      organizationId,
+      request,
+    });
+    const entityScopes = await this.entities.listMemberScopes(tenant);
+
+    return memberEntityScopeListResponseSchema.parse({ entityScopes });
+  }
 
   @Get(':organizationId/members/:userId/entity-scope')
   @UseGuards(ResourceJwtGuard, SubjectRateLimitGuard)

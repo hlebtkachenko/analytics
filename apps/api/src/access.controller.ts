@@ -7,27 +7,17 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import {
+  entityScopeOpenApiSchema,
+  organizationCapabilityNames,
   organizationIdentifierSchema,
   type OrganizationAccessResponse,
 } from '@bap/security';
 
-import { entityScopeOpenApiSchema } from './legal-entities/contract.js';
 import { MembershipResolver } from './membership-resolver.js';
 import type { AuthenticatedRequest } from './request-context.js';
 import { ResourceJwtGuard } from './resource-jwt.guard.js';
 import { SubjectRateLimitGuard } from './subject-rate-limit.guard.js';
 import { resolveTenantAccess } from './tenant-access.js';
-
-const capabilityNames = [
-  'createEntities',
-  'deleteEntities',
-  'manageEntityAccess',
-  'manageMembers',
-  'manageOrganization',
-  'updateEntities',
-  'uploadData',
-  'useAi',
-];
 
 @ApiBearerAuth('resource-token')
 @Controller({ path: 'organizations', version: '1' })
@@ -47,9 +37,12 @@ export class AccessController {
         capabilities: {
           additionalProperties: false,
           properties: Object.fromEntries(
-            capabilityNames.map((name) => [name, { type: 'boolean' }]),
+            organizationCapabilityNames.map((name) => [
+              name,
+              { type: 'boolean' },
+            ]),
           ),
-          required: capabilityNames,
+          required: organizationCapabilityNames,
           type: 'object',
         },
         entityScope: entityScopeOpenApiSchema,

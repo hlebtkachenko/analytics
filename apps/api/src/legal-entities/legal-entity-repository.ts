@@ -1,48 +1,52 @@
 import { Injectable, type OnModuleDestroy } from '@nestjs/common';
-import { readEntityScope, withTenantContext } from '@bap/db';
+import { readEntityScope, runInTenantContext } from '@bap/db';
+import type { TenantContext } from '@bap/db';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 import type { DatabasePool } from '@bap/db/pool';
 import type { EntityScope, LegalEntity, OrganizationRole } from '@bap/security';
-import type { PoolClient } from 'pg';
 
-import type { TenantSelector } from '../tenant-access.js';
 import { MAX_LEGAL_ENTITY_LIST_SIZE } from './contract.js';
 
-export interface ListLegalEntitiesInput extends TenantSelector {
+export interface ListLegalEntitiesInput extends TenantContext {
   // null is the absence of an entity filter; an empty array lists nothing.
   legalEntityIds: readonly string[] | null;
 }
 
-export interface CreateLegalEntityInput extends TenantSelector {
+export interface CreateLegalEntityInput extends TenantContext {
   kind: string;
   name: string;
   registrationNumber: string | null;
 }
 
-export interface UpdateLegalEntityInput extends TenantSelector {
-  kind: string | null;
+export interface UpdateLegalEntityInput extends TenantContext {
+  kind: string | undefined;
   legalEntityId: string;
   legalEntityIds: readonly string[] | null;
-  name: string | null;
-  // Explicit flag: an absent field leaves the number alone, an explicit null clears it.
-  registrationNumber: string | null;
-  updatesRegistrationNumber: boolean;
+  name: string | undefined;
+  // An absent number leaves the stored one alone, an explicit null clears it.
+  registrationNumber: string | null | undefined;
 }
 
-export interface DeleteLegalEntityInput extends TenantSelector {
+export interface DeleteLegalEntityInput extends TenantContext {
   legalEntityId: string;
   legalEntityIds: readonly string[] | null;
 }
 
-export interface ReadMemberEntityScopeInput extends TenantSelector {
+export interface ReadMemberEntityScopeInput extends TenantContext {
   targetRole: OrganizationRole;
   targetUserId: string;
 }
 
-export interface WriteMemberEntityScopeInput extends TenantSelector {
+export interface WriteMemberEntityScopeInput extends TenantContext {
   scope: EntityScope;
   targetUserId: string;
+}
+
+// One entry per stored scope row; a member without a row is implicitly unrestricted and is omitted.
+export interface MemberEntityScope {
+  entityScope: EntityScope;
+  userId: string;
 }
 
 // 'unknown-entity' is the only failure the caller must translate, and it becomes a 400.
@@ -89,25 +93,11 @@ export function isDuplicateEntityName(error: unknown): boolean {
   );
 }
 
-async function inTenantContext<T>(
-  pool: DatabasePool,
-  tenant: TenantSelector,
-  operation: (transaction: PoolClient) => Promise<T>,
-): Promise<T> {
-  const client = await pool.connect();
-
-  try {
-    return await withTenantContext(client, tenant, operation);
-  } finally {
-    client.release();
-  }
-}
-
 export async function listLegalEntities(
   pool: DatabasePool,
   input: ListLegalEntitiesInput,
 ): Promise<LegalEntity[]> {
-  return inTenantContext(pool, input, async (transaction) => {
+  return runInTenantContext(pool, input, async (transaction) => {
     const result = await transaction.query<LegalEntityRow>(
       `select ${LEGAL_ENTITY_COLUMNS}
        from app.legal_entity
@@ -125,7 +115,7 @@ export async function createLegalEntity(
   pool: DatabasePool,
   input: CreateLegalEntityInput,
 ): Promise<LegalEntity> {
-  return inTenantContext(pool, input, async (transaction) => {
+  return runInTenantContext(pool, input, async (transaction) => {
     const created = await transaction.query<LegalEntityRow>(
       `insert into app.legal_entity (organization_id, name, kind, registration_number, created_by)
        values ($1, $2, $3, $4, $5)
@@ -144,8 +134,7 @@ export async function createLegalEntity(
       throw new Error('The legal entity insert returned no row.');
     }
 
-    // Attribution is derived from the transaction context, so this must run inside it.
-    // The metadata names the kind only: the entity name is never logged.
+    // Attribution comes from the transaction context, so this runs inside it and logs the kind only, never the name.
     await transaction.query(
       "select app.record_audit('legal_entity.created', 'legal_entity', $1, $2::jsonb)",
       [row.id, JSON.stringify({ kind: row.kind })],
@@ -159,7 +148,7 @@ export async function updateLegalEntity(
   pool: DatabasePool,
   input: UpdateLegalEntityInput,
 ): Promise<LegalEntity | null> {
-  return inTenantContext(pool, input, async (transaction) => {
+  return runInTenantContext(pool, input, async (transaction) => {
     const updated = await transaction.query<LegalEntityRow>(
       `update app.legal_entity
        set name = coalesce($2, name),
@@ -171,10 +160,10 @@ export async function updateLegalEntity(
        returning ${LEGAL_ENTITY_COLUMNS}`,
       [
         input.legalEntityId,
-        input.name,
-        input.kind,
-        input.updatesRegistrationNumber,
-        input.registrationNumber,
+        input.name ?? null,
+        input.kind ?? null,
+        input.registrationNumber !== undefined,
+        input.registrationNumber ?? null,
         entityFilter(input.legalEntityIds),
       ],
     );
@@ -197,7 +186,7 @@ export async function deleteLegalEntity(
   pool: DatabasePool,
   input: DeleteLegalEntityInput,
 ): Promise<boolean> {
-  return inTenantContext(pool, input, async (transaction) => {
+  return runInTenantContext(pool, input, async (transaction) => {
     const removed = await transaction.query(
       `delete from app.legal_entity
        where id = $1
@@ -221,13 +210,57 @@ export async function readMemberEntityScope(
   pool: DatabasePool,
   input: ReadMemberEntityScopeInput,
 ): Promise<EntityScope> {
-  return inTenantContext(pool, input, (transaction) =>
+  return runInTenantContext(pool, input, (transaction) =>
     readEntityScope(transaction, {
       organizationId: input.organizationId,
       role: input.targetRole,
       userId: input.targetUserId,
     }),
   );
+}
+
+// The members page needs every stored scope at once: one transaction and two queries instead of a call per member.
+export async function listMemberEntityScopes(
+  pool: DatabasePool,
+  input: TenantContext,
+): Promise<MemberEntityScope[]> {
+  return runInTenantContext(pool, input, async (transaction) => {
+    const scopes = await transaction.query<{ mode: string; user_id: string }>(
+      `select user_id, mode
+       from app.member_entity_scope
+       where organization_id = $1
+       order by user_id`,
+      [input.organizationId],
+    );
+    const granted = await transaction.query<{
+      legal_entity_id: string;
+      user_id: string;
+    }>(
+      `select user_id, legal_entity_id
+       from app.legal_entity_access
+       where organization_id = $1
+       order by user_id, legal_entity_id`,
+      [input.organizationId],
+    );
+    const entitiesByUser = new Map<string, string[]>();
+
+    for (const row of granted.rows) {
+      const entities = entitiesByUser.get(row.user_id) ?? [];
+      entities.push(row.legal_entity_id);
+      entitiesByUser.set(row.user_id, entities);
+    }
+
+    return scopes.rows.map((row) => ({
+      entityScope:
+        row.mode === 'restricted'
+          ? {
+              legalEntityIds: entitiesByUser.get(row.user_id) ?? [],
+              mode: 'restricted' as const,
+            }
+          : { mode: 'all' as const },
+      userId: row.user_id,
+    }));
+  });
 }
 
 export async function writeMemberEntityScope(
@@ -237,7 +270,7 @@ export async function writeMemberEntityScope(
   const legalEntityIds =
     input.scope.mode === 'restricted' ? [...input.scope.legalEntityIds] : [];
 
-  return inTenantContext(pool, input, async (transaction) => {
+  return runInTenantContext(pool, input, async (transaction) => {
     if (legalEntityIds.length > 0) {
       // Row level security confines this count to the caller's organization, so a foreign id is unknown too.
       const known = await transaction.query<{ total: number }>(
@@ -305,6 +338,7 @@ export abstract class LegalEntityRepository {
   abstract createEntity(input: CreateLegalEntityInput): Promise<LegalEntity>;
   abstract deleteEntity(input: DeleteLegalEntityInput): Promise<boolean>;
   abstract listEntities(input: ListLegalEntitiesInput): Promise<LegalEntity[]>;
+  abstract listMemberScopes(input: TenantContext): Promise<MemberEntityScope[]>;
   abstract readMemberScope(
     input: ReadMemberEntityScopeInput,
   ): Promise<EntityScope>;
@@ -333,6 +367,10 @@ export class DatabaseLegalEntityRepository
 
   async listEntities(input: ListLegalEntitiesInput): Promise<LegalEntity[]> {
     return listLegalEntities(await this.getPool(), input);
+  }
+
+  async listMemberScopes(input: TenantContext): Promise<MemberEntityScope[]> {
+    return listMemberEntityScopes(await this.getPool(), input);
   }
 
   async onModuleDestroy(): Promise<void> {

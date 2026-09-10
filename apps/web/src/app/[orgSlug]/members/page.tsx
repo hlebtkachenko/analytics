@@ -13,7 +13,7 @@ import {
 import { updateMemberEntityScopeAction } from '../../../lib/organizations/entity-actions';
 import {
   readLegalEntities,
-  readMemberEntityScope,
+  readMemberEntityScopes,
 } from '../../../lib/organizations/entities';
 import type { EntityScope } from '../../../lib/organizations/entities';
 import { resolveOrganizationRouteForRequest } from '../../../lib/organizations/resolver';
@@ -53,25 +53,15 @@ export default async function OrganizationMembersPage({
   // ADR 0011 leaves membership, invitations and entity access with the owner alone.
   const canManage = organization.role === 'owner';
   const assignableRoles = ['owner', 'admin', 'member'] as const;
-  const scopedMembers =
-    canManage && members !== null
-      ? members.members.filter((member) => member.role !== 'owner')
-      : [];
-  const legalEntities = canManage
-    ? await readLegalEntities(organization.id)
-    : null;
-  // One scope read per manageable member, bounded by the same 100-member list.
-  const memberScopes = new Map<string, EntityScope | null>(
-    await Promise.all(
-      scopedMembers.map(
-        async (member) =>
-          [
-            member.userId,
-            await readMemberEntityScope(organization.id, member.userId),
-          ] as const,
-      ),
-    ),
-  );
+  // One entity list and one bulk scope read, never one request per listed member.
+  const [legalEntities, memberScopes] = canManage
+    ? await Promise.all([
+        readLegalEntities(organization.id),
+        readMemberEntityScopes(organization.id),
+      ])
+    : [null, null];
+  // A failed read must never be shown as unrestricted access, so the editor is withheld.
+  const scopeEditorAvailable = legalEntities !== null && memberScopes !== null;
   const { result } = await searchParams;
   const invite = inviteOrganizationMemberAction.bind(null, organization.slug);
   const updateRole = updateOrganizationMemberRoleAction.bind(
@@ -148,17 +138,15 @@ export default async function OrganizationMembersPage({
           <ul>
             {members.members.map((member) => {
               const canManageTarget = canManage;
-              const scope = memberScopes.get(member.userId);
-              const restricted =
-                scope !== undefined &&
-                scope !== null &&
-                scope.mode === 'restricted';
+              // Entity access is owner-managed, and an owner never restricts themselves.
+              const offersScope = canManage && member.role !== 'owner';
+              // A member without a stored scope row is unrestricted by contract.
+              const scope: EntityScope = memberScopes?.get(member.userId) ?? {
+                mode: 'all',
+              };
+              const restricted = scope.mode === 'restricted';
               const selectedEntities = new Set(
-                scope !== undefined &&
-                  scope !== null &&
-                  scope.mode === 'restricted'
-                  ? scope.legalEntityIds
-                  : [],
+                scope.mode === 'restricted' ? scope.legalEntityIds : [],
               );
 
               return (
@@ -205,9 +193,10 @@ export default async function OrganizationMembersPage({
                       </form>
                     </>
                   ) : null}
-                  {canManage &&
-                  member.role !== 'owner' &&
-                  legalEntities !== null ? (
+                  {offersScope && !scopeEditorAvailable ? (
+                    <p>Entity access is unavailable.</p>
+                  ) : null}
+                  {offersScope && scopeEditorAvailable ? (
                     <form
                       action={updateEntityScope}
                       aria-label={`Entity access for ${member.user.email}`}

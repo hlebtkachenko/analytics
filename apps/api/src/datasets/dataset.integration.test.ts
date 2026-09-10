@@ -4,6 +4,7 @@ import {
   runMigrations,
   withTenantContext,
 } from '@bap/db';
+import type { TenantContext } from '@bap/db';
 import { resolveMembership } from '@bap/db/access';
 import type { DatabaseConfiguration, DatabaseRole } from '@bap/db/config';
 import type { DatabasePool } from '@bap/db/pool';
@@ -14,7 +15,6 @@ import {
 import type { PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import type { TenantSelector } from '../tenant-access.js';
 import {
   listDatasets,
   readDatasetRowPage,
@@ -32,17 +32,17 @@ let container: StartedPostgreSqlContainer;
 let migratorPool: DatabasePool;
 
 // Neutral placeholder tenants: an owner, a read-only member beside it, and a stranger in another one.
-const creator: TenantSelector = {
+const creator: TenantContext = {
   organizationId: 'org-1',
   role: 'owner',
   userId: 'user-1',
 };
-const reader: TenantSelector = {
+const reader: TenantContext = {
   organizationId: 'org-1',
   role: 'member',
   userId: 'user-2',
 };
-const stranger: TenantSelector = {
+const stranger: TenantContext = {
   organizationId: 'org-2',
   role: 'owner',
   userId: 'user-3',
@@ -69,7 +69,7 @@ function configurationFor(role: DatabaseRole): DatabaseConfiguration {
 }
 
 async function asTenant<T>(
-  tenant: TenantSelector,
+  tenant: TenantContext,
   operation: (transaction: PoolClient) => Promise<T>,
 ): Promise<T> {
   const client = await apiPool.connect();
@@ -83,7 +83,7 @@ async function asTenant<T>(
 
 // One neutral placeholder entity per organization; every dataset attaches to exactly one.
 async function createLegalEntity(
-  tenant: TenantSelector,
+  tenant: TenantContext,
   name: string,
 ): Promise<string> {
   return asTenant(tenant, async (transaction) => {
@@ -98,7 +98,7 @@ async function createLegalEntity(
 }
 
 async function createDataset(
-  tenant: TenantSelector,
+  tenant: TenantContext,
   legalEntityId: string,
 ): Promise<string> {
   return asTenant(tenant, async (transaction) => {

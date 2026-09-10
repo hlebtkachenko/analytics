@@ -6,9 +6,9 @@
 
 The 2026-09-08 brainstorm asks for two-level tenancy: an organization is a
 workspace, and many legal entities (companies and sole traders) live inside it
-and can be opened separately or analysed together. Today the organization is
-the only tenant unit, `member` can upload data and there is no way to restrict
-an admin or member to a subset of entities. See ADR 0011.
+and can be opened separately or analysed together. Today the organization is the
+only tenant unit, `member` can upload data and there is no way to restrict an
+admin or member to a subset of entities. See ADR 0011.
 
 ## Scope
 
@@ -26,21 +26,20 @@ an admin or member to a subset of entities. See ADR 0011.
 
 ## Design
 
-Vocabulary: "organization" stays the workspace and slug owner; "legal entity"
-is the inner object. Row level security keeps the organization as its only
+Vocabulary: "organization" stays the workspace and slug owner; "legal entity" is
+the inner object. Row level security keeps the organization as its only
 boundary. Entity selection and the restricted scope are application-level
 filters applied by the API from one resolver, exactly as the meeting asked.
 
 Migration `20260910.0001_legal_entities.sql`:
 
-- `app.legal_entity(id, organization_id, name, kind, registration_number,
-  created_by, created_at, updated_at)`, unique `(id, organization_id)` and
-  `(organization_id, name)`; kind check `company | sole_trader`.
-- `app.member_entity_scope(organization_id, user_id, mode, updated_by,
-  updated_at)`, primary key `(organization_id, user_id)`, mode check
-  `all | restricted`.
-- `app.legal_entity_access(organization_id, user_id, legal_entity_id,
-  created_by, created_at)`, composite foreign key to the entity, cascade.
+- `app.legal_entity(id, organization_id, name, kind, registration_number, created_by, created_at, updated_at)`,
+  unique `(id, organization_id)` and `(organization_id, name)`; kind check
+  `company | sole_trader`.
+- `app.member_entity_scope(organization_id, user_id, mode, updated_by, updated_at)`,
+  primary key `(organization_id, user_id)`, mode check `all | restricted`.
+- `app.legal_entity_access(organization_id, user_id, legal_entity_id, created_by, created_at)`,
+  composite foreign key to the entity, cascade.
 - `app.dataset.legal_entity_id` and `app.upload.legal_entity_id`, both
   `NOT NULL` with composite foreign keys `ON DELETE CASCADE`. A development
   database holding datasets must be reset before this migration.
@@ -48,6 +47,12 @@ Migration `20260910.0001_legal_entities.sql`:
   (`owner`, `admin`) and `app.role_is_owner()` gate every write policy. Reads
   stay organization-wide, so the creator and per-dataset grant conditions leave
   the `SELECT` policies and `app.data_grants` is dropped.
+- `app.clear_member_entity_scope()` is a `SECURITY DEFINER` trigger function on
+  `auth.member`, firing `AFTER DELETE` and `AFTER UPDATE OF role` to `owner`, so
+  a scope never outlives the membership it describes. Both scope tables carry a
+  `SELECT` and a `DELETE` maintenance policy for `bap_owner`, since `FORCE` row
+  level security applies to the definer and a `DELETE` reads its `WHERE` clause
+  through the `SELECT` policies.
 - Entity, scope and access tables are `ENABLE` and `FORCE` row level security:
   `SELECT` on organization match; entity `INSERT` and `UPDATE` need
   `role_can_write()`; entity `DELETE`, scope and access writes need
@@ -62,9 +67,12 @@ returns `{ mode: 'all' }` for owners or unscoped members and
 `@bap/security`: capabilities become `manageOrganization`, `manageMembers`,
 `manageEntityAccess`, `createEntities`, `updateEntities`, `deleteEntities`,
 `uploadData`, `useAi`. Owner holds all; admin holds `createEntities`,
-`updateEntities`, `uploadData`, `useAi`; member holds only `useAi`. The access
-response gains `entityScope`. Shared schemas: `legalEntityKindSchema`,
-`legalEntitySchema`, `entityScopeSchema`, `legalEntityIdentifierSchema`, and
+`updateEntities`, `uploadData`, `useAi`; member holds only `useAi`. A restricted
+entity scope also removes `createEntities`, because a restricted caller could
+not see the entity it just created; an owner is never restricted, so this only
+ever narrows an admin or a member. The access response gains `entityScope`.
+Shared schemas: `legalEntityKindSchema`, `legalEntitySchema`,
+`entityScopeSchema`, `legalEntityIdentifierSchema`, and
 `legalEntityInScope(scope, id)`.
 
 `apps/api`, all under `/v1/organizations/:organizationId`, resource token plus
@@ -79,6 +87,10 @@ membership on every call, entity scope applied after membership:
 - `GET|PUT /members/:userId/entity-scope` needs `manageEntityAccess`; the body
   is the `entityScope` shape; an owner target is rejected with 409; unknown
   entity ids are rejected with 400.
+- `GET /entity-scopes` needs `manageEntityAccess` and returns
+  `{ entityScopes: [{ userId, entityScope }] }` for every stored scope row in
+  one tenant transaction, so the members page needs no call per member. A member
+  without a stored row is implicitly `all` and is omitted.
 - `GET /datasets?legalEntityId=` filters by scope and optional entity; each
   summary carries `legalEntityId`. Rows and export return 404 when the dataset's
   entity is out of scope.

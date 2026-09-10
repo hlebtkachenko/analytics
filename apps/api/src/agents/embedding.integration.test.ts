@@ -5,6 +5,7 @@ import {
   runMigrations,
   withTenantContext,
 } from '@bap/db';
+import type { TenantContext } from '@bap/db';
 import type { DatabaseConfiguration, DatabaseRole } from '@bap/db/config';
 import type { DatabasePool } from '@bap/db/pool';
 import {
@@ -16,7 +17,6 @@ import type { PgBoss } from 'pg-boss';
 import type { PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import type { TenantSelector } from '../tenant-access.js';
 import { backfillDatasetEmbeddings } from '../worker/backfill-embeddings.js';
 import {
   createQueue,
@@ -127,7 +127,7 @@ function testRegistry(): AiRegistry {
 const registry = (): Promise<AiRegistry> => Promise.resolve(testRegistry());
 
 async function asTenant<T>(
-  tenant: TenantSelector,
+  tenant: TenantContext,
   operation: (transaction: PoolClient) => Promise<T>,
 ): Promise<T> {
   const client = await apiPool.connect();
@@ -140,7 +140,7 @@ async function asTenant<T>(
 }
 
 // One neutral placeholder entity per organization; every dataset attaches to exactly one.
-async function createLegalEntity(tenant: TenantSelector): Promise<string> {
+async function createLegalEntity(tenant: TenantContext): Promise<string> {
   return asTenant(tenant, async (transaction) => {
     const created = await transaction.query<{ id: string }>(
       `insert into app.legal_entity (organization_id, name, kind, created_by)
@@ -154,7 +154,7 @@ async function createLegalEntity(tenant: TenantSelector): Promise<string> {
 
 // Neutral placeholder metadata; alpha and foreign are identical so their vectors collide by construction.
 async function createDataset(
-  tenant: TenantSelector,
+  tenant: TenantContext,
   legalEntityId: string,
   name: string,
   description: string,
