@@ -1,5 +1,12 @@
 # Tenant Data Foundation Plan
 
+> **Status: historical delivered plan.** The generic dataset schema, RLS,
+> CSV/XLSX ingestion path, list and row reads, and upload staging contract are
+> implemented. Later phases added embeddings, summarization, streaming chat,
+> CSV/XLSX export, and the dataset UI. Current behavior is documented in
+> [architecture](../../ARCHITECTURE.md) and the
+> [master plan execution report](../reports/master-plan-execution.md).
+
 This plan covers the generic tenant data layer that has to exist before any
 analytics behavior. It specifies the phase 2 migration and the ingestion path
 that fills it. It inherits the decisions in
@@ -227,10 +234,11 @@ not depend on a uniqueness constraint the specified schema does not have.
 
 ## Upload size limits
 
-[`infrastructure/caddy/Caddyfile`](../../infrastructure/caddy/Caddyfile)
-currently sets no `request_body` limit, so a body of any size is proxied into
-the web service. That is acceptable while no route accepts a file and
-unacceptable the moment one does.
+At planning time,
+[`infrastructure/caddy/Caddyfile`](../../infrastructure/caddy/Caddyfile) set no
+`request_body` limit and no route accepted a file. Implementation added a 25 MB
+edge limit together with the fixed streaming upload BFF and the application API
+limit, so the original gap is closed.
 
 The limit belongs at the edge for three reasons. Caddy is the only public
 service, so it is the one place that can refuse a body before any application
@@ -309,16 +317,19 @@ reason the `vector` columns need a decision rather than a preference.
 
 Details of each gate are in [testing](../testing.md).
 
-## Out of scope
+## Out of scope for this historical phase
 
 - Any business-domain entity. No customer, employee, company, transaction, or
   analytics table, and no sample rows of any kind.
 - Analytics semantics: aggregation, metric definitions, derived or transformed
   datasets, and joins between datasets.
-- Embeddings, semantic search, chat, and model calls, which belong to phase 3.
-- The dataset, sharing, and grant management screens. This phase specifies
-  enforcement, not user interface.
-- Row exports, dataset versioning, row-level editing, and soft delete.
+- Embeddings, semantic search, chat, and model calls belonged to phase 3 and
+  were delivered later.
+- The dataset, sharing, and grant management screens were not part of this
+  phase. A dataset list, upload, row view, chart, export, and dataset-grounded
+  chat UI were delivered later; sharing and grant management UI remain absent.
+- Row exports were delivered later. Dataset versioning, row-level editing, and
+  soft delete remain deferred.
 - Columnar storage, object storage, quotas, and billing.
 
 ## Resolved decisions

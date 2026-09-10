@@ -1,0 +1,16 @@
+@use '@bap/design-system/tokens/spacing.scss' as spacing;
+
+.content {
+  min-inline-size: 0;
+  padding-block-start: spacing.$spacing-09;
+}
+
+.sideNavClosed {
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.sideNavOpen {
+  pointer-events: auto;
+  visibility: visible;
+}

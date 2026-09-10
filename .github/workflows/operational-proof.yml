@@ -4,13 +4,19 @@ on:
   pull_request:
     paths:
       - '.github/workflows/operational-proof.yml'
+      - 'apps/api/**'
+      - 'apps/reporting-api/**'
       - 'apps/web/**'
+      - 'packages/ai/**'
       - 'packages/db/**'
-      - 'packages/db/drizzle/**'
+      - 'packages/design-system/**'
+      - 'packages/security/**'
       - 'compose*.yaml'
       - 'config/compose.environment.example'
+      - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
+      - 'turbo.json'
       - 'docker/**'
       - 'infrastructure/caddy/**'
       - 'playwright.operational.config.ts'
@@ -104,23 +110,19 @@ jobs:
           printf 'BAP_OPERATIONAL_ORGANIZATION_ID=%s\n' "$organization_id" >> "$GITHUB_ENV"
           printf 'BAP_OPERATIONAL_USER_ID=%s\n' "$user_id" >> "$GITHUB_ENV"
 
-      - name: Enable public sign-up
-        shell: bash
-        run: |
-          result=$(docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm --no-deps migrator node node_modules/@bap/db/dist/cli.js signup enable)
-          printf '%s' "$result" | jq -e '.publicSignupEnabled == true' >/dev/null
-
       - name: Allow the temporary organization loop
         shell: bash
         run: |
-          result=$(docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm --no-deps migrator node node_modules/@bap/db/dist/cli.js organization-quota --email "$BAP_OPERATIONAL_EMAIL" --total 2 --note 'operational-proof: Phase 10 organization loop')
+          result=$(docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm --no-deps migrator node node_modules/@bap/db/dist/cli.js organization-quota --email "$BAP_OPERATIONAL_EMAIL" --total 2 --note 'operational-proof: organization loop')
           printf '%s' "$result" | jq -e '.grantedTotal == 2' >/dev/null
 
-      - name: Run public sign-up proof
+      - name: Run browser proof
         shell: bash
-        run: >-
-          pnpm exec playwright test --config playwright.operational.config.ts
-          tests/operational/sign-up.spec.ts
+        run: |
+          pnpm exec playwright test --config playwright.operational.config.ts tests/operational/sign-up.spec.ts tests/operational/access.spec.ts tests/operational/icons.spec.ts tests/operational/identity.spec.ts tests/operational/organizations.spec.ts tests/operational/slice.spec.ts tests/operational/zz-sign-out.spec.ts
+          if docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml logs --no-color web | grep -Fq 'could not determine a client IP'; then
+            exit 1
+          fi
 
       - name: Restore public sign-up default
         if: always() && steps.stack.outcome == 'success'
@@ -128,15 +130,6 @@ jobs:
         run: |
           result=$(docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm --no-deps migrator node node_modules/@bap/db/dist/cli.js signup disable)
           printf '%s' "$result" | jq -e '.publicSignupEnabled == false' >/dev/null
-
-      - name: Run browser proof
-        # The one-worker shared session is closed by the final zz-sign-out spec.
-        shell: bash
-        run: |
-          pnpm exec playwright test --config playwright.operational.config.ts tests/operational/access.spec.ts tests/operational/icons.spec.ts tests/operational/identity.spec.ts tests/operational/organizations.spec.ts tests/operational/slice.spec.ts tests/operational/zz-sign-out.spec.ts
-          if docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml logs --no-color web | grep -Fq 'could not determine a client IP'; then
-            exit 1
-          fi
 
       - name: Prove backup, check, and restore
         shell: bash
@@ -171,7 +164,7 @@ jobs:
 
       - name: Stop stack
         if: always()
-        # The operations profile owns the restic volume, so a plain down leaves it for the next run.
+        # The entire CI stack is disposable, including its database and restic volumes.
         run: >-
           docker compose --profile operations --profile bootstrap -f
           compose.yaml -f compose.development.yaml -f compose.mailpit.yaml down

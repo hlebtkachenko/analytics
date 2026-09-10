@@ -15,10 +15,12 @@ import { useTranslation } from 'react-i18next';
 import { authClient } from '../../../lib/auth/client';
 
 type SignUpFormProperties = Readonly<{
-  enabled: boolean;
+  publicSignupEnabled: boolean;
 }>;
 
-export default function SignUpForm({ enabled }: SignUpFormProperties) {
+export default function SignUpForm({
+  publicSignupEnabled,
+}: SignUpFormProperties) {
   const { t } = useTranslation();
   const [state, setState] = useState<'error' | 'form' | 'success'>('form');
 
@@ -41,16 +43,22 @@ export default function SignUpForm({ enabled }: SignUpFormProperties) {
     <main>
       <Stack gap={7}>
         <h1>{t('signUp.title')}</h1>
-        <p>{t('signUp.summary')}</p>
-        {!enabled ? (
+        <p>
+          {t(
+            publicSignupEnabled
+              ? 'signUp.summary'
+              : 'signUp.invitationOnlySummary',
+          )}
+        </p>
+        {!publicSignupEnabled ? (
           <InlineNotification
             hideCloseButton
             kind="info"
             lowContrast
-            title={t('signUp.closed')}
+            title={t('signUp.invitationOnly')}
           />
         ) : null}
-        {enabled && state === 'success' ? (
+        {state === 'success' ? (
           <InlineNotification
             hideCloseButton
             kind="success"
@@ -59,7 +67,7 @@ export default function SignUpForm({ enabled }: SignUpFormProperties) {
             title={t('signUp.successTitle')}
           />
         ) : null}
-        {enabled && state !== 'success' ? (
+        {state !== 'success' ? (
           <Form action={submit} aria-label={t('signUp.title')}>
             <Stack gap={5}>
               <TextInput

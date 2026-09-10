@@ -13,8 +13,12 @@ pnpm test:coverage
 The suite proves:
 
 - Carbon-backed identity and access surfaces render with translated strings;
+- the authenticated Carbon shell includes one skip target, current-route
+  navigation, mobile navigation labels, and identity-route exclusion;
 - sign-up, activation, password recovery, and welcome pages preserve their
   server gates, generic outcomes, redirects, and alert semantics;
+- invitation-only sign-up retains its form while both backend admission layers
+  reject an uninvited address;
 - the account page gates on a server session and calls the exact Better Auth
   password-change, session-revocation, sign-out, and deletion client methods;
 - web health is public while readiness and metrics remain private;
@@ -53,16 +57,18 @@ Design-system icon tests pin the exact 18 curated `@bap/design-system/icons`
 exports and their intrinsic glyph behavior at the supported 16, 20, 24, and 32px
 artboards. A separate TypeScript compiler AST contract parses the actual
 production TSX, rejects direct application imports from `@carbon/icons-react`,
-and pins the exact 21 reviewed `renderIcon={Identifier}` callsites, facade
-imports, visible children, and absence of icon-only props. The AST coverage also
-protects the five Phase 10 pages' exact throwaway marker and zero
-CSS/design-system/icon boundary. Committed production Playwright coverage
-verifies real public and authenticated controls for keyboard order, axe,
-label-derived accessible names, 16px Carbon SVG semantics and alignment, 44px
-targets, Phase 10 exclusion, console and page errors, and 640 CSS-pixel
-layout-equivalent reflow without document overflow. The 640px check is not a
-browser-zoom claim; true browser zoom is recorded only as separate dated local
-evidence after setting and reading the Chrome tab zoom.
+and pins the reviewed Carbon control-icon callsites plus the direct decorative
+status icons, facade imports, visible labels, and absence of icon-only controls.
+The AST coverage also protects the five temporary pages' exact throwaway marker
+and zero CSS/design-system/icon boundary. That source-level guard scopes the
+temporary page modules, not the shared Carbon shell that surrounds authenticated
+routes. Committed production Playwright coverage verifies real public and
+authenticated controls for keyboard order, axe, label-derived accessible names,
+Carbon SVG semantics and alignment, 44px targets, temporary-content exclusion,
+console and page errors, and 640 CSS-pixel layout-equivalent reflow without
+document overflow. The 640px check is not a browser-zoom claim; true browser
+zoom is recorded only as separate dated local evidence after setting and reading
+the Chrome tab zoom.
 
 ## Integration and operational proof
 
@@ -96,7 +102,7 @@ missing-auth fixture untouched, reject live and unrequested ids, and leave
 stored state unchanged on a direct repeat. Unit coverage drives CLI role
 transitions, rollback, JSON-only output, and redacted errors.
 
-Phase 7 database coverage pins organization-quota columns, named constraints,
+Organization-quota database coverage pins columns, named constraints,
 foreign-key delete actions, direct and default ACLs, trigger identity, function
 owner, invoker rights, fixed search path, and revoked execution. It proves an
 absent quota rejects attributed creation, NULL attribution consumes no quota,
@@ -108,8 +114,8 @@ normalization, invalid legacy membership returning no access, and both setup
 entrypoints validating before user writes and closing their one-shot migrator
 pool before organization creation.
 
-Phase 8 focused auth coverage dispatches the configured Better Auth handler to
-prove quota exhaustion returns 403 before writes, raw slugs are normalized
+Focused organization auth coverage dispatches the configured Better Auth handler
+to prove quota exhaustion returns 403 before writes, raw slugs are normalized
 before framework side effects, invalid and reserved results are side-effect
 free, forged creator input is discarded, and the authenticated creator becomes
 an `owner`. Unit coverage pins the fail-closed `organizationLimit` polarity,
@@ -125,33 +131,33 @@ also reads the resulting note and NULL auth grantor through the real role
 boundary. The existing advisory-lock race remains the authoritative concurrency
 proof; an application precheck is not treated as race enforcement.
 
-Phase 9 coverage proves the exact parameterized organization/member join,
-approved role parsing, and real member, nonmember, and unknown-slug outcomes
-through `bap_auth`. Web tests prove malformed slugs reach neither session nor
-database work, unauthenticated and unverified requests fail closed, resolver
-errors disclose nothing, and the layout uses the same not-found path for every
-negative result. The root redirect is pinned to `/organizations`. Separate BFF
-and PostgreSQL assertions prove a valid slug-shaped selector can cross the web's
-syntax check but cannot resolve as an id at the service membership boundary.
-Phase 10 page tests cover every new route: membership listing, quota-positive
-and quota-zero creation states, name-to-slug prefill, organization navigation,
-explicit-id member and invitation reads, permission-based form visibility, and
-settings prefill. Action tests prove normalized creation preserves ambient
-session state, forged organization ids are ignored, explicit resolved ids reach
-Better Auth, the temporary sole-owner recheck runs, co-owner changes work, and
-failures expose only fixed generic outcomes.
+Organization routing coverage proves the exact parameterized organization/member
+join, approved role parsing, and real member, nonmember, and unknown-slug
+outcomes through `bap_auth`. Web tests prove malformed slugs reach neither
+session nor database work, unauthenticated and unverified requests fail closed,
+resolver errors disclose nothing, and the layout uses the same not-found path
+for every negative result. The root redirect is pinned to `/organizations`.
+Separate BFF and PostgreSQL assertions prove a valid slug-shaped selector can
+cross the web's syntax check but cannot resolve as an id at the service
+membership boundary. Temporary organization page tests cover every route:
+membership listing, quota-positive and quota-zero creation states, name-to-slug
+prefill, organization navigation, plain native breadcrumbs, explicit-id member
+and invitation reads, permission-based form visibility, and settings prefill.
+Action tests prove normalized creation preserves ambient session state, forged
+organization ids are ignored, explicit resolved ids reach Better Auth, the
+temporary sole-owner recheck runs, co-owner changes work, and failures expose
+only fixed generic outcomes.
 
-Phase 11 closes the identity and organization milestones without adding a new
-runtime path. The shared TypeScript/PostgreSQL corpus explicitly enumerates all
-16 reserved routes. The PostgreSQL default-privilege probe creates a disposable
-`auth.*` table as `bap_owner` and executes SELECT, INSERT, UPDATE, and DELETE as
+The identity and organization integration closure adds no runtime path. The
+shared TypeScript/PostgreSQL corpus explicitly enumerates all 16 reserved
+routes. The PostgreSQL default-privilege probe creates a disposable `auth.*`
+table as `bap_owner` and executes SELECT, INSERT, UPDATE, and DELETE as
 `bap_auth`; the quota test then proves that `auth.organization_quota` remains a
 SELECT-only exception, while the account-lifecycle proof keeps `bap_auth`
 outside schema `app`. A paired BFF and real resolver proof shows that a valid
 slug-shaped selector is forwarded only to the fixed service, receives a redacted
 403, and resolves no database membership when used as an id. The full
-integration command reruns every pre-existing RLS assertion as the milestone
-exit.
+integration command reruns every pre-existing RLS assertion as its exit gate.
 
 PostgreSQL integration keeps the TypeScript and database slug corpus in exact
 parity. It also runs the forward reservation SQL inside a rollback-only
@@ -159,28 +165,40 @@ collision fixture and proves the migration aborts before replacing the
 constraint. The real quota reader covers positive, exhausted, and absent grants
 through `bap_auth`.
 
-The live Phase 10 browser walk starts from `/organizations`, creates an allowed
-organization, and traverses its overview, members, and settings pages through
-Caddy. It also covers native keyboard operation, axe, a mobile viewport, 640
+The live organization browser walk starts from `/organizations`, creates an
+allowed organization, and traverses its overview, members, and settings pages
+through Caddy. It also covers the shared skip link and primary navigation, plain
+native breadcrumbs, native keyboard operation, axe, a mobile viewport, 640
 CSS-pixel layout-equivalent reflow, horizontal overflow, and page/console
-errors. This is not a browser-zoom assertion. The pages intentionally have no
-CSS or Carbon imports. The operational workflow raises only its disposable
-synthetic owner's total quota from 1 to 2 through the existing migrator command;
-the second organization consumes that capacity and the proof finishes on the
-zero-quota state. The authenticated access, icon, organization, dataset, and
-final sign-out specs share one worker-scoped synthetic browser session. The
-public access assertions remain unauthenticated, and the lexically final
-sign-out spec closes the shared session and proves the post-sign-out 401.
-Together with the icon invitation recipient, this keeps the combined suite
-inside the unchanged public sign-in rate limit after the preceding unverified
-account check.
+errors. This is not a browser-zoom assertion. The temporary page modules
+intentionally retain their marker comments and have no CSS, design-system, or
+icon imports; only the shared root shell is Carbon. The operational workflow
+raises only its disposable synthetic owner's total quota from 1 to 2 through the
+existing migrator command; the second organization consumes that capacity and
+the proof finishes on the zero-quota state. The authenticated access, icon,
+organization, dataset, and final sign-out specs share one worker-scoped
+synthetic browser session. The public access assertions remain unauthenticated,
+and the lexically final sign-out spec closes the shared session and proves the
+post-sign-out 401.
+
+The combined serial suite uses exactly 3 sign-in requests per 60 seconds: the
+shared synthetic owner browser session, the expected unverified-account denial,
+and one verified invited-recipient sign-in. That recipient follows the fixed
+invitation link and submits the visible sign-up form while public sign-up is off
+as attempt 2 in the same 4-attempt edge bucket, verifies through the internal
+Mailpit API without emitting a message body, link, token, or address, reopens
+and accepts the real invitation, and is then changed to `admin` and removed by
+the owner through the real organization workflow. The one-worker operational
+configuration disables Playwright tracing, and the sensitive lifecycle reports
+only fixed errors or sanitized pathnames. Its member locators contain no invitee
+address, so a failed proof does not retain the token, invitation id, or address
+in test artifacts or assertion output.
 
 The scheduled and manually runnable GitHub Actions operational proof creates a
 disposable local Compose stack, creates a gated synthetic account, completes a
 browser sign-in and organization-access check, then backs up and restores the
-database into a separate service. Before the existing identity suite, it enables
-public sign-up through the migrator CLI and runs a serial Caddy-path proof that
-returns the switch OFF in both test and workflow cleanup.
+database into a separate service. The serial Caddy-path proof owns its switch
+transitions and returns the switch OFF in both test and workflow cleanup.
 
 Synthetic account creation is a command override of the profiled
 `bootstrap-owner` one-shot, not an exec inside long-lived web. The rendered
@@ -189,22 +207,28 @@ boundaries, while web has neither the migrator environment path nor secret
 mount. The created quota row is included in the normal backup and restore
 surface.
 
-That sign-up proof checks the closed page and a 403 POST while OFF. Because the
-edge limiter runs before policy, that denial is attempt 1; fresh sign-up is
-attempt 2, its identical duplicate is attempt 3, and a different attempt 4 must
-return 429 in the same 60-second Caddy-established client bucket. Fresh and
-duplicate must have equal statuses, exact equal `Set-Cookie` headers, bodies
-deep-equal after removing only generated ids and timestamps, `token: null`, and
-no session cookie. Correct-password sign-in for the new unverified account must
-return 403 without a cookie. The development Mailpit API is queried by the
-unique synthetic `example.test` recipient: exactly 1 fresh verification message
-must appear after the fresh auth response, which awaits development SMTP
-acceptance. The recipient id set is checked immediately and finally over a short
-Mailpit API-consistency window after both the duplicate and fourth responses.
-That window does not bound SMTP work. The test never fetches a message body,
-link, or token. It also proves the loopback inspection proxy permits only GET
-`/readyz` and GET `/api/v1/search`, returning 404 for the UI, other paths, and
-non-GET methods.
+That sign-up proof checks the invitation-only page with its form and a 403 POST
+for an uninvited address while OFF. Because the edge limiter runs before policy,
+that denial is attempt 1. The owner then creates the real invitation, and its
+recipient follows the fixed link and submits the visible sign-up form while OFF
+as attempt 2. The switch turns ON only for sign-in-page discoverability before
+the identical duplicate attempt 3; a different attempt 4 must return 429 in the
+same 60-second Caddy-established client bucket. Fresh and duplicate must have
+equal statuses, exact equal `Set-Cookie` headers, bodies deep-equal after
+removing only generated ids and timestamps, `token: null`, and no session
+cookie. Correct-password sign-in for the new unverified account must return 403
+without a cookie. The development Mailpit API is queried by the unique synthetic
+`example.test` recipient: exactly 1 fresh verification message must appear after
+the fresh auth response, which awaits development SMTP acceptance. The recipient
+id set is checked immediately and finally over a short Mailpit API-consistency
+window after both the duplicate and fourth responses. That window does not bound
+SMTP work. The public delivery assertions never fetch a message body, link, or
+token. The later one-shot verification helper reads the invited recipient's
+message and relays the callback to the same browser context through a fixed
+loopback path without writing it to output. The browser consumes the callback.
+The proof also confirms the loopback inspection proxy permits only GET `/readyz`
+and GET `/api/v1/search`, returning 404 for the UI, other paths, and non-GET
+methods.
 
 The workflow then validates the restored owner membership, minimum initial
 quota, and current migration identifier. It does not exercise production data, a
@@ -234,16 +258,24 @@ the installed Better Auth handler and proves reset completion returns 429 on the
 6th request after allowing 5.
 
 The committed icon regression uses the same disposable production stack and a
-real authenticated fixture:
+real authenticated fixture. A standalone run requires all 4 fixture variables to
+be exported in the shell; the guards below validate presence without printing
+their values:
 
 ```sh
-BAP_OPERATIONAL_BASE_URL=http://localhost:3000 pnpm exec playwright test --config playwright.operational.config.ts tests/operational/icons.spec.ts
+: "${BAP_OPERATIONAL_EMAIL:?set BAP_OPERATIONAL_EMAIL}"
+: "${BAP_OPERATIONAL_PASSWORD:?set BAP_OPERATIONAL_PASSWORD}"
+: "${BAP_OPERATIONAL_ORGANIZATION_ID:?set BAP_OPERATIONAL_ORGANIZATION_ID}"
+: "${BAP_OPERATIONAL_ORGANIZATION_SLUG:?set BAP_OPERATIONAL_ORGANIZATION_SLUG}"
+BAP_OPERATIONAL_BASE_URL="${BAP_OPERATIONAL_BASE_URL:-http://localhost:3000}" pnpm exec playwright test --config playwright.operational.config.ts tests/operational/icons.spec.ts
 ```
 
 It covers the actual public and authenticated application callsites. The test
-creates only disposable synthetic accounts, an invitation, and a 30-row neutral
-CSV inside that stack. It does not mock application routes. Its explicit 640
-CSS-pixel viewport is the repeatable layout-equivalent check, not browser zoom.
+uses the shared disposable authenticated owner and a 30-row neutral CSV inside
+that stack. The consolidated sign-up regression owns invitation onboarding and
+membership mutation. Neither test mocks application routes. The icon test's
+explicit 640 CSS-pixel viewport is the repeatable layout-equivalent check, not
+browser zoom.
 
 On 2026-08-31, a headed Google Chrome for Testing 151.0.7922.34 check on macOS
 26 set the `/sign-in` tab to a true 200% browser zoom. The extension-reported

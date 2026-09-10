@@ -78,6 +78,16 @@ describe('OrganizationMembersPage', () => {
       headers: expect.any(Headers),
       query: { organizationId: 'organization-1' },
     });
+    const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    expect(
+      within(breadcrumb).getByRole('link', { name: 'Organizations' }),
+    ).toHaveAttribute('href', '/organizations');
+    expect(
+      within(breadcrumb).getByRole('link', { name: 'Organization One' }),
+    ).toHaveAttribute('href', '/organization-one');
+    expect(
+      within(breadcrumb).getByText('Members', { selector: 'li' }),
+    ).toHaveAttribute('aria-current', 'page');
     const inviteForm = screen.getByRole('form', { name: 'Invite member' });
     expect(inviteForm).toBeVisible();
     expect(

@@ -2,12 +2,12 @@
 
 ## Current status
 
-The operational SaaS foundation, identity and organization milestones, and the
-pinned Carbon workbench are delivered on `main`. Their final integration closure
-keeps the organization quota, role isolation, slug boundary, and existing RLS
-invariants under one repository gate. Analytics product behavior and production
-rollout remain deliberately deferred until their requirements and owner-provided
-infrastructure inputs exist.
+The operational SaaS foundation, generic tenant-data and AI vertical slice,
+identity and organization milestones, and pinned Carbon workbench are delivered
+on `main`. The platform can ingest, list, view, export, summarize, embed, and
+chat about domain-free datasets while preserving organization and per-user data
+isolation. Business-domain schemas, analytics semantics, production rollout, and
+owner-dependent infrastructure remain deliberately deferred.
 
 ## Documentation map
 
@@ -19,21 +19,27 @@ infrastructure inputs exist.
 - [Deployment](deployment.md)
 - [Security](security.md)
 - [Authentication and organization access](authentication.md)
+- [Application and HTTP routes](application-routes.md)
+- [Database ownership and tenant isolation](database-isolation.md)
 - [Backup and restore proof](backup-and-restore.md)
 - [Phase 5 SaaS foundation report](reports/phase-5-saas-foundation.md)
 - [Phase 6 platform batteries report](reports/phase-6-platform-batteries.md)
 - [Master plan execution report](reports/master-plan-execution.md)
+- [Identity and organizations execution report](reports/identity-organizations-execution.md)
 - [Foundation research](foundation-research.md)
 - [Carbon integration](design-system/carbon.md)
 - [Carbon offline knowledge base](design-system/knowledge-base/README.md)
 - [Carbon workbench plan and verification](planning/carbon-workbench.md)
+- [SaaS foundation plan](planning/saas-foundation.md)
 - [Platform batteries plan](planning/platform-batteries.md)
 - [Tenant data foundation plan](planning/tenant-data-foundation.md)
 - [MCP server plan](planning/mcp-server.md)
+- [Tooling decisions](tooling/tool-decisions.md)
 - [Carbon patterns](design-system/patterns.md)
 - [Carbon accessibility](design-system/accessibility.md)
 - [Architecture](../ARCHITECTURE.md)
 - [Design](../DESIGN.md)
+- [Repository security policy](../SECURITY.md)
 - [Third-party notices](../THIRD_PARTY_NOTICES.md)
 - [ADR 0001: monorepo boundaries](adr/0001-monorepo-boundaries.md)
 - [ADR 0002: separate application and reporting APIs](adr/0002-separate-application-and-reporting-apis.md)

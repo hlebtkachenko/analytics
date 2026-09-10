@@ -1,5 +1,11 @@
 # Public Sign-up and Activation
 
+**Correction (2026-09-01):** The sign-up form now remains visible while public
+sign-up is off so an invited recipient can register with the invited address.
+The server changes only the explanatory copy. The 2 backend invitation-or-switch
+predicates remain the sole admission authority, so form visibility cannot admit
+an uninvited address.
+
 ## Problem
 
 Email/password registration previously had no browser entry point. The platform
@@ -52,22 +58,23 @@ columns offset by 1, and 6 large columns offset by 5. One CSS-module rule adds
 vertical padding with a design-system spacing token. The route group does not
 change public URLs, and the pages contain no tile, UI shell, or header.
 
-`/sign-up` reads `publicSignupEnabled()` on the server and renders no form when
-the read is false or fails. The form accepts name, email, and a 14-128 character
-password, then calls Better Auth with the relative `/activate` callback. Fresh
-and duplicate-address successes discard the framework payload and render the
-same generic result. `/forgot-password` similarly uses only the relative
-`/reset-password` callback and renders the same success for existing and
-nonexistent addresses. The proxy canonicalizes reset callbacks before a page
-render. Exactly 1 token in Better Auth's installed 24-character shape is moved
-into a 30-minute `HttpOnly`, `SameSite=Lax` cookie scoped to `/reset-password`,
-with `Secure` enabled in production, then redirected to the clean path. A
-callback error, malformed token, or duplicate token clears that capability. A
-clean request without a valid capability reaches the same generic no-form state.
-These redirects and the clean reset page use `Referrer-Policy: no-referrer`.
-Exact proxy matcher entries keep reset and activation canonicalization active
-even when either supported prefetch header is present; the generic matcher
-retains its prefetch exclusions for other routes.
+`/sign-up` reads `publicSignupEnabled()` on the server. The existing form is
+always rendered: normal public-registration copy appears when the read is true,
+and invitation-only copy appears when it is false or fails. The form accepts
+name, email, and a 14-128 character password, then calls Better Auth with the
+relative `/activate` callback. Fresh and duplicate-address successes discard the
+framework payload and render the same generic result. `/forgot-password`
+similarly uses only the relative `/reset-password` callback and renders the same
+success for existing and nonexistent addresses. The proxy canonicalizes reset
+callbacks before a page render. Exactly 1 token in Better Auth's installed
+24-character shape is moved into a 30-minute `HttpOnly`, `SameSite=Lax` cookie
+scoped to `/reset-password`, with `Secure` enabled in production, then
+redirected to the clean path. A callback error, malformed token, or duplicate
+token clears that capability. A clean request without a valid capability reaches
+the same generic no-form state. These redirects and the clean reset page use
+`Referrer-Policy: no-referrer`. Exact proxy matcher entries keep reset and
+activation canonicalization active even when either supported prefetch header is
+present; the generic matcher retains its prefetch exclusions for other routes.
 
 The reset page gives its Client Component only a capability-present boolean. Its
 Server Action reads the path-scoped cookie and validates the 14-128 character
@@ -101,7 +108,8 @@ caveat for automatic sign-in after verification remains. Caddy overwrites the
 client header publicly, but direct internal web-service access can still spoof a
 valid prefix and must remain excluded by the deployment topology.
 
-Switch and session reads remain server-only. Browser forms send only relative
+Switch and session reads remain server-only. The sign-up page's visible state is
+informational only and grants no authority. Browser forms send only relative
 callback paths. The reset capability exists only in the callback request and the
 path-scoped `HttpOnly` cookie, never in production HTML, an RSC payload, client
 state, or a Server Action argument. No page renders or logs a reset token,
@@ -116,15 +124,16 @@ Focused web tests drive the exported POST route, a direct Better Auth API
 dispatch, and every identity page export. Backend coverage includes switch-off,
 switch-on, invitation bypass, failed reads, edge exhaustion, cloned JSON,
 malformed and unsupported bodies, exact rates, and the synthetic response. Page
-coverage includes switch-on/off and failed switch reads, identical fresh and
-duplicate success, identical existing and nonexistent recovery success, all 3
-activation branches, reset callback errors with no form, and unauthenticated
-welcome redirection. Database CLI and PostgreSQL integration coverage retains
-the switch, grant, rate-limit, invitation, backup, and default-privilege proofs.
-The production browser regression proves callback redirect and cookie
-attributes, sentinel absence from HTML and RSC responses, exact keyboard focus
-order, expected Chromium accessibility-tree roles and names, and zero axe
-violations across representative identity states. It repeats reset-token,
+coverage includes public and invitation-only copy for switch-on, switch-off, and
+failed switch reads while retaining the form, identical fresh and duplicate
+success, identical existing and nonexistent recovery success, all 3 activation
+branches, reset callback errors with no form, and unauthenticated welcome
+redirection. Database CLI and PostgreSQL integration coverage retains the
+switch, grant, rate-limit, invitation, backup, and default-privilege proofs. The
+production browser regression proves callback redirect and cookie attributes,
+sentinel absence from HTML and RSC responses, exact keyboard focus order,
+expected Chromium accessibility-tree roles and names, and zero axe violations
+across representative identity states. It repeats reset-token,
 reset-error-plus-token, and activation-error callbacks with both
 `Purpose: prefetch` and `Next-Router-Prefetch` RSC requests. An isolated
 installed-router test proves the reset completion rule allows 5 attempts and

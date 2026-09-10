@@ -2,9 +2,22 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { I18nProvider } from '../../../i18n/client-provider';
+import InvitationClient from './invitation-client';
 import InvitationPage from './page';
 
-const mocks = vi.hoisted(() => ({ replace: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  getAuth: vi.fn(),
+  getSession: vi.fn(),
+  replace: vi.fn(),
+}));
+
+vi.mock('../../../lib/auth/server', () => ({
+  getAuth: mocks.getAuth,
+}));
+
+vi.mock('next/headers', () => ({
+  headers: vi.fn(async () => new Headers()),
+}));
 
 vi.mock('next/navigation', () => ({
   useParams: () => ({ invitationId: 'invitation_1' }),
@@ -26,12 +39,35 @@ const pendingInvitation = {
 function renderInvitationPage() {
   return render(
     <I18nProvider>
-      <InvitationPage />
+      <InvitationClient />
     </I18nProvider>,
   );
 }
 
 describe('InvitationPage', () => {
+  it('guides a signed-out recipient without looking up or forwarding the invitation', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    mocks.getSession.mockResolvedValue(null);
+    mocks.getAuth.mockResolvedValue({ api: { getSession: mocks.getSession } });
+
+    const page = await InvitationPage();
+    const { container } = render(<I18nProvider>{page}</I18nProvider>);
+
+    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
+      'href',
+      '/sign-in',
+    );
+    expect(
+      screen.getByRole('link', { name: 'Create invited account' }),
+    ).toHaveAttribute('href', '/sign-up');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(container.textContent).not.toMatch(/invitation_1|token|email=/i);
+    expect(
+      [...container.querySelectorAll('a')].map((link) => link.href).join(' '),
+    ).not.toContain('invitation_1');
+  });
+
   it('presents the invited organization and role without naming a credential', async () => {
     vi.stubGlobal(
       'fetch',

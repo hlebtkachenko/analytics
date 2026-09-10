@@ -1,7 +1,9 @@
-# Feature Specs
+# Feature Implementation Records
 
-## Current specs
+## Delivered and historical records
 
+- [Authenticated navigation and invitation onboarding](2026-09-01-authenticated-navigation-and-invitation-onboarding.md)
+- [Conductor and CI source-of-truth reconciliation](2026-09-01-conductor-ci-source-truth.md)
 - [Identity and organization integration closure](2026-09-01-identity-organization-integration-closure.md)
 - [Carbon application icons](2026-09-01-carbon-application-icons.md)
 - [Organization throwaway UI](2026-08-31-organization-throwaway-ui.md)
@@ -13,9 +15,12 @@
 - [Account lifecycle](2026-08-31-account-lifecycle.md)
 - [Public sign-up and activation](2026-08-31-public-sign-up-and-activation.md)
 
-A spec is a short document describing one feature before it is built. Whoever is
-about to implement the feature writes it, human or agent. Its purpose is to make
-disagreement cheap: a reviewer reads a page instead of a diff.
+A spec is a short implementation record that starts before a feature is built.
+Whoever is about to implement the feature writes it, human or agent. Its purpose
+is to make disagreement cheap: a reviewer reads a page instead of a diff. This
+index retains both delivered and superseded records as history; runtime code,
+`ARCHITECTURE.md`, `DESIGN.md`, and the documents under `docs/` describe the
+current system.
 
 ## File convention
 
@@ -43,12 +48,12 @@ document in the wrong folder.
   research behind them. One planning document is the input to several specs.
 - `docs/adr/` records a decision that constrains later work, such as a topology
   change, a boundary, or a technology choice. An ADR outlives the feature that
-  prompted it; a spec is disposable once the feature ships. When writing a spec
-  surfaces a decision of that kind, the decision moves to an ADR and the spec
-  links to it.
-- `ARCHITECTURE.md` and `docs/security.md` describe the system as it is. A spec
-  describes a system that does not exist yet. Once the feature ships, those
-  documents are updated and the spec stops being the source of truth.
+  prompted it. When writing a spec surfaces a decision of that kind, the
+  decision moves to an ADR and the spec links to it.
+- Runtime code, `ARCHITECTURE.md`, `DESIGN.md`, and the runtime documents under
+  `docs/` describe the system as it is. A spec captures design intent and
+  delivery history, but stops being the source of truth once implementation
+  lands.
 
 ## When a change needs one
 
@@ -67,8 +72,9 @@ Skip it for a bug fix with an obvious cause, a dependency bump, a test, a
 rename, a formatting pass, or a documentation edit. Skip it whenever writing the
 spec would cost more than writing the change and reading the diff.
 
-## What this folder is not
+## Historical status
 
-Specs are written before implementation, never after. Delivered work is
-described by `ARCHITECTURE.md`, the ADRs, and the code, so nothing here is
-written retroactively to document something that already exists.
+Specs are written before implementation, never created retroactively to explain
+already-delivered work. A delivered record remains indexed here, including its
+dated corrections, but it must not be used instead of current code,
+`ARCHITECTURE.md`, `DESIGN.md`, ADRs, or runtime documentation.

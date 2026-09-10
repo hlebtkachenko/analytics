@@ -28,7 +28,18 @@ export default async function OrganizationSettingsPage({
     organization.role === 'owner' || organization.role === 'admin';
 
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
+      <nav aria-label="Breadcrumb">
+        <ol>
+          <li>
+            <Link href="/organizations">Organizations</Link>
+          </li>
+          <li>
+            <Link href={`/${organization.slug}`}>{organization.name}</Link>
+          </li>
+          <li aria-current="page">Settings</li>
+        </ol>
+      </nav>
       <h1>{organization.name} settings</h1>
       <p>
         <Link href={`/${organization.slug}`}>Back to organization</Link>

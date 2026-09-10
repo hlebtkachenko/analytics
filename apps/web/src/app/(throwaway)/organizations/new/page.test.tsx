@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import NewOrganizationPage from './page';
@@ -45,6 +51,13 @@ describe('NewOrganizationPage', () => {
 
     render(await NewOrganizationPage({ searchParams: Promise.resolve({}) }));
 
+    const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    expect(
+      within(breadcrumb).getByRole('link', { name: 'Organizations' }),
+    ).toHaveAttribute('href', '/organizations');
+    expect(
+      within(breadcrumb).getByText('Create organization', { selector: 'li' }),
+    ).toHaveAttribute('aria-current', 'page');
     expect(screen.getByText('Remaining creation quota: 2')).toBeVisible();
     const name = screen.getByLabelText('Name');
     const slug = screen.getByLabelText('Slug');

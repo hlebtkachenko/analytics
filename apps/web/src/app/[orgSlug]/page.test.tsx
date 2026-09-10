@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import OrganizationPage from './page';
@@ -37,6 +37,13 @@ describe('OrganizationPage', () => {
     expect(
       screen.getByRole('heading', { name: 'Organization One' }),
     ).toBeVisible();
+    const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    expect(
+      within(breadcrumb).getByRole('link', { name: 'Organizations' }),
+    ).toHaveAttribute('href', '/organizations');
+    expect(
+      within(breadcrumb).getByText('Organization One', { selector: 'li' }),
+    ).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: 'Members' })).toHaveAttribute(
       'href',
       '/organization-one/members',

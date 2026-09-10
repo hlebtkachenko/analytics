@@ -204,6 +204,16 @@ malformed request or any rate-limit, invitation, or setting read failure is
 denied with `PUBLIC_SIGN_UP_DISABLED`; policy code uses query parameters and
 never logs the submitted address.
 
+The sign-up form remains visible with invitation-only guidance while the switch
+is off. That presentation grants no authority and cannot bypass either policy
+layer. A signed-out invitation page performs no invitation lookup and exposes
+only generic guidance with fixed sign-in and sign-up links. It does not forward
+the invitation id in a query parameter, form field, prop, cookie, visible
+message, or log. The recipient must reopen the original link after verification;
+Better Auth then requires the matching verified session before invitation read
+or acceptance. BAP explicitly pins that verified-email requirement in the
+organization configuration.
+
 The switch table is deliberately outside Better Auth's runtime authority. Tables
 created in `auth` inherit SELECT, INSERT, UPDATE, and DELETE for `bap_auth`, so
 the migration explicitly revokes that default grant on `auth.platform_setting`.
@@ -220,24 +230,41 @@ details. Better Auth returns a complete synthetic user shape for duplicate
 addresses, including Admin and Two Factor fields, so plugin fields do not weaken
 its anti-enumeration response.
 
-The operational proof uses only unique `example.test` identities and the public
-Caddy path. It compares fresh and duplicate status, exact `Set-Cookie` headers,
-and bodies after removing only generated identity ids and timestamps. It never
-reads or prints a verification body, link, or token. Mailpit is queried by the
-unique recipient, and only message ids are retained long enough to prove 1 fresh
-delivery after the awaited fresh response. Immediate and final recipient-id
-checks over a short Mailpit API-consistency window prove the duplicate and
-fourth responses do not change their recipient sets; this is not an SMTP work
-timeout. The proof also confirms the account remains unverified and sessionless,
-attempt 4 in the same public client bucket is limited, and public sign-up is
-restored OFF.
+The public sign-up proof uses only unique `example.test` identities and the
+public Caddy path. It compares fresh and duplicate status, exact `Set-Cookie`
+headers, and bodies after removing only generated identity ids and timestamps.
+Its public delivery assertions never read or print a verification body, link, or
+token. Mailpit is queried by the unique recipient, and only message ids are
+retained long enough to prove 1 fresh delivery after the awaited fresh response.
+Immediate and final recipient-id checks over a short Mailpit API-consistency
+window prove the duplicate and fourth responses do not change their recipient
+sets; this is not an SMTP work timeout. The proof also confirms the account
+remains unverified and sessionless, attempt 4 in the same public client bucket
+is limited, and public sign-up is restored OFF.
+
+The wider serial suite stays within exactly 3 sign-ins per 60 seconds: one
+shared synthetic owner sign-in, one unverified-account denial, and one verified
+invited-recipient sign-in. Invitation registration uses the visible sign-up form
+while the switch is off and is attempt 2 in the recipient browser's 4-attempt
+edge bucket. A one-shot internal helper reads only that recipient's Mailpit
+message and relays its verification callback to the same browser context through
+a fixed loopback path without writing the body, link, token, or address to
+output. The browser consumes the callback, then the recipient accepts the real
+invitation from a matching verified session; the owner changes the role and
+removes the membership through the real organization workflow. That sensitive
+lifecycle runs in the trace-disabled one-worker operational configuration and
+uses fixed failure messages, sanitized pathname checks, and address-free
+locators so retained test artifacts and assertion output cannot contain its
+token, invitation id, or invitee address.
 
 The `/sign-up` page reads the admission switch only in a Server Component and
-fails closed to a state with no form. Client code receives only the resulting
-boolean, never a database handle or setting-table access. Sign-up and recovery
-callbacks are fixed relative paths. Fresh and duplicate sign-up responses, and
-existing and nonexistent password-reset requests, collapse to identical visible
-success states without consuming framework messages.
+always renders the form. Client code receives only the resulting boolean for
+public or invitation-only copy, never a database handle or setting-table access.
+A failed switch read shows invitation-only guidance while the backend fails
+closed. Sign-up and recovery callbacks are fixed relative paths. Fresh and
+duplicate sign-up responses, and existing and nonexistent password-reset
+requests, collapse to identical visible success states without consuming
+framework messages.
 
 Reset and activation callbacks are canonicalized before any page render. The
 proxy accepts exactly 1 reset token in Better Auth's installed shape, stores it
@@ -357,16 +384,22 @@ cannot silently shadow an existing organization URL.
 
 ## Temporary organization action boundary
 
-Phase 10's 5 organization pages are deliberately plain and temporary, but their
-server actions are untrusted public POST boundaries. They rederive the verified
-session and member-gated organization resolution, validate `FormData`, ignore
-any browser-supplied organization id, and call only installed Better Auth APIs
-with the exact resolved id. Creation keeps the stored active organization
-unchanged. Each scoped action validates its bound slug before constructing any
-path or calling the resolver or provider. Malformed, protocol-relative-looking,
-and encoded-looking values reach only `/organizations?result=error` with no side
+The 5 organization pages are deliberately plain and temporary, but their server
+actions are untrusted public POST boundaries. They rederive the verified session
+and member-gated organization resolution, validate `FormData`, ignore any
+browser-supplied organization id, and call only installed Better Auth APIs with
+the exact resolved id. Creation keeps the stored active organization unchanged.
+Each scoped action validates its bound slug before constructing any path or
+calling the resolver or provider. Malformed, protocol-relative-looking, and
+encoded-looking values reach only `/organizations?result=error` with no side
 effect. Valid scoped redirects use only the parsed or durable resolved slug;
 provider and database failures become generic messages and are not logged.
+
+Their page modules retain the exact throwaway markers, plain native breadcrumbs,
+and zero CSS, design-system, or icon imports. A shared Carbon shell may surround
+these authenticated routes, but it does not change their server-action trust
+boundary or make the temporary page content permanent. Carbon organization and
+account page content remains future work.
 
 The UI mirrors installed Better Auth permissions: owners may assign all three
 roles and manage owner targets, while admins may assign only `admin` or `member`

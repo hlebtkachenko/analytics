@@ -109,7 +109,7 @@ export default function AccountActions({ email }: AccountActionsProperties) {
   }
 
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
       <h1>Account</h1>
       <p>Email: {email}</p>
 

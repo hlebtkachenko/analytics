@@ -1,5 +1,13 @@
 # Public Sign-up Operational Proof
 
+**Correction (2026-09-01):** The OFF-state browser assertion now expects the
+registration form with invitation-only guidance. Admission is still denied for
+an uninvited address by both backend policy layers. The wider serial suite keeps
+the exact 3-per-60-second sign-in budget with one shared owner sign-in, the
+unverified-account denial, and one verified invited-recipient sign-in. The real
+invited registration is edge attempt 2 in the same recipient browser context and
+Caddy-established bucket as this spec's 4-attempt edge-rate proof.
+
 ## Problem
 
 Public sign-up has focused tests, but no live-stack proof that its default-off
@@ -34,23 +42,32 @@ non-blocking mail-hook behavior. Production Compose continues to select Resend
 and contains no Mailpit service, proxy, port, route, network, or SMTP variables.
 
 The serial operational spec uses the existing migrator CLI to put sign-up OFF,
-prove the closed page and a 403 API response, then put it ON. A unique
-`example.test` identity signs up once and repeats the identical request. The
-responses must have equal status and exact `Set-Cookie` headers, and bodies must
-match after removing only generated user ids and timestamps. Neither response
-may contain a token or session cookie. Correct-password sign-in remains blocked
-for the unverified user. Because the OFF request consumes the first edge-rate
-attempt, the fourth sign-up request in that same client bucket must return 429.
+prove the invitation-only page and a 403 API response for an uninvited address,
+and create a real pending invitation through the owner UI. A unique
+`example.test` invitee follows the fixed invitation-page link and submits the
+visible sign-up form while the switch remains OFF. That fresh registration is
+edge attempt 2. The test then turns the switch ON only to prove sign-in-page
+discoverability and repeats the identical request as attempt 3. The responses
+must have equal status and exact `Set-Cookie` headers, and bodies must match
+after removing only generated user ids and timestamps. Neither response may
+contain a token or session cookie. Correct-password sign-in remains blocked for
+the unverified user. A fourth sign-up request in that same client bucket must
+return 429.
 
-The test polls Mailpit's documented HTTP API for the unique recipient and
-records the single fresh verification message without reading its body, link, or
-token. SMTP acceptance is part of the fresh auth response boundary, so the test
-checks for exactly 1 message after that response. It checks the recipient id set
-immediately and again over a short Mailpit API-consistency window after both the
-duplicate and fourth responses. That window is not a bound on SMTP work. The
-test restores sign-up OFF in a `finally` block. The workflow also disables
-sign-up in an unconditional cleanup step before the existing identity suite
-continues.
+This public sign-up proof polls Mailpit's documented HTTP API for the unique
+recipient and records the single fresh verification message without reading its
+body, link, or token. SMTP acceptance is part of the fresh auth response
+boundary, so the test checks for exactly 1 message after that response. It
+checks the recipient id set immediately and again over a short Mailpit
+API-consistency window after both the duplicate and fourth responses. That
+window is not a bound on SMTP work. In the same consolidated flow, a one-shot
+Compose helper reads the invited recipient's message and relays its callback to
+the same browser context through a fixed loopback path. The helper writes no
+body, link, token, or recipient to output, and tracing is disabled. The browser
+consumes the callback, signs in, accepts the intended role, and the owner
+changes and removes that membership. The test restores sign-up OFF in a
+`finally` block. The workflow also disables sign-up in an unconditional cleanup
+step.
 
 ## Security
 

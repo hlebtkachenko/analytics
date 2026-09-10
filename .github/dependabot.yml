@@ -50,3 +50,12 @@ updates:
       - dependency-name: node
         update-types:
           - version-update:semver-major
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      compose-images:
+        patterns:
+          - '*'

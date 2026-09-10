@@ -37,7 +37,13 @@ plus verification through production Resend or the explicit log transport,
 remain non-blocking. Verification through the exact development SMTP sink waits
 for SMTP acceptance before the auth response resolves. Invitation mail links to
 `/invitation/:invitationId`, where an authenticated recipient reviews and
-accepts the invitation.
+accepts the invitation. A signed-out visitor sees only generic guidance and
+fixed `/sign-in` and `/sign-up` links. That render performs no invitation lookup
+and forwards no invitation id through a query parameter, form field, prop,
+cookie, visible message, or log. After account verification, the recipient
+reopens the original invitation link. Better Auth then requires the recipient's
+verified session and matching email before either reading or accepting the
+invitation.
 
 Production delivery uses Resend. Development and CI select a narrowly fixed
 Nodemailer transport to the internal `mailpit:1025` sink; no other SMTP endpoint
@@ -54,18 +60,22 @@ The bare Carbon identity layout covers these public URLs without a product
 header or UI shell:
 
 - `/sign-in` for email and password sign-in, with a link to password recovery
+  and a create-account link only while public sign-up is on
 - `/sign-in/two-factor` for the pending TOTP challenge
-- `/sign-up` for server-gated account creation
+- `/sign-up` for account creation with public or invitation-only guidance
 - `/forgot-password` for a generic password-reset request
 - `/reset-password` for a valid Better Auth reset callback
 - `/activate` for the email-verification callback result
 - `/welcome` for the authenticated post-activation handoff
 
-The sign-up page reads the switch through the server-only database boundary. A
-false value or failed read replaces the whole form with the closed state. The
-form sends name, email, and a 14-128 character password with the relative
-`/activate` callback. Both a new address and an existing address produce the
-same visible check-email result.
+The sign-up page reads the switch through the server-only database boundary. The
+form remains available in every switch state: a true value shows public
+registration copy, while false or a failed read shows invitation-only guidance.
+Form visibility is not admission authority. The form sends name, email, and a
+14-128 character password with the relative `/activate` callback, and both
+backend policy layers still require the switch or a matching pending, unexpired
+invitation. Both a new address and an existing address produce the same visible
+check-email result.
 
 Password recovery uses the relative `/reset-password` callback and gives the
 same check-email result whether the address exists or not. Before rendering, the
@@ -102,10 +112,35 @@ All identity forms use standard Carbon form controls through
 tokens, framework error bodies, or database errors.
 
 `/account` is a separate authenticated, deliberately temporary plain-HTML page.
-It has no Carbon components, style sheet, product header, or UI shell. It shows
-the session email and exposes sign-out, password change, and account deletion.
-Its Server Component redirects failed or absent session reads to `/sign-in` and
-passes only the email into the interactive client boundary.
+Its own source has no Carbon components, style sheet, or icons and retains the
+exact throwaway marker. The root layout surrounds it with the shared Carbon
+application shell, but its content remains plain and its permanent Carbon
+replacement is future work. It shows the session email and exposes sign-out,
+password change, and account deletion. Its Server Component redirects failed or
+absent session reads to `/sign-in` and passes only the email into the
+interactive client boundary.
+
+## Authenticated application navigation
+
+Signed-in application routes share a minimal Carbon shell with a skip link to
+the route's single `main-content` landmark. Desktop and collapsible mobile
+navigation use native links to Access, Organizations, Datasets, and Account and
+identify the current route. Identity and invitation routes stay outside the
+shell.
+
+The Access organization cards link implemented capabilities to real routes.
+Member management targets `/{slug}/members`; dataset upload targets
+`/datasets?organization={slug}#upload-dataset`. The dataset page accepts that
+slug only when it matches the authenticated organization list, then sends only
+the corresponding immutable organization id through the BFF. Data grants and the
+general assistant remain descriptive, non-interactive unavailable statuses.
+
+Subordinate routes expose semantic breadcrumbs. Permanent Carbon content uses
+Carbon breadcrumbs, including `Datasets > {dataset name}` for an inline dataset
+view. The five temporary organization page modules keep plain native
+breadcrumbs, their exact throwaway markers, and zero CSS, design-system, or icon
+imports. Only the shared root shell is Carbon; permanent Carbon organization and
+account content remains future work.
 
 ## Admin HTTP inventory
 
@@ -115,7 +150,7 @@ requires the named authoritative browser session and, where listed, permission.
 Requests are JSON unless a query is shown. There is no BAP admin UI or BAP HTTP
 consumer for any of them.
 
-| Method and path                    | Phase 5 exposure     | HTTP input                                                    | Installed HTTP authorization                                                                                                          |
+| Method and path                    | BAP exposure         | HTTP input                                                    | Installed HTTP authorization                                                                                                          |
 | ---------------------------------- | -------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `POST /admin/set-role`             | Reachable, 3/60      | `{ userId, role }`                                            | Session plus `user:set-role`                                                                                                          |
 | `GET /admin/get-user`              | Reachable, read-only | `?id=USER_ID`                                                 | Session plus `user:get`                                                                                                               |
@@ -129,7 +164,7 @@ consumer for any of them.
 | `POST /admin/stop-impersonating`   | Disabled             | No body                                                       | If enabled: a live impersonated session and the signed original-admin session cookie; no separate role permission                     |
 | `POST /admin/revoke-user-session`  | Reachable, 3/60      | `{ sessionToken }`                                            | Session plus `session:revoke`                                                                                                         |
 | `POST /admin/revoke-user-sessions` | Reachable, 3/60      | `{ userId }`                                                  | Session plus `session:revoke`                                                                                                         |
-| `POST /admin/remove-user`          | Disabled by Phase 4  | `{ userId }`                                                  | If enabled: session plus `user:delete`; self-removal is rejected, but the BAP deletion hook is bypassed                               |
+| `POST /admin/remove-user`          | Disabled             | `{ userId }`                                                  | If enabled: session plus `user:delete`; self-removal is rejected, but the BAP deletion hook is bypassed                               |
 | `POST /admin/set-user-password`    | Reachable, 3/60      | `{ userId, newPassword }`                                     | Session plus `user:set-password`                                                                                                      |
 | `POST /admin/has-permission`       | Reachable, read-only | `{ permissions }`                                             | Authoritative session; evaluates the current user's requested permissions and requires no additional permission                       |
 
@@ -198,17 +233,30 @@ never include the underlying database message. There is no browser, HTTP, or
 long-running service control surface for this setting.
 
 The scheduled operational proof uses that same CLI and the real public Caddy
-path. Its first POST is denied while OFF and still consumes edge attempt 1. With
-the switch ON, attempts 2 and 3 submit identical fresh and duplicate requests;
-their statuses, exact `Set-Cookie` headers, and response bodies match after only
-generated ids and timestamps are removed, both tokens are null, and neither
-creates a session. Correct-password sign-in remains 403 for the unverified
-account, and attempt 4 returns 429. A recipient-filtered Mailpit query proves
-the fresh request sends exactly 1 verification message after its awaited auth
-response. The duplicate and fourth response boundaries are followed by immediate
-and final recipient-id comparisons over a short Mailpit API-consistency window.
-That window does not bound SMTP work. Cleanup always restores the default-off
-state.
+path. Its first POST is denied while OFF and still consumes edge attempt 1. The
+owner creates a real pending invitation, and the invitee follows the fixed link
+to submit the visible sign-up form while the switch remains OFF as attempt 2.
+The switch turns ON only for sign-in-page discoverability before the identical
+duplicate attempt 3. Fresh and duplicate statuses, exact `Set-Cookie` headers,
+and response bodies match after only generated ids and timestamps are removed,
+both tokens are null, and neither creates a session. Correct-password sign-in
+remains 403 for the unverified account, and attempt 4 returns 429. A
+recipient-filtered Mailpit query proves the fresh request sends exactly 1
+verification message after its awaited auth response. The duplicate and fourth
+response boundaries are followed by immediate and final recipient-id comparisons
+over a short Mailpit API-consistency window. That window does not bound SMTP
+work. Cleanup always restores the default-off state.
+
+The wider serial browser suite uses exactly 3 sign-in requests in the same
+60-second window: the shared synthetic owner sign-in, the expected
+unverified-account denial, and one verified invited-recipient sign-in. The
+invitee registers through the visible sign-up form while public sign-up remains
+off. A one-shot internal helper reads only that recipient's Mailpit message and
+relays its verification callback to the same browser context through a fixed
+loopback path without writing the body, link, token, or address to output. The
+browser consumes the callback, then the recipient signs in, reopens the
+invitation, accepts it, and the owner proves role change and removal through the
+organization workflow.
 
 ## Password and email verification
 
@@ -216,8 +264,10 @@ Password sign-in is enabled and requires verified email. Passwords must contain
 14-128 characters, and a completed reset revokes the user's existing sessions.
 Verification mail is sent at sign-up and expires after 30 minutes. Successful
 verification activates the account and automatically creates a browser session.
-Sign-up itself creates no session, organization, or membership. An invited user
-accepts the invitation after authentication to gain the offered membership.
+Sign-up itself creates no session, organization, or membership. Organization
+configuration explicitly requires email verification for invitation actions. An
+invited user accepts the invitation only from the verified, matching
+authenticated session to gain the offered membership.
 
 Two factor is opt-in TOTP. Sign-in returns a two-factor redirect instead of a
 session, and `/sign-in/two-factor` verifies the code before the real session
@@ -284,8 +334,8 @@ because the request was consumed.
 
 A retained or granted dataset can remain readable after `created_by` is
 tombstoned. `app.dataset_is_writable` then recognizes no live creator, so that
-dataset remains unwritable until later ownership or delegation work. This phase
-does not implement that later workflow.
+dataset remains unwritable until later ownership or delegation work. That
+workflow is not implemented.
 
 This lifecycle is not complete GDPR compliance. BAP has no access or portability
 workflow, and identifiers can remain in `app.audit_log.metadata`,
@@ -293,21 +343,31 @@ workflow, and identifiers can remain in `app.audit_log.metadata`,
 
 ## Resource-token boundary
 
-The browser never receives or stores a resource JWT. The only resource-token
-flows are:
+The browser never receives or stores a resource JWT. For each admitted request,
+the BFF validates the organization identifier and a verified opaque browser
+session, signs one five-minute Ed25519 JWT in memory for one fixed upstream
+call, and returns a private, non-cacheable response. A valid incoming request id
+is relayed; otherwise the BFF generates one. JSON responses are validated before
+they cross back to the browser, and upstream bodies and headers are not
+forwarded unless a route explicitly lists a streamed body below.
 
-```text
-GET /api/bff/application/organizations/:organizationId/access
-  -> GET http://api:3001/v1/organizations/:organizationId/access
+The fixed BFF matrix is:
 
-GET /api/bff/reporting/organizations/:organizationId/access
-  -> GET http://reporting-api:3002/v1/organizations/:organizationId/access
-```
+| Browser method and path                                                                                          | Fixed upstream                                                                                                       | Timeout and transfer                                                                                                            | Successful browser contract                                                                                                                                                           |
+| ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/bff/application/organizations/:organizationId/access`                                                  | `GET http://api:3001/v1/organizations/:organizationId/access`                                                        | 3 seconds; bounded JSON                                                                                                         | Strict `{ service: 'application-api', organizationId, role, capabilities }`                                                                                                           |
+| `GET /api/bff/reporting/organizations/:organizationId/access`                                                    | `GET http://reporting-api:3002/v1/organizations/:organizationId/access`                                              | 3 seconds; bounded JSON                                                                                                         | Strict `{ service: 'reporting-api', organizationId, role, capabilities }`                                                                                                             |
+| `GET /api/bff/application/organizations/:organizationId/datasets`                                                | `GET http://api:3001/v1/organizations/:organizationId/datasets`                                                      | 10 seconds; bounded JSON                                                                                                        | Strict dataset list with UUID, name, nullable description, non-negative row count, `importing`/`ready`/`failed` status, and ISO created/updated timestamps                            |
+| `GET /api/bff/application/organizations/:organizationId/datasets/:datasetId/rows?after=&pageSize=`               | `GET http://api:3001/v1/organizations/:organizationId/datasets/:datasetId/rows`                                      | 10 seconds; bounded JSON                                                                                                        | UUID dataset id; optional non-negative `after`; `pageSize` 1-500, default 100; strict columns, scalar row data, row numbers, page size, nullable next cursor, and matching dataset id |
+| `GET /api/bff/application/organizations/:organizationId/datasets/:datasetId/export?format=csv` or `?format=xlsx` | `GET http://api:3001/v1/organizations/:organizationId/datasets/:datasetId/export` with `format=csv` or `format=xlsx` | 30 seconds for response headers only; the validated response body then streams without a midstream timeout                      | Exact CSV or XLSX media type and a locally minted `dataset-{validated UUID}.{format}` attachment filename; no upstream response header is relayed                                     |
+| `POST /api/bff/application/organizations/:organizationId/uploads`                                                | `POST http://api:3001/v1/organizations/:organizationId/uploads`                                                      | Multipart request body streams to the API with a 120-second timeout; the API enforces the matching 25,000,000-byte upload limit | HTTP 202 with strict `{ status: 'accepted', uploadId: UUID }`                                                                                                                         |
 
-Each BFF handler validates the opaque session and verified-email state, signs a
-five-minute Ed25519 JWT in memory, calls its fixed upstream with a three-second
-timeout, validates the upstream response, and returns only `service`,
-`organizationId`, and `role`.
+Application membership and row-level security remain authoritative at the API.
+Invalid sessions, selectors, queries, media types, upstream failures, and
+contract mismatches return fixed BFF errors without exposing a resource token or
+upstream detail. Dataset list and row responses are buffered only within their
+bounded contracts; uploads and successful exports preserve streaming across the
+web tier.
 
 Nest validation requires:
 
@@ -405,7 +465,7 @@ generic JSON code. No application or HTTP quota writer exists.
 Organization deletion remains intentionally unavailable. Combined with the
 account-deletion sole-owner guard, a sole owner can delete neither the
 organization nor their account until ownership is delegated. Cross-schema
-operator purge is a later milestone, not part of this phase.
+operator purge remains future work.
 
 ## Organization routing
 
@@ -440,14 +500,18 @@ segment in the same pull request.
 
 ## Temporary organization pages
 
-The 5 Phase 10 pages are an intentionally throwaway, unstyled browser loop. They
-use semantic headings, navigation, labels, native controls, lists, and
-progressive-enhancement server-action forms, with no page CSS or design-system
-imports. `/organizations/new` reads creator-attributed quota through a narrow
-SELECT-only `@bap/db` accessor. A missing row, malformed state, or read failure
-renders remaining quota as zero and replaces the complete form with one
-sentence. When capacity exists, the account name prefills the organization name
-and the shared normalizer keeps the slug field in step with name edits.
+The 5 temporary organization pages are an intentionally throwaway, unstyled
+browser loop. They use semantic headings, navigation, labels, native controls,
+lists, and progressive-enhancement server-action forms, with no page CSS,
+design-system, or icon imports. Each subordinate page uses a plain native
+breadcrumb. Their exact throwaway markers remain enforced, and permanent Carbon
+page content is future work even though the shared root shell surrounds
+authenticated routes. `/organizations/new` reads creator-attributed quota
+through a narrow SELECT-only `@bap/db` accessor. A missing row, malformed state,
+or read failure renders remaining quota as zero and replaces the complete form
+with one sentence. When capacity exists, the account name prefills the
+organization name and the shared normalizer keeps the slug field in step with
+name edits.
 
 Creation validates and normalizes again on the server, calls Better Auth with
 `keepCurrentActiveOrganization: true`, and redirects only to the validated

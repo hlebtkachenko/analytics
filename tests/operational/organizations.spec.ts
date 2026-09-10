@@ -45,6 +45,27 @@ async function expectNoHorizontalOverflow(
     .toBe(true);
 }
 
+async function focusWithKeyboard(
+  page: import('@playwright/test').Page,
+  target: import('@playwright/test').Locator,
+) {
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  });
+
+  for (let index = 0; index < 30; index += 1) {
+    await page.keyboard.press('Tab');
+    if (
+      await target.evaluate((element) => element === document.activeElement)
+    ) {
+      return;
+    }
+  }
+  throw new Error('Keyboard navigation did not reach the requested control.');
+}
+
 test('walks the temporary organization loop through explicit member-scoped actions', async ({
   page,
 }) => {
@@ -69,6 +90,18 @@ test('walks the temporary organization loop through explicit member-scoped actio
   await expect(page).toHaveURL(/\/organizations\/new$/);
   await expect(page.getByText('Remaining creation quota: 1')).toBeVisible();
 
+  let breadcrumbOrganizations = page
+    .getByRole('navigation', { name: 'Breadcrumb' })
+    .getByRole('link', { name: 'Organizations' });
+  await focusWithKeyboard(page, breadcrumbOrganizations);
+  await expect(breadcrumbOrganizations).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/organizations$/);
+  await page.getByRole('link', { name: 'Create organization' }).click();
+  breadcrumbOrganizations = page
+    .getByRole('navigation', { name: 'Breadcrumb' })
+    .getByRole('link', { name: 'Organizations' });
+  await focusWithKeyboard(page, breadcrumbOrganizations);
   await page.keyboard.press('Tab');
   await expect(
     page.getByRole('link', { name: 'Back to organizations' }),
@@ -125,7 +158,7 @@ test('walks the temporary organization loop through explicit member-scoped actio
   // A 640 CSS-pixel viewport is an automated layout equivalent, not browser zoom.
   await page.setViewportSize({ height: 900, width: 640 });
   await expectNoHorizontalOverflow(page);
-  await page.setViewportSize({ height: 640, width: 360 });
+  await page.setViewportSize({ height: 640, width: 320 });
   await expectNoHorizontalOverflow(page);
 
   await page.getByRole('link', { name: 'Back to organization' }).click();

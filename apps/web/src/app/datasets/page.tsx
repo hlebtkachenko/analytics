@@ -2,6 +2,8 @@
 
 import { Upload, View } from '@bap/design-system/icons';
 import {
+  Breadcrumb,
+  BreadcrumbItem,
   Button,
   FileUploader,
   InlineLoading,
@@ -35,6 +37,7 @@ const organizationsSchema = z.array(
   z.object({
     id: z.string().min(1),
     name: z.string().min(1),
+    slug: z.string().min(1),
   }),
 );
 // Mirrors the access contract the BFF validated; only the gated capabilities are read back.
@@ -81,8 +84,14 @@ export default function DatasetsPage() {
     void getJson('/api/auth/organization/list', controller.signal)
       .then((payload) => organizationsSchema.parse(payload))
       .then((items) => {
+        const requestedSlug = new URLSearchParams(window.location.search).get(
+          'organization',
+        );
+        const requestedOrganization = items.find(
+          (organization) => organization.slug === requestedSlug,
+        );
         setOrganizations(items);
-        setOrganizationId(items[0]?.id ?? '');
+        setOrganizationId(requestedOrganization?.id ?? items[0]?.id ?? '');
         setOrganizationsState('idle');
       })
       .catch((error: unknown) => {
@@ -199,7 +208,7 @@ export default function DatasetsPage() {
     !resolving && !listFailed && !accessFailed && datasets.length === 0;
 
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
       <Stack gap={7}>
         <h1>{t('datasets.title')}</h1>
         {resolving ? (
@@ -209,6 +218,7 @@ export default function DatasetsPage() {
           <InlineNotification
             kind="error"
             lowContrast
+            role="alert"
             title={t('datasets.accessError')}
           />
         ) : null}
@@ -216,6 +226,7 @@ export default function DatasetsPage() {
           <InlineNotification
             kind="error"
             lowContrast
+            role="alert"
             title={t('datasets.error')}
           />
         ) : null}
@@ -247,6 +258,7 @@ export default function DatasetsPage() {
         {datasets.length > 0 ? (
           <TableContainer
             description={t('datasets.listDescription')}
+            id="dataset-list"
             style={{ minInlineSize: 0 }}
             title={t('datasets.listTitle')}
           >
@@ -301,63 +313,79 @@ export default function DatasetsPage() {
         ) : null}
         {/* Capabilities only choose which actions are offered, the database enforces access. */}
         {access?.capabilities.uploadData ? (
-          <Stack gap={5}>
-            <h2>{t('datasets.uploadTitle')}</h2>
-            <FileUploader
-              accept={['.csv', '.xlsx']}
-              buttonKind="tertiary"
-              buttonLabel={t('datasets.uploadChoose')}
-              filenameStatus="edit"
-              iconDescription={t('datasets.uploadClear')}
-              labelDescription={t('datasets.uploadDescription')}
-              labelTitle={t('datasets.uploadTitle')}
-              name="file"
-              onAddFiles={(_event, content) => {
-                setFile(content.addedFiles[0]);
-                setUploadState('idle');
-              }}
-              onDelete={() => {
-                setFile(undefined);
-              }}
-            />
-            <Button
-              disabled={file === undefined || uploadState === 'uploading'}
-              onClick={() => void upload()}
-              renderIcon={Upload}
-              type="button"
-            >
-              {t('datasets.uploadSubmit')}
-            </Button>
-            {uploadState === 'uploading' ? (
-              <InlineLoading description={t('datasets.uploadWaiting')} />
-            ) : null}
-            {uploadState === 'accepted' ? (
-              <InlineNotification
-                kind="success"
-                lowContrast
-                title={t('datasets.uploadAccepted')}
+          <section aria-labelledby="upload-dataset-heading" id="upload-dataset">
+            <Stack gap={5}>
+              <h2 id="upload-dataset-heading">{t('datasets.uploadTitle')}</h2>
+              <FileUploader
+                accept={['.csv', '.xlsx']}
+                buttonKind="tertiary"
+                buttonLabel={t('datasets.uploadChoose')}
+                filenameStatus="edit"
+                iconDescription={t('datasets.uploadClear')}
+                labelDescription={t('datasets.uploadDescription')}
+                labelTitle={t('datasets.uploadTitle')}
+                name="file"
+                onAddFiles={(_event, content) => {
+                  setFile(content.addedFiles[0]);
+                  setUploadState('idle');
+                }}
+                onDelete={() => {
+                  setFile(undefined);
+                }}
               />
-            ) : null}
-            {uploadState === 'error' ? (
-              <InlineNotification
-                kind="error"
-                lowContrast
-                title={t('datasets.uploadFailed')}
-              />
-            ) : null}
-          </Stack>
+              <Button
+                disabled={file === undefined || uploadState === 'uploading'}
+                onClick={() => void upload()}
+                renderIcon={Upload}
+                type="button"
+              >
+                {t('datasets.uploadSubmit')}
+              </Button>
+              {uploadState === 'uploading' ? (
+                <InlineLoading description={t('datasets.uploadWaiting')} />
+              ) : null}
+              {uploadState === 'accepted' ? (
+                <InlineNotification
+                  kind="success"
+                  lowContrast
+                  title={t('datasets.uploadAccepted')}
+                />
+              ) : null}
+              {uploadState === 'error' ? (
+                <InlineNotification
+                  kind="error"
+                  lowContrast
+                  role="alert"
+                  title={t('datasets.uploadFailed')}
+                />
+              ) : null}
+            </Stack>
+          </section>
         ) : null}
         {openDataset !== undefined && access !== undefined ? (
-          <DatasetView
-            dataset={openDataset}
-            // Keyed by dataset, so a newly opened one never inherits the cursor, rows or chat of the last.
-            key={openDataset.id}
-            onClose={() => {
-              setOpenDataset(undefined);
-            }}
-            organizationId={organizationId}
-            useAi={access.capabilities.useAi}
-          />
+          <>
+            <Breadcrumb aria-label="Breadcrumb" noTrailingSlash>
+              <BreadcrumbItem
+                href="#dataset-list"
+                onClick={() => {
+                  setOpenDataset(undefined);
+                }}
+              >
+                {t('datasets.title')}
+              </BreadcrumbItem>
+              <BreadcrumbItem isCurrentPage>{openDataset.name}</BreadcrumbItem>
+            </Breadcrumb>
+            <DatasetView
+              dataset={openDataset}
+              // Keyed by dataset, so a newly opened one never inherits the cursor, rows or chat of the last.
+              key={openDataset.id}
+              onClose={() => {
+                setOpenDataset(undefined);
+              }}
+              organizationId={organizationId}
+              useAi={access.capabilities.useAi}
+            />
+          </>
         ) : null}
       </Stack>
     </main>

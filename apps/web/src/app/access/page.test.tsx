@@ -43,7 +43,11 @@ describe('AccessPage', () => {
     const fetchMock = vi.fn(async (input: string) => {
       if (input === '/api/auth/organization/list') {
         return Response.json([
-          { id: 'organization_1', name: 'Organization 1' },
+          {
+            id: 'organization_1',
+            name: 'Organization 1',
+            slug: 'organization-1',
+          },
         ]);
       }
       if (input.includes('/application/')) {
@@ -89,7 +93,11 @@ describe('AccessPage', () => {
       vi.fn(async (input: string) => {
         if (input === '/api/auth/organization/list') {
           return Response.json([
-            { id: 'organization_1', name: 'Organization 1' },
+            {
+              id: 'organization_1',
+              name: 'Organization 1',
+              slug: 'organization-1',
+            },
           ]);
         }
         return Response.json({
@@ -107,13 +115,11 @@ describe('AccessPage', () => {
     renderAccessPage();
 
     expect(
-      await screen.findByRole('button', { name: 'Upload data' }),
+      await screen.findByRole('link', { name: 'Upload data' }),
     ).toBeVisible();
+    expect(screen.getByText('Ask the assistant')).toBeVisible();
     expect(
-      screen.getByRole('button', { name: 'Ask the assistant' }),
-    ).toBeVisible();
-    expect(
-      screen.queryByRole('button', { name: 'Manage members' }),
+      screen.queryByRole('link', { name: 'Manage members' }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Manage data grants' }),
@@ -124,11 +130,20 @@ describe('AccessPage', () => {
     renderAccessPage();
 
     expect(
-      await screen.findByRole('button', { name: 'Manage members' }),
+      await screen.findByRole('link', { name: 'Manage members' }),
     ).toBeVisible();
     expect(
-      screen.getByRole('button', { name: 'Manage data grants' }),
-    ).toBeVisible();
+      screen.queryByRole('button', { name: 'Manage data grants' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Manage data grants')).toBeVisible();
+    expect(screen.getAllByText('Unavailable')).toHaveLength(2);
+    expect(
+      screen.getByRole('link', { name: 'Manage members' }),
+    ).toHaveAttribute('href', '/organization-1/members');
+    expect(screen.getByRole('link', { name: 'Upload data' })).toHaveAttribute(
+      'href',
+      '/datasets?organization=organization-1#upload-dataset',
+    );
   });
 
   it('shows an access error without presenting role results', async () => {
@@ -137,7 +152,11 @@ describe('AccessPage', () => {
       vi.fn(async (input: string) => {
         if (input === '/api/auth/organization/list') {
           return Response.json([
-            { id: 'organization_1', name: 'Organization 1' },
+            {
+              id: 'organization_1',
+              name: 'Organization 1',
+              slug: 'organization-1',
+            },
           ]);
         }
         return new Response(null, { status: 403 });

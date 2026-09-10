@@ -4,7 +4,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-wanted_major=$(cut -d. -f1 .nvmrc)
+wanted_version=$(<.nvmrc)
 
 if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
   # shellcheck disable=SC1091
@@ -12,10 +12,10 @@ if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
   nvm install || true
 fi
 
-# check-node-pins compares the pin files to each other, so the running version is asserted here.
-active_major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo none)
-if [[ $active_major != "$wanted_major" ]]; then
-  echo "Node $wanted_major is required, found $active_major." >&2
+# check-node-pins compares pin files, so the running version is asserted here.
+active_version=$(node -p 'process.versions.node' 2>/dev/null || echo none)
+if [[ $active_version != "$wanted_version" ]]; then
+  echo "Node $wanted_version is required, found $active_version." >&2
   exit 1
 fi
 

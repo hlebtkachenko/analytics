@@ -48,8 +48,9 @@ Nest APIs require the configured PostgreSQL roles and secret files, so use the
 Compose stack for integrated work:
 
 ```sh
+test -e .env || cp config/compose.environment.example .env
 pnpm secrets:local
-docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml up --build --detach --wait
+BAP_PUBLIC_HOST=http://localhost docker compose --env-file .env -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml up --build --detach --wait
 ```
 
 Use `docker compose ... logs --no-color` for stack diagnostics and
@@ -81,9 +82,16 @@ Each Conductor workspace is a separate git worktree, so everything the
 repository ignores starts missing: `node_modules`, build output, and the
 `.secrets` directory the Compose stack mounts all eleven of its secrets from.
 `.conductor/settings.toml` therefore runs `scripts/conductor-setup.sh` on
-creation, which asserts the running Node major against `.nvmrc`, installs with a
-frozen lockfile, and seeds the local secrets. Run that script by hand after a
-plain `git clone` to reach the same state.
+creation, which attempts the pinned nvm install, asserts the running Node
+version exactly against `.nvmrc`, installs with a frozen lockfile, and seeds the
+local secrets. Run that script by hand after a plain `git clone` to reach the
+same state.
+
+Conductor run scripts are nonconcurrent across this repository. The native
+development command includes the workbench's fixed port, and the integrated
+stack creates Docker resources outside the worktree. Use one workspace run
+script at a time; direct terminal commands remain available when deliberate
+parallel isolation has been arranged manually.
 
 Archiving a workspace deletes its directory and nothing outside it, so
 `scripts/conductor-archive.sh` runs first and removes the Compose project the

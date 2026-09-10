@@ -1,14 +1,9 @@
-import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-
 import { expect, test as publicTest } from '@playwright/test';
-import type { Browser, Locator, Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import axe from 'axe-core';
 
 import { expect as authenticatedExpect, test } from './authenticated-test';
 
-const baseURL =
-  process.env.BAP_OPERATIONAL_BASE_URL ?? 'http://localhost:39100';
 const organizationId =
   process.env.BAP_OPERATIONAL_ORGANIZATION_ID ?? 'bap-operational';
 const organizationSlug =
@@ -40,89 +35,6 @@ type AxeWindow = Window &
 type DatasetList = Readonly<{
   datasets: ReadonlyArray<Readonly<{ name: string; status: string }>>;
 }>;
-
-function composeArguments(command: readonly string[]): string[] {
-  const project = process.env.BAP_OPERATIONAL_COMPOSE_PROJECT;
-  return [
-    'compose',
-    ...(project ? ['--project-name', project] : []),
-    '-f',
-    'compose.yaml',
-    '-f',
-    'compose.development.yaml',
-    '-f',
-    'compose.mailpit.yaml',
-    ...command,
-  ];
-}
-
-async function runDocker(
-  command: readonly string[],
-  input?: string,
-): Promise<string> {
-  return await new Promise((resolve, reject) => {
-    const child = spawn('docker', composeArguments(command), {
-      cwd: process.cwd(),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let settled = false;
-    const timeout = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill();
-        reject(new Error('Operational fixture command timed out.'));
-      }
-    }, 30_000);
-
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      stdout += chunk;
-    });
-    child.once('error', () => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeout);
-        reject(new Error('Operational fixture command could not start.'));
-      }
-    });
-    child.once('close', (code) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeout);
-        if (code === 0) {
-          resolve(stdout);
-        } else {
-          reject(new Error('Operational fixture command failed.'));
-        }
-      }
-    });
-    child.stdin.end(input);
-  });
-}
-
-async function setPublicSignup(enabled: boolean): Promise<void> {
-  const stdout = await runDocker([
-    'run',
-    '--rm',
-    '--no-deps',
-    'migrator',
-    'node',
-    'node_modules/@bap/db/dist/cli.js',
-    'signup',
-    enabled ? 'enable' : 'disable',
-  ]);
-  const result: unknown = JSON.parse(stdout);
-
-  if (
-    typeof result !== 'object' ||
-    result === null ||
-    !('publicSignupEnabled' in result) ||
-    result.publicSignupEnabled !== enabled
-  ) {
-    throw new Error('Unexpected public sign-up state.');
-  }
-}
 
 async function expectNoAccessibilityViolations(page: Page): Promise<void> {
   await page.evaluate(axe.source);
@@ -200,6 +112,29 @@ async function expectIconControl(
   ).toBe(false);
 }
 
+async function expectDecorativeStatusIcon(heading: Locator): Promise<void> {
+  const icon = heading.locator('..').locator('svg');
+  await expect(icon).toHaveCount(1);
+  await expect(icon).toHaveAttribute('aria-hidden', 'true');
+  await expect(icon).toHaveAttribute('focusable', 'false');
+  await expect(icon).toHaveAttribute('fill', 'currentColor');
+  await expect(icon).toHaveAttribute('height', '20');
+  await expect(icon).toHaveAttribute('width', '20');
+  await expect(icon).not.toHaveAttribute('aria-label', /.+/);
+  await expect(icon).not.toHaveAttribute('tabindex', /.+/);
+  expect(
+    await icon.evaluate((element) => {
+      const rectangle = element.getBoundingClientRect();
+      return {
+        active: element === document.activeElement,
+        height: rectangle.height,
+        tabIndex: element.tabIndex,
+        width: rectangle.width,
+      };
+    }),
+  ).toEqual({ active: false, height: 20, tabIndex: -1, width: 20 });
+}
+
 async function focusWithKeyboard(page: Page, control: Locator): Promise<void> {
   await page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) {
@@ -232,92 +167,6 @@ function monitorPage(page: Page): Readonly<{
   });
   page.on('pageerror', (error) => pageErrors.push(error.message));
   return { consoleErrors, pageErrors };
-}
-
-async function signIn(
-  page: Page,
-  email: string,
-  secret: string,
-): Promise<void> {
-  await page.goto('/sign-in');
-  await page.getByLabel('Email address').fill(email);
-  await page.locator('input[name="password"]').fill(secret);
-  const signedIn = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'POST' &&
-      response.url().includes('/api/auth/sign-in/email'),
-  );
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  expect((await signedIn).ok()).toBe(true);
-}
-
-async function createInvitationRecipient(): Promise<
-  Readonly<{
-    email: string;
-    password: string;
-  }>
-> {
-  const suffix = randomUUID();
-  const email = `icon-recipient-${suffix}@example.test`;
-  const recipientPassword = `Operational-${randomUUID()}`;
-  const input = JSON.stringify({
-    email,
-    name: 'Icon Recipient',
-    organizationName: `Icon Recipient ${suffix}`,
-    organizationSlug: `icon-recipient-${suffix}`,
-    password: recipientPassword,
-  });
-  const stdout = await runDocker(
-    [
-      '--profile',
-      'bootstrap',
-      'run',
-      '--rm',
-      '--no-deps',
-      '-T',
-      '-e',
-      'BAP_E2E_SETUP=true',
-      'bootstrap-owner',
-      'node',
-      'apps/web/dist-cli/cli/create-synthetic-account.js',
-    ],
-    input,
-  );
-  const result: unknown = JSON.parse(stdout);
-
-  if (
-    typeof result !== 'object' ||
-    result === null ||
-    !('status' in result) ||
-    result.status !== 'created'
-  ) {
-    throw new Error('Synthetic invitation recipient was not created.');
-  }
-
-  return { email, password: recipientPassword };
-}
-
-async function verifyInvitationControl(
-  browser: Browser,
-  invitationId: string,
-  recipient: Readonly<{ email: string; password: string }>,
-): Promise<void> {
-  const context = await browser.newContext({ baseURL });
-  const page = await context.newPage();
-  const errors = monitorPage(page);
-
-  try {
-    await signIn(page, recipient.email, recipient.password);
-    await page.goto(`/invitation/${invitationId}`);
-    const accept = page.getByRole('button', { name: 'Accept invitation' });
-    await expectIconControl(accept, 'Accept invitation');
-    await focusWithKeyboard(page, accept);
-    await expectNoAccessibilityViolations(page);
-    expect(errors.consoleErrors).toEqual([]);
-    expect(errors.pageErrors).toEqual([]);
-  } finally {
-    await context.close();
-  }
 }
 
 publicTest(
@@ -359,16 +208,11 @@ publicTest(
       'Open Carbon React documentation',
     );
 
-    try {
-      await setPublicSignup(true);
-      await page.goto('/sign-up');
-      await expectIconControl(
-        page.getByRole('button', { name: 'Create account' }),
-        'Create account',
-      );
-    } finally {
-      await setPublicSignup(false);
-    }
+    await page.goto('/sign-up');
+    await expectIconControl(
+      page.getByRole('button', { name: 'Create account' }),
+      'Create account',
+    );
 
     await expectNoAccessibilityViolations(page);
     await expectNoDocumentOverflow(page);
@@ -378,7 +222,6 @@ publicTest(
 );
 
 test('proves every real authenticated icon control and Phase 10 exclusion', async ({
-  browser,
   page,
 }) => {
   test.skip(password.length === 0, 'BAP_OPERATIONAL_PASSWORD is required.');
@@ -414,12 +257,21 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   for (const [role, label] of [
     ['button', 'Sign out'],
     ['link', 'Open datasets'],
-    ['button', 'Manage members'],
-    ['button', 'Manage data grants'],
-    ['button', 'Upload data'],
-    ['button', 'Ask the assistant'],
+    ['link', 'Manage members'],
+    ['link', 'Upload data'],
   ] as const) {
     await expectIconControl(page.getByRole(role, { name: label }), label);
+  }
+  for (const label of ['Manage data grants', 'Ask the assistant']) {
+    const heading = page.getByRole('heading', { name: label });
+    await authenticatedExpect(heading).toBeVisible();
+    await expectDecorativeStatusIcon(heading);
+    await authenticatedExpect(
+      page.getByRole('button', { name: label }),
+    ).toHaveCount(0);
+    await authenticatedExpect(
+      page.getByRole('link', { name: label }),
+    ).toHaveCount(0);
   }
   await focusWithKeyboard(page, page.getByRole('button', { name: 'Sign out' }));
   await expectNoAccessibilityViolations(page);
@@ -508,35 +360,6 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   await expectNoAccessibilityViolations(page);
   await expectNoDocumentOverflow(page);
 
-  const recipient = await createInvitationRecipient();
-  const invitation = await page.evaluate(
-    async ({ email, organizationId: targetOrganizationId }) => {
-      const response = await fetch('/api/auth/organization/invite-member', {
-        body: JSON.stringify({
-          email,
-          organizationId: targetOrganizationId,
-          role: 'member',
-        }),
-        headers: { 'content-type': 'application/json' },
-        method: 'POST',
-      });
-      const body: unknown = await response.json();
-      return { body, status: response.status };
-    },
-    { email: recipient.email, organizationId },
-  );
-  authenticatedExpect(invitation.status).toBe(200);
-  authenticatedExpect(invitation.body).toEqual(
-    authenticatedExpect.objectContaining({
-      id: authenticatedExpect.any(String),
-    }),
-  );
-  await verifyInvitationControl(
-    browser,
-    (invitation.body as { id: string }).id,
-    recipient,
-  );
-
   for (const route of [
     '/organizations',
     '/organizations/new',
@@ -546,13 +369,36 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   ]) {
     await page.goto(route);
     await authenticatedExpect(page.locator('main')).toHaveCount(1);
-    await authenticatedExpect(page.locator('svg.cds--btn__icon')).toHaveCount(
-      0,
-    );
-    await authenticatedExpect(page.locator('[class*="cds--"]')).toHaveCount(0);
+    const temporaryContent = page.locator('main');
+    await authenticatedExpect(
+      temporaryContent.locator('svg.cds--btn__icon'),
+    ).toHaveCount(0);
+    await authenticatedExpect(
+      temporaryContent.locator('[class*="cds--"]'),
+    ).toHaveCount(0);
     await expectNoAccessibilityViolations(page);
     await expectNoDocumentOverflow(page);
   }
+
+  await page.setViewportSize({ height: 640, width: 320 });
+  await page.goto('/access');
+  await expectNoDocumentOverflow(page);
+  await page.getByRole('button', { name: 'Open primary navigation' }).click();
+  const smallScreenAccount = page
+    .getByRole('navigation', {
+      exact: true,
+      name: 'Primary navigation on small screens',
+    })
+    .getByRole('link', { name: 'Account' });
+  await focusWithKeyboard(page, smallScreenAccount);
+  await page.keyboard.press('Enter');
+  await authenticatedExpect(page).toHaveURL(/\/account$/);
+  await authenticatedExpect(
+    page.getByRole('heading', { exact: true, name: 'Account' }),
+  ).toBeVisible();
+  await authenticatedExpect(page.locator('main')).toHaveCount(1);
+  await expectNoDocumentOverflow(page);
+  await expectNoAccessibilityViolations(page);
 
   expect(errors.consoleErrors).toEqual([]);
   expect(errors.pageErrors).toEqual([]);
