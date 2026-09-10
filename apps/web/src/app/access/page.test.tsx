@@ -18,14 +18,28 @@ afterEach(() => {
 });
 
 const memberCapabilities = {
-  manageGrants: false,
+  createEntities: false,
+  deleteEntities: false,
+  manageEntityAccess: false,
   manageMembers: false,
-  uploadData: true,
+  manageOrganization: false,
+  updateEntities: false,
+  uploadData: false,
   useAi: true,
 };
+const adminCapabilities = {
+  ...memberCapabilities,
+  createEntities: true,
+  updateEntities: true,
+  uploadData: true,
+};
 const ownerCapabilities = {
-  manageGrants: true,
+  createEntities: true,
+  deleteEntities: true,
+  manageEntityAccess: true,
   manageMembers: true,
+  manageOrganization: true,
+  updateEntities: true,
   uploadData: true,
   useAi: true,
 };
@@ -53,6 +67,7 @@ describe('AccessPage', () => {
       if (input.includes('/application/')) {
         return Response.json({
           capabilities: memberCapabilities,
+          entityScope: { mode: 'all' },
           organizationId: 'organization_1',
           role: 'member',
           service: 'application-api',
@@ -60,6 +75,7 @@ describe('AccessPage', () => {
       }
       return Response.json({
         capabilities: memberCapabilities,
+        entityScope: { mode: 'all' },
         organizationId: 'organization_1',
         role: 'member',
         service: 'reporting-api',
@@ -89,7 +105,10 @@ describe('AccessPage', () => {
   });
 
   it('hides administrative actions from a member and offers them to an owner', async () => {
-    const respondWithRole = (role: 'member' | 'owner') =>
+    const respondWithRole = (
+      role: 'admin' | 'member' | 'owner',
+      entityScope: unknown = { mode: 'all' },
+    ) =>
       vi.fn(async (input: string) => {
         if (input === '/api/auth/organization/list') {
           return Response.json([
@@ -102,7 +121,12 @@ describe('AccessPage', () => {
         }
         return Response.json({
           capabilities:
-            role === 'owner' ? ownerCapabilities : memberCapabilities,
+            role === 'owner'
+              ? ownerCapabilities
+              : role === 'admin'
+                ? adminCapabilities
+                : memberCapabilities,
+          entityScope,
           organizationId: 'organization_1',
           role,
           service: input.includes('/application/')
@@ -111,19 +135,46 @@ describe('AccessPage', () => {
         });
       });
 
-    vi.stubGlobal('fetch', respondWithRole('member'));
+    vi.stubGlobal(
+      'fetch',
+      respondWithRole('member', {
+        legalEntityIds: ['00000000-0000-4000-8000-000000000001'],
+        mode: 'restricted',
+      }),
+    );
     renderAccessPage();
 
+    expect(await screen.findByText('Ask the assistant: Allowed')).toBeVisible();
+    expect(screen.getByText('Upload data: Not allowed')).toBeVisible();
     expect(
-      await screen.findByRole('link', { name: 'Upload data' }),
+      screen.getByText('Entity scope: Selected legal entities: 1'),
     ).toBeVisible();
-    expect(screen.getByText('Ask the assistant')).toBeVisible();
     expect(
       screen.queryByRole('link', { name: 'Manage members' }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'Manage data grants' }),
+      screen.queryByRole('link', { name: 'Manage entity access' }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Manage legal entities' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Upload data' }),
+    ).not.toBeInTheDocument();
+
+    cleanup();
+    vi.stubGlobal('fetch', respondWithRole('admin'));
+    renderAccessPage();
+
+    expect(
+      await screen.findByRole('link', { name: 'Manage legal entities' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('link', { name: 'Manage entity access' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Delete legal entities: Not allowed'),
+    ).toBeVisible();
 
     cleanup();
     vi.stubGlobal('fetch', respondWithRole('owner'));
@@ -132,18 +183,33 @@ describe('AccessPage', () => {
     expect(
       await screen.findByRole('link', { name: 'Manage members' }),
     ).toBeVisible();
-    expect(
-      screen.queryByRole('button', { name: 'Manage data grants' }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByText('Manage data grants')).toBeVisible();
-    expect(screen.getAllByText('Unavailable')).toHaveLength(2);
+    expect(screen.getByText('Entity scope: All legal entities')).toBeVisible();
+    expect(screen.getAllByText('Unavailable')).toHaveLength(1);
     expect(
       screen.getByRole('link', { name: 'Manage members' }),
     ).toHaveAttribute('href', '/organization-1/members');
+    expect(
+      screen.getByRole('link', { name: 'Manage entity access' }),
+    ).toHaveAttribute('href', '/organization-1/members');
+    expect(
+      screen.getByRole('link', { name: 'Manage legal entities' }),
+    ).toHaveAttribute('href', '/organization-1/entities');
     expect(screen.getByRole('link', { name: 'Upload data' })).toHaveAttribute(
       'href',
       '/datasets?organization=organization-1#upload-dataset',
     );
+    for (const capability of [
+      'Manage organization',
+      'Manage members',
+      'Manage entity access',
+      'Create legal entities',
+      'Edit legal entities',
+      'Delete legal entities',
+      'Upload data',
+      'Ask the assistant',
+    ]) {
+      expect(screen.getByText(`${capability}: Allowed`)).toBeVisible();
+    }
   });
 
   it('shows an access error without presenting role results', async () => {

@@ -122,10 +122,11 @@ describe('runTenantJob', () => {
     expect(fake.releases).toBe(1);
     expect(fake.queries.map(({ text }) => text)).toEqual([
       'begin',
-      "select set_config('bap.user_id', $1, true), set_config('bap.organization_id', $2, true)",
+      "select set_config('bap.user_id', $1, true), set_config('bap.organization_id', $2, true), set_config('bap.role', $3, true)",
       'commit',
     ]);
-    expect(fake.queries[1]?.values).toEqual(['user-1', 'org-1']);
+    // The role comes from the freshly resolved membership, never from the job payload.
+    expect(fake.queries[1]?.values).toEqual(['user-1', 'org-1', 'owner']);
   });
 
   it('rolls back and releases the client when the work fails', async () => {

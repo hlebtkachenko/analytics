@@ -3,11 +3,17 @@
 ## Current status
 
 The operational SaaS foundation, generic tenant-data and AI vertical slice,
-identity and organization milestones, and pinned Carbon workbench are delivered
-on `main`. The platform can ingest, list, view, export, summarize, embed, and
-chat about domain-free datasets while preserving organization and per-user data
-isolation. Business-domain schemas, analytics semantics, production rollout, and
-owner-dependent infrastructure remain deliberately deferred.
+identity and organization milestones, two-level tenancy, and pinned Carbon
+workbench are delivered on `main`. An organization is a workspace holding many
+legal entities; owners manage organization settings, members, invitations, and
+entity access, admins create and edit legal entities and upload data, and
+members are read-only aside from the assistant. Each admin or member can be
+scoped to all entities or an explicit subset, and datasets and uploads each
+belong to exactly one legal entity. The platform can ingest, list, view, export,
+summarize, embed, and chat about domain-free datasets while preserving
+organization and per-user data isolation. Business-domain schemas, analytics
+semantics, production rollout, and owner-dependent infrastructure remain
+deliberately deferred.
 
 ## Documentation map
 
@@ -51,6 +57,7 @@ owner-dependent infrastructure remain deliberately deferred.
 - [ADR 0008: operator-tier account erasure](adr/0008-account-erasure.md)
 - [ADR 0009: organization creation foundation](adr/0009-organization-creation-foundation.md)
 - [ADR 0010: organization route resolution](adr/0010-organization-route-resolution.md)
+- [ADR 0011: two-level tenancy](adr/0011-two-level-tenancy.md)
 
 Documentation must stay synchronized with commands, runtime behavior, and
 architecture decisions in the same change.

@@ -4,6 +4,7 @@ import {
   runMigrations,
   withTenantContext,
 } from '@bap/db';
+import { resolveMembership } from '@bap/db/access';
 import type { DatabaseConfiguration, DatabaseRole } from '@bap/db/config';
 import type { DatabasePool } from '@bap/db/pool';
 import {
@@ -13,6 +14,7 @@ import {
 import type { PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import type { TenantSelector } from '../tenant-access.js';
 import {
   listDatasets,
   readDatasetRowPage,
@@ -29,12 +31,30 @@ let apiPool: DatabasePool;
 let container: StartedPostgreSqlContainer;
 let migratorPool: DatabasePool;
 
-// Neutral placeholder tenants: a creator, a grantee in the same tenant, and a stranger in another one.
-const creator = { organizationId: 'org-1', userId: 'user-1' };
-const grantee = { organizationId: 'org-1', userId: 'user-2' };
-const stranger = { organizationId: 'org-2', userId: 'user-3' };
-let ownedDatasetId = '';
+// Neutral placeholder tenants: an owner, a read-only member beside it, and a stranger in another one.
+const creator: TenantSelector = {
+  organizationId: 'org-1',
+  role: 'owner',
+  userId: 'user-1',
+};
+const reader: TenantSelector = {
+  organizationId: 'org-1',
+  role: 'member',
+  userId: 'user-2',
+};
+const stranger: TenantSelector = {
+  organizationId: 'org-2',
+  role: 'owner',
+  userId: 'user-3',
+};
+// The absence of an entity filter is the "all entities" view.
+const allEntities = { legalEntityIds: null };
 let foreignDatasetId = '';
+let foreignEntityId = '';
+let ownedDatasetId = '';
+let ownedEntityId = '';
+let secondDatasetId = '';
+let secondEntityId = '';
 
 function configurationFor(role: DatabaseRole): DatabaseConfiguration {
   return {
@@ -49,7 +69,7 @@ function configurationFor(role: DatabaseRole): DatabaseConfiguration {
 }
 
 async function asTenant<T>(
-  tenant: { organizationId: string; userId: string },
+  tenant: TenantSelector,
   operation: (transaction: PoolClient) => Promise<T>,
 ): Promise<T> {
   const client = await apiPool.connect();
@@ -61,16 +81,32 @@ async function asTenant<T>(
   }
 }
 
-async function createDataset(tenant: {
-  organizationId: string;
-  userId: string;
-}): Promise<string> {
+// One neutral placeholder entity per organization; every dataset attaches to exactly one.
+async function createLegalEntity(
+  tenant: TenantSelector,
+  name: string,
+): Promise<string> {
   return asTenant(tenant, async (transaction) => {
     const created = await transaction.query<{ id: string }>(
-      `insert into app.dataset (organization_id, name, description, status, created_by)
-       values ($1, 'placeholder container', 'placeholder description', 'ready', $2)
+      `insert into app.legal_entity (organization_id, name, kind, created_by)
+       values ($1, $2, 'company', $3)
        returning id`,
-      [tenant.organizationId, tenant.userId],
+      [tenant.organizationId, name, tenant.userId],
+    );
+    return created.rows[0]?.id ?? '';
+  });
+}
+
+async function createDataset(
+  tenant: TenantSelector,
+  legalEntityId: string,
+): Promise<string> {
+  return asTenant(tenant, async (transaction) => {
+    const created = await transaction.query<{ id: string }>(
+      `insert into app.dataset (organization_id, legal_entity_id, name, description, status, created_by)
+       values ($1, $2, 'placeholder container', 'placeholder description', 'ready', $3)
+       returning id`,
+      [tenant.organizationId, legalEntityId, tenant.userId],
     );
     const datasetId = created.rows[0]?.id ?? '';
     await transaction.query(
@@ -138,13 +174,23 @@ beforeAll(async () => {
 
   await rootPool.end();
   apiPool = createDatabasePool(configurationFor('bap_api'));
-  ownedDatasetId = await createDataset(creator);
-  foreignDatasetId = await createDataset(stranger);
+  ownedEntityId = await createLegalEntity(creator, 'Placeholder Holding');
+  secondEntityId = await createLegalEntity(creator, 'Placeholder Trader');
+  foreignEntityId = await createLegalEntity(stranger, 'Placeholder Foreign');
+  ownedDatasetId = await createDataset(creator, ownedEntityId);
+  secondDatasetId = await createDataset(creator, secondEntityId);
+  foreignDatasetId = await createDataset(stranger, foreignEntityId);
+  // The member is restricted to the second entity only, which the API resolver reads back.
   await asTenant(creator, async (transaction) => {
     await transaction.query(
-      `insert into app.data_grants (organization_id, user_id, resource_type, resource_id, scope)
-       values ($1, $2, 'dataset', $3, 'read')`,
-      [creator.organizationId, grantee.userId, ownedDatasetId],
+      `insert into app.member_entity_scope (organization_id, user_id, mode, updated_by)
+       values ($1, $2, 'restricted', $3)`,
+      [creator.organizationId, reader.userId, creator.userId],
+    );
+    await transaction.query(
+      `insert into app.legal_entity_access (organization_id, user_id, legal_entity_id, created_by)
+       values ($1, $2, $3, $4)`,
+      [creator.organizationId, reader.userId, secondEntityId, creator.userId],
     );
   });
 });
@@ -156,59 +202,101 @@ afterAll(async () => {
 
 describe('dataset read and export queries against PostgreSQL', () => {
   it('never returns another tenant dataset or its rows', async () => {
-    const strangerList = await listDatasets(apiPool, stranger);
+    const strangerList = await listDatasets(apiPool, {
+      ...stranger,
+      ...allEntities,
+    });
     const strangerPage = await readDatasetRowPage(apiPool, {
       ...stranger,
+      ...allEntities,
       after: null,
       datasetId: ownedDatasetId,
       pageSize: 10,
     });
-    // The same subject with a forged tenant selector still resolves to nothing.
-    const forgedTenant = await readDatasetRowPage(apiPool, {
-      after: null,
-      datasetId: ownedDatasetId,
+    // A forged tenant selector cannot be built at all: the resolver denies this subject that organization.
+    const forgedMembership = await resolveMembership(apiPool, {
       organizationId: creator.organizationId,
-      pageSize: 10,
-      userId: stranger.userId,
+      subjectId: stranger.userId,
     });
 
     expect(strangerList.map((dataset) => dataset.id)).toEqual([
       foreignDatasetId,
     ]);
     expect(strangerPage).toBeNull();
-    expect(forgedTenant).toBeNull();
+    expect(forgedMembership).toBeNull();
   });
 
-  it('lists a dataset with its row count for the creator', async () => {
-    const owned = await listDatasets(apiPool, creator);
+  it('lists every dataset of the organization with its row count and entity', async () => {
+    const owned = await listDatasets(apiPool, { ...creator, ...allEntities });
 
-    expect(owned).toHaveLength(1);
-    expect(owned[0]).toMatchObject({
+    expect(owned.map((dataset) => dataset.id).sort()).toEqual(
+      [ownedDatasetId, secondDatasetId].sort(),
+    );
+    expect(
+      owned.find((dataset) => dataset.id === ownedDatasetId),
+    ).toMatchObject({
       description: 'placeholder description',
       id: ownedDatasetId,
+      legalEntityId: ownedEntityId,
       name: 'placeholder container',
       rowCount: ROW_COUNT,
       status: 'ready',
     });
   });
 
-  it('lets a grant read the dataset but never write it', async () => {
-    const visible = await listDatasets(apiPool, grantee);
+  it('applies the entity filter the scope resolver produced', async () => {
+    const scoped = await listDatasets(apiPool, {
+      ...reader,
+      legalEntityIds: [secondEntityId],
+    });
+    const inScope = await readDatasetRowPage(apiPool, {
+      ...reader,
+      after: null,
+      datasetId: secondDatasetId,
+      legalEntityIds: [secondEntityId],
+      pageSize: 10,
+    });
+    const outOfScope = await readDatasetRowPage(apiPool, {
+      ...reader,
+      after: null,
+      datasetId: ownedDatasetId,
+      legalEntityIds: [secondEntityId],
+      pageSize: 10,
+    });
+    // An empty list is a caller who may see nothing, which is not the same as no filter at all.
+    const nothing = await listDatasets(apiPool, {
+      ...reader,
+      legalEntityIds: [],
+    });
+
+    expect(scoped.map((dataset) => dataset.id)).toEqual([secondDatasetId]);
+    expect(inScope?.rows).toHaveLength(ROW_COUNT);
+    // A dataset outside the scope answers exactly like a missing one.
+    expect(outOfScope).toBeNull();
+    expect(nothing).toEqual([]);
+  });
+
+  it('lets a read-only member read the datasets and never write them', async () => {
+    const visible = await listDatasets(apiPool, { ...reader, ...allEntities });
     const page = await readDatasetRowPage(apiPool, {
-      ...grantee,
+      ...reader,
+      ...allEntities,
       after: null,
       datasetId: ownedDatasetId,
       pageSize: 10,
     });
 
-    expect(visible.map((dataset) => dataset.id)).toEqual([ownedDatasetId]);
+    // Without the application filter row level security shows the member the whole organization.
+    expect(visible.map((dataset) => dataset.id).sort()).toEqual(
+      [ownedDatasetId, secondDatasetId].sort(),
+    );
     expect(page?.columns.map((column) => column.name)).toEqual([
       'label',
       'count',
     ]);
     expect(page?.rows).toHaveLength(ROW_COUNT);
 
-    const writes = await asTenant(grantee, async (transaction) => {
+    const writes = await asTenant(reader, async (transaction) => {
       const updatedRow = await transaction.query(
         "update app.dataset_row set data = '{}'::jsonb where dataset_id = $1",
         [ownedDatasetId],
@@ -228,21 +316,22 @@ describe('dataset read and export queries against PostgreSQL', () => {
       };
     });
 
-    // A read grant confers visibility only, so every write silently matches no row.
+    // The member role confers visibility only, so every write silently matches no row.
     expect(writes).toEqual({ deletedRow: 0, renamed: 0, updatedRow: 0 });
 
     await expect(
-      asTenant(grantee, (transaction) =>
+      asTenant(reader, (transaction) =>
         transaction.query(
           `insert into app.dataset_row (dataset_id, organization_id, row_number, data)
            values ($1, $2, 99, '{}'::jsonb)`,
-          [ownedDatasetId, grantee.organizationId],
+          [ownedDatasetId, reader.organizationId],
         ),
       ),
     ).rejects.toThrow(/row-level security/i);
 
     const unchanged = await readDatasetRowPage(apiPool, {
       ...creator,
+      ...allEntities,
       after: null,
       datasetId: ownedDatasetId,
       pageSize: 10,
@@ -254,18 +343,21 @@ describe('dataset read and export queries against PostgreSQL', () => {
   it('walks the rows by keyset instead of by offset', async () => {
     const first = await readDatasetRowPage(apiPool, {
       ...creator,
+      ...allEntities,
       after: null,
       datasetId: ownedDatasetId,
       pageSize: 2,
     });
     const second = await readDatasetRowPage(apiPool, {
       ...creator,
+      ...allEntities,
       after: 1,
       datasetId: ownedDatasetId,
       pageSize: 2,
     });
     const last = await readDatasetRowPage(apiPool, {
       ...creator,
+      ...allEntities,
       after: 3,
       datasetId: ownedDatasetId,
       pageSize: 2,
@@ -288,6 +380,7 @@ describe('dataset read and export queries against PostgreSQL', () => {
     try {
       for await (const batch of streamDatasetRows(apiPool, {
         ...creator,
+        ...allEntities,
         batchSize: 2,
         datasetId: ownedDatasetId,
       })) {
@@ -308,6 +401,7 @@ describe('dataset read and export queries against PostgreSQL', () => {
     apiPool.on('acquire', countEarly);
     const iterator = streamDatasetRows(apiPool, {
       ...creator,
+      ...allEntities,
       batchSize: 2,
       datasetId: ownedDatasetId,
     });
@@ -320,9 +414,10 @@ describe('dataset read and export queries against PostgreSQL', () => {
     expect(earlyAcquired).toBe(1);
   });
 
-  it('hides a dataset from a tenant that has no grant for it', async () => {
+  it('hides a dataset that belongs to another organization', async () => {
     const page = await readDatasetRowPage(apiPool, {
       ...creator,
+      ...allEntities,
       after: null,
       datasetId: foreignDatasetId,
       pageSize: 10,

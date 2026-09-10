@@ -52,28 +52,31 @@ describe('OrganizationSettingsPage', () => {
     expect(screen.getByLabelText('Slug')).toHaveValue('organization-one');
   });
 
-  it('does not offer the update form to a member', async () => {
-    mocks.resolveOrganizationRouteForRequest.mockResolvedValue({
-      id: 'organization-1',
-      name: 'Organization One',
-      role: 'member',
-      slug: 'organization-one',
-    });
+  it.each(['admin', 'member'] as const)(
+    'does not offer the update form to an %s',
+    async (role) => {
+      mocks.resolveOrganizationRouteForRequest.mockResolvedValue({
+        id: 'organization-1',
+        name: 'Organization One',
+        role,
+        slug: 'organization-one',
+      });
 
-    render(
-      await OrganizationSettingsPage({
-        params: Promise.resolve({ orgSlug: 'organization-one' }),
-        searchParams: Promise.resolve({}),
-      }),
-    );
+      render(
+        await OrganizationSettingsPage({
+          params: Promise.resolve({ orgSlug: 'organization-one' }),
+          searchParams: Promise.resolve({}),
+        }),
+      );
 
-    expect(
-      screen.queryByRole('form', { name: 'Organization settings' }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'You do not have permission to update this organization.',
-      ),
-    ).toBeVisible();
-  });
+      expect(
+        screen.queryByRole('form', { name: 'Organization settings' }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByText(
+          'You do not have permission to update this organization.',
+        ),
+      ).toBeVisible();
+    },
+  );
 });

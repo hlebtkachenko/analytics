@@ -21,6 +21,7 @@ describe('AccessController', () => {
     const controller = new AccessController({
       checkReadiness: async () => true,
       getPoolStatistics: () => ({ idle: 0, total: 0, waiting: 0 }),
+      readEntityScope: async () => ({ mode: 'all' as const }),
       resolve: async () => ({ emailVerified: true, role: 'admin' }),
     } as MembershipResolver);
 
@@ -33,14 +34,44 @@ describe('AccessController', () => {
       }),
     ).resolves.toEqual({
       capabilities: {
-        manageGrants: false,
-        manageMembers: true,
+        createEntities: true,
+        deleteEntities: false,
+        manageEntityAccess: false,
+        manageMembers: false,
+        manageOrganization: false,
+        updateEntities: true,
         uploadData: true,
         useAi: true,
       },
+      entityScope: { mode: 'all' },
       organizationId: 'organization_1',
       role: 'admin',
       service: 'reporting-api',
+    });
+  });
+
+  it('mirrors a restricted entity scope in the response', async () => {
+    const legalEntityId = '4a2b7c1e-9f5d-4c3a-8b21-6e0f7d5a4c39';
+    const controller = new AccessController({
+      checkReadiness: async () => true,
+      getPoolStatistics: () => ({ idle: 0, total: 0, waiting: 0 }),
+      readEntityScope: async () => ({
+        legalEntityIds: [legalEntityId],
+        mode: 'restricted' as const,
+      }),
+      resolve: async () => ({ emailVerified: true, role: 'member' }),
+    } as MembershipResolver);
+
+    await expect(
+      controller.getAccess('organization_1', {
+        headers: {},
+        method: 'GET',
+        resourcePrincipal: { issuedAt: 1, subject: 'user_1' },
+        url: '/v1/organizations/organization_1/access',
+      }),
+    ).resolves.toMatchObject({
+      entityScope: { legalEntityIds: [legalEntityId], mode: 'restricted' },
+      role: 'member',
     });
   });
 
@@ -48,6 +79,7 @@ describe('AccessController', () => {
     const controller = new AccessController({
       checkReadiness: async () => true,
       getPoolStatistics: () => ({ idle: 0, total: 0, waiting: 0 }),
+      readEntityScope: async () => ({ mode: 'all' as const }),
       resolve: async () => ({ emailVerified: false, role: null }),
     } as MembershipResolver);
 

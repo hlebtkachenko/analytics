@@ -2,6 +2,8 @@ import { withTenantContext } from '@bap/db';
 import type { DatabasePool } from '@bap/db/pool';
 import type { PoolClient } from 'pg';
 
+import type { TenantSelector } from '../tenant-access.js';
+
 // Must equal the width of app.dataset_embedding.embedding; a provider answer of any other width is rejected here.
 export const EMBEDDING_DIMENSIONS = 1_536;
 
@@ -45,18 +47,14 @@ export interface SimilarDataset {
   name: string;
 }
 
-export interface SearchDatasetsByEmbeddingInput {
+export interface SearchDatasetsByEmbeddingInput extends TenantSelector {
   embedding: readonly number[];
   limit: number;
-  organizationId: string;
-  userId: string;
 }
 
-export interface FindDatasetsNearDatasetInput {
+export interface FindDatasetsNearDatasetInput extends TenantSelector {
   datasetId: string;
   limit: number;
-  organizationId: string;
-  userId: string;
 }
 
 // The vector crosses as one bound parameter, never as SQL text, and the provider answer is validated first.
@@ -74,7 +72,8 @@ export function toVectorLiteral(embedding: readonly number[]): string {
   return `[${embedding.join(',')}]`;
 }
 
-// Only datasets this subject created are listed: app.dataset_embedding writes follow app.dataset_is_writable.
+// Only datasets this subject created are listed, which keeps one backfill bounded;
+// writing them also needs app.dataset_is_writable, so a read-only member embeds nothing.
 export async function loadEmbeddingCandidates(
   transaction: PoolClient,
   input: LoadEmbeddingCandidatesInput,
@@ -167,33 +166,29 @@ export async function searchDatasetsByEmbedding(
   const client = await pool.connect();
 
   try {
-    return await withTenantContext(
-      client,
-      { organizationId: input.organizationId, userId: input.userId },
-      async (transaction) => {
-        await transaction.query(ENABLE_ITERATIVE_SCAN);
-        const result = await transaction.query<{
-          dataset_id: string;
-          distance: number;
-          name: string;
-        }>(
-          `select d.id as dataset_id,
+    return await withTenantContext(client, input, async (transaction) => {
+      await transaction.query(ENABLE_ITERATIVE_SCAN);
+      const result = await transaction.query<{
+        dataset_id: string;
+        distance: number;
+        name: string;
+      }>(
+        `select d.id as dataset_id,
                   d.name,
                   (e.embedding <=> $1::vector)::float8 as distance
            from app.dataset_embedding as e
            join app.dataset as d on d.id = e.dataset_id
            order by e.embedding <=> $1::vector
            limit $2`,
-          [literal, input.limit],
-        );
+        [literal, input.limit],
+      );
 
-        return result.rows.map((row) => ({
-          datasetId: row.dataset_id,
-          distance: Number(row.distance),
-          name: row.name,
-        }));
-      },
-    );
+      return result.rows.map((row) => ({
+        datasetId: row.dataset_id,
+        distance: Number(row.distance),
+        name: row.name,
+      }));
+    });
   } finally {
     client.release();
   }
@@ -207,17 +202,14 @@ export async function findDatasetsNearDataset(
   const client = await pool.connect();
 
   try {
-    return await withTenantContext(
-      client,
-      { organizationId: input.organizationId, userId: input.userId },
-      async (transaction) => {
-        await transaction.query(ENABLE_ITERATIVE_SCAN);
-        const result = await transaction.query<{
-          dataset_id: string;
-          distance: number;
-          name: string;
-        }>(
-          `select other.dataset_id,
+    return await withTenantContext(client, input, async (transaction) => {
+      await transaction.query(ENABLE_ITERATIVE_SCAN);
+      const result = await transaction.query<{
+        dataset_id: string;
+        distance: number;
+        name: string;
+      }>(
+        `select other.dataset_id,
                   d.name,
                   (other.embedding <=> source.embedding)::float8 as distance
            from app.dataset_embedding as source
@@ -226,16 +218,15 @@ export async function findDatasetsNearDataset(
            where source.dataset_id = $1::uuid
            order by other.embedding <=> source.embedding
            limit $2`,
-          [input.datasetId, input.limit],
-        );
+        [input.datasetId, input.limit],
+      );
 
-        return result.rows.map((row) => ({
-          datasetId: row.dataset_id,
-          distance: Number(row.distance),
-          name: row.name,
-        }));
-      },
-    );
+      return result.rows.map((row) => ({
+        datasetId: row.dataset_id,
+        distance: Number(row.distance),
+        name: row.name,
+      }));
+    });
   } finally {
     client.release();
   }

@@ -2,6 +2,10 @@
 
 **Date:** 2026-09-01
 
+Superseded in part by 2026-09-10-workspace-legal-entities.md: the unimplemented
+data-grant capability described below no longer exists, replaced by legal
+entities and per-member entity scope.
+
 ## Problem
 
 Signed-in users can reach `/access` and `/datasets`, but the application has no

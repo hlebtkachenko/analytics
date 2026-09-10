@@ -10,6 +10,12 @@ import {
   removeOrganizationMemberAction,
   updateOrganizationMemberRoleAction,
 } from '../../../lib/organizations/actions';
+import { updateMemberEntityScopeAction } from '../../../lib/organizations/entity-actions';
+import {
+  readLegalEntities,
+  readMemberEntityScope,
+} from '../../../lib/organizations/entities';
+import type { EntityScope } from '../../../lib/organizations/entities';
 import { resolveOrganizationRouteForRequest } from '../../../lib/organizations/resolver';
 
 export default async function OrganizationMembersPage({
@@ -44,12 +50,28 @@ export default async function OrganizationMembersPage({
     memberResult.status === 'fulfilled' ? memberResult.value : null;
   const invitations =
     invitationResult.status === 'fulfilled' ? invitationResult.value : null;
-  const canManage =
-    organization.role === 'owner' || organization.role === 'admin';
-  const assignableRoles =
-    organization.role === 'owner'
-      ? (['owner', 'admin', 'member'] as const)
-      : (['admin', 'member'] as const);
+  // ADR 0011 leaves membership, invitations and entity access with the owner alone.
+  const canManage = organization.role === 'owner';
+  const assignableRoles = ['owner', 'admin', 'member'] as const;
+  const scopedMembers =
+    canManage && members !== null
+      ? members.members.filter((member) => member.role !== 'owner')
+      : [];
+  const legalEntities = canManage
+    ? await readLegalEntities(organization.id)
+    : null;
+  // One scope read per manageable member, bounded by the same 100-member list.
+  const memberScopes = new Map<string, EntityScope | null>(
+    await Promise.all(
+      scopedMembers.map(
+        async (member) =>
+          [
+            member.userId,
+            await readMemberEntityScope(organization.id, member.userId),
+          ] as const,
+      ),
+    ),
+  );
   const { result } = await searchParams;
   const invite = inviteOrganizationMemberAction.bind(null, organization.slug);
   const updateRole = updateOrganizationMemberRoleAction.bind(
@@ -57,6 +79,10 @@ export default async function OrganizationMembersPage({
     organization.slug,
   );
   const removeMember = removeOrganizationMemberAction.bind(
+    null,
+    organization.slug,
+  );
+  const updateEntityScope = updateMemberEntityScopeAction.bind(
     null,
     organization.slug,
   );
@@ -121,9 +147,19 @@ export default async function OrganizationMembersPage({
         {members !== null && members.members.length > 0 ? (
           <ul>
             {members.members.map((member) => {
-              const canManageTarget =
-                organization.role === 'owner' ||
-                (organization.role === 'admin' && member.role !== 'owner');
+              const canManageTarget = canManage;
+              const scope = memberScopes.get(member.userId);
+              const restricted =
+                scope !== undefined &&
+                scope !== null &&
+                scope.mode === 'restricted';
+              const selectedEntities = new Set(
+                scope !== undefined &&
+                  scope !== null &&
+                  scope.mode === 'restricted'
+                  ? scope.legalEntityIds
+                  : [],
+              );
 
               return (
                 <li key={member.id}>
@@ -168,6 +204,62 @@ export default async function OrganizationMembersPage({
                         <button type="submit">Remove member</button>
                       </form>
                     </>
+                  ) : null}
+                  {canManage &&
+                  member.role !== 'owner' &&
+                  legalEntities !== null ? (
+                    <form
+                      action={updateEntityScope}
+                      aria-label={`Entity access for ${member.user.email}`}
+                    >
+                      <input
+                        name="userId"
+                        type="hidden"
+                        value={member.userId}
+                      />
+                      <fieldset>
+                        <legend>Entity access</legend>
+                        <p>
+                          <input
+                            defaultChecked={!restricted}
+                            id={`scope-all-${member.id}`}
+                            name="mode"
+                            type="radio"
+                            value="all"
+                          />
+                          <label htmlFor={`scope-all-${member.id}`}>
+                            All entities
+                          </label>
+                        </p>
+                        <p>
+                          <input
+                            defaultChecked={restricted}
+                            id={`scope-restricted-${member.id}`}
+                            name="mode"
+                            type="radio"
+                            value="restricted"
+                          />
+                          <label htmlFor={`scope-restricted-${member.id}`}>
+                            Selected entities
+                          </label>
+                        </p>
+                        {legalEntities.map((entity) => (
+                          <p key={entity.id}>
+                            <input
+                              defaultChecked={selectedEntities.has(entity.id)}
+                              id={`scope-${member.id}-${entity.id}`}
+                              name="legalEntityIds"
+                              type="checkbox"
+                              value={entity.id}
+                            />
+                            <label htmlFor={`scope-${member.id}-${entity.id}`}>
+                              {entity.name}
+                            </label>
+                          </p>
+                        ))}
+                      </fieldset>
+                      <button type="submit">Save entity access</button>
+                    </form>
                   ) : null}
                 </li>
               );

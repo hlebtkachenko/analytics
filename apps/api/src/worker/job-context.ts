@@ -48,9 +48,14 @@ export async function runTenantJob<T>(
   const client = await options.pool.connect();
 
   try {
+    // The role is re-resolved here, never carried in the payload, so a demoted subject loses its writes.
     return await withTenantContext(
       client,
-      { organizationId: payload.organizationId, userId: payload.userId },
+      {
+        organizationId: payload.organizationId,
+        role: membership.role,
+        userId: payload.userId,
+      },
       (transaction) => options.work(transaction, payload),
     );
   } finally {

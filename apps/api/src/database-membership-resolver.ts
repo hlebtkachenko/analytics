@@ -1,10 +1,13 @@
 import { Injectable, type OnModuleDestroy } from '@nestjs/common';
+import { readEntityScope, withTenantContext } from '@bap/db';
 import { checkMigrationCompatibility, resolveMembership } from '@bap/db/access';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 import type { DatabasePool } from '@bap/db/pool';
+import type { EntityScope } from '@bap/security';
 
 import { MembershipResolver } from './membership-resolver.js';
+import type { TenantSelector } from './tenant-access.js';
 
 @Injectable()
 export class DatabaseMembershipResolver
@@ -37,6 +40,19 @@ export class DatabaseMembershipResolver
   async onModuleDestroy(): Promise<void> {
     if (this.poolPromise !== undefined) {
       await (await this.poolPromise).end();
+    }
+  }
+
+  async readEntityScope(tenant: TenantSelector): Promise<EntityScope> {
+    const pool = await this.getPool();
+    const client = await pool.connect();
+
+    try {
+      return await withTenantContext(client, tenant, (transaction) =>
+        readEntityScope(transaction, tenant),
+      );
+    } finally {
+      client.release();
     }
   }
 

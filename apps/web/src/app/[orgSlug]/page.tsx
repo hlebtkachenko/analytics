@@ -32,6 +32,9 @@ export default async function OrganizationPage({
             <Link href={`/${organization.slug}/members`}>Members</Link>
           </li>
           <li>
+            <Link href={`/${organization.slug}/entities`}>Entities</Link>
+          </li>
+          <li>
             <Link href={`/${organization.slug}/settings`}>Settings</Link>
           </li>
           <li>

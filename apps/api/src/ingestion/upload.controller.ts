@@ -4,19 +4,19 @@ import { rename } from 'node:fs/promises';
 import {
   BadRequestException,
   Controller,
-  ForbiddenException,
   Inject,
   Param,
   Post,
   Req,
-  UnauthorizedException,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { MulterModuleOptions } from '@nestjs/platform-express';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiBody,
   ApiConsumes,
   ApiCreatedResponse,
   ApiForbiddenResponse,
@@ -25,8 +25,9 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import {
+  legalEntityIdentifierSchema,
+  legalEntityInScope,
   organizationIdentifierSchema,
-  resolveOrganizationAccess,
 } from '@bap/security';
 import { z } from 'zod';
 
@@ -34,6 +35,7 @@ import { MembershipResolver } from '../membership-resolver.js';
 import type { AuthenticatedRequest } from '../request-context.js';
 import { ResourceJwtGuard } from '../resource-jwt.guard.js';
 import { SubjectRateLimitGuard } from '../subject-rate-limit.guard.js';
+import { resolveTenantAccess } from '../tenant-access.js';
 import { MAX_UPLOAD_BYTES } from './contract.js';
 import type { UploadAcceptedResponse } from './contract.js';
 import { IngestionQueue } from './ingestion-queue.js';
@@ -106,7 +108,8 @@ const multerOptions: MulterModuleOptions = {
   // fields and files bound the shape exactly, so no separate part count is needed.
   limits: {
     fieldSize: 1_024,
-    fields: 0,
+    // Exactly one text field: the legal entity the upload belongs to.
+    fields: 1,
     fileSize: MAX_UPLOAD_BYTES,
     files: 1,
     headerPairs: 32,
@@ -128,6 +131,16 @@ export class UploadController {
   @UseInterceptors(FileInterceptor('file', multerOptions))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Stage a CSV or XLSX upload for ingestion' })
+  @ApiBody({
+    schema: {
+      properties: {
+        file: { format: 'binary', type: 'string' },
+        legalEntityId: { format: 'uuid', type: 'string' },
+      },
+      required: ['file', 'legalEntityId'],
+      type: 'object',
+    },
+  })
   @ApiCreatedResponse({
     schema: {
       additionalProperties: false,
@@ -139,6 +152,9 @@ export class UploadController {
       type: 'object',
     },
   })
+  @ApiBadRequestResponse({
+    description: 'The file or the legal entity field is unusable',
+  })
   @ApiUnauthorizedResponse({ description: 'The resource token is invalid' })
   @ApiForbiddenResponse({ description: 'Organization access is denied' })
   @ApiPayloadTooLargeResponse({ description: 'The upload exceeds 25 MB' })
@@ -147,12 +163,6 @@ export class UploadController {
     organizationId: string,
     @Req() request: AuthenticatedRequest,
   ): Promise<UploadAcceptedResponse> {
-    const principal = request.resourcePrincipal;
-
-    if (principal === undefined) {
-      throw new UnauthorizedException();
-    }
-
     const received = request.file;
     const stagingDirectory = loadStagingDirectory(process.env);
     let cleanupTemporaryPath = received?.path ?? null;
@@ -166,22 +176,24 @@ export class UploadController {
         temporaryPath: received?.path,
       });
 
-      if (!file.success) {
+      const legalEntityId = legalEntityIdentifierSchema.safeParse(
+        request.body?.legalEntityId,
+      );
+
+      if (!file.success || !legalEntityId.success) {
         throw new BadRequestException();
       }
 
-      const membership = await this.memberships.resolve(
-        principal.subject,
+      const { entityScope, tenant } = await resolveTenantAccess({
+        capability: 'uploadData',
+        memberships: this.memberships,
         organizationId,
-      );
-      const access = resolveOrganizationAccess(
-        'application-api',
-        organizationId,
-        membership,
-      );
+        request,
+      });
 
-      if (access === null || !access.capabilities.uploadData) {
-        throw new ForbiddenException();
+      // An out-of-scope entity and an unknown one answer alike, so the scope leaks nothing.
+      if (!legalEntityInScope(entityScope, legalEntityId.data)) {
+        throw new BadRequestException();
       }
 
       const uploadId = randomUUID();
@@ -193,26 +205,26 @@ export class UploadController {
       cleanupTemporaryPath = null;
       cleanupUploadId = uploadId;
 
-      await this.uploads.record({
+      const recorded = await this.uploads.record({
+        ...tenant,
         byteSize: file.data.size,
         filename: file.data.originalname,
-        organizationId,
+        legalEntityId: legalEntityId.data,
         uploadId,
-        userId: principal.subject,
       });
+
+      if (!recorded) {
+        throw new BadRequestException();
+      }
 
       try {
         await this.queue.enqueue({
           organizationId,
           uploadId,
-          userId: principal.subject,
+          userId: tenant.userId,
         });
       } catch (error) {
-        await this.uploads.fail({
-          organizationId,
-          uploadId,
-          userId: principal.subject,
-        });
+        await this.uploads.fail({ ...tenant, uploadId });
         throw error;
       }
 

@@ -3,6 +3,10 @@
 - Status: accepted
 - Date: 2026-08-31
 
+Amended by [ADR 0011](0011-two-level-tenancy.md): the same slug-resolved
+organization now scopes many legal entities rather than acting alone as the
+tenant.
+
 ## Context
 
 Organization URLs need a human-readable slug, while application and reporting

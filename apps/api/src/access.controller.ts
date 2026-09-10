@@ -1,13 +1,4 @@
-import {
-  Controller,
-  ForbiddenException,
-  Get,
-  Inject,
-  Param,
-  Req,
-  UnauthorizedException,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Inject, Param, Req, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiForbiddenResponse,
@@ -17,14 +8,26 @@ import {
 } from '@nestjs/swagger';
 import {
   organizationIdentifierSchema,
-  resolveOrganizationAccess,
   type OrganizationAccessResponse,
 } from '@bap/security';
 
+import { entityScopeOpenApiSchema } from './legal-entities/contract.js';
 import { MembershipResolver } from './membership-resolver.js';
 import type { AuthenticatedRequest } from './request-context.js';
 import { ResourceJwtGuard } from './resource-jwt.guard.js';
 import { SubjectRateLimitGuard } from './subject-rate-limit.guard.js';
+import { resolveTenantAccess } from './tenant-access.js';
+
+const capabilityNames = [
+  'createEntities',
+  'deleteEntities',
+  'manageEntityAccess',
+  'manageMembers',
+  'manageOrganization',
+  'updateEntities',
+  'uploadData',
+  'useAi',
+];
 
 @ApiBearerAuth('resource-token')
 @Controller({ path: 'organizations', version: '1' })
@@ -43,20 +46,24 @@ export class AccessController {
       properties: {
         capabilities: {
           additionalProperties: false,
-          properties: {
-            manageGrants: { type: 'boolean' },
-            manageMembers: { type: 'boolean' },
-            uploadData: { type: 'boolean' },
-            useAi: { type: 'boolean' },
-          },
-          required: ['manageGrants', 'manageMembers', 'uploadData', 'useAi'],
+          properties: Object.fromEntries(
+            capabilityNames.map((name) => [name, { type: 'boolean' }]),
+          ),
+          required: capabilityNames,
           type: 'object',
         },
+        entityScope: entityScopeOpenApiSchema,
         organizationId: { type: 'string' },
         role: { enum: ['owner', 'admin', 'member'], type: 'string' },
         service: { enum: ['application-api'], type: 'string' },
       },
-      required: ['service', 'organizationId', 'role', 'capabilities'],
+      required: [
+        'service',
+        'organizationId',
+        'role',
+        'capabilities',
+        'entityScope',
+      ],
       type: 'object',
     },
   })
@@ -67,25 +74,11 @@ export class AccessController {
     organizationId: string,
     @Req() request: AuthenticatedRequest,
   ): Promise<OrganizationAccessResponse> {
-    const principal = request.resourcePrincipal;
-
-    if (principal === undefined) {
-      throw new UnauthorizedException();
-    }
-
-    const membership = await this.memberships.resolve(
-      principal.subject,
+    const { access } = await resolveTenantAccess({
+      memberships: this.memberships,
       organizationId,
-    );
-    const access = resolveOrganizationAccess(
-      'application-api',
-      organizationId,
-      membership,
-    );
-
-    if (access === null) {
-      throw new ForbiddenException();
-    }
+      request,
+    });
 
     return access;
   }

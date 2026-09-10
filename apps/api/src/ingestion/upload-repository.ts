@@ -4,23 +4,23 @@ import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 import type { DatabasePool } from '@bap/db/pool';
 
-export interface RecordUploadInput {
+import type { TenantSelector } from '../tenant-access.js';
+
+export interface RecordUploadInput extends TenantSelector {
   byteSize: number;
   filename: string;
-  organizationId: string;
+  legalEntityId: string;
   uploadId: string;
-  userId: string;
 }
 
-export interface FailUploadInput {
-  organizationId: string;
+export interface FailUploadInput extends TenantSelector {
   uploadId: string;
-  userId: string;
 }
 
 export abstract class UploadRepository {
   abstract fail(input: FailUploadInput): Promise<void>;
-  abstract record(input: RecordUploadInput): Promise<void>;
+  // false means the legal entity is unknown inside this organization, which the route answers with 400.
+  abstract record(input: RecordUploadInput): Promise<boolean>;
 }
 
 @Injectable()
@@ -45,18 +45,33 @@ export class DatabaseUploadRepository
     }
   }
 
-  async record(input: RecordUploadInput): Promise<void> {
-    await this.inTenantContext(input, async (transaction) => {
+  async record(input: RecordUploadInput): Promise<boolean> {
+    return this.inTenantContext(input, async (transaction) => {
       // Metadata only: the raw bytes stay on the staging volume and never enter the database.
-      await transaction.query(
-        `insert into app.upload (id, organization_id, filename, byte_size, status)
-         values ($1, $2, $3, $4, 'pending')`,
-        [input.uploadId, input.organizationId, input.filename, input.byteSize],
+      // The entity is resolved through row level security, so an id from another organization inserts nothing.
+      const recorded = await transaction.query(
+        `insert into app.upload (id, organization_id, legal_entity_id, filename, byte_size, status)
+         select $1, $2, entity.id, $4, $5, 'pending'
+         from app.legal_entity as entity
+         where entity.id = $3`,
+        [
+          input.uploadId,
+          input.organizationId,
+          input.legalEntityId,
+          input.filename,
+          input.byteSize,
+        ],
       );
+
+      if (recorded.rowCount === 0) {
+        return false;
+      }
+
       await transaction.query(
         "select app.record_audit('upload.received', 'upload', $1, '{}'::jsonb)",
         [input.uploadId],
       );
+      return true;
     });
   }
 
@@ -68,7 +83,7 @@ export class DatabaseUploadRepository
   }
 
   private async inTenantContext<T>(
-    tenant: { organizationId: string; userId: string },
+    tenant: TenantSelector,
     operation: Parameters<typeof withTenantContext<T>>[2],
   ): Promise<T> {
     const pool = await this.getPool();

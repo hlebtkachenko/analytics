@@ -2,25 +2,88 @@ import { z } from 'zod';
 
 import { webLogger } from '../logger.ts';
 
+// The API lists at most 200 entities, and the browser never asks for more than it can show.
+const MAX_LEGAL_ENTITIES = 200;
+const MAX_LEGAL_ENTITY_NAME_LENGTH = 200;
+// The same bound and alphabet the database check constraint enforces on app.legal_entity.
+const MAX_REGISTRATION_NUMBER_LENGTH = 32;
+const registrationNumberPattern = /^[A-Za-z0-9-]+$/;
+const LEGAL_ENTITY_TIMEOUT_MS = 10_000;
+
 const organizationIdSchema = z
   .string()
   .min(1)
   .max(128)
   .regex(/^[A-Za-z0-9_-]+$/);
-// Mirrors the access contract in @bap/security, which apps/web must not import.
-const accessResponseSchema = z.object({
-  capabilities: z
+// Better Auth mints opaque text user ids, so a member selector is bounded like an organization one.
+const subjectIdSchema = organizationIdSchema;
+const legalEntityIdSchema = z.string().uuid();
+const legalEntityKindSchema = z.enum(['company', 'sole_trader']);
+// Mirrors the entity scope contract in @bap/security, which apps/web must not import.
+const entityScopeSchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('all') }).strict(),
+  z
     .object({
-      manageGrants: z.boolean(),
-      manageMembers: z.boolean(),
-      uploadData: z.boolean(),
-      useAi: z.boolean(),
+      legalEntityIds: z.array(legalEntityIdSchema).max(MAX_LEGAL_ENTITIES),
+      mode: z.literal('restricted'),
     })
     .strict(),
-  organizationId: organizationIdSchema,
-  role: z.enum(['owner', 'admin', 'member']),
-  service: z.enum(['application-api', 'reporting-api']),
-});
+]);
+// Mirrors the access contract in @bap/security, which apps/web must not import.
+const accessResponseSchema = z
+  .object({
+    capabilities: z
+      .object({
+        createEntities: z.boolean(),
+        deleteEntities: z.boolean(),
+        manageEntityAccess: z.boolean(),
+        manageMembers: z.boolean(),
+        manageOrganization: z.boolean(),
+        updateEntities: z.boolean(),
+        uploadData: z.boolean(),
+        useAi: z.boolean(),
+      })
+      .strict(),
+    entityScope: entityScopeSchema,
+    organizationId: organizationIdSchema,
+    role: z.enum(['owner', 'admin', 'member']),
+    service: z.enum(['application-api', 'reporting-api']),
+  })
+  .strict();
+// Mirrors the legal entity contract in @bap/api, which apps/web must not import.
+const legalEntitySchema = z
+  .object({
+    createdAt: z.iso.datetime(),
+    id: legalEntityIdSchema,
+    kind: legalEntityKindSchema,
+    name: z.string(),
+    registrationNumber: z.string().nullable(),
+    updatedAt: z.iso.datetime(),
+  })
+  .strict();
+
+const legalEntityListSchema = z
+  .object({ legalEntities: z.array(legalEntitySchema) })
+  .strict();
+
+const legalEntityCreateBodySchema = z
+  .object({
+    kind: legalEntityKindSchema,
+    name: z.string().trim().min(1).max(MAX_LEGAL_ENTITY_NAME_LENGTH),
+    registrationNumber: z
+      .string()
+      .trim()
+      .min(1)
+      .max(MAX_REGISTRATION_NUMBER_LENGTH)
+      .regex(registrationNumberPattern)
+      .optional(),
+  })
+  .strict();
+
+// A patch carries only what changes, so an empty object is refused rather than sent.
+const legalEntityUpdateBodySchema = legalEntityCreateBodySchema
+  .partial()
+  .refine((body) => Object.keys(body).length > 0);
 
 export type BffService = 'application' | 'reporting';
 
@@ -99,6 +162,11 @@ const datasetRowQuerySchema = z
   })
   .strict();
 
+// The only dataset filter the browser may ask for: one entity, or none at all.
+const datasetListQuerySchema = z
+  .object({ legalEntityId: legalEntityIdSchema.optional() })
+  .strict();
+
 const datasetListSchema = z
   .object({
     datasets: z.array(
@@ -107,6 +175,7 @@ const datasetListSchema = z
           createdAt: z.iso.datetime(),
           description: z.string().nullable(),
           id: datasetIdSchema,
+          legalEntityId: legalEntityIdSchema,
           name: z.string(),
           rowCount: z.number().int().min(0),
           status: z.enum(['importing', 'ready', 'failed']),
@@ -323,9 +392,13 @@ export async function postDatasetUpload(
   return jsonResponse(payload.data, 202, { 'x-request-id': requestId });
 }
 
-type PreparedCall =
-  | Readonly<{ failure: Response }>
-  | Readonly<{ requestId: string; selector: string; token: string }>;
+type PreparedApplicationCall = Readonly<{
+  requestId: string;
+  selector: string;
+  token: string;
+}>;
+
+type PreparedCall = PreparedApplicationCall | Readonly<{ failure: Response }>;
 
 function resolveRequestId(request: Request): string {
   const parsed = requestIdSchema.safeParse(
@@ -365,12 +438,19 @@ async function prepareApplicationCall(
   };
 }
 
+function applicationPath(selector: string, suffix: string): string {
+  return `${internalServiceOrigins.application}/v1/organizations/${encodeURIComponent(selector)}/${suffix}`;
+}
+
 function datasetPath(
   selector: string,
   datasetId: string,
   suffix: string,
 ): string {
-  return `${internalServiceOrigins.application}/v1/organizations/${encodeURIComponent(selector)}/datasets/${encodeURIComponent(datasetId)}/${suffix}`;
+  return applicationPath(
+    selector,
+    `datasets/${encodeURIComponent(datasetId)}/${suffix}`,
+  );
 }
 
 export async function getDatasets(
@@ -379,16 +459,30 @@ export async function getDatasets(
   organizationId: string,
   fetchImplementation: typeof fetch = fetch,
 ): Promise<Response> {
+  // A malformed entity filter is refused here, never widened into an unfiltered list.
+  const query = datasetListQuerySchema.safeParse(
+    Object.fromEntries(new URL(request.url).searchParams),
+  );
+
+  if (!query.success) {
+    return jsonResponse({ error: 'invalid_filter' }, 400);
+  }
+
   const prepared = await prepareApplicationCall(auth, request, organizationId);
 
   if ('failure' in prepared) {
     return prepared.failure;
   }
 
+  // Rebuilt from the validated value only, so no client query string is forwarded verbatim.
+  const filter =
+    query.data.legalEntityId === undefined
+      ? ''
+      : `?legalEntityId=${encodeURIComponent(query.data.legalEntityId)}`;
   let response: Response;
   try {
     response = await fetchImplementation(
-      `${internalServiceOrigins.application}/v1/organizations/${encodeURIComponent(prepared.selector)}/datasets`,
+      `${applicationPath(prepared.selector, 'datasets')}${filter}`,
       {
         cache: 'no-store',
         headers: {
@@ -587,4 +681,349 @@ export async function getDatasetExport(
     },
     status: 200,
   });
+}
+
+export type EntityScope = z.infer<typeof entityScopeSchema>;
+export type LegalEntity = z.infer<typeof legalEntitySchema>;
+export type OrganizationAccess = z.infer<typeof accessResponseSchema>;
+
+// Exported so a server render parses exactly the contract this module already validated.
+export {
+  accessResponseSchema,
+  entityScopeSchema,
+  legalEntityListSchema,
+  legalEntitySchema,
+};
+
+type ApplicationJsonCall = Readonly<{
+  body?: unknown;
+  errorCode: string;
+  method: 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT';
+  operation: string;
+  path: string;
+  // A null schema means the contract answers with no content at all.
+  schema: z.ZodType | null;
+  successStatus: number;
+}>;
+
+// One outbound JSON call under the shared timeout, private headers and failure vocabulary.
+async function callApplicationJson(
+  prepared: PreparedApplicationCall,
+  call: ApplicationJsonCall,
+  fetchImplementation: typeof fetch,
+): Promise<Response> {
+  const outboundHeaders: Record<string, string> = {
+    authorization: `Bearer ${prepared.token}`,
+    'x-bap-request-id': prepared.requestId,
+  };
+
+  if (call.body !== undefined) {
+    outboundHeaders['content-type'] = 'application/json';
+  }
+
+  let response: Response;
+  try {
+    response = await fetchImplementation(
+      applicationPath(prepared.selector, call.path),
+      {
+        ...(call.body === undefined ? {} : { body: JSON.stringify(call.body) }),
+        cache: 'no-store',
+        headers: outboundHeaders,
+        method: call.method,
+        signal: AbortSignal.timeout(LEGAL_ENTITY_TIMEOUT_MS),
+      },
+    );
+  } catch {
+    return upstreamFailure(call.operation, 'unreachable');
+  }
+
+  if (!response.ok) {
+    // An upstream fault is not a refusal, so it is recorded rather than passed through silently.
+    if (response.status >= 500) {
+      return upstreamFailure(call.operation, 'unreachable');
+    }
+
+    return jsonResponse({ error: call.errorCode }, response.status);
+  }
+
+  if (call.schema === null) {
+    return new Response(null, {
+      headers: {
+        ...privateResponseHeaders,
+        'x-request-id': prepared.requestId,
+      },
+      status: call.successStatus,
+    });
+  }
+
+  let responseBody: unknown;
+  try {
+    responseBody = await response.json();
+  } catch {
+    return upstreamFailure(call.operation, 'unreadable');
+  }
+  const payload = call.schema.safeParse(responseBody);
+
+  if (!payload.success) {
+    return upstreamFailure(call.operation, 'unexpected_shape');
+  }
+
+  return jsonResponse(payload.data, call.successStatus, {
+    'x-request-id': prepared.requestId,
+  });
+}
+
+type ParsedBody<T> = Readonly<{ data: T }> | Readonly<{ failure: Response }>;
+
+// Every browser body is validated here before a resource token is minted for it.
+async function readJsonBody<T>(
+  request: Request,
+  schema: z.ZodType<T>,
+): Promise<ParsedBody<T>> {
+  if (
+    !(request.headers.get('content-type') ?? '').startsWith('application/json')
+  ) {
+    return { failure: jsonResponse({ error: 'invalid_body' }, 400) };
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return { failure: jsonResponse({ error: 'invalid_body' }, 400) };
+  }
+
+  const parsed = schema.safeParse(body);
+
+  if (!parsed.success) {
+    return { failure: jsonResponse({ error: 'invalid_body' }, 400) };
+  }
+
+  return { data: parsed.data };
+}
+
+// A malformed entity id answers exactly like an invisible one, so nothing can be enumerated.
+function parsedLegalEntityId(
+  legalEntityId: string,
+): Readonly<{ failure: Response }> | Readonly<{ value: string }> {
+  const parsed = legalEntityIdSchema.safeParse(legalEntityId);
+
+  return parsed.success
+    ? { value: parsed.data }
+    : { failure: jsonResponse({ error: 'legal_entity_not_found' }, 404) };
+}
+
+function parsedSubjectId(
+  userId: string,
+): Readonly<{ failure: Response }> | Readonly<{ value: string }> {
+  const parsed = subjectIdSchema.safeParse(userId);
+
+  return parsed.success
+    ? { value: parsed.data }
+    : { failure: jsonResponse({ error: 'member_not_found' }, 404) };
+}
+
+export async function getLegalEntities(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'legal_entities_unavailable',
+      method: 'GET',
+      operation: 'getLegalEntities',
+      path: 'legal-entities',
+      schema: legalEntityListSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function postLegalEntity(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const body = await readJsonBody(request, legalEntityCreateBodySchema);
+
+  if ('failure' in body) {
+    return body.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      body: body.data,
+      errorCode: 'legal_entity_rejected',
+      method: 'POST',
+      operation: 'postLegalEntity',
+      path: 'legal-entities',
+      schema: legalEntitySchema,
+      successStatus: 201,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function patchLegalEntity(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  legalEntityId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const selectedEntity = parsedLegalEntityId(legalEntityId);
+
+  if ('failure' in selectedEntity) {
+    return selectedEntity.failure;
+  }
+
+  const body = await readJsonBody(request, legalEntityUpdateBodySchema);
+
+  if ('failure' in body) {
+    return body.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      body: body.data,
+      errorCode: 'legal_entity_rejected',
+      method: 'PATCH',
+      operation: 'patchLegalEntity',
+      path: `legal-entities/${encodeURIComponent(selectedEntity.value)}`,
+      schema: legalEntitySchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function deleteLegalEntity(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  legalEntityId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const selectedEntity = parsedLegalEntityId(legalEntityId);
+
+  if ('failure' in selectedEntity) {
+    return selectedEntity.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'legal_entity_rejected',
+      method: 'DELETE',
+      operation: 'deleteLegalEntity',
+      path: `legal-entities/${encodeURIComponent(selectedEntity.value)}`,
+      schema: null,
+      successStatus: 204,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function getMemberEntityScope(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  userId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const subject = parsedSubjectId(userId);
+
+  if ('failure' in subject) {
+    return subject.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'entity_scope_unavailable',
+      method: 'GET',
+      operation: 'getMemberEntityScope',
+      path: `members/${encodeURIComponent(subject.value)}/entity-scope`,
+      schema: entityScopeSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function putMemberEntityScope(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  userId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const subject = parsedSubjectId(userId);
+
+  if ('failure' in subject) {
+    return subject.failure;
+  }
+
+  const body = await readJsonBody(request, entityScopeSchema);
+
+  if ('failure' in body) {
+    return body.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      body: body.data,
+      errorCode: 'entity_scope_rejected',
+      method: 'PUT',
+      operation: 'putMemberEntityScope',
+      path: `members/${encodeURIComponent(subject.value)}/entity-scope`,
+      schema: entityScopeSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
 }

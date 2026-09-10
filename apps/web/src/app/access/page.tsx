@@ -34,17 +34,41 @@ const organizationsSchema = z.array(
     slug: z.string().min(1),
   }),
 );
+const capabilitiesSchema = z.object({
+  createEntities: z.boolean(),
+  deleteEntities: z.boolean(),
+  manageEntityAccess: z.boolean(),
+  manageMembers: z.boolean(),
+  manageOrganization: z.boolean(),
+  updateEntities: z.boolean(),
+  uploadData: z.boolean(),
+  useAi: z.boolean(),
+});
 const accessSchema = z.object({
-  capabilities: z.object({
-    manageGrants: z.boolean(),
-    manageMembers: z.boolean(),
-    uploadData: z.boolean(),
-    useAi: z.boolean(),
-  }),
+  capabilities: capabilitiesSchema,
+  entityScope: z.discriminatedUnion('mode', [
+    z.object({ mode: z.literal('all') }),
+    z.object({
+      legalEntityIds: z.array(z.string().min(1)),
+      mode: z.literal('restricted'),
+    }),
+  ]),
   organizationId: z.string().min(1),
   role: z.enum(['owner', 'admin', 'member']),
   service: z.enum(['application-api', 'reporting-api']),
 });
+
+// The eight capabilities are listed in one fixed order, whatever the role holds.
+const capabilityNames = [
+  'manageOrganization',
+  'manageMembers',
+  'manageEntityAccess',
+  'createEntities',
+  'updateEntities',
+  'deleteEntities',
+  'uploadData',
+  'useAi',
+] as const;
 
 type AccessResult = z.infer<typeof accessSchema>;
 type Organization = z.infer<typeof organizationsSchema>[number];
@@ -197,6 +221,26 @@ export default function AccessPage() {
               <p>
                 {t('access.reporting')}: {reportingAccess.role}
               </p>
+              <h2>{t('access.capabilities')}</h2>
+              <ul>
+                {capabilityNames.map((capability) => (
+                  <li key={capability}>
+                    {t(`access.${capability}`)}:{' '}
+                    {applicationAccess.capabilities[capability]
+                      ? t('access.capabilityAllowed')
+                      : t('access.capabilityDenied')}
+                  </li>
+                ))}
+              </ul>
+              <p>
+                {t('access.entityScope')}:{' '}
+                {applicationAccess.entityScope.mode === 'all'
+                  ? t('access.entityScopeAll')
+                  : t('access.entityScopeRestricted', {
+                      count:
+                        applicationAccess.entityScope.legalEntityIds.length,
+                    })}
+              </p>
               <h2>{t('access.actions')}</h2>
               {/* Capabilities only choose which actions are offered, the database enforces access. */}
               <Grid>
@@ -213,20 +257,32 @@ export default function AccessPage() {
                     </Button>
                   </Column>
                 ) : null}
-                {applicationAccess.capabilities.manageGrants ? (
+                {applicationAccess.capabilities.manageEntityAccess &&
+                selectedOrganization ? (
                   <Column lg={4} md={4} sm={4}>
-                    <Tile>
-                      <Stack gap={3}>
-                        <Security
-                          aria-hidden="true"
-                          focusable="false"
-                          size={20}
-                        />
-                        <h3>{t('access.manageGrants')}</h3>
-                        <Tag type="gray">{t('access.unavailable')}</Tag>
-                        <p>{t('access.manageGrantsUnavailable')}</p>
-                      </Stack>
-                    </Tile>
+                    <Button
+                      href={`/${encodeURIComponent(selectedOrganization.slug)}/members`}
+                      kind="tertiary"
+                      renderIcon={Security}
+                      size="lg"
+                    >
+                      {t('access.manageEntityAccess')}
+                    </Button>
+                  </Column>
+                ) : null}
+                {(applicationAccess.capabilities.createEntities ||
+                  applicationAccess.capabilities.updateEntities ||
+                  applicationAccess.capabilities.manageEntityAccess) &&
+                selectedOrganization ? (
+                  <Column lg={4} md={4} sm={4}>
+                    <Button
+                      href={`/${encodeURIComponent(selectedOrganization.slug)}/entities`}
+                      kind="tertiary"
+                      renderIcon={DataSet}
+                      size="lg"
+                    >
+                      {t('access.manageEntities')}
+                    </Button>
                   </Column>
                 ) : null}
                 {applicationAccess.capabilities.uploadData &&

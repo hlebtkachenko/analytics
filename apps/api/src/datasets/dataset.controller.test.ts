@@ -1,7 +1,11 @@
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { SubjectRateLimiter, type ResourceJwtVerifier } from '@bap/security';
+import {
+  SubjectRateLimiter,
+  type EntityScope,
+  type ResourceJwtVerifier,
+} from '@bap/security';
 import request from 'supertest';
 import {
   afterAll,
@@ -30,12 +34,15 @@ import { DatasetRepository } from './dataset-repository.js';
 import type {
   DatasetColumnRecord,
   DatasetRowRecord,
+  EntityScopeSelector,
   ReadDatasetRowPageInput,
   StreamDatasetRowsInput,
 } from './dataset-repository.js';
 
 const DATASET_ID = '2f1c4a4e-6f0d-4f0a-9b3e-0d5b5c8a1e77';
 const HIDDEN_DATASET_ID = '0b0f1d2e-3c4b-4a59-8d6e-7f8091a2b3c4';
+const LEGAL_ENTITY_ID = '4a2b7c1e-9f5d-4c3a-8b21-6e0f7d5a4c39';
+const OTHER_LEGAL_ENTITY_ID = '5b3c8d2f-0a6e-4d4b-9c32-7f1a8e6b5d40';
 // A neutral placeholder name carrying the characters a header injection would need.
 const DATASET_NAME = 'placeholder "quoted"; name';
 
@@ -51,6 +58,8 @@ const rows: DatasetRowRecord[] = Array.from({ length: 5 }, (_value, index) => ({
 
 describe('application dataset routes', () => {
   let application: NestExpressApplication;
+  let entityScope: EntityScope = { mode: 'all' };
+  const listCalls: EntityScopeSelector[] = [];
   const rowPageCalls: ReadDatasetRowPageInput[] = [];
   const streamCalls: StreamDatasetRowsInput[] = [];
   const streamPulls: number[] = [];
@@ -71,6 +80,7 @@ describe('application dataset routes', () => {
   const memberships: MembershipResolver = {
     checkReadiness: vi.fn(async () => true),
     getPoolStatistics: vi.fn(() => ({ idle: 0, total: 0, waiting: 0 })),
+    readEntityScope: vi.fn(async () => entityScope),
     resolve: vi.fn(async (_subject, organizationId) =>
       organizationId === 'organization_1'
         ? { emailVerified: true, role: 'member' as const }
@@ -78,24 +88,37 @@ describe('application dataset routes', () => {
     ),
   };
   const datasets: DatasetRepository = {
-    listDatasets: vi.fn(async () => [
-      {
-        createdAt: '2026-08-30T06:00:00.000Z',
-        description: null,
-        id: DATASET_ID,
-        name: DATASET_NAME,
-        rowCount: rows.length,
-        status: 'ready',
-        updatedAt: '2026-08-30T06:05:00.000Z',
-      },
-    ]),
+    listDatasets: vi.fn(async (input) => {
+      listCalls.push(input);
+
+      return [
+        {
+          createdAt: '2026-08-30T06:00:00.000Z',
+          description: null,
+          id: DATASET_ID,
+          legalEntityId: LEGAL_ENTITY_ID,
+          name: DATASET_NAME,
+          rowCount: rows.length,
+          status: 'ready',
+          updatedAt: '2026-08-30T06:05:00.000Z',
+        },
+      ];
+    }),
     readColumns: vi.fn(async (input) =>
-      input.datasetId === DATASET_ID ? columns : null,
+      input.datasetId === DATASET_ID &&
+      (input.legalEntityIds === null ||
+        input.legalEntityIds.includes(LEGAL_ENTITY_ID))
+        ? columns
+        : null,
     ),
     readRowPage: vi.fn(async (input) => {
       rowPageCalls.push(input);
 
-      if (input.datasetId !== DATASET_ID) {
+      if (
+        input.datasetId !== DATASET_ID ||
+        (input.legalEntityIds !== null &&
+          !input.legalEntityIds.includes(LEGAL_ENTITY_ID))
+      ) {
         return null;
       }
 
@@ -143,6 +166,8 @@ describe('application dataset routes', () => {
   });
 
   beforeEach(() => {
+    entityScope = { mode: 'all' };
+    listCalls.length = 0;
     rowPageCalls.length = 0;
     streamCalls.length = 0;
     streamPulls.length = 0;
@@ -160,6 +185,7 @@ describe('application dataset routes', () => {
           createdAt: '2026-08-30T06:00:00.000Z',
           description: null,
           id: DATASET_ID,
+          legalEntityId: LEGAL_ENTITY_ID,
           name: DATASET_NAME,
           rowCount: 5,
           status: 'ready',
@@ -167,6 +193,68 @@ describe('application dataset routes', () => {
         },
       ],
     });
+    // No scope and no query parameter means no entity filter at all.
+    expect(listCalls).toEqual([
+      {
+        legalEntityIds: null,
+        organizationId: 'organization_1',
+        role: 'member',
+        userId: 'user_1',
+      },
+    ]);
+  });
+
+  it('narrows the list to one entity and refuses an unusable selector', async () => {
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_1/datasets')
+      .query({ legalEntityId: LEGAL_ENTITY_ID })
+      .set('Authorization', 'Bearer member')
+      .expect(200);
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_1/datasets')
+      .query({ legalEntityId: 'not-a-uuid' })
+      .set('Authorization', 'Bearer member')
+      .expect(400);
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_1/datasets')
+      .query({ unexpected: 'value' })
+      .set('Authorization', 'Bearer member')
+      .expect(400);
+
+    expect(listCalls).toEqual([
+      {
+        legalEntityIds: [LEGAL_ENTITY_ID],
+        organizationId: 'organization_1',
+        role: 'member',
+        userId: 'user_1',
+      },
+    ]);
+  });
+
+  it('answers a restricted caller with nothing outside its scope', async () => {
+    entityScope = {
+      legalEntityIds: [OTHER_LEGAL_ENTITY_ID],
+      mode: 'restricted',
+    };
+
+    // The requested entity is out of scope, so the list narrows to nothing instead of widening.
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_1/datasets')
+      .query({ legalEntityId: LEGAL_ENTITY_ID })
+      .set('Authorization', 'Bearer member')
+      .expect(200);
+    expect(listCalls[0]?.legalEntityIds).toEqual([]);
+
+    // The dataset itself belongs to an entity the caller cannot see, so it is simply not found.
+    await request(application.getHttpServer())
+      .get(`/v1/organizations/organization_1/datasets/${DATASET_ID}/rows`)
+      .set('Authorization', 'Bearer member')
+      .expect(404);
+    await request(application.getHttpServer())
+      .get(`/v1/organizations/organization_1/datasets/${DATASET_ID}/export`)
+      .query({ format: 'csv' })
+      .set('Authorization', 'Bearer member')
+      .expect(404);
   });
 
   it('refuses an invalid token and a subject without membership', async () => {
@@ -214,15 +302,19 @@ describe('application dataset routes', () => {
       {
         after: null,
         datasetId: DATASET_ID,
+        legalEntityIds: null,
         organizationId: 'organization_1',
         pageSize: 2,
+        role: 'member',
         userId: 'user_1',
       },
       {
         after: 3,
         datasetId: DATASET_ID,
+        legalEntityIds: null,
         organizationId: 'organization_1',
         pageSize: 2,
+        role: 'member',
         userId: 'user_1',
       },
     ]);
@@ -293,7 +385,9 @@ describe('application dataset routes', () => {
       {
         batchSize: DATASET_EXPORT_BATCH_SIZE,
         datasetId: DATASET_ID,
+        legalEntityIds: null,
         organizationId: 'organization_1',
+        role: 'member',
         userId: 'user_1',
       },
     ]);

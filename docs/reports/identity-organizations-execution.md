@@ -106,3 +106,32 @@ upstream inventory for the workbench and for upgrade inspection.
   denied both the accessibility-window attachment and Apple Events UI control
   needed for the check. A human VoiceOver confirmation is still required and is
   not claimed here.
+
+## 2026-09-10: workspace legal entities
+
+[ADR 0011](../adr/0011-two-level-tenancy.md) and its
+[spec](../../.ai/specs/2026-09-10-workspace-legal-entities.md) redefined the
+organization as a workspace holding many legal entities. `member` becomes
+read-only aside from the assistant; `admin` keeps creating and updating entities
+and uploading data but loses member and organization management to `owner`
+alone, which also gains entity access management and entity deletion. Migration
+`20260910.0001` adds `app.legal_entity`, `app.member_entity_scope`, and
+`app.legal_entity_access`, attaches every dataset and upload to exactly one
+entity through a composite foreign key, adds the `bap.role` tenant-transaction
+setting with `app.role_can_write()`/`app.role_is_owner()` write gates, and drops
+`app.data_grants`; `DATABASE_MIGRATION_COMPATIBILITY` moves to that id.
+
+`@bap/security` capabilities become `manageOrganization`, `manageMembers`,
+`manageEntityAccess`, `createEntities`, `updateEntities`, `deleteEntities`,
+`uploadData`, and `useAi`, and the access response gains `entityScope`. The web
+application's Better Auth organization plugin now runs an explicit access
+control restricting organization, member, and invitation permissions to `owner`.
+`apps/api` adds legal-entity and member entity-scope routes and extends dataset
+listing and uploads with entity filtering; `apps/web` mirrors every route
+through the BFF, adds `/[orgSlug]/entities`, adds an owner-only entity scope
+editor to `/[orgSlug]/members`, and adds an entity scope switch and upload
+entity selector to `/datasets`. Verification: unit tests for the contract,
+resolvers, controllers, and pages; `pnpm test:integration` proving role-gated
+writes, entity cascade, scope reads, and the dropped grant table; an operational
+Playwright proof for owner, admin, and member; `pnpm check`,
+`pnpm test:integration`, and Compose model verification.

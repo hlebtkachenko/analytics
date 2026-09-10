@@ -15,6 +15,7 @@ describe('GET /health', () => {
       .useValue({
         checkReadiness: async () => true,
         getPoolStatistics: () => ({ idle: 0, total: 0, waiting: 0 }),
+        readEntityScope: async () => ({ mode: 'all' as const }),
         resolve: async () => ({ emailVerified: false, role: null }),
       })
       .compile();

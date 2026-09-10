@@ -7,6 +7,8 @@ import {
 } from '@bap/db/access';
 import { admin, jwt, organization, twoFactor } from 'better-auth/plugins';
 import { APIError, betterAuth } from 'better-auth';
+import { createAccessControl } from 'better-auth/plugins/access';
+import { defaultStatements } from 'better-auth/plugins/organization/access';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -69,6 +71,34 @@ export const unsupportedActiveOrganizationEndpointErrorCode =
   'ACTIVE_ORGANIZATION_ENDPOINT_DISABLED';
 export const unsupportedActiveOrganizationPath =
   '/organization/get-active-member';
+// ADR 0011 moved organization, membership and invitation writes to the owner alone.
+export const organizationAccessControl = createAccessControl(defaultStatements);
+
+export const organizationRoles = {
+  admin: organizationAccessControl.newRole({
+    ac: [],
+    invitation: [],
+    member: [],
+    organization: [],
+    team: [],
+  }),
+  member: organizationAccessControl.newRole({
+    ac: [],
+    invitation: [],
+    member: [],
+    organization: [],
+    team: [],
+  }),
+  // Organization deletion stays disabled, so the owner never holds that statement.
+  owner: organizationAccessControl.newRole({
+    ac: [],
+    invitation: ['create', 'cancel'],
+    member: ['create', 'update', 'delete'],
+    organization: ['update'],
+    team: [],
+  }),
+} as const;
+
 export const organizationCreationConfiguration = {
   allowUserToCreateOrganization: true,
   creatorRole: 'owner',
@@ -489,9 +519,11 @@ async function createAuth() {
       admin(adminPluginOptions),
       organization({
         ...organizationCreationConfiguration,
+        ac: organizationAccessControl,
         organizationHooks: { beforeCreateOrganization },
         organizationLimit: (user) => organizationLimitReached(pool, user),
         schema: organizationAuthSchema,
+        roles: organizationRoles,
         sendInvitationEmail: createInvitationSender(
           mail,
           environment.BAP_PUBLIC_ORIGIN,

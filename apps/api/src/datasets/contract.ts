@@ -1,3 +1,4 @@
+import { legalEntityIdentifierSchema } from '@bap/security';
 import { z } from 'zod';
 
 import { datasetIdentifierSchema } from '../agents/contract.js';
@@ -39,11 +40,19 @@ export const datasetExportQuerySchema = z
 
 export type DatasetExportQuery = z.infer<typeof datasetExportQuerySchema>;
 
+// One optional entity narrows the list; its absence is the "all entities in scope" view.
+export const datasetListQuerySchema = z
+  .object({ legalEntityId: legalEntityIdentifierSchema.optional() })
+  .strict();
+
+export type DatasetListQuery = z.infer<typeof datasetListQuerySchema>;
+
 export const datasetSummarySchema = z
   .object({
     createdAt: z.iso.datetime(),
     description: z.string().nullable(),
     id: datasetIdentifierSchema,
+    legalEntityId: legalEntityIdentifierSchema,
     name: z.string(),
     rowCount: z.number().int().min(0),
     status: datasetStatusSchema,

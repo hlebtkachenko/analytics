@@ -5,6 +5,7 @@ export const datasetSummarySchema = z.object({
   createdAt: z.string().min(1),
   description: z.string().nullable(),
   id: z.string().min(1),
+  legalEntityId: z.string().min(1),
   name: z.string(),
   rowCount: z.number().int().min(0),
   status: z.enum(['importing', 'ready', 'failed']),
@@ -13,6 +14,20 @@ export const datasetSummarySchema = z.object({
 
 export const datasetListSchema = z.object({
   datasets: z.array(datasetSummarySchema),
+});
+
+// Mirrors the legal entity contract the BFF already validated.
+export const legalEntitySchema = z.object({
+  createdAt: z.string().min(1),
+  id: z.string().min(1),
+  kind: z.enum(['company', 'sole_trader']),
+  name: z.string(),
+  registrationNumber: z.string().nullable(),
+  updatedAt: z.string().min(1),
+});
+
+export const legalEntityListSchema = z.object({
+  legalEntities: z.array(legalEntitySchema),
 });
 
 export const datasetColumnSchema = z.object({
@@ -48,6 +63,7 @@ export type DatasetColumn = z.infer<typeof datasetColumnSchema>;
 export type DatasetRow = z.infer<typeof datasetRowSchema>;
 export type DatasetRowPage = z.infer<typeof datasetRowPageSchema>;
 export type DatasetSummary = z.infer<typeof datasetSummarySchema>;
+export type LegalEntity = z.infer<typeof legalEntitySchema>;
 
 // Well inside the 500 row ceiling the server refuses to exceed, and small enough to read.
 export const DATASET_PAGE_SIZE = 25;
@@ -56,8 +72,20 @@ export function organizationPath(organizationId: string): string {
   return `/api/bff/application/organizations/${encodeURIComponent(organizationId)}`;
 }
 
-export function datasetsPath(organizationId: string): string {
-  return `${organizationPath(organizationId)}/datasets`;
+// The one dataset filter the page may ask for: every entity in scope, or exactly one.
+export function datasetsPath(
+  organizationId: string,
+  legalEntityId?: string,
+): string {
+  const filter =
+    legalEntityId === undefined || legalEntityId.length === 0
+      ? ''
+      : `?legalEntityId=${encodeURIComponent(legalEntityId)}`;
+  return `${organizationPath(organizationId)}/datasets${filter}`;
+}
+
+export function legalEntitiesPath(organizationId: string): string {
+  return `${organizationPath(organizationId)}/legal-entities`;
 }
 
 export function datasetPath(organizationId: string, datasetId: string): string {

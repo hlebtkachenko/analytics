@@ -2,6 +2,10 @@
 
 **Date:** 2026-08-31
 
+Superseded in part by 2026-09-10-workspace-legal-entities.md: member and
+organization management moved to `owner` alone, so admins no longer assign roles
+or manage members.
+
 ## Problem
 
 Organization creation, membership, invitations, and settings have server-side

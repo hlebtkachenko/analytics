@@ -8,6 +8,7 @@ describe('reporting metrics', () => {
     const memberships = {
       checkReadiness: async () => true,
       getPoolStatistics: () => ({ idle: 1, total: 2, waiting: 0 }),
+      readEntityScope: async () => ({ mode: 'all' as const }),
       resolve: async () => ({ emailVerified: false, role: null }),
     } as MembershipResolver;
     const metrics = new ServiceMetrics(memberships);

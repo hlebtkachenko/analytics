@@ -47,6 +47,7 @@ describe('application access route', () => {
   const memberships: MembershipResolver = {
     checkReadiness: vi.fn(async () => true),
     getPoolStatistics: vi.fn(() => ({ idle: 0, total: 0, waiting: 0 })),
+    readEntityScope: vi.fn(async () => ({ mode: 'all' as const })),
     resolve: vi.fn(async (_subject, organizationId) =>
       organizationId === 'organization_1'
         ? { emailVerified: true, role: 'member' as const }
@@ -93,11 +94,16 @@ describe('application access route', () => {
 
     expect(first.body).toEqual({
       capabilities: {
-        manageGrants: false,
+        createEntities: false,
+        deleteEntities: false,
+        manageEntityAccess: false,
         manageMembers: false,
-        uploadData: true,
+        manageOrganization: false,
+        updateEntities: false,
+        uploadData: false,
         useAi: true,
       },
+      entityScope: { mode: 'all' },
       organizationId: 'organization_1',
       role: 'member',
       service: 'application-api',
@@ -186,6 +192,30 @@ describe('application access route', () => {
 
     expect(Object.keys(document.paths)).toEqual([
       '/v1/organizations/{organizationId}/access',
+    ]);
+
+    const access = document.paths['/v1/organizations/{organizationId}/access']
+      ?.get?.responses['200'] as unknown as {
+      content: Record<string, { schema: Record<string, unknown> }>;
+    };
+    const schema = access.content['application/json']?.schema as unknown as {
+      properties: Record<string, { properties?: Record<string, unknown> }>;
+      required: string[];
+    };
+
+    // The published contract must carry the scope and the whole capability set, or the BFF mirrors a lie.
+    expect(schema.required).toContain('entityScope');
+    expect(
+      Object.keys(schema.properties.capabilities?.properties ?? {}).sort(),
+    ).toEqual([
+      'createEntities',
+      'deleteEntities',
+      'manageEntityAccess',
+      'manageMembers',
+      'manageOrganization',
+      'updateEntities',
+      'uploadData',
+      'useAi',
     ]);
   });
 });

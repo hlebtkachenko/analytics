@@ -1,11 +1,13 @@
+import { readEntityScope, withTenantContext } from '@bap/db';
 import { checkMigrationCompatibility, resolveMembership } from '@bap/db/access';
 import type { DatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool, type DatabasePool } from '@bap/db/pool';
 import { Injectable } from '@nestjs/common';
 import type { OnApplicationShutdown } from '@nestjs/common';
-import type { MembershipResolution } from '@bap/security';
+import type { EntityScope, MembershipResolution } from '@bap/security';
 
 import { MembershipResolver } from './membership-resolver.js';
+import type { TenantSelector } from './membership-resolver.js';
 
 @Injectable()
 export class DatabaseMembershipResolver
@@ -41,6 +43,18 @@ export class DatabaseMembershipResolver
 
   async onApplicationShutdown(): Promise<void> {
     await this.pool?.end();
+  }
+
+  async readEntityScope(tenant: TenantSelector): Promise<EntityScope> {
+    const client = await this.getPool().connect();
+
+    try {
+      return await withTenantContext(client, tenant, (transaction) =>
+        readEntityScope(transaction, tenant),
+      );
+    } finally {
+      client.release();
+    }
   }
 
   async resolve(

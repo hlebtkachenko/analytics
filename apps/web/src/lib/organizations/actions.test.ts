@@ -252,6 +252,45 @@ describe('organization server actions', () => {
     expect(JSON.stringify(mocks.redirect.mock.calls)).not.toContain('private');
   });
 
+  it.each(['admin', 'member'] as const)(
+    'refuses every owner-only membership action to an %s',
+    async (role) => {
+      mocks.resolveOrganizationRouteForRequest.mockResolvedValue({
+        ...organization,
+        role,
+      });
+
+      await inviteOrganizationMemberAction(
+        'organization-one',
+        form({ email: 'invited@example.test', role: 'member' }),
+      );
+      await updateOrganizationMemberRoleAction(
+        'organization-one',
+        form({ memberId: 'member-2', role: 'admin' }),
+      );
+      await removeOrganizationMemberAction(
+        'organization-one',
+        form({ memberId: 'member-2' }),
+      );
+      await updateOrganizationAction(
+        'organization-one',
+        form({ name: 'Organization Renamed', slug: 'organization-renamed' }),
+      );
+
+      expect(mocks.createInvitation).not.toHaveBeenCalled();
+      expect(mocks.updateMemberRole).not.toHaveBeenCalled();
+      expect(mocks.removeMember).not.toHaveBeenCalled();
+      expect(mocks.updateOrganization).not.toHaveBeenCalled();
+      expect(mocks.revalidatePath).not.toHaveBeenCalled();
+      expect(mocks.redirect.mock.calls.map((call) => call[0])).toEqual([
+        '/organization-one/members?result=error',
+        '/organization-one/members?result=error',
+        '/organization-one/members?result=error',
+        '/organization-one/settings?result=error',
+      ]);
+    },
+  );
+
   it.each([
     ['invite', '/attacker.example'],
     ['update role', '//attacker.example'],

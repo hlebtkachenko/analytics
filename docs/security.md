@@ -382,18 +382,43 @@ finds no row and the service returns 403. Adding a literal top-level web route
 must add the matching reserved slug in the same pull request so a future route
 cannot silently shadow an existing organization URL.
 
+## Tenancy and entity boundary
+
+ADR 0011 keeps the organization as the sole row level security boundary. Every
+tenant transaction still binds one `bap.organization_id`, and now also binds
+`bap.role` alongside `bap.user_id`, so the database itself refuses a write from
+a read-only `member` and an entity deletion from `admin`, independent of
+whatever the calling code already checked. `app.role_can_write()` and
+`app.role_is_owner()` read that role setting and gate every write policy on
+`app.legal_entity`, `app.member_entity_scope`, and `app.legal_entity_access`.
+
+Legal entities live inside an organization in `app.legal_entity`. Selecting one
+entity, or restricting an admin or member to a subset, is an application-level
+filter computed by one shared resolver in the API, never a row level security
+policy: `SELECT` on a dataset or an upload stays organization-wide, exactly as
+before. The "all entities" view is the absence of that application filter, not a
+cross-organization query, and a restricted member's out-of-scope dataset returns
+the same not-found response a stranger gets. Because the filter lives above the
+database, every new code path that lists or reads a dataset or an upload must
+call that same resolver; nothing in PostgreSQL enforces it.
+
+Per-dataset grants no longer exist. `app.data_grants` is dropped, `member` is
+read-only, and dataset and upload visibility depends only on organization
+membership and, above that boundary, entity scope.
+
 ## Temporary organization action boundary
 
-The 5 organization pages are deliberately plain and temporary, but their server
-actions are untrusted public POST boundaries. They rederive the verified session
-and member-gated organization resolution, validate `FormData`, ignore any
-browser-supplied organization id, and call only installed Better Auth APIs with
-the exact resolved id. Creation keeps the stored active organization unchanged.
-Each scoped action validates its bound slug before constructing any path or
-calling the resolver or provider. Malformed, protocol-relative-looking, and
-encoded-looking values reach only `/organizations?result=error` with no side
-effect. Valid scoped redirects use only the parsed or durable resolved slug;
-provider and database failures become generic messages and are not logged.
+The 6 organization pages, now including `/[orgSlug]/entities`, are deliberately
+plain and temporary, but their server actions are untrusted public POST
+boundaries. They rederive the verified session and member-gated organization
+resolution, validate `FormData`, ignore any browser-supplied organization id,
+and call only installed Better Auth APIs with the exact resolved id. Creation
+keeps the stored active organization unchanged. Each scoped action validates its
+bound slug before constructing any path or calling the resolver or provider.
+Malformed, protocol-relative-looking, and encoded-looking values reach only
+`/organizations?result=error` with no side effect. Valid scoped redirects use
+only the parsed or durable resolved slug; provider and database failures become
+generic messages and are not logged.
 
 Their page modules retain the exact throwaway markers, plain native breadcrumbs,
 and zero CSS, design-system, or icon imports. A shared Carbon shell may surround
@@ -401,10 +426,11 @@ these authenticated routes, but it does not change their server-action trust
 boundary or make the temporary page content permanent. Carbon organization and
 account page content remains future work.
 
-The UI mirrors installed Better Auth permissions: owners may assign all three
-roles and manage owner targets, while admins may assign only `admin` or `member`
-and receive no change or removal controls for owner targets. Members are
-read-only. Better Auth remains authoritative. Role and removal actions reread up
+The UI mirrors the access control ADR 0011 added to the Better Auth organization
+plugin: only owners may update settings, invite, assign any of the three roles,
+remove a member, or edit an admin's or a member's entity scope. Admins and
+members are both read-only in this UI. Better Auth remains authoritative and
+independently refuses the same admin actions. Role and removal actions reread up
 to the configured 100-member limit and refuse a final-owner change in the
 temporary UI. That read followed by mutation is not atomic and does not repair
 Better Auth 1.7.2's direct endpoint gaps: its last-owner role check applies only
@@ -442,20 +468,21 @@ named row, verifies identity absence as owner, sets the non-login `bap_eraser`
 role for an invoker-rights app function, returns to owner, consumes the request,
 and commits atomically. `bap_eraser` has BYPASSRLS but no password, CONNECT, or
 inherited membership. Its app privileges are limited to schema usage, function
-execution, and SELECT/UPDATE on the 3 subject columns. `bap_auth` retains no
+execution, SELECT/UPDATE on the 5 subject columns, and DELETE on the two entity
+scope tables now that `app.data_grants` is dropped. `bap_auth` retains no
 app-schema access, and `bap_api` cannot execute erasure or UPDATE the audit log.
 There is no blind orphan sweep.
 
 The function generates 1 opaque `erased_<uuid>` only when a matching row exists,
-never derives it from the user id, and applies it to audit attribution, data
-grants, and dataset creators. A repeat leaves stored state unchanged. Retained
-or granted datasets can remain readable after `dataset.created_by` is
-tombstoned, but `dataset_is_writable` no longer recognizes a live creator. They
-remain unwritable until later ownership or delegation work.
-`app.audit_log.metadata` is deliberately not rewritten and can retain user ids.
-Identifiers can also remain in `auth.rate_limit`, `auth.verification`, and
-pg-boss job payloads. Access and portability are not implemented. This is a
-narrow erasure mechanism, not a claim of complete GDPR compliance.
+never derives it from the user id, and applies it to audit attribution and
+dataset creators. A repeat leaves stored state unchanged. Retained or granted
+datasets can remain readable after `dataset.created_by` is tombstoned, but
+`dataset_is_writable` no longer recognizes a live creator. They remain
+unwritable until later ownership or delegation work. `app.audit_log.metadata` is
+deliberately not rewritten and can retain user ids. Identifiers can also remain
+in `auth.rate_limit`, `auth.verification`, and pg-boss job payloads. Access and
+portability are not implemented. This is a narrow erasure mechanism, not a claim
+of complete GDPR compliance.
 
 ## Admin HTTP boundary
 

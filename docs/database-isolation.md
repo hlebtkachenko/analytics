@@ -9,7 +9,7 @@ connection URLs are not accepted.
 | Role            | Purpose                                  | Owner membership | RLS bypass |
 | --------------- | ---------------------------------------- | ---------------- | ---------- |
 | `bap_owner`     | Own schemas and reviewed objects         | Not a login      | No         |
-| `bap_eraser`    | Anonymize 3 approved subject columns     | SET from owner   | Yes        |
+| `bap_eraser`    | Anonymize 5 approved subject columns     | SET from owner   | Yes        |
 | `bap_migrator`  | Run reviewed migrations after `SET ROLE` | SET only         | No         |
 | `bap_auth`      | Better Auth tables and rate limits       | None             | No         |
 | `bap_api`       | Application membership resolver          | None             | No         |
@@ -123,13 +123,17 @@ row. Its function is owned by `bap_owner`, has a fixed search path, and grants
 no direct execution to runtime roles.
 
 `app.erase_user(text)` is an invoker-rights, fixed-search-path function. The
-eraser role has schema usage, function execution, and SELECT/UPDATE on only
-`audit_log.user_id`, `data_grants.user_id`, and `dataset.created_by`. It has no
-table-wide grant. The database CLI connects as `bap_migrator`, sets owner to
-lock and validate the pending request, sets eraser for the app function, returns
-to owner to consume the request, and commits once. A live or unrequested id is
-refused before eraser role entry. `bap_auth` retains zero access to schema
-`app`, and `bap_api` retains no UPDATE on `app.audit_log`.
+eraser role has schema usage, function execution, SELECT/UPDATE on only
+`audit_log.user_id`, `dataset.created_by`, `legal_entity.created_by`,
+`member_entity_scope.updated_by`, and `legal_entity_access.created_by`, plus
+SELECT on the two scope tables' `user_id` and DELETE on those two tables so a
+subject's own scope rows disappear. `data_grants.user_id` was removed with that
+table under ADR 0011. It has no other table-wide grant. The database CLI
+connects as `bap_migrator`, sets owner to lock and validate the pending request,
+sets eraser for the app function, returns to owner to consume the request, and
+commits once. A live or unrequested id is refused before eraser role entry.
+`bap_auth` retains zero access to schema `app`, and `bap_api` retains no UPDATE
+on `app.audit_log`.
 
 The public sign-up edge limiter also stays behind `@bap/db`. One statement
 inserts or atomically advances a hashed, namespaced `auth.rate_limit` key before
@@ -139,6 +143,49 @@ count is below 3 or the 60-second window has expired. Once full, the statement
 returns no row and performs no write until expiry. The same data-modifying CTE
 prunes expired rows from only the edge namespace on every consume. A partial
 `last_request` index supports that cleanup; Better Auth's own keys are retained.
+
+Migration `20260910.0001` implements ADR 0011's two-level tenancy.
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
+`20260910.0001`; rolling application code back after this migration leaves
+readiness at 503 until code expecting that exact version is deployed or the
+expected version is deliberately advanced.
+
+It adds
+`app.legal_entity(id, organization_id, name, kind, registration_number, created_by, created_at, updated_at)`,
+unique on `(id, organization_id)` and on `(organization_id, name)`, with `kind`
+constrained to `company` or `sole_trader`. `app.member_entity_scope` is keyed
+`(organization_id, user_id)` and records `mode` as `all` or `restricted`.
+`app.legal_entity_access` names the individual entities a restricted member or
+admin may see, with a composite foreign key to `app.legal_entity` that cascades
+on delete. `app.dataset.legal_entity_id` and `app.upload.legal_entity_id` are
+`NOT NULL` composite foreign keys to the entity, also `ON DELETE CASCADE`; a
+development database holding datasets must be reset before this migration runs.
+`app.data_grants` is dropped: dataset visibility no longer depends on the
+creator or a per-dataset grant, only on organization membership and, at the
+application layer, entity scope.
+
+The tenant transaction gains a third setting, `bap.role`, alongside
+`bap.organization_id` and `bap.user_id`; `withTenantContext` in `@bap/db` sets
+all three together. Two `SECURITY INVOKER` helpers read it:
+`app.role_can_write()` is true for `owner` and `admin`, and
+`app.role_is_owner()` is true only for `owner`. Every write policy on the new
+tables calls one of them, so the database itself refuses a write from a
+read-only member and an entity deletion from an admin, independently of whatever
+the application layer already checked.
+
+The new tables' policies follow one shape: `SELECT` stays organization-wide,
+matching the existing tenant policy contract below; entity `INSERT` and `UPDATE`
+require `role_can_write()`; entity `DELETE`, and every write to
+`app.member_entity_scope` and `app.legal_entity_access`, require
+`role_is_owner()`. Row level security does not filter by entity: the "all
+entities" view is the absence of an application-level filter, never a
+database-level one. Entity selection and the restricted scope are computed by
+one resolver in `@bap/db`,
+`readEntityScope(transaction, { organizationId, role, userId })`, which returns
+`{ mode: 'all' }` for an owner or an unscoped admin or member, or
+`{ mode: 'restricted', legalEntityIds }` otherwise; every new data path that
+reads a dataset or an upload must go through it, because the database will not
+apply that filter on its own.
 
 ## Tenant policy contract
 
@@ -150,13 +197,21 @@ Every future tenant table must include:
 - a `USING` policy for reads and changes;
 - a matching `WITH CHECK` policy for inserted or changed rows.
 
+A table that attaches to a legal entity, such as `app.dataset` and `app.upload`,
+also carries a non-null `legal_entity_id` and a composite foreign key against
+`app.legal_entity(id, organization_id)` rather than a bare reference to the
+entity id. That composite key pins the entity to the row's own
+`organization_id`, so an entity from another organization can never be attached
+even before row level security is evaluated.
+
 Split the policies per command whenever a table is readable more widely than it
 is writable. A single `ALL` policy applies its `USING` clause to `DELETE` and to
 the row selection of `UPDATE`, so a read grant would silently confer deletion.
 `app.dataset`, `app.dataset_column`, `app.dataset_row`, and
 `app.dataset_embedding` therefore carry separate `SELECT`, `INSERT`, `UPDATE`,
-and `DELETE` policies: reading follows the dataset, writing stays with its
-creator.
+and `DELETE` policies: `SELECT` is organization-wide, and writing requires
+`app.role_can_write()` rather than matching the creator, since ADR 0011 made
+`member` read-only and dropped the per-dataset grant.
 
 Tenant context is set with `SET LOCAL` inside one transaction. It cannot persist
 through pooled connections after commit or rollback. Missing context fails
@@ -175,10 +230,11 @@ backup writes, schema changes, and owner role changes.
 
 Account-lifecycle coverage additionally asserts exact eraser attributes,
 membership options, CONNECT denial, request-table ACLs, both function owners and
-search paths, and the 6 column privileges needed by the erasure function. It
+search paths, and the column privileges needed by the erasure function. It
 proves sole-owned and co-owned counts, all identity cascades, live and
-unrequested refusal, one opaque tombstone across all 3 app columns, request
-consumption, and idempotent stored state.
+unrequested refusal, one opaque tombstone across the 2 remaining app columns now
+that `app.data_grants` is dropped, request consumption, and idempotent stored
+state.
 
 Organization-creation coverage asserts the exact quota columns, named checks,
 foreign-key delete actions, trigger and function catalog state, direct table ACL
@@ -203,14 +259,20 @@ paired BFF assertion proves that the same syntactically valid slug is forwarded
 only to the fixed application target with an in-memory resource token, returns
 the service's 403, and exposes only the fixed `access_denied` response.
 
-It also proves the phase 1 authorization tables: `app.data_grants` is readable
-only inside its own tenant context and rejects a cross-tenant write, and
-`app.audit_log` is append only, since no service role holds `INSERT`, `UPDATE`,
-or `DELETE` on it. `app.record_audit` is asserted to be `SECURITY DEFINER` with
-a fixed `search_path` and to take no organization or subject argument at all, so
-a caller cannot name the tenant it writes to; attribution comes from
-`current_setting`, and a payload claiming another organization still lands in
-the caller's own tenant.
+It also proves the append-only phase 1 authorization table: `app.audit_log`
+allows no service role `INSERT`, `UPDATE`, or `DELETE`. `app.record_audit` is
+asserted to be `SECURITY DEFINER` with a fixed `search_path` and to take no
+organization or subject argument at all, so a caller cannot name the tenant it
+writes to; attribution comes from `current_setting`, and a payload claiming
+another organization still lands in the caller's own tenant. `app.data_grants`
+itself is dropped by migration `20260910.0001`; the suite instead proves that
+`app.legal_entity`, `app.member_entity_scope`, and `app.legal_entity_access` are
+each `ENABLE`/`FORCE` RLS, that `app.role_can_write()` and `app.role_is_owner()`
+gate exactly the write policies described above, that an entity delete by an
+admin is rejected, that an entity insert or dataset upload naming an entity from
+another organization is rejected by the composite foreign key, and that a
+restricted member's out-of-scope dataset read returns the same absence as a
+nonmember's.
 
 It also proves the phase 3 embedding table. `app.dataset_embedding` stores one
 `vector(1536)` per dataset, keyed to its parent by a composite foreign key that

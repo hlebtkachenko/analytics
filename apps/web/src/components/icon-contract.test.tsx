@@ -70,6 +70,13 @@ const reviewedCallsites = [
     'UserMultiple',
     "{t('access.manageMembers')}",
   ],
+  [
+    'app/access/page.tsx',
+    'Button',
+    'Security',
+    "{t('access.manageEntityAccess')}",
+  ],
+  ['app/access/page.tsx', 'Button', 'DataSet', "{t('access.manageEntities')}"],
   ['app/access/page.tsx', 'Button', 'Upload', "{t('access.uploadData')}"],
   ['app/datasets/page.tsx', 'Button', 'View', "{t('datasets.open')}"],
   ['app/datasets/page.tsx', 'Button', 'Upload', "{t('datasets.uploadSubmit')}"],
@@ -127,6 +134,7 @@ const throwawayPages = [
   'app/(throwaway)/organizations/page.tsx',
   'app/(throwaway)/organizations/new/page.tsx',
   'app/[orgSlug]/page.tsx',
+  'app/[orgSlug]/entities/page.tsx',
   'app/[orgSlug]/members/page.tsx',
   'app/[orgSlug]/settings/page.tsx',
 ] as const;
@@ -426,16 +434,6 @@ describe('Carbon application icon AST contract', () => {
     );
 
     expect(actualCallsites).toEqual([
-      {
-        attributes: {
-          'aria-hidden': 'true',
-          focusable: 'false',
-          size: '{20}',
-        },
-        file: 'app/access/page.tsx',
-        icon: 'Security',
-        selfClosing: true,
-      },
       {
         attributes: {
           'aria-hidden': 'true',

@@ -24,8 +24,8 @@ export default async function OrganizationSettingsPage({
     null,
     organization.slug,
   );
-  const canUpdate =
-    organization.role === 'owner' || organization.role === 'admin';
+  // ADR 0011 leaves organization settings with the owner alone.
+  const canUpdate = organization.role === 'owner';
 
   return (
     <main id="main-content" tabIndex={-1}>

@@ -128,19 +128,27 @@ navigation use native links to Access, Organizations, Datasets, and Account and
 identify the current route. Identity and invitation routes stay outside the
 shell.
 
-The Access organization cards link implemented capabilities to real routes.
-Member management targets `/{slug}/members`; dataset upload targets
+The Access organization cards link implemented capabilities to real routes and
+also list the caller's eight capabilities and `entityScope`. Member management
+and entity access management target `/{slug}/members`, visible only with
+`manageMembers` and `manageEntityAccess`; dataset upload targets
 `/datasets?organization={slug}#upload-dataset`. The dataset page accepts that
 slug only when it matches the authenticated organization list, then sends only
-the corresponding immutable organization id through the BFF. Data grants and the
-general assistant remain descriptive, non-interactive unavailable statuses.
+the corresponding immutable organization id through the BFF. There is no
+per-dataset grant left to render; the general assistant remains a descriptive,
+non-interactive unavailable status on this page.
+
+The datasets page adds a per-page entity scope switch, either all entities or
+one legal entity, and an upload entity selector. Both stay within the caller's
+`entityScope`: a restricted admin or member can only switch among, or upload
+into, the entities named there.
 
 Subordinate routes expose semantic breadcrumbs. Permanent Carbon content uses
 Carbon breadcrumbs, including `Datasets > {dataset name}` for an inline dataset
-view. The five temporary organization page modules keep plain native
-breadcrumbs, their exact throwaway markers, and zero CSS, design-system, or icon
-imports. Only the shared root shell is Carbon; permanent Carbon organization and
-account content remains future work.
+view. The six temporary organization page modules keep plain native breadcrumbs,
+their exact throwaway markers, and zero CSS, design-system, or icon imports.
+Only the shared root shell is Carbon; permanent Carbon organization and account
+content remains future work.
 
 ## Admin HTTP inventory
 
@@ -321,16 +329,16 @@ docker compose --env-file .env -f compose.yaml -f compose.development.yaml run -
 
 The command requires exactly 1 explicit pending id. In 1 transaction it locks
 that request, proves the auth identity is absent, assumes the RLS-bypassing
-eraser role only for the 3 app-column updates, returns to owner, consumes the
-request, and commits. It emits JSON only. A missing request, live identity, or
-database failure produces the same redacted JSON failure. There is no orphan
-sweep.
+eraser role only for the app-column updates and scope-row deletions, returns to
+owner, consumes the request, and commits. It emits JSON only. A missing request,
+live identity, or database failure produces the same redacted JSON failure.
+There is no orphan sweep.
 
-One opaque `erased_<uuid>` replaces the subject in `app.audit_log.user_id`,
-`app.data_grants.user_id`, and `app.dataset.created_by`. It is generated
-independently of the user id and used consistently for that invocation. A repeat
-direct function call changes no stored state, and a repeat CLI call fails
-because the request was consumed.
+One opaque `erased_<uuid>` replaces the subject in `app.audit_log.user_id` and
+`app.dataset.created_by`; `app.data_grants.user_id` was a third target until ADR
+0011 dropped that table. It is generated independently of the user id and used
+consistently for that invocation. A repeat direct function call changes no
+stored state, and a repeat CLI call fails because the request was consumed.
 
 A retained or granted dataset can remain readable after `created_by` is
 tombstoned. `app.dataset_is_writable` then recognizes no live creator, so that
@@ -353,14 +361,17 @@ forwarded unless a route explicitly lists a streamed body below.
 
 The fixed BFF matrix is:
 
-| Browser method and path                                                                                          | Fixed upstream                                                                                                       | Timeout and transfer                                                                                                            | Successful browser contract                                                                                                                                                           |
-| ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/bff/application/organizations/:organizationId/access`                                                  | `GET http://api:3001/v1/organizations/:organizationId/access`                                                        | 3 seconds; bounded JSON                                                                                                         | Strict `{ service: 'application-api', organizationId, role, capabilities }`                                                                                                           |
-| `GET /api/bff/reporting/organizations/:organizationId/access`                                                    | `GET http://reporting-api:3002/v1/organizations/:organizationId/access`                                              | 3 seconds; bounded JSON                                                                                                         | Strict `{ service: 'reporting-api', organizationId, role, capabilities }`                                                                                                             |
-| `GET /api/bff/application/organizations/:organizationId/datasets`                                                | `GET http://api:3001/v1/organizations/:organizationId/datasets`                                                      | 10 seconds; bounded JSON                                                                                                        | Strict dataset list with UUID, name, nullable description, non-negative row count, `importing`/`ready`/`failed` status, and ISO created/updated timestamps                            |
-| `GET /api/bff/application/organizations/:organizationId/datasets/:datasetId/rows?after=&pageSize=`               | `GET http://api:3001/v1/organizations/:organizationId/datasets/:datasetId/rows`                                      | 10 seconds; bounded JSON                                                                                                        | UUID dataset id; optional non-negative `after`; `pageSize` 1-500, default 100; strict columns, scalar row data, row numbers, page size, nullable next cursor, and matching dataset id |
-| `GET /api/bff/application/organizations/:organizationId/datasets/:datasetId/export?format=csv` or `?format=xlsx` | `GET http://api:3001/v1/organizations/:organizationId/datasets/:datasetId/export` with `format=csv` or `format=xlsx` | 30 seconds for response headers only; the validated response body then streams without a midstream timeout                      | Exact CSV or XLSX media type and a locally minted `dataset-{validated UUID}.{format}` attachment filename; no upstream response header is relayed                                     |
-| `POST /api/bff/application/organizations/:organizationId/uploads`                                                | `POST http://api:3001/v1/organizations/:organizationId/uploads`                                                      | Multipart request body streams to the API with a 120-second timeout; the API enforces the matching 25,000,000-byte upload limit | HTTP 202 with strict `{ status: 'accepted', uploadId: UUID }`                                                                                                                         |
+| Browser method and path                                                                                          | Fixed upstream                                                                                                       | Timeout and transfer                                                                                                            | Successful browser contract                                                                                                                                                                                                          |
+| ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /api/bff/application/organizations/:organizationId/access`                                                  | `GET http://api:3001/v1/organizations/:organizationId/access`                                                        | 3 seconds; bounded JSON                                                                                                         | Strict `{ service: 'application-api', organizationId, role, capabilities, entityScope }`                                                                                                                                             |
+| `GET /api/bff/reporting/organizations/:organizationId/access`                                                    | `GET http://reporting-api:3002/v1/organizations/:organizationId/access`                                              | 3 seconds; bounded JSON                                                                                                         | Strict `{ service: 'reporting-api', organizationId, role, capabilities, entityScope }`                                                                                                                                               |
+| `GET /api/bff/application/organizations/:organizationId/legal-entities`                                          | `GET http://api:3001/v1/organizations/:organizationId/legal-entities`                                                | 3 seconds; bounded JSON                                                                                                         | Legal entities in the caller's scope, at most 200, newest first                                                                                                                                                                      |
+| `POST`/`PATCH`/`DELETE /api/bff/application/organizations/:organizationId/legal-entities[/:legalEntityId]`       | Same verb to `http://api:3001/v1/organizations/:organizationId/legal-entities[/:legalEntityId]`                      | 3 seconds; bounded JSON                                                                                                         | Requires `createEntities`, `updateEntities`, or `deleteEntities` and, for update or delete, entity scope                                                                                                                             |
+| `GET`/`PUT /api/bff/application/organizations/:organizationId/members/:userId/entity-scope`                      | Same verb to `http://api:3001/v1/organizations/:organizationId/members/:userId/entity-scope`                         | 3 seconds; bounded JSON                                                                                                         | Requires `manageEntityAccess`; rejects an owner target with 409 and an unknown entity id with 400                                                                                                                                    |
+| `GET /api/bff/application/organizations/:organizationId/datasets?legalEntityId=`                                 | `GET http://api:3001/v1/organizations/:organizationId/datasets`                                                      | 10 seconds; bounded JSON                                                                                                        | Strict dataset list with UUID, name, nullable description, `legalEntityId`, non-negative row count, `importing`/`ready`/`failed` status, and ISO created/updated timestamps, filtered by scope and the optional entity               |
+| `GET /api/bff/application/organizations/:organizationId/datasets/:datasetId/rows?after=&pageSize=`               | `GET http://api:3001/v1/organizations/:organizationId/datasets/:datasetId/rows`                                      | 10 seconds; bounded JSON                                                                                                        | UUID dataset id; optional non-negative `after`; `pageSize` 1-500, default 100; strict columns, scalar row data, row numbers, page size, nullable next cursor, and matching dataset id; 404 when the dataset's entity is out of scope |
+| `GET /api/bff/application/organizations/:organizationId/datasets/:datasetId/export?format=csv` or `?format=xlsx` | `GET http://api:3001/v1/organizations/:organizationId/datasets/:datasetId/export` with `format=csv` or `format=xlsx` | 30 seconds for response headers only; the validated response body then streams without a midstream timeout                      | Exact CSV or XLSX media type and a locally minted `dataset-{validated UUID}.{format}` attachment filename; no upstream response header is relayed; 404 when the dataset's entity is out of scope                                     |
+| `POST /api/bff/application/organizations/:organizationId/uploads`                                                | `POST http://api:3001/v1/organizations/:organizationId/uploads`                                                      | Multipart request body streams to the API with a 120-second timeout; the API enforces the matching 25,000,000-byte upload limit | HTTP 202 with strict `{ status: 'accepted', uploadId: UUID }`; the multipart `legalEntityId` field must be in scope                                                                                                                  |
 
 Application membership and row-level security remain authoritative at the API.
 Invalid sessions, selectors, queries, media types, upstream failures, and
@@ -392,6 +403,29 @@ New or changed member and invitation rows accept only the scalar roles `owner`,
 `admin`, and `member`. The migration leaves its role checks `NOT VALID` so a
 historical composed or otherwise invalid value does not block deployment. The
 resolver treats such a legacy value as no membership instead of throwing.
+
+Since ADR 0011, the organization is a workspace holding many legal entities, and
+the role matrix reflects that split. `owner` holds organization settings,
+members and invitations, entity access, and entity deletion. `admin` can create
+and update legal entities and upload data, but cannot manage members,
+organization settings, entity access, or delete an entity. `member` is read-only
+aside from the assistant.
+
+`@bap/security` derives eight capabilities from that role: `manageOrganization`,
+`manageMembers`, `manageEntityAccess`, `createEntities`, `updateEntities`,
+`deleteEntities`, `uploadData`, and `useAi`. `owner` holds all eight; `admin`
+holds `createEntities`, `updateEntities`, `uploadData`, and `useAi`; `member`
+holds only `useAi`. Both APIs enforce a capability before opening a tenant
+transaction, so the UI hint and the enforced boundary agree. The access response
+also carries `entityScope`: `{ mode: 'all' }` for an owner or an unscoped admin
+or member, or `{ mode: 'restricted', legalEntityIds }` for one limited to an
+explicit set of legal entities. An owner is never restricted.
+
+The web application's Better Auth organization plugin now runs an explicit
+access-control configuration where only `owner` holds the `organization`,
+`member`, and `invitation` permissions. Better Auth itself refuses an admin's
+attempt to update organization settings, invite, remove, or reassign a member,
+independently of the BFF and API capability checks above.
 
 ## Organization creation
 
@@ -500,18 +534,18 @@ segment in the same pull request.
 
 ## Temporary organization pages
 
-The 5 temporary organization pages are an intentionally throwaway, unstyled
-browser loop. They use semantic headings, navigation, labels, native controls,
-lists, and progressive-enhancement server-action forms, with no page CSS,
-design-system, or icon imports. Each subordinate page uses a plain native
-breadcrumb. Their exact throwaway markers remain enforced, and permanent Carbon
-page content is future work even though the shared root shell surrounds
-authenticated routes. `/organizations/new` reads creator-attributed quota
-through a narrow SELECT-only `@bap/db` accessor. A missing row, malformed state,
-or read failure renders remaining quota as zero and replaces the complete form
-with one sentence. When capacity exists, the account name prefills the
-organization name and the shared normalizer keeps the slug field in step with
-name edits.
+The 6 temporary organization pages, now including `/[orgSlug]/entities`, are an
+intentionally throwaway, unstyled browser loop. They use semantic headings,
+navigation, labels, native controls, lists, and progressive-enhancement
+server-action forms, with no page CSS, design-system, or icon imports. Each
+subordinate page uses a plain native breadcrumb. Their exact throwaway markers
+remain enforced, and permanent Carbon page content is future work even though
+the shared root shell surrounds authenticated routes. `/organizations/new` reads
+creator-attributed quota through a narrow SELECT-only `@bap/db` accessor. A
+missing row, malformed state, or read failure renders remaining quota as zero
+and replaces the complete form with one sentence. When capacity exists, the
+account name prefills the organization name and the shared normalizer keeps the
+slug field in step with name edits.
 
 Creation validates and normalizes again on the server, calls Better Auth with
 `keepCurrentActiveOrganization: true`, and redirects only to the validated
@@ -525,18 +559,28 @@ Destinations for valid values use only the parsed slug or the durable slug
 returned by the resolver. All failures use fixed local redirects and generic
 messages.
 
-Owners can update settings, invite or assign `owner`, `admin`, or `member`, and
-manage owner targets subject to the temporary final-owner safeguard. Admins can
-update settings, invite or assign only `admin` or `member`, and receive change
-and removal forms only for non-owner targets. Ordinary members receive read-only
-membership and invitation lists. Better Auth remains the permission boundary.
-Before this temporary UI demotes or removes an owner, its action rereads the
-full 100-member-bounded list and refuses to remove the final observed owner.
-This is a non-atomic UI safeguard, not a global invariant. Installed Better Auth
-1.7.2 checks only self-demotion and uses its configured member limit when
-counting owners for removal, so concurrent or direct endpoint gaps remain the
-approved follow-up. Organization deletion, active selection, custom roles, and
-teams remain unavailable.
+Only owners can update settings, invite, assign `owner`, `admin`, or `member`,
+remove a member, and edit an admin's or a member's entity scope, subject to the
+temporary final-owner safeguard. Admins and ordinary members both receive
+read-only settings, membership, and invitation views; ADR 0011 moved member and
+organization management to `owner` alone, and Better Auth's explicit access
+control now enforces the same restriction independently of this UI.
+`/[orgSlug]/members` adds an owner-only entity scope editor next to each
+restricted admin or member, setting `all` or an explicit set of legal entity
+ids; the editor rejects an owner target. Before this temporary UI demotes or
+removes an owner, its action rereads the full 100-member-bounded list and
+refuses to remove the final observed owner. This is a non-atomic UI safeguard,
+not a global invariant. Installed Better Auth 1.7.2 checks only self-demotion
+and uses its configured member limit when counting owners for removal, so
+concurrent or direct endpoint gaps remain the approved follow-up. Organization
+deletion, active selection, custom roles, and teams remain unavailable.
+
+The new `/[orgSlug]/entities` page lists the legal entities in the viewer's
+scope. An owner or an admin holding `createEntities`/`updateEntities` can add or
+edit a `company` or `sole_trader` entity with an optional registration number;
+only an owner can delete one. Members see the list without management forms.
+This page shares the same plain, temporary presentation as the other four
+organization pages.
 
 ## First owner
 
