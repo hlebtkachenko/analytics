@@ -53,6 +53,7 @@ function browserShard() {
 }
 
 export default defineConfig({
+  resolve: { dedupe: ['react', 'react-dom'] },
   test: {
     shard: browserShard(),
     projects: [
