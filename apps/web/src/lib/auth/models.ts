@@ -6,7 +6,6 @@ export const coreAuthModels = {
       accountId: 'account_id',
       createdAt: 'created_at',
       idToken: 'id_token',
-      issuer: 'issuer',
       password: 'password',
       providerId: 'provider_id',
       refreshToken: 'refresh_token',

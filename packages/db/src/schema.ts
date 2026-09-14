@@ -72,7 +72,6 @@ export const accounts = authSchema.table(
       .defaultNow(),
     id: text('id').primaryKey(),
     idToken: text('id_token'),
-    issuer: text('issuer').notNull(),
     password: text('password'),
     providerId: text('provider_id').notNull(),
     refreshToken: text('refresh_token'),
@@ -89,8 +88,8 @@ export const accounts = authSchema.table(
   },
   (table) => [
     index('account_user_id_idx').on(table.userId),
-    uniqueIndex('account_issuer_account_id_key').on(
-      table.issuer,
+    uniqueIndex('account_provider_id_account_id_key').on(
+      table.providerId,
       table.accountId,
     ),
   ],
