@@ -9,6 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from '@bap/design-system/react';
+import { useMemo } from 'react';
 
 import type { CellValue, GridRow, PivotConfig, PivotGridProps } from './types';
 import styles from './pivot-grid.module.scss';
@@ -62,50 +63,54 @@ export function aggregatePivot(
   const rowValues = distinctSorted(rows, config.rowDimension);
   const columnValues = distinctSorted(rows, config.columnDimension);
 
-  function aggregate(matchingRows: readonly GridRow[]): number {
-    if (aggregation === 'count') {
-      return matchingRows.length;
-    }
-    const sum = matchingRows.reduce(
-      (total, row) => total + toNumber(row[config.measure]),
-      0,
-    );
-    if (aggregation === 'avg') {
-      return matchingRows.length === 0 ? 0 : sum / matchingRows.length;
-    }
+  // Accumulate sum and count for each cell, row, and column in one pass.
+  const cellSum = new Map<string, number>();
+  const cellCount = new Map<string, number>();
+  const rowSum = new Map<string, number>();
+  const rowCount = new Map<string, number>();
+  const columnSum = new Map<string, number>();
+  const columnCount = new Map<string, number>();
+  let grandSum = 0;
+  let grandCount = 0;
+  const bump = (map: Map<string, number>, key: string, value: number): void => {
+    map.set(key, (map.get(key) ?? 0) + value);
+  };
+  for (const row of rows) {
+    const rowKey = dimensionKey(row[config.rowDimension]);
+    const columnKey = dimensionKey(row[config.columnDimension]);
+    const value = toNumber(row[config.measure]);
+    const cellKey = `${rowKey}\u0000${columnKey}`;
+    bump(cellSum, cellKey, value);
+    bump(cellCount, cellKey, 1);
+    bump(rowSum, rowKey, value);
+    bump(rowCount, rowKey, 1);
+    bump(columnSum, columnKey, value);
+    bump(columnCount, columnKey, 1);
+    grandSum += value;
+    grandCount += 1;
+  }
+
+  // Resolve an accumulated sum and count into the configured aggregation.
+  const resolve = (sum: number, count: number): number => {
+    if (aggregation === 'count') return count;
+    if (aggregation === 'avg') return count === 0 ? 0 : sum / count;
     return sum;
-  }
-
-  function cell(rowValue: string, columnValue: string): number {
-    return aggregate(
-      rows.filter(
-        (row) =>
-          dimensionKey(row[config.rowDimension]) === rowValue &&
-          dimensionKey(row[config.columnDimension]) === columnValue,
-      ),
-    );
-  }
-
-  function rowTotal(rowValue: string): number {
-    return aggregate(
-      rows.filter((row) => dimensionKey(row[config.rowDimension]) === rowValue),
-    );
-  }
-
-  function columnTotal(columnValue: string): number {
-    return aggregate(
-      rows.filter(
-        (row) => dimensionKey(row[config.columnDimension]) === columnValue,
-      ),
-    );
-  }
+  };
 
   return {
-    cell,
-    columnTotal,
+    cell: (rowValue, columnValue) => {
+      const key = `${rowValue}\u0000${columnValue}`;
+      return resolve(cellSum.get(key) ?? 0, cellCount.get(key) ?? 0);
+    },
+    columnTotal: (columnValue) =>
+      resolve(
+        columnSum.get(columnValue) ?? 0,
+        columnCount.get(columnValue) ?? 0,
+      ),
     columnValues,
-    grandTotal: aggregate(rows),
-    rowTotal,
+    grandTotal: resolve(grandSum, grandCount),
+    rowTotal: (rowValue) =>
+      resolve(rowSum.get(rowValue) ?? 0, rowCount.get(rowValue) ?? 0),
     rowValues,
   };
 }
@@ -117,7 +122,7 @@ export function PivotGrid({
   description,
   size = 'sm',
 }: PivotGridProps) {
-  const matrix = aggregatePivot(rows, config);
+  const matrix = useMemo(() => aggregatePivot(rows, config), [rows, config]);
 
   return (
     <TableContainer title={title} description={description}>

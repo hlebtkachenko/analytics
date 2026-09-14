@@ -43,6 +43,21 @@ describe('DataGrid', () => {
     expect(bodyRowText()[0]).toContain('alpha');
   });
 
+  it('keeps missing values last in both sort directions', () => {
+    const withGap: readonly GridRow[] = [
+      { id: '1', name: 'alpha', score: 5 },
+      { id: '2', name: 'beta', score: null },
+      { id: '3', name: 'gamma', score: 3 },
+    ];
+    render(<DataGrid columns={columns} rows={withGap} sortable />);
+    const scoreHeader = screen.getByText('Score');
+    fireEvent.click(scoreHeader);
+    expect(bodyRowText().at(-1)).toContain('beta');
+    fireEvent.click(scoreHeader);
+    expect(bodyRowText()[0]).toContain('alpha');
+    expect(bodyRowText().at(-1)).toContain('beta');
+  });
+
   it('filters rows with the client search', () => {
     render(<DataGrid columns={columns} rows={rows} search />);
     fireEvent.change(screen.getByPlaceholderText('Search rows'), {

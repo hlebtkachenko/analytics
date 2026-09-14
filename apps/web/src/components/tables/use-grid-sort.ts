@@ -4,11 +4,8 @@ import { useMemo, useState } from 'react';
 
 import type { CellValue, GridRow, SortDirection, SortSpec } from './types';
 
-// Compare two primitive cell values with numbers numeric and nulls last.
-function compareValues(a: CellValue, b: CellValue): number {
-  if (a === b) return 0;
-  if (a === null || a === undefined) return 1;
-  if (b === null || b === undefined) return -1;
+// Compare two present values; nulls are handled by the caller so they stay last.
+function comparePresent(a: CellValue, b: CellValue): number {
   if (typeof a === 'number' && typeof b === 'number') return a - b;
   return String(a).localeCompare(String(b));
 }
@@ -50,7 +47,15 @@ export function useGridSort(
     if (specs.length === 0) return rows;
     return [...rows].sort((left, right) => {
       for (const spec of specs) {
-        const order = compareValues(left[spec.key], right[spec.key]);
+        const a = left[spec.key];
+        const b = right[spec.key];
+        const aMissing = a === null || a === undefined;
+        const bMissing = b === null || b === undefined;
+        // Missing values sort last in both directions, never negated.
+        if (aMissing && bMissing) continue;
+        if (aMissing) return 1;
+        if (bMissing) return -1;
+        const order = comparePresent(a, b);
         if (order !== 0) return spec.direction === 'ASC' ? order : -order;
       }
       return 0;

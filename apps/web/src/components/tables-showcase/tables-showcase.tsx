@@ -21,6 +21,7 @@ import {
 } from '@bap/design-system/react';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 
+import PageContainer from '../page-container';
 import { DataGrid } from '../tables/data-grid';
 import {
   datasetColumns,
@@ -259,225 +260,215 @@ export function TablesShowcase() {
 
   return (
     <main aria-labelledby="tables-showcase-heading">
-      <Grid>
-        <Column lg={16} md={8} sm={4}>
-          <Stack gap={7}>
-            <header>
-              <Heading id="tables-showcase-heading">
-                Table component blocks
-              </Heading>
-              <p>
-                Carbon table archetypes mapped from the cube data table
-                variations. One toggle-driven grid, a tree grid, and a pivot
-                grid.
-              </p>
-              <Stack gap={3} orientation="horizontal">
-                <Tag type="green">DataGrid</Tag>
-                <Tag type="blue">TreeDataGrid</Tag>
-                <Tag type="purple">PivotGrid</Tag>
-              </Stack>
-            </header>
-
-            <Tabs>
-              <TabList aria-label="Table archetypes">
-                <Tab>Data grid</Tab>
-                <Tab>Tree</Tab>
-                <Tab>Pivot</Tab>
-              </TabList>
-              <TabPanels>
-                <TabPanel>
-                  <Grid className={styles.panelGrid ?? ''}>
-                    <Column lg={4} md={8} sm={4}>
-                      <Section level={2}>
-                        <Tile>
-                          <Stack gap={5}>
-                            <Heading>Controls</Heading>
-                            <Dropdown
-                              id="density"
-                              items={[...DENSITIES]}
-                              itemToString={(item) => item ?? ''}
-                              label="Density"
-                              onChange={(data) => {
-                                if (data.selectedItem)
-                                  setDensity(data.selectedItem);
-                              }}
-                              selectedItem={density}
-                              titleText="Density"
-                            />
-                            <RadioButtonGroup
-                              legendText="Selection"
-                              name="selection"
-                              onChange={(value) =>
-                                setSelection(value as SelectionMode)
-                              }
-                              valueSelected={selection}
-                            >
-                              <RadioButton
-                                id="sel-none"
-                                labelText="None"
-                                value="none"
-                              />
-                              <RadioButton
-                                id="sel-single"
-                                labelText="Single"
-                                value="single"
-                              />
-                              <RadioButton
-                                id="sel-multi"
-                                labelText="Multi"
-                                value="multi"
-                              />
-                            </RadioButtonGroup>
-                            <RadioButtonGroup
-                              legendText="State"
-                              name="state"
-                              onChange={(value) =>
-                                setAsyncState(value as GridState)
-                              }
-                              valueSelected={asyncState}
-                            >
-                              <RadioButton
-                                id="state-ready"
-                                labelText="Ready"
-                                value="ready"
-                              />
-                              <RadioButton
-                                id="state-loading"
-                                labelText="Loading"
-                                value="loading"
-                              />
-                              <RadioButton
-                                id="state-empty"
-                                labelText="Empty"
-                                value="empty"
-                              />
-                              <RadioButton
-                                id="state-error"
-                                labelText="Error"
-                                value="error"
-                              />
-                            </RadioButtonGroup>
-                            <RadioButtonGroup
-                              legendText="Loading mode"
-                              name="loading-mode"
-                              onChange={(value) =>
-                                setLoadingMode(value as LoadingMode)
-                              }
-                              valueSelected={loadingMode}
-                            >
-                              <RadioButton
-                                id="load-skeleton"
-                                labelText="Skeleton"
-                                value="skeleton"
-                              />
-                              <RadioButton
-                                id="load-overlay"
-                                labelText="Overlay"
-                                value="overlay"
-                              />
-                            </RadioButtonGroup>
-                            <NumberInput
-                              id="page-size"
-                              label="Page size"
-                              min={1}
-                              onChange={(_event, { value }) => {
-                                const next = Number(value);
-                                if (!Number.isNaN(next)) setPageSize(next);
-                              }}
-                              value={pageSize}
-                            />
-                            <NumberInput
-                              id="max-height"
-                              label="Scroll height (px)"
-                              min={120}
-                              onChange={(_event, { value }) => {
-                                const next = Number(value);
-                                if (!Number.isNaN(next)) setMaxHeight(next);
-                              }}
-                              value={maxHeight}
-                            />
-                            <div className={styles.toggles}>
-                              {TOGGLES.map((toggle) => (
-                                <Toggle
-                                  id={`toggle-${toggle.key}`}
-                                  key={toggle.key}
-                                  labelA="Off"
-                                  labelB="On"
-                                  labelText={toggle.label}
-                                  onToggle={setFlag(toggle.key)}
-                                  size="sm"
-                                  toggled={flags[toggle.key]}
-                                />
-                              ))}
-                            </div>
-                          </Stack>
-                        </Tile>
-                      </Section>
-                    </Column>
-                    <Column lg={8} md={8} sm={4}>
-                      <DataGrid {...gridProps} />
-                    </Column>
-                    <Column lg={4} md={8} sm={4}>
-                      <Section level={2}>
-                        <Tile>
-                          <Stack gap={5}>
-                            <Heading>Details</Heading>
-                            <Detail
-                              label="Selected rows"
-                              value={String(selectedCount)}
-                            />
-                            <Detail label="Last clicked row" value={lastRow} />
-                            <Detail
-                              label="Last bulk action"
-                              value={lastAction}
-                            />
-                            <Detail
-                              label="Loaded rows"
-                              value={String(gridRows.length)}
-                            />
-                          </Stack>
-                        </Tile>
-                      </Section>
-                    </Column>
-                  </Grid>
-                </TabPanel>
-
-                <TabPanel>
-                  <Grid>
-                    <Column lg={10} md={8} sm={4}>
-                      <TreeDataGrid
-                        columns={treeColumns}
-                        description="Regions contain clusters that contain nodes."
-                        nodes={infrastructureTree}
-                        title="Infrastructure"
-                      />
-                    </Column>
-                  </Grid>
-                </TabPanel>
-
-                <TabPanel>
-                  <Grid>
-                    <Column lg={10} md={8} sm={4}>
-                      <Stack gap={5}>
-                        <PivotGrid
-                          config={pivotConfig}
-                          description="Total dataset size by steward and status."
-                          rows={allRows}
-                          title="Dataset size pivot"
-                        />
-                        <p className={styles.note}>
-                          Pivot is a showcase capability only. Product analytics
-                          surfaces stay deferred per DESIGN.md.
-                        </p>
-                      </Stack>
-                    </Column>
-                  </Grid>
-                </TabPanel>
-              </TabPanels>
-            </Tabs>
+      <PageContainer>
+        <header>
+          <Heading id="tables-showcase-heading">Table component blocks</Heading>
+          <p>
+            Carbon table archetypes mapped from the cube data table variations.
+            One toggle-driven grid, a tree grid, and a pivot grid.
+          </p>
+          <Stack gap={3} orientation="horizontal">
+            <Tag type="green">DataGrid</Tag>
+            <Tag type="blue">TreeDataGrid</Tag>
+            <Tag type="purple">PivotGrid</Tag>
           </Stack>
-        </Column>
-      </Grid>
+        </header>
+
+        <Tabs>
+          <TabList aria-label="Table archetypes">
+            <Tab>Data grid</Tab>
+            <Tab>Tree</Tab>
+            <Tab>Pivot</Tab>
+          </TabList>
+          <TabPanels>
+            <TabPanel>
+              <Grid className={styles.panelGrid ?? ''}>
+                <Column lg={4} md={8} sm={4}>
+                  <Section level={2}>
+                    <Tile>
+                      <Stack gap={5}>
+                        <Heading>Controls</Heading>
+                        <Dropdown
+                          id="density"
+                          items={[...DENSITIES]}
+                          itemToString={(item) => item ?? ''}
+                          label="Density"
+                          onChange={(data) => {
+                            if (data.selectedItem)
+                              setDensity(data.selectedItem);
+                          }}
+                          selectedItem={density}
+                          titleText="Density"
+                        />
+                        <RadioButtonGroup
+                          legendText="Selection"
+                          name="selection"
+                          onChange={(value) =>
+                            setSelection(value as SelectionMode)
+                          }
+                          valueSelected={selection}
+                        >
+                          <RadioButton
+                            id="sel-none"
+                            labelText="None"
+                            value="none"
+                          />
+                          <RadioButton
+                            id="sel-single"
+                            labelText="Single"
+                            value="single"
+                          />
+                          <RadioButton
+                            id="sel-multi"
+                            labelText="Multi"
+                            value="multi"
+                          />
+                        </RadioButtonGroup>
+                        <RadioButtonGroup
+                          legendText="State"
+                          name="state"
+                          onChange={(value) =>
+                            setAsyncState(value as GridState)
+                          }
+                          valueSelected={asyncState}
+                        >
+                          <RadioButton
+                            id="state-ready"
+                            labelText="Ready"
+                            value="ready"
+                          />
+                          <RadioButton
+                            id="state-loading"
+                            labelText="Loading"
+                            value="loading"
+                          />
+                          <RadioButton
+                            id="state-empty"
+                            labelText="Empty"
+                            value="empty"
+                          />
+                          <RadioButton
+                            id="state-error"
+                            labelText="Error"
+                            value="error"
+                          />
+                        </RadioButtonGroup>
+                        <RadioButtonGroup
+                          legendText="Loading mode"
+                          name="loading-mode"
+                          onChange={(value) =>
+                            setLoadingMode(value as LoadingMode)
+                          }
+                          valueSelected={loadingMode}
+                        >
+                          <RadioButton
+                            id="load-skeleton"
+                            labelText="Skeleton"
+                            value="skeleton"
+                          />
+                          <RadioButton
+                            id="load-overlay"
+                            labelText="Overlay"
+                            value="overlay"
+                          />
+                        </RadioButtonGroup>
+                        <NumberInput
+                          id="page-size"
+                          label="Page size"
+                          min={1}
+                          onChange={(_event, { value }) => {
+                            const next = Number(value);
+                            if (!Number.isNaN(next)) setPageSize(next);
+                          }}
+                          value={pageSize}
+                        />
+                        <NumberInput
+                          id="max-height"
+                          label="Scroll height (px)"
+                          min={120}
+                          onChange={(_event, { value }) => {
+                            const next = Number(value);
+                            if (!Number.isNaN(next)) setMaxHeight(next);
+                          }}
+                          value={maxHeight}
+                        />
+                        <div className={styles.toggles}>
+                          {TOGGLES.map((toggle) => (
+                            <Toggle
+                              id={`toggle-${toggle.key}`}
+                              key={toggle.key}
+                              labelA="Off"
+                              labelB="On"
+                              labelText={toggle.label}
+                              onToggle={setFlag(toggle.key)}
+                              size="sm"
+                              toggled={flags[toggle.key]}
+                            />
+                          ))}
+                        </div>
+                      </Stack>
+                    </Tile>
+                  </Section>
+                </Column>
+                <Column lg={8} md={8} sm={4}>
+                  <DataGrid {...gridProps} />
+                </Column>
+                <Column lg={4} md={8} sm={4}>
+                  <Section level={2}>
+                    <Tile>
+                      <Stack gap={5}>
+                        <Heading>Details</Heading>
+                        <Detail
+                          label="Selected rows"
+                          value={String(selectedCount)}
+                        />
+                        <Detail label="Last clicked row" value={lastRow} />
+                        <Detail label="Last bulk action" value={lastAction} />
+                        <Detail
+                          label="Loaded rows"
+                          value={String(gridRows.length)}
+                        />
+                      </Stack>
+                    </Tile>
+                  </Section>
+                </Column>
+              </Grid>
+            </TabPanel>
+
+            <TabPanel>
+              <Grid>
+                <Column lg={10} md={8} sm={4}>
+                  <TreeDataGrid
+                    columns={treeColumns}
+                    description="Regions contain clusters that contain nodes."
+                    nodes={infrastructureTree}
+                    title="Infrastructure"
+                  />
+                </Column>
+              </Grid>
+            </TabPanel>
+
+            <TabPanel>
+              <Grid>
+                <Column lg={10} md={8} sm={4}>
+                  <Stack gap={5}>
+                    <PivotGrid
+                      config={pivotConfig}
+                      description="Total dataset size by steward and status."
+                      rows={allRows}
+                      title="Dataset size pivot"
+                    />
+                    <p className={styles.note}>
+                      Pivot is a showcase capability only. Product analytics
+                      surfaces stay deferred per DESIGN.md.
+                    </p>
+                  </Stack>
+                </Column>
+              </Grid>
+            </TabPanel>
+          </TabPanels>
+        </Tabs>
+      </PageContainer>
     </main>
   );
 }
