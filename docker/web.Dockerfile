@@ -9,10 +9,12 @@ RUN corepack enable && corepack prepare pnpm@11.24.0 --activate
 WORKDIR /workspace
 
 FROM base AS dependencies
-COPY --parents package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json apps/*/package.json packages/*/package.json ./
+# turbo.json is excluded here so editing it does not invalidate the cached install layer
+COPY --parents package.json pnpm-lock.yaml pnpm-workspace.yaml apps/*/package.json packages/*/package.json ./
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --filter @bap/web...
 
 FROM dependencies AS build
+COPY turbo.json ./
 COPY apps/web apps/web
 COPY packages packages
 RUN pnpm --filter @bap/db build \
