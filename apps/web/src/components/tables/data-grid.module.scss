@@ -1,0 +1,74 @@
+// Scroll region that hosts sticky headers, virtualization, and infinite scroll.
+.scroll {
+  overflow: auto;
+  position: relative;
+}
+
+// Pin the header row while the body scrolls vertically.
+.stickyHead thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+// Header cell anchors the resize handle and drag affordance.
+.headerCell {
+  position: relative;
+}
+
+.reorderable {
+  cursor: grab;
+}
+
+// Draggable element while it is being moved.
+.dragging {
+  opacity: 0.5;
+}
+
+// Column resize grip on the trailing edge of a header cell.
+.resizeHandle {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  inline-size: 6px;
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+}
+
+.clickableRow {
+  cursor: pointer;
+}
+
+// Highlight a cell inside the selected range.
+.cellSelected {
+  background: var(--cds-highlight);
+}
+
+.alignEnd {
+  text-align: end;
+}
+
+// Dim the body while stale rows load in overlay mode.
+.overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--cds-overlay);
+  z-index: 4;
+}
+
+// Spacer rows reserve height for off-screen virtualized rows.
+.spacerRow td {
+  padding: 0;
+  border: 0;
+}
+
+.emptyCell {
+  text-align: center;
+  padding: 2rem;
+  color: var(--cds-text-secondary);
+}
+
+.loadMore {
+  block-size: 1px;
+}
