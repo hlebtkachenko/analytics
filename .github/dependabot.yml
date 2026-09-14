@@ -37,6 +37,11 @@ updates:
         update-types:
           - version-update:semver-major
           - version-update:semver-minor
+      # pg-boss schema is pinned by a repository migration, upgrade needs a new migration.
+      - dependency-name: pg-boss
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
 
   - package-ecosystem: docker
     directory: /docker
