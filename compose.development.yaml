@@ -7,6 +7,14 @@ services:
     environment:
       BAP_PUBLIC_ORIGIN: http://localhost:${WEB_PORT:-3000}
 
+  api:
+    environment:
+      AUTH_RATE_LIMIT: ${BAP_API_RATE_LIMIT:-60}
+
+  reporting-api:
+    environment:
+      AUTH_RATE_LIMIT: ${BAP_API_RATE_LIMIT:-60}
+
   database:
     ports:
       - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'

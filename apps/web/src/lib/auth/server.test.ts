@@ -25,6 +25,7 @@ import {
   authLoggerConfiguration,
   authRateLimitRules,
   beforeCreateOrganization,
+  cookieSecureForOrigin,
   createAccountDeletionBeforeHook,
   createAuthBeforeHook,
   createPublicSignUpBeforeHook,
@@ -408,6 +409,14 @@ describe('Better Auth resource contract', () => {
         NODE_ENV: 'test',
       }),
     ).toThrow();
+  });
+
+  it('derives cookie secure from the public origin protocol, not NODE_ENV', () => {
+    // Safari drops Secure cookies on http://localhost, so the local demo
+    // stack (https origin required only in real production) must not mark
+    // cookies Secure just because NODE_ENV is production.
+    expect(cookieSecureForOrigin('https://bap.invalid')).toBe(true);
+    expect(cookieSecureForOrigin('http://localhost:39100')).toBe(false);
   });
 
   it('reads only a protected, sufficiently long auth secret', async () => {

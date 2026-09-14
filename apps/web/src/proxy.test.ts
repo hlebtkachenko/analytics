@@ -1,11 +1,15 @@
 import { NextRequest } from 'next/server';
 import { unstable_doesMiddlewareMatch } from 'next/experimental/testing/server';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resetCapabilityCookieName } from './lib/auth/reset-capability.js';
 import { config, proxy } from './proxy.js';
 
 const resetCapability = 'ResetSentinelTokenAbc123';
+
+beforeEach(() => {
+  vi.stubEnv('BAP_PUBLIC_ORIGIN', 'https://bap.invalid');
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -54,7 +58,7 @@ describe('proxy', () => {
     expect(response.headers.get('x-middleware-request-x-nonce')).toBeTruthy();
   });
 
-  it('canonicalizes a reset token into a production-only secure capability cookie', async () => {
+  it('canonicalizes a reset token into a secure capability cookie when the public origin is https', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     const response = proxy(
       new NextRequest(
@@ -75,6 +79,31 @@ describe('proxy', () => {
     expect(cookie).toMatch(/SameSite=lax/i);
     expect(cookie).toMatch(/Secure/i);
     expect(await response.text()).not.toContain(resetCapability);
+  });
+
+  it('omits Secure on the capability cookie when the public origin is http, matching the local demo stack', async () => {
+    // Safari drops Secure cookies on http://localhost, unlike Chromium, which
+    // silently signed users out of the demo stack on every navigation.
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('BAP_PUBLIC_ORIGIN', 'http://localhost:39100');
+    const response = proxy(
+      new NextRequest(
+        `https://bap.invalid/reset-password?token=${resetCapability}`,
+      ),
+    );
+    const cookie = response.headers.get('set-cookie');
+
+    expect(cookie).toContain(`${resetCapabilityCookieName}=${resetCapability}`);
+    expect(cookie).toMatch(/HttpOnly/i);
+    expect(cookie).not.toMatch(/Secure/i);
+  });
+
+  it('refuses to run without a configured public origin', () => {
+    vi.stubEnv('BAP_PUBLIC_ORIGIN', undefined);
+
+    expect(() => proxy(new NextRequest('https://bap.invalid/sign-in'))).toThrow(
+      'BAP_PUBLIC_ORIGIN must be set',
+    );
   });
 
   it.each([

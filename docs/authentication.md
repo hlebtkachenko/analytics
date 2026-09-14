@@ -3,10 +3,13 @@
 ## Browser identity
 
 Better Auth owns host-only opaque session cookies in the Next.js application.
-Production cookies are `HttpOnly`, `Secure`, and `SameSite=Lax`. The configured
-origin and trusted origin are exact values, never wildcards. Email/password
-sign-up is available behind a default-off runtime switch. A pending, unexpired
-organization invitation for the submitted address bypasses that switch.
+Cookies are always `HttpOnly` and `SameSite=Lax`, and `Secure` whenever the
+configured public origin is HTTPS, which is every production deployment; the
+local demo stack's HTTP origin is the one plain exception, because Safari drops
+`Secure` cookies on `http://localhost`. The configured origin and trusted origin
+are exact values, never wildcards. Email/password sign-up is available behind a
+default-off runtime switch. A pending, unexpired organization invitation for the
+submitted address bypasses that switch.
 
 Nine authentication paths are disabled:
 
@@ -80,13 +83,15 @@ check-email result.
 Password recovery uses the relative `/reset-password` callback and gives the
 same check-email result whether the address exists or not. Before rendering, the
 proxy moves exactly 1 valid-shape callback token into a 30-minute `HttpOnly`,
-`SameSite=Lax` cookie scoped to `/reset-password`, sets `Secure` in production,
-and redirects to the clean path. A callback error, malformed token, or duplicate
-token clears that capability. A clean request without a valid capability
-produces one generic reset-link failure with no form. Callback redirects and the
-clean reset page use `Referrer-Policy: no-referrer`. Exact matcher entries apply
-this canonicalization even to `Purpose: prefetch` and `Next-Router-Prefetch`
-requests, while other routes keep the generic prefetch exclusion.
+`SameSite=Lax` cookie scoped to `/reset-password`, `Secure` whenever the
+configured public origin is HTTPS and plain on an HTTP origin such as the local
+demo, and redirects to the clean path. A callback error, malformed token, or
+duplicate token clears that capability. A clean request without a valid
+capability produces one generic reset-link failure with no form. Callback
+redirects and the clean reset page use `Referrer-Policy: no-referrer`. Exact
+matcher entries apply this canonicalization even to `Purpose: prefetch` and
+`Next-Router-Prefetch` requests, while other routes keep the generic prefetch
+exclusion.
 
 The page passes only a capability-present boolean to its Client Component. Its
 Server Action reads the cookie, validates password bounds and confirmation, and

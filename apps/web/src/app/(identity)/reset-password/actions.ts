@@ -70,8 +70,12 @@ export async function resetPassword(
 function clearResetCapability(
   cookieStore: Awaited<ReturnType<typeof cookies>>,
 ): void {
+  const publicOrigin = process.env.BAP_PUBLIC_ORIGIN;
+  if (publicOrigin === undefined) {
+    throw new Error('BAP_PUBLIC_ORIGIN must be set');
+  }
   cookieStore.set(resetCapabilityCookieName, '', {
-    ...resetCapabilityCookieOptions(process.env.NODE_ENV === 'production'),
+    ...resetCapabilityCookieOptions(publicOrigin),
     maxAge: 0,
   });
 }

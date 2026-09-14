@@ -5,6 +5,11 @@ const resetCapability = 'ResetSentinelTokenAbc123';
 const resetErrorCode = 'PRIVATE_RESET_CALLBACK_CODE';
 const activationErrorCode = 'PRIVATE_ACTIVATION_CODE';
 
+// Secure follows the operational stack's own public origin, not NODE_ENV.
+const resetCookieShouldBeSecure =
+  new URL(process.env.BAP_OPERATIONAL_BASE_URL ?? 'http://localhost:39100')
+    .protocol === 'https:';
+
 type AxeViolation = Readonly<{
   id: string;
   impact: string | null;
@@ -56,7 +61,11 @@ test('canonicalizes callback secrets before production HTML and RSC rendering', 
   expect(setCookie).toMatch(/Max-Age=1800/i);
   expect(setCookie).toMatch(/Path=\/reset-password/i);
   expect(setCookie).toMatch(/SameSite=lax/i);
-  expect(setCookie).toMatch(/Secure/i);
+  if (resetCookieShouldBeSecure) {
+    expect(setCookie).toMatch(/Secure/i);
+  } else {
+    expect(setCookie).not.toMatch(/Secure/i);
+  }
 
   const resetPage = await page.goto(`/reset-password?token=${resetCapability}`);
   await page.waitForLoadState('networkidle');
@@ -76,7 +85,7 @@ test('canonicalizes callback secrets before production HTML and RSC rendering', 
     httpOnly: true,
     path: '/reset-password',
     sameSite: 'Lax',
-    secure: true,
+    secure: resetCookieShouldBeSecure,
     value: resetCapability,
   });
 
@@ -193,7 +202,11 @@ test('canonicalizes sensitive callbacks for every prefetch header variant', asyn
     expect(setCookie, prefetch.label).toMatch(/Max-Age=1800/i);
     expect(setCookie, prefetch.label).toMatch(/Path=\/reset-password/i);
     expect(setCookie, prefetch.label).toMatch(/SameSite=lax/i);
-    expect(setCookie, prefetch.label).toMatch(/Secure/i);
+    if (resetCookieShouldBeSecure) {
+      expect(setCookie, prefetch.label).toMatch(/Secure/i);
+    } else {
+      expect(setCookie, prefetch.label).not.toMatch(/Secure/i);
+    }
 
     const resetErrorResponse = await page.request.get(
       `/reset-password?error=${resetErrorCode}&token=${resetCapability}`,
@@ -216,7 +229,11 @@ test('canonicalizes sensitive callbacks for every prefetch header variant', asyn
     expect(clearedCookie, prefetch.label).toMatch(/HttpOnly/i);
     expect(clearedCookie, prefetch.label).toMatch(/Path=\/reset-password/i);
     expect(clearedCookie, prefetch.label).toMatch(/SameSite=lax/i);
-    expect(clearedCookie, prefetch.label).toMatch(/Secure/i);
+    if (resetCookieShouldBeSecure) {
+      expect(clearedCookie, prefetch.label).toMatch(/Secure/i);
+    } else {
+      expect(clearedCookie, prefetch.label).not.toMatch(/Secure/i);
+    }
     expect(clearedCookie, prefetch.label).not.toContain(resetCapability);
 
     const activationResponse = await page.request.get(

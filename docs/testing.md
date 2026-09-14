@@ -204,6 +204,9 @@ of the application API. Dataset readiness is polled on a widening interval, the
 legal entity proof reuses its own scope switch instead of a second page load,
 and a scope switch that is denied is driven again rather than trusted, because a
 denied request consumes no budget and the fixed window resets within a minute.
+The proof and demo stacks raise that budget to 240 requests a minute through
+`BAP_API_RATE_LIMIT`, because the icon and legal entity specs run back to back
+on the same synthetic owner within one worker.
 
 The two-level tenancy proof runs as `tests/operational/legal-entities.spec.ts`
 against the same disposable stack. Its narrated steps prove that the owner
