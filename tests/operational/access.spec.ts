@@ -171,10 +171,7 @@ test('protects the authenticated BAP access contract without browser token leaka
     page.getByRole('form', { name: 'Change password' }),
   ).toBeVisible();
 
-  await page
-    .getByRole('navigation', { exact: true, name: 'Primary navigation' })
-    .getByRole('link', { name: 'Access' })
-    .click();
+  await primaryNavigation.getByRole('link', { name: 'Access' }).click();
   await authenticatedExpect(
     page.getByText('Application API role: owner'),
   ).toBeVisible();

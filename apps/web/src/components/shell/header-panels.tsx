@@ -74,7 +74,7 @@ export function SwitcherPanel({
         : [];
 
   return (
-    <HeaderPanel aria-label="Workspaces" expanded={expanded}>
+    <HeaderPanel expanded={expanded}>
       {expanded ? (
         <Switcher aria-label="Workspaces">
           {list.map((organization) => (
@@ -105,7 +105,7 @@ export function SwitcherPanel({
 
 export function NotificationsPanel({ expanded }: PanelProperties) {
   return (
-    <HeaderPanel aria-label="Notifications" expanded={expanded}>
+    <HeaderPanel expanded={expanded}>
       {expanded ? (
         <div className={styles.panel!}>
           <h2 className={styles.panelHeading!}>Notifications</h2>
@@ -125,7 +125,7 @@ export function HelpPanel({ expanded }: PanelProperties) {
     });
 
   return (
-    <HeaderPanel aria-label="Help" expanded={expanded}>
+    <HeaderPanel expanded={expanded}>
       {expanded ? (
         <div className={styles.menu!}>
           <Button kind="ghost" onClick={soon('Documentation')}>
@@ -148,7 +148,7 @@ export function HelpPanel({ expanded }: PanelProperties) {
 
 export function SettingsPanel({ expanded }: PanelProperties) {
   return (
-    <HeaderPanel aria-label="Settings" expanded={expanded}>
+    <HeaderPanel expanded={expanded}>
       {expanded ? (
         <div className={styles.panel!}>
           <h2 className={styles.panelHeading!}>Settings</h2>
@@ -175,7 +175,7 @@ export function AccountPanel({ expanded }: PanelProperties) {
   }
 
   return (
-    <HeaderPanel aria-label="Account" expanded={expanded}>
+    <HeaderPanel expanded={expanded}>
       {expanded ? (
         <div className={styles.account!}>
           <div className={styles.identity!}>
