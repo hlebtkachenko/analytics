@@ -1,5 +1,6 @@
-.grid {
-  // Small breadcrumb sits in the page header, above the title with a clear gap.
-  padding-block-start: 1rem;
-  margin-block-end: 1rem;
+.band {
+  // A page-header band: small breadcrumb, a divider, then a gap before the title.
+  padding-block-end: 0.75rem;
+  margin-block-end: 1.5rem;
+  border-block-end: 1px solid var(--cds-border-subtle);
 }

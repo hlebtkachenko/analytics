@@ -164,12 +164,6 @@ export function SettingsPanel({ expanded }: PanelProperties) {
   );
 }
 
-const modeLabels: Readonly<Record<(typeof themeModes)[number], string>> = {
-  dark: 'Dark',
-  light: 'Light',
-  system: 'System',
-};
-
 export function AccountPanel({ expanded }: PanelProperties) {
   const router = useRouter();
   const { mode, setMode } = useThemeMode();
@@ -205,10 +199,6 @@ export function AccountPanel({ expanded }: PanelProperties) {
             </Link>
           </div>
           <div className={styles.section!}>
-            <div className={styles.appearance!}>
-              <Light aria-hidden="true" focusable="false" size={16} />
-              <Asleep aria-hidden="true" focusable="false" size={16} />
-            </div>
             <RadioButtonGroup
               legendText="Appearance"
               name="theme-mode"
@@ -220,13 +210,25 @@ export function AccountPanel({ expanded }: PanelProperties) {
               orientation="vertical"
               valueSelected={mode}
             >
-              {themeModes.map((option) => (
-                <RadioButton
-                  key={option}
-                  labelText={modeLabels[option]}
-                  value={option}
-                />
-              ))}
+              <RadioButton
+                labelText={
+                  <span className={styles.option!}>
+                    <Light aria-hidden="true" focusable="false" size={16} />
+                    Light
+                  </span>
+                }
+                value="light"
+              />
+              <RadioButton
+                labelText={
+                  <span className={styles.option!}>
+                    <Asleep aria-hidden="true" focusable="false" size={16} />
+                    Dark
+                  </span>
+                }
+                value="dark"
+              />
+              <RadioButton labelText="System" value="system" />
             </RadioButtonGroup>
           </div>
           <div className={styles.section!}>

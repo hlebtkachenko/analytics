@@ -17,13 +17,6 @@ import type { Crumb } from './breadcrumb-trail';
 import styles from './breadcrumbs.module.scss';
 
 function renderCrumb(crumb: Crumb) {
-  if (crumb.current) {
-    return (
-      <BreadcrumbItem isCurrentPage key={crumb.href}>
-        {crumb.label}
-      </BreadcrumbItem>
-    );
-  }
   return (
     <BreadcrumbItem key={crumb.href}>
       <Link href={{ pathname: crumb.href }}>{crumb.label}</Link>
@@ -39,34 +32,37 @@ export default function Breadcrumbs() {
     organization && { name: organization.name, slug: organization.slug },
   );
 
-  // Top-level pages and linear tasks carry no breadcrumb.
-  if (crumbs.length <= 1) {
+  // The current page is the page title, so the breadcrumb shows only ancestors.
+  const ancestors = crumbs.slice(0, -1);
+  if (ancestors.length === 0) {
     return null;
   }
 
-  const { head, hidden, tail } = collapseTrail(crumbs);
+  const { head, hidden, tail } = collapseTrail(ancestors);
 
   return (
-    <Grid className={styles.grid!}>
-      <Column lg={16} md={8} sm={4}>
-        <Breadcrumb noTrailingSlash size="sm">
-          {head.map(renderCrumb)}
-          {hidden.length > 0 ? (
-            <BreadcrumbItem data-floating-menu-container>
-              <OverflowMenu aria-label="Show hidden breadcrumbs" size="sm">
-                {hidden.map((crumb) => (
-                  <OverflowMenuItem
-                    href={crumb.href}
-                    itemText={crumb.label}
-                    key={crumb.href}
-                  />
-                ))}
-              </OverflowMenu>
-            </BreadcrumbItem>
-          ) : null}
-          {tail.map(renderCrumb)}
-        </Breadcrumb>
-      </Column>
-    </Grid>
+    <div className={styles.band!}>
+      <Grid className={styles.grid!}>
+        <Column lg={16} md={8} sm={4}>
+          <Breadcrumb size="sm">
+            {head.map(renderCrumb)}
+            {hidden.length > 0 ? (
+              <BreadcrumbItem data-floating-menu-container>
+                <OverflowMenu aria-label="Show hidden breadcrumbs" size="sm">
+                  {hidden.map((crumb) => (
+                    <OverflowMenuItem
+                      href={crumb.href}
+                      itemText={crumb.label}
+                      key={crumb.href}
+                    />
+                  ))}
+                </OverflowMenu>
+              </BreadcrumbItem>
+            ) : null}
+            {tail.map(renderCrumb)}
+          </Breadcrumb>
+        </Column>
+      </Grid>
+    </div>
   );
 }

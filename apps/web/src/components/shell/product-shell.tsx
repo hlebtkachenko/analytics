@@ -141,33 +141,30 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
             isCollapsible
             onClick={toggleNavigation}
           />
+          <span aria-hidden="true" className={styles.logo!} />
+          <HeaderName href="/access" prefix="Afframe">
+            Analytics
+          </HeaderName>
+          <HeaderNavigation aria-label="Areas">
+            <HeaderMenuItem href="/access" isActive>
+              Analytics
+            </HeaderMenuItem>
+            <HeaderMenuItem
+              href="#"
+              onClick={(event) => {
+                event.preventDefault();
+                notify({
+                  subtitle: 'The AI Assistant is coming soon.',
+                  title: ASSISTANT_AREA_LABEL,
+                });
+              }}
+            >
+              {ASSISTANT_AREA_LABEL}
+            </HeaderMenuItem>
+          </HeaderNavigation>
           {searchOpen ? (
             <GlobalSearch onClose={() => setOpenPanel(null)} />
-          ) : (
-            <>
-              <span aria-hidden="true" className={styles.logo!} />
-              <HeaderName href="/access" prefix="Afframe">
-                Analytics
-              </HeaderName>
-              <HeaderNavigation aria-label="Areas">
-                <HeaderMenuItem href="/access" isActive>
-                  Analytics
-                </HeaderMenuItem>
-                <HeaderMenuItem
-                  href="#"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    notify({
-                      subtitle: 'The AI Assistant is coming soon.',
-                      title: ASSISTANT_AREA_LABEL,
-                    });
-                  }}
-                >
-                  {ASSISTANT_AREA_LABEL}
-                </HeaderMenuItem>
-              </HeaderNavigation>
-            </>
-          )}
+          ) : null}
           <HeaderGlobalBar>
             <HeaderGlobalAction
               aria-label={searchOpen ? 'Close search' : 'Search'}

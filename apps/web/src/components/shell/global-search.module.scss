@@ -1,4 +1,5 @@
 .field {
+  position: relative;
   flex: 1 1 auto;
   min-inline-size: 0;
   align-self: stretch;
@@ -16,9 +17,9 @@
 }
 
 .results {
-  position: fixed;
+  position: absolute;
   z-index: 8000;
-  inset-block-start: 3rem;
+  inset-block-start: 100%;
   inset-inline: 0;
   max-block-size: 60vh;
   overflow-y: auto;

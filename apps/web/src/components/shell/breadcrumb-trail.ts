@@ -66,15 +66,15 @@ export type CollapsedTrail = Readonly<{
   tail: Crumb[];
 }>;
 
-// Keeps the first two and the current crumb, hiding the rest behind an overflow
+// Keeps the first crumb and the last two, hiding the middle behind an overflow
 // once the trail grows beyond the maximum.
 export function collapseTrail(crumbs: Crumb[], max = 5): CollapsedTrail {
   if (crumbs.length <= max) {
     return { head: crumbs, hidden: [], tail: [] };
   }
   return {
-    head: crumbs.slice(0, 2),
-    hidden: crumbs.slice(2, -1),
-    tail: crumbs.slice(-1),
+    head: crumbs.slice(0, 1),
+    hidden: crumbs.slice(1, -2),
+    tail: crumbs.slice(-2),
   };
 }
