@@ -1,0 +1,17 @@
+.content {
+  min-inline-size: 0;
+  margin-block-start: 3rem;
+}
+
+// Carbon's large breakpoint; the rail is only laid out beside content above it.
+@media (min-width: 66rem) {
+  .content {
+    // Leaves room for the collapsed icon rail.
+    margin-inline-start: 3rem;
+  }
+
+  .contentExpanded {
+    // The pinned rail is wider, so the content shifts further.
+    margin-inline-start: 16rem;
+  }
+}

@@ -109,7 +109,7 @@ export default function AccountActions({ email }: AccountActionsProperties) {
   }
 
   return (
-    <main id="main-content" tabIndex={-1}>
+    <>
       <h1>Account</h1>
       <p>Email: {email}</p>
 
@@ -184,6 +184,6 @@ export default function AccountActions({ email }: AccountActionsProperties) {
           <StatusMessage status={deleteStatus} />
         </form>
       </section>
-    </main>
+    </>
   );
 }

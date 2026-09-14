@@ -164,162 +164,155 @@ export default function AccessPage() {
   );
 
   return (
-    <main id="main-content" tabIndex={-1}>
-      <PageContainer>
-        <h1>{t('access.title')}</h1>
-        <Button
-          kind="secondary"
-          onClick={() => void signOut()}
-          renderIcon={Logout}
-          type="button"
+    <PageContainer>
+      <h1>{t('access.title')}</h1>
+      <Button
+        kind="secondary"
+        onClick={() => void signOut()}
+        renderIcon={Logout}
+        type="button"
+      >
+        {t('common.signOut')}
+      </Button>
+      <Button href="/datasets" kind="tertiary" renderIcon={DataSet}>
+        {t('access.datasets')}
+      </Button>
+      {state === 'loading' ? (
+        <InlineLoading description={t('access.loading')} />
+      ) : null}
+      {state === 'error' ? (
+        <InlineNotification
+          kind="error"
+          lowContrast
+          role="alert"
+          subtitle={t('access.error')}
+          title={t('access.denied')}
+        />
+      ) : null}
+      {empty ? (
+        <InlineNotification kind="info" lowContrast title={t('access.empty')} />
+      ) : null}
+      {organizations.length > 0 ? (
+        <Select
+          id="organization"
+          labelText={t('access.organization')}
+          onChange={(event) => selectOrganization(event.target.value)}
+          value={organizationId}
         >
-          {t('common.signOut')}
-        </Button>
-        <Button href="/datasets" kind="tertiary" renderIcon={DataSet}>
-          {t('access.datasets')}
-        </Button>
-        {state === 'loading' ? (
-          <InlineLoading description={t('access.loading')} />
-        ) : null}
-        {state === 'error' ? (
-          <InlineNotification
-            kind="error"
-            lowContrast
-            role="alert"
-            subtitle={t('access.error')}
-            title={t('access.denied')}
-          />
-        ) : null}
-        {empty ? (
-          <InlineNotification
-            kind="info"
-            lowContrast
-            title={t('access.empty')}
-          />
-        ) : null}
-        {organizations.length > 0 ? (
-          <Select
-            id="organization"
-            labelText={t('access.organization')}
-            onChange={(event) => selectOrganization(event.target.value)}
-            value={organizationId}
-          >
-            {organizations.map((organization) => (
-              <SelectItem
-                key={organization.id}
-                text={organization.name}
-                value={organization.id}
-              />
-            ))}
-          </Select>
-        ) : null}
-        {applicationAccess && reportingAccess ? (
-          <Tile>
-            <Stack gap={5}>
-              <p>
-                {t('access.application')}: {applicationAccess.role}
-              </p>
-              <p>
-                {t('access.reporting')}: {reportingAccess.role}
-              </p>
-              <h2>{t('access.capabilities')}</h2>
-              <ul>
-                {capabilityNames.map((capability) => (
-                  <li key={capability}>
-                    {t(`access.${capability}`)}:{' '}
-                    {applicationAccess.capabilities[capability]
-                      ? t('access.capabilityAllowed')
-                      : t('access.capabilityDenied')}
-                  </li>
-                ))}
-              </ul>
-              <p>
-                {t('access.entityScope')}:{' '}
-                {applicationAccess.entityScope.mode === 'all'
-                  ? t('access.entityScopeAll')
-                  : t('access.entityScopeRestricted', {
-                      count:
-                        applicationAccess.entityScope.legalEntityIds.length,
-                    })}
-              </p>
-              <h2>{t('access.actions')}</h2>
-              {/* Capabilities only choose which actions are offered, the database enforces access. */}
-              <Grid>
-                {applicationAccess.capabilities.manageMembers &&
-                selectedOrganization ? (
-                  <Column lg={4} md={4} sm={4}>
-                    <Button
-                      href={`/${encodeURIComponent(selectedOrganization.slug)}/members`}
-                      kind="tertiary"
-                      renderIcon={UserMultiple}
-                      size="lg"
-                    >
-                      {t('access.manageMembers')}
-                    </Button>
-                  </Column>
-                ) : null}
-                {applicationAccess.capabilities.manageEntityAccess &&
-                selectedOrganization ? (
-                  <Column lg={4} md={4} sm={4}>
-                    <Button
-                      href={`/${encodeURIComponent(selectedOrganization.slug)}/members`}
-                      kind="tertiary"
-                      renderIcon={Security}
-                      size="lg"
-                    >
-                      {t('access.manageEntityAccess')}
-                    </Button>
-                  </Column>
-                ) : null}
-                {(applicationAccess.capabilities.createEntities ||
-                  applicationAccess.capabilities.updateEntities ||
-                  applicationAccess.capabilities.manageEntityAccess) &&
-                selectedOrganization ? (
-                  <Column lg={4} md={4} sm={4}>
-                    <Button
-                      href={`/${encodeURIComponent(selectedOrganization.slug)}/entities`}
-                      kind="tertiary"
-                      renderIcon={DataSet}
-                      size="lg"
-                    >
-                      {t('access.manageEntities')}
-                    </Button>
-                  </Column>
-                ) : null}
-                {applicationAccess.capabilities.uploadData &&
-                selectedOrganization ? (
-                  <Column lg={4} md={4} sm={4}>
-                    <Button
-                      href={`/datasets?organization=${encodeURIComponent(selectedOrganization.slug)}#upload-dataset`}
-                      kind="tertiary"
-                      renderIcon={Upload}
-                      size="lg"
-                    >
-                      {t('access.uploadData')}
-                    </Button>
-                  </Column>
-                ) : null}
-                {applicationAccess.capabilities.useAi ? (
-                  <Column lg={4} md={4} sm={4}>
-                    <Tile>
-                      <Stack gap={3}>
-                        <AiGenerate
-                          aria-hidden="true"
-                          focusable="false"
-                          size={20}
-                        />
-                        <h3>{t('access.useAi')}</h3>
-                        <Tag type="gray">{t('access.unavailable')}</Tag>
-                        <p>{t('access.useAiUnavailable')}</p>
-                      </Stack>
-                    </Tile>
-                  </Column>
-                ) : null}
-              </Grid>
-            </Stack>
-          </Tile>
-        ) : null}
-      </PageContainer>
-    </main>
+          {organizations.map((organization) => (
+            <SelectItem
+              key={organization.id}
+              text={organization.name}
+              value={organization.id}
+            />
+          ))}
+        </Select>
+      ) : null}
+      {applicationAccess && reportingAccess ? (
+        <Tile>
+          <Stack gap={5}>
+            <p>
+              {t('access.application')}: {applicationAccess.role}
+            </p>
+            <p>
+              {t('access.reporting')}: {reportingAccess.role}
+            </p>
+            <h2>{t('access.capabilities')}</h2>
+            <ul>
+              {capabilityNames.map((capability) => (
+                <li key={capability}>
+                  {t(`access.${capability}`)}:{' '}
+                  {applicationAccess.capabilities[capability]
+                    ? t('access.capabilityAllowed')
+                    : t('access.capabilityDenied')}
+                </li>
+              ))}
+            </ul>
+            <p>
+              {t('access.entityScope')}:{' '}
+              {applicationAccess.entityScope.mode === 'all'
+                ? t('access.entityScopeAll')
+                : t('access.entityScopeRestricted', {
+                    count: applicationAccess.entityScope.legalEntityIds.length,
+                  })}
+            </p>
+            <h2>{t('access.actions')}</h2>
+            {/* Capabilities only choose which actions are offered, the database enforces access. */}
+            <Grid>
+              {applicationAccess.capabilities.manageMembers &&
+              selectedOrganization ? (
+                <Column lg={4} md={4} sm={4}>
+                  <Button
+                    href={`/${encodeURIComponent(selectedOrganization.slug)}/members`}
+                    kind="tertiary"
+                    renderIcon={UserMultiple}
+                    size="lg"
+                  >
+                    {t('access.manageMembers')}
+                  </Button>
+                </Column>
+              ) : null}
+              {applicationAccess.capabilities.manageEntityAccess &&
+              selectedOrganization ? (
+                <Column lg={4} md={4} sm={4}>
+                  <Button
+                    href={`/${encodeURIComponent(selectedOrganization.slug)}/members`}
+                    kind="tertiary"
+                    renderIcon={Security}
+                    size="lg"
+                  >
+                    {t('access.manageEntityAccess')}
+                  </Button>
+                </Column>
+              ) : null}
+              {(applicationAccess.capabilities.createEntities ||
+                applicationAccess.capabilities.updateEntities ||
+                applicationAccess.capabilities.manageEntityAccess) &&
+              selectedOrganization ? (
+                <Column lg={4} md={4} sm={4}>
+                  <Button
+                    href={`/${encodeURIComponent(selectedOrganization.slug)}/entities`}
+                    kind="tertiary"
+                    renderIcon={DataSet}
+                    size="lg"
+                  >
+                    {t('access.manageEntities')}
+                  </Button>
+                </Column>
+              ) : null}
+              {applicationAccess.capabilities.uploadData &&
+              selectedOrganization ? (
+                <Column lg={4} md={4} sm={4}>
+                  <Button
+                    href={`/datasets?organization=${encodeURIComponent(selectedOrganization.slug)}#upload-dataset`}
+                    kind="tertiary"
+                    renderIcon={Upload}
+                    size="lg"
+                  >
+                    {t('access.uploadData')}
+                  </Button>
+                </Column>
+              ) : null}
+              {applicationAccess.capabilities.useAi ? (
+                <Column lg={4} md={4} sm={4}>
+                  <Tile>
+                    <Stack gap={3}>
+                      <AiGenerate
+                        aria-hidden="true"
+                        focusable="false"
+                        size={20}
+                      />
+                      <h3>{t('access.useAi')}</h3>
+                      <Tag type="gray">{t('access.unavailable')}</Tag>
+                      <p>{t('access.useAiUnavailable')}</p>
+                    </Stack>
+                  </Tile>
+                </Column>
+              ) : null}
+            </Grid>
+          </Stack>
+        </Tile>
+      ) : null}
+    </PageContainer>
   );
 }

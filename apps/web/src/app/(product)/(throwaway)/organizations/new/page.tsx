@@ -29,15 +29,7 @@ export default async function NewOrganizationPage({
   const { result } = await searchParams;
 
   return (
-    <main id="main-content" tabIndex={-1}>
-      <nav aria-label="Breadcrumb">
-        <ol>
-          <li>
-            <Link href="/organizations">Organizations</Link>
-          </li>
-          <li aria-current="page">Create organization</li>
-        </ol>
-      </nav>
+    <>
       <h1>Create organization</h1>
       <p>
         <Link href="/organizations">Back to organizations</Link>
@@ -51,6 +43,6 @@ export default async function NewOrganizationPage({
       ) : (
         <OrganizationForm initialName={session.user.name} />
       )}
-    </main>
+    </>
   );
 }

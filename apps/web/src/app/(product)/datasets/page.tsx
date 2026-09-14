@@ -270,237 +270,226 @@ export default function DatasetsPage() {
     !resolving && !listFailed && !accessFailed && datasets.length === 0;
 
   return (
-    <main id="main-content" tabIndex={-1}>
-      <PageContainer>
-        <h1>{t('datasets.title')}</h1>
-        {resolving ? (
-          <InlineLoading description={t('datasets.loading')} />
-        ) : null}
-        {accessFailed ? (
-          <InlineNotification
-            kind="error"
-            lowContrast
-            role="alert"
-            title={t('datasets.accessError')}
-          />
-        ) : null}
-        {listFailed ? (
-          <InlineNotification
-            kind="error"
-            lowContrast
-            role="alert"
-            title={t('datasets.error')}
-          />
-        ) : null}
-        {organizations.length > 0 ? (
-          <Select
-            id="datasets-organization"
-            labelText={t('datasets.organization')}
-            onChange={(event) => {
-              selectOrganization(event.target.value);
-            }}
-            value={organizationId}
-          >
-            {organizations.map((organization) => (
-              <SelectItem
-                key={organization.id}
-                text={organization.name}
-                value={organization.id}
-              />
-            ))}
-          </Select>
-        ) : null}
-        {organizationId.length > 0 && legalEntities.length > 0 ? (
-          <Select
-            id="datasets-scope"
-            labelText={t('datasets.scope')}
-            onChange={(event) => {
-              selectScope(event.target.value);
-            }}
-            value={scopeEntityId}
-          >
+    <PageContainer>
+      <h1>{t('datasets.title')}</h1>
+      {resolving ? <InlineLoading description={t('datasets.loading')} /> : null}
+      {accessFailed ? (
+        <InlineNotification
+          kind="error"
+          lowContrast
+          role="alert"
+          title={t('datasets.accessError')}
+        />
+      ) : null}
+      {listFailed ? (
+        <InlineNotification
+          kind="error"
+          lowContrast
+          role="alert"
+          title={t('datasets.error')}
+        />
+      ) : null}
+      {organizations.length > 0 ? (
+        <Select
+          id="datasets-organization"
+          labelText={t('datasets.organization')}
+          onChange={(event) => {
+            selectOrganization(event.target.value);
+          }}
+          value={organizationId}
+        >
+          {organizations.map((organization) => (
             <SelectItem
-              text={t('datasets.scopeAll')}
-              value={allEntitiesValue}
+              key={organization.id}
+              text={organization.name}
+              value={organization.id}
             />
-            {legalEntities.map((entity) => (
-              <SelectItem
-                key={entity.id}
-                text={entity.name}
-                value={entity.id}
-              />
-            ))}
-          </Select>
-        ) : null}
-        {empty ? (
-          <InlineNotification
-            kind="info"
-            lowContrast
-            title={t('datasets.empty')}
-          />
-        ) : null}
-        {datasets.length > 0 ? (
-          <TableContainer
-            description={t('datasets.listDescription')}
-            className={styles.tableContainer!}
-            id="dataset-list"
-            title={t('datasets.listTitle')}
-          >
-            <Table aria-label={t('datasets.listTitle')} size="sm">
-              <TableHead>
-                <TableRow>
-                  <TableHeader scope="col">
-                    {t('datasets.columnName')}
-                  </TableHeader>
-                  <TableHeader scope="col">
-                    {t('datasets.columnEntity')}
-                  </TableHeader>
-                  <TableHeader scope="col">
-                    {t('datasets.columnStatus')}
-                  </TableHeader>
-                  <TableHeader scope="col">
-                    {t('datasets.columnRows')}
-                  </TableHeader>
-                  <TableHeader scope="col">
-                    {t('datasets.columnUpdated')}
-                  </TableHeader>
-                  <TableHeader scope="col">
-                    {t('datasets.columnAction')}
-                  </TableHeader>
+          ))}
+        </Select>
+      ) : null}
+      {organizationId.length > 0 && legalEntities.length > 0 ? (
+        <Select
+          id="datasets-scope"
+          labelText={t('datasets.scope')}
+          onChange={(event) => {
+            selectScope(event.target.value);
+          }}
+          value={scopeEntityId}
+        >
+          <SelectItem text={t('datasets.scopeAll')} value={allEntitiesValue} />
+          {legalEntities.map((entity) => (
+            <SelectItem key={entity.id} text={entity.name} value={entity.id} />
+          ))}
+        </Select>
+      ) : null}
+      {empty ? (
+        <InlineNotification
+          kind="info"
+          lowContrast
+          title={t('datasets.empty')}
+        />
+      ) : null}
+      {datasets.length > 0 ? (
+        <TableContainer
+          description={t('datasets.listDescription')}
+          className={styles.tableContainer!}
+          id="dataset-list"
+          title={t('datasets.listTitle')}
+        >
+          <Table aria-label={t('datasets.listTitle')} size="sm">
+            <TableHead>
+              <TableRow>
+                <TableHeader scope="col">
+                  {t('datasets.columnName')}
+                </TableHeader>
+                <TableHeader scope="col">
+                  {t('datasets.columnEntity')}
+                </TableHeader>
+                <TableHeader scope="col">
+                  {t('datasets.columnStatus')}
+                </TableHeader>
+                <TableHeader scope="col">
+                  {t('datasets.columnRows')}
+                </TableHeader>
+                <TableHeader scope="col">
+                  {t('datasets.columnUpdated')}
+                </TableHeader>
+                <TableHeader scope="col">
+                  {t('datasets.columnAction')}
+                </TableHeader>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {datasets.map((dataset) => (
+                <TableRow key={dataset.id}>
+                  <TableCell>{dataset.name}</TableCell>
+                  <TableCell>{entityName(dataset.legalEntityId)}</TableCell>
+                  <TableCell>{t(statusLabels[dataset.status])}</TableCell>
+                  <TableCell>{dataset.rowCount}</TableCell>
+                  <TableCell>{dataset.updatedAt.slice(0, 10)}</TableCell>
+                  <TableCell>
+                    <Button
+                      aria-label={t('datasets.openNamed', {
+                        name: dataset.name,
+                      })}
+                      kind="tertiary"
+                      onClick={() => {
+                        setOpenDataset(dataset);
+                      }}
+                      renderIcon={View}
+                      size="lg"
+                      type="button"
+                    >
+                      {t('datasets.open')}
+                    </Button>
+                  </TableCell>
                 </TableRow>
-              </TableHead>
-              <TableBody>
-                {datasets.map((dataset) => (
-                  <TableRow key={dataset.id}>
-                    <TableCell>{dataset.name}</TableCell>
-                    <TableCell>{entityName(dataset.legalEntityId)}</TableCell>
-                    <TableCell>{t(statusLabels[dataset.status])}</TableCell>
-                    <TableCell>{dataset.rowCount}</TableCell>
-                    <TableCell>{dataset.updatedAt.slice(0, 10)}</TableCell>
-                    <TableCell>
-                      <Button
-                        aria-label={t('datasets.openNamed', {
-                          name: dataset.name,
-                        })}
-                        kind="tertiary"
-                        onClick={() => {
-                          setOpenDataset(dataset);
-                        }}
-                        renderIcon={View}
-                        size="lg"
-                        type="button"
-                      >
-                        {t('datasets.open')}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        ) : null}
-        {/* Capabilities only choose which actions are offered, the database enforces access. */}
-        {access?.capabilities.uploadData ? (
-          <section aria-labelledby="upload-dataset-heading" id="upload-dataset">
-            <Stack gap={5}>
-              <h2 id="upload-dataset-heading">{t('datasets.uploadTitle')}</h2>
-              <Select
-                id="upload-legal-entity"
-                labelText={t('datasets.uploadEntity')}
-                onChange={(event) => {
-                  setUploadEntityId(event.target.value);
-                  setUploadState('idle');
-                }}
-                value={uploadEntityId}
-              >
-                <SelectItem
-                  text={t('datasets.uploadEntityPrompt')}
-                  value={allEntitiesValue}
-                />
-                {legalEntities.map((entity) => (
-                  <SelectItem
-                    key={entity.id}
-                    text={entity.name}
-                    value={entity.id}
-                  />
-                ))}
-              </Select>
-              <FileUploader
-                accept={['.csv', '.xlsx']}
-                buttonKind="tertiary"
-                buttonLabel={t('datasets.uploadChoose')}
-                filenameStatus="edit"
-                iconDescription={t('datasets.uploadClear')}
-                labelDescription={t('datasets.uploadDescription')}
-                labelTitle={t('datasets.uploadTitle')}
-                name="file"
-                onAddFiles={(_event, content) => {
-                  setFile(content.addedFiles[0]);
-                  setUploadState('idle');
-                }}
-                onDelete={() => {
-                  setFile(undefined);
-                }}
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      ) : null}
+      {/* Capabilities only choose which actions are offered, the database enforces access. */}
+      {access?.capabilities.uploadData ? (
+        <section aria-labelledby="upload-dataset-heading" id="upload-dataset">
+          <Stack gap={5}>
+            <h2 id="upload-dataset-heading">{t('datasets.uploadTitle')}</h2>
+            <Select
+              id="upload-legal-entity"
+              labelText={t('datasets.uploadEntity')}
+              onChange={(event) => {
+                setUploadEntityId(event.target.value);
+                setUploadState('idle');
+              }}
+              value={uploadEntityId}
+            >
+              <SelectItem
+                text={t('datasets.uploadEntityPrompt')}
+                value={allEntitiesValue}
               />
-              <Button
-                disabled={
-                  file === undefined ||
-                  uploadEntityId.length === 0 ||
-                  uploadState === 'uploading'
-                }
-                onClick={() => void upload()}
-                renderIcon={Upload}
-                type="button"
-              >
-                {t('datasets.uploadSubmit')}
-              </Button>
-              {uploadState === 'uploading' ? (
-                <InlineLoading description={t('datasets.uploadWaiting')} />
-              ) : null}
-              {uploadState === 'accepted' ? (
-                <InlineNotification
-                  kind="success"
-                  lowContrast
-                  title={t('datasets.uploadAccepted')}
+              {legalEntities.map((entity) => (
+                <SelectItem
+                  key={entity.id}
+                  text={entity.name}
+                  value={entity.id}
                 />
-              ) : null}
-              {uploadState === 'error' ? (
-                <InlineNotification
-                  kind="error"
-                  lowContrast
-                  role="alert"
-                  title={t('datasets.uploadFailed')}
-                />
-              ) : null}
-            </Stack>
-          </section>
-        ) : null}
-        {openDataset !== undefined && access !== undefined ? (
-          <>
-            <Breadcrumb aria-label="Breadcrumb" noTrailingSlash>
-              <BreadcrumbItem
-                href="#dataset-list"
-                onClick={() => {
-                  setOpenDataset(undefined);
-                }}
-              >
-                {t('datasets.title')}
-              </BreadcrumbItem>
-              <BreadcrumbItem isCurrentPage>{openDataset.name}</BreadcrumbItem>
-            </Breadcrumb>
-            <DatasetView
-              dataset={openDataset}
-              // Keyed by dataset, so a newly opened one never inherits the cursor, rows or chat of the last.
-              key={openDataset.id}
-              onClose={() => {
+              ))}
+            </Select>
+            <FileUploader
+              accept={['.csv', '.xlsx']}
+              buttonKind="tertiary"
+              buttonLabel={t('datasets.uploadChoose')}
+              filenameStatus="edit"
+              iconDescription={t('datasets.uploadClear')}
+              labelDescription={t('datasets.uploadDescription')}
+              labelTitle={t('datasets.uploadTitle')}
+              name="file"
+              onAddFiles={(_event, content) => {
+                setFile(content.addedFiles[0]);
+                setUploadState('idle');
+              }}
+              onDelete={() => {
+                setFile(undefined);
+              }}
+            />
+            <Button
+              disabled={
+                file === undefined ||
+                uploadEntityId.length === 0 ||
+                uploadState === 'uploading'
+              }
+              onClick={() => void upload()}
+              renderIcon={Upload}
+              type="button"
+            >
+              {t('datasets.uploadSubmit')}
+            </Button>
+            {uploadState === 'uploading' ? (
+              <InlineLoading description={t('datasets.uploadWaiting')} />
+            ) : null}
+            {uploadState === 'accepted' ? (
+              <InlineNotification
+                kind="success"
+                lowContrast
+                title={t('datasets.uploadAccepted')}
+              />
+            ) : null}
+            {uploadState === 'error' ? (
+              <InlineNotification
+                kind="error"
+                lowContrast
+                role="alert"
+                title={t('datasets.uploadFailed')}
+              />
+            ) : null}
+          </Stack>
+        </section>
+      ) : null}
+      {openDataset !== undefined && access !== undefined ? (
+        <>
+          <Breadcrumb aria-label="Breadcrumb" noTrailingSlash>
+            <BreadcrumbItem
+              href="#dataset-list"
+              onClick={() => {
                 setOpenDataset(undefined);
               }}
-              organizationId={organizationId}
-              useAi={access.capabilities.useAi}
-            />
-          </>
-        ) : null}
-      </PageContainer>
-    </main>
+            >
+              {t('datasets.title')}
+            </BreadcrumbItem>
+            <BreadcrumbItem isCurrentPage>{openDataset.name}</BreadcrumbItem>
+          </Breadcrumb>
+          <DatasetView
+            dataset={openDataset}
+            // Keyed by dataset, so a newly opened one never inherits the cursor, rows or chat of the last.
+            key={openDataset.id}
+            onClose={() => {
+              setOpenDataset(undefined);
+            }}
+            organizationId={organizationId}
+            useAi={access.capabilities.useAi}
+          />
+        </>
+      ) : null}
+    </PageContainer>
   );
 }

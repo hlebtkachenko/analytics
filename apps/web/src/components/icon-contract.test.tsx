@@ -29,6 +29,18 @@ const reviewedImports = {
   'components/datasets/dataset-export.tsx': ['Download'],
   'components/datasets/dataset-view.tsx': ['ArrowLeft', 'ArrowRight', 'Close'],
   'components/design-system-reference.tsx': ['Launch'],
+  'components/shell/header-panels.tsx': ['Asleep', 'Light', 'Logout'],
+  'components/shell/product-shell.tsx': [
+    'DataSet',
+    'Enterprise',
+    'Help',
+    'Notification',
+    'Search',
+    'Security',
+    'Settings',
+    'Switcher',
+    'UserAvatar',
+  ],
 } as const;
 
 const reviewedCallsites = [
@@ -152,6 +164,27 @@ const reviewedCallsites = [
     'Button',
     'Launch',
     'Open Carbon React documentation',
+  ],
+  ['components/shell/header-panels.tsx', 'Button', 'Logout', 'Sign out'],
+  ['components/shell/product-shell.tsx', 'SideNavLink', 'Security', 'Access'],
+  [
+    'components/shell/product-shell.tsx',
+    'SideNavLink',
+    'Enterprise',
+    'Organizations',
+  ],
+  ['components/shell/product-shell.tsx', 'SideNavLink', 'DataSet', 'Datasets'],
+  [
+    'components/shell/product-shell.tsx',
+    'SideNavLink',
+    'UserAvatar',
+    'Account',
+  ],
+  [
+    'components/shell/product-shell.tsx',
+    'SideNavMenu',
+    'Enterprise',
+    'Members Entities Settings',
   ],
 ] as const;
 
@@ -467,6 +500,62 @@ describe('Carbon application icon AST contract', () => {
         },
         file: 'app/(product)/access/page.tsx',
         icon: 'AiGenerate',
+        selfClosing: true,
+      },
+      {
+        attributes: {
+          'aria-hidden': 'true',
+          focusable: 'false',
+          size: '{16}',
+        },
+        file: 'components/shell/header-panels.tsx',
+        icon: 'Light',
+        selfClosing: true,
+      },
+      {
+        attributes: {
+          'aria-hidden': 'true',
+          focusable: 'false',
+          size: '{16}',
+        },
+        file: 'components/shell/header-panels.tsx',
+        icon: 'Asleep',
+        selfClosing: true,
+      },
+      {
+        attributes: { size: '{20}' },
+        file: 'components/shell/product-shell.tsx',
+        icon: 'Search',
+        selfClosing: true,
+      },
+      {
+        attributes: { size: '{20}' },
+        file: 'components/shell/product-shell.tsx',
+        icon: 'Notification',
+        selfClosing: true,
+      },
+      {
+        attributes: { size: '{20}' },
+        file: 'components/shell/product-shell.tsx',
+        icon: 'Help',
+        selfClosing: true,
+      },
+      {
+        attributes: { size: '{20}' },
+        file: 'components/shell/product-shell.tsx',
+        icon: 'Settings',
+        selfClosing: true,
+      },
+      {
+        attributes: { size: '{20}' },
+        file: 'components/shell/product-shell.tsx',
+        icon: 'Switcher',
+        selfClosing: true,
+      },
+      {
+        attributes: { size: '{20}' },
+        file: 'components/shell/product-shell.tsx',
+        icon: 'UserAvatar',
         selfClosing: true,
       },
     ]);

@@ -101,16 +101,6 @@ describe('OrganizationEntitiesPage', () => {
     await renderPage();
 
     expect(mocks.readLegalEntities).toHaveBeenCalledWith('organization-1');
-    const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' });
-    expect(
-      within(breadcrumb).getByRole('link', { name: 'Organizations' }),
-    ).toHaveAttribute('href', '/organizations');
-    expect(
-      within(breadcrumb).getByRole('link', { name: 'Organization One' }),
-    ).toHaveAttribute('href', '/organization-one');
-    expect(
-      within(breadcrumb).getByText('Entities', { selector: 'li' }),
-    ).toHaveAttribute('aria-current', 'page');
     expect(screen.getByText(/Placeholder Holding/)).toBeVisible();
     expect(screen.getByText(/HRB-1/)).toBeVisible();
     expect(screen.getByText('Your entity scope: All entities')).toBeVisible();

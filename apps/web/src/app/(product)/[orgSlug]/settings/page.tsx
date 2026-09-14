@@ -28,18 +28,7 @@ export default async function OrganizationSettingsPage({
   const canUpdate = organization.role === 'owner';
 
   return (
-    <main id="main-content" tabIndex={-1}>
-      <nav aria-label="Breadcrumb">
-        <ol>
-          <li>
-            <Link href="/organizations">Organizations</Link>
-          </li>
-          <li>
-            <Link href={`/${organization.slug}`}>{organization.name}</Link>
-          </li>
-          <li aria-current="page">Settings</li>
-        </ol>
-      </nav>
+    <>
       <h1>{organization.name} settings</h1>
       <p>
         <Link href={`/${organization.slug}`}>Back to organization</Link>
@@ -79,6 +68,6 @@ export default async function OrganizationSettingsPage({
       ) : (
         <p>You do not have permission to update this organization.</p>
       )}
-    </main>
+    </>
   );
 }

@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
 
+import { ActiveOrganization } from '../../../components/shell/active-organization';
 import { resolveOrganizationRouteForRequest } from '../../../lib/organizations/resolver';
 
 export default async function OrganizationLayout({
@@ -17,5 +18,14 @@ export default async function OrganizationLayout({
     notFound();
   }
 
-  return children;
+  return (
+    <>
+      <ActiveOrganization
+        name={organization.name}
+        role={organization.role}
+        slug={organization.slug}
+      />
+      {children}
+    </>
+  );
 }
