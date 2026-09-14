@@ -54,21 +54,23 @@ export function useColumnLayout(
     [columns],
   );
 
-  // Initialize from a persisted layout once, falling back to column defaults.
+  // Read any persisted layout a single time per key.
+  const storedLayout = useMemo(() => loadLayout(persistKey), [persistKey]);
+
+  // Initialize from the persisted layout once, falling back to column defaults.
   const [order, setOrder] = useState<string[]>(() => {
-    const stored = loadLayout(persistKey);
     const known = new Set(defaultOrder);
-    return stored ? stored.order.filter((key) => known.has(key)) : defaultOrder;
+    return storedLayout
+      ? storedLayout.order.filter((key) => known.has(key))
+      : defaultOrder;
   });
-  const [widths, setWidths] = useState<Record<string, number>>(() => {
-    const stored = loadLayout(persistKey);
-    return stored ? { ...defaultWidths, ...stored.widths } : defaultWidths;
-  });
+  const [widths, setWidths] = useState<Record<string, number>>(() =>
+    storedLayout ? { ...defaultWidths, ...storedLayout.widths } : defaultWidths,
+  );
   const [hidden, setHidden] = useState<Set<string>>(() => {
-    const stored = loadLayout(persistKey);
     const known = new Set(defaultOrder);
-    return stored
-      ? new Set(stored.hidden.filter((key) => known.has(key)))
+    return storedLayout
+      ? new Set(storedLayout.hidden.filter((key) => known.has(key)))
       : new Set();
   });
 
@@ -120,12 +122,15 @@ export function useColumnLayout(
 
   const visibleColumns = useMemo(() => {
     const byKey = new Map(columns.map((column) => [column.key, column]));
-    return order
+    const ordered = order
       .map((key) => byKey.get(key))
-      .filter(
-        (column): column is GridColumn =>
-          column !== undefined && !hidden.has(column.key),
-      );
+      .filter((column): column is GridColumn => column !== undefined);
+    // Columns added after a layout was persisted are appended, never dropped.
+    const inOrder = new Set(order);
+    const appended = columns.filter((column) => !inOrder.has(column.key));
+    return [...ordered, ...appended].filter(
+      (column) => !hidden.has(column.key),
+    );
   }, [columns, order, hidden]);
 
   return {

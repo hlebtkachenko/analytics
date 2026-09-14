@@ -499,7 +499,8 @@ export function DataGrid(props: DataGridProps) {
               </TableRow>
             ) : (
               renderRows.map((row, index) => {
-                const rowIndex = rowBase + index;
+                // Page-aware absolute index so cell selection never leaks across pages.
+                const rowIndex = numberBase + index;
                 return (
                   <TableRow
                     className={cx(onRowClick && styles.clickableRow)}
