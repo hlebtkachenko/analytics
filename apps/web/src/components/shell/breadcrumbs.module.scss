@@ -1,6 +1,4 @@
 .band {
-  // A page-header band: small breadcrumb, a divider, then a gap before the title.
-  padding-block-end: 0.75rem;
-  margin-block-end: 1.5rem;
-  border-block-end: 1px solid var(--cds-border-subtle);
+  // Breadcrumb sits directly above the page title, no divider, matching Carbon.
+  margin-block: 0.5rem 1rem;
 }

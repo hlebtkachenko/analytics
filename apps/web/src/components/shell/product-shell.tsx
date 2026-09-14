@@ -129,7 +129,10 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
   return (
     <>
       <Theme theme="g100">
-        <Header aria-label="Afframe Analytics">
+        <Header
+          aria-label="Afframe Analytics"
+          className={searchOpen ? styles.searching! : ''}
+        >
           <SkipToContent href="#main-content">
             Skip to main content
           </SkipToContent>
@@ -141,7 +144,6 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
             isCollapsible
             onClick={toggleNavigation}
           />
-          <span aria-hidden="true" className={styles.logo!} />
           <HeaderName href="/access" prefix="Afframe">
             Analytics
           </HeaderName>

@@ -16,13 +16,10 @@
   }
 }
 
-.logo {
-  display: block;
-  align-self: center;
-  inline-size: 1.5rem;
-  block-size: 1.5rem;
-  margin-inline: 1rem 0.5rem;
-  background: url('/logomark.svg') center / contain no-repeat;
+// While searching, the field fills the free space so its right edge butts the
+// close action. Otherwise the global bar also grows and leaves a gap.
+.searching :global(.cds--header__global) {
+  flex: 0 0 auto;
 }
 
 // The active area reads as pure white on the dark header, not the dimmer token.
