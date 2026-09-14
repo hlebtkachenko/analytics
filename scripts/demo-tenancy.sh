@@ -21,6 +21,12 @@ organization_slug='bap-operational'
 
 compose_files=(-f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml)
 
+# Corepack pins the repository's pnpm, so it is preferred over whatever pnpm the host has on its PATH.
+pnpm_command=(pnpm)
+if command -v corepack >/dev/null 2>&1; then
+  pnpm_command=(corepack pnpm)
+fi
+
 compose() {
   docker compose "${compose_files[@]}" "$@"
 }
@@ -122,7 +128,9 @@ compose run --rm --no-deps migrator \
   jq -e '.grantedTotal == 2' >/dev/null
 
 printf '== 6/6 Running the legal entity browser proof\n'
-pnpm exec playwright test --config playwright.operational.config.ts \
+# A Playwright bump needs a matching Chromium; the install is a no-op when it is already present.
+"${pnpm_command[@]}" exec playwright install chromium
+"${pnpm_command[@]}" exec playwright test --config playwright.operational.config.ts \
   --reporter=list tests/operational/legal-entities.spec.ts
 
 cat <<SUMMARY
