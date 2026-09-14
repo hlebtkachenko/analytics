@@ -37,6 +37,7 @@ vi.mock('../../../lib/auth/server', () => ({
 }));
 
 beforeEach(() => {
+  vi.stubEnv('BAP_PUBLIC_ORIGIN', 'https://bap.invalid');
   mocks.cookieGet.mockReturnValue({ value: resetCapability });
   mocks.requestHeaders.mockReturnValue(
     new Headers({
@@ -54,6 +55,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
 });
 
 async function renderResetPassword() {

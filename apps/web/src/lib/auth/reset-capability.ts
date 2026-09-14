@@ -8,12 +8,18 @@ export function isValidResetCapability(value: unknown): value is string {
   return typeof value === 'string' && resetCapabilityPattern.test(value);
 }
 
-export function resetCapabilityCookieOptions(production: boolean) {
+// Safari drops Secure cookies on http:// origins (e.g. the local demo stack),
+// so secure must follow the configured public origin, never NODE_ENV alone.
+export function cookieSecureForOrigin(origin: string): boolean {
+  return new URL(origin).protocol === 'https:';
+}
+
+export function resetCapabilityCookieOptions(publicOrigin: string) {
   return {
     httpOnly: true,
     maxAge: resetCapabilityLifetimeSeconds,
     path: resetCapabilityCookiePath,
     sameSite: 'lax' as const,
-    secure: production,
+    secure: cookieSecureForOrigin(publicOrigin),
   };
 }
