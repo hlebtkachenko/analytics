@@ -32,6 +32,10 @@ function createContentSecurityPolicy(
 export function proxy(request: NextRequest): NextResponse {
   const nonce = crypto.randomUUID();
   const production = process.env.NODE_ENV === 'production';
+  const publicOrigin = process.env.BAP_PUBLIC_ORIGIN;
+  if (publicOrigin === undefined) {
+    throw new Error('BAP_PUBLIC_ORIGIN must be set');
+  }
   const contentSecurityPolicy = createContentSecurityPolicy(nonce, !production);
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('content-security-policy', contentSecurityPolicy);
@@ -69,11 +73,11 @@ export function proxy(request: NextRequest): NextResponse {
       response.cookies.set(
         resetCapabilityCookieName,
         token,
-        resetCapabilityCookieOptions(production),
+        resetCapabilityCookieOptions(publicOrigin),
       );
     } else {
       response.cookies.set(resetCapabilityCookieName, '', {
-        ...resetCapabilityCookieOptions(production),
+        ...resetCapabilityCookieOptions(publicOrigin),
         maxAge: 0,
       });
     }
@@ -91,7 +95,7 @@ export function proxy(request: NextRequest): NextResponse {
     const capability = request.cookies.get(resetCapabilityCookieName)?.value;
     if (capability !== undefined && !isValidResetCapability(capability)) {
       response.cookies.set(resetCapabilityCookieName, '', {
-        ...resetCapabilityCookieOptions(production),
+        ...resetCapabilityCookieOptions(publicOrigin),
         maxAge: 0,
       });
     }

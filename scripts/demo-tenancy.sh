@@ -5,6 +5,8 @@ set -euo pipefail
 repository_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repository_root"
 
+# The proof runs three accounts back to back, which needs more than the production rate budget.
+export BAP_API_RATE_LIMIT=${BAP_API_RATE_LIMIT:-240}
 export BAP_OPERATIONAL_ADMIN_EMAIL=${BAP_OPERATIONAL_ADMIN_EMAIL:-admin@bap.invalid}
 export BAP_OPERATIONAL_BASE_URL=${BAP_OPERATIONAL_BASE_URL:-http://localhost:39100}
 export BAP_OPERATIONAL_EMAIL=${BAP_OPERATIONAL_EMAIL:-owner@bap.invalid}
@@ -20,6 +22,12 @@ organization_name='BAP Operational'
 organization_slug='bap-operational'
 
 compose_files=(-f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml)
+
+# Corepack pins the repository's pnpm, so it is preferred over whatever pnpm the host has on its PATH.
+pnpm_command=(pnpm)
+if command -v corepack >/dev/null 2>&1; then
+  pnpm_command=(corepack pnpm)
+fi
 
 compose() {
   docker compose "${compose_files[@]}" "$@"
@@ -122,7 +130,9 @@ compose run --rm --no-deps migrator \
   jq -e '.grantedTotal == 2' >/dev/null
 
 printf '== 6/6 Running the legal entity browser proof\n'
-pnpm exec playwright test --config playwright.operational.config.ts \
+# A Playwright bump needs a matching Chromium; the install is a no-op when it is already present.
+"${pnpm_command[@]}" exec playwright install chromium
+"${pnpm_command[@]}" exec playwright test --config playwright.operational.config.ts \
   --reporter=list tests/operational/legal-entities.spec.ts
 
 cat <<SUMMARY

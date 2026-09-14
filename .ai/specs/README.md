@@ -3,6 +3,7 @@
 ## Delivered and historical records
 
 - [Product application layout](2026-09-14-product-application-layout.md)
+- [Account issuer column removal](2026-09-14-account-issuer-removal.md)
 - [Workspace legal entities](2026-09-10-workspace-legal-entities.md)
 - [Authenticated navigation and invitation onboarding](2026-09-01-authenticated-navigation-and-invitation-onboarding.md)
 - [Conductor and CI source-of-truth reconciliation](2026-09-01-conductor-ci-source-truth.md)

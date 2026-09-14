@@ -187,6 +187,17 @@ one resolver in `@bap/db`,
 reads a dataset or an upload must go through it, because the database will not
 apply that filter on its own.
 
+Migration `20260914.0001` drops `auth.account.issuer` and its
+`account_issuer_account_id_key` unique index: Better Auth 1.7.3 removed the
+`issuer` field from its account model and validates the schema at init, so the
+stale column made every account insert fail.
+`account_provider_id_account_id_key`, unique on `(provider_id, account_id)`,
+replaces it, matching the pair Better Auth 1.7.3 now uses to identify an
+account. `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is
+now `20260914.0001`; rolling application code back after this migration leaves
+readiness at 503 until code expecting that exact version is deployed or the
+expected version is deliberately advanced.
+
 ## Tenant policy contract
 
 Every future tenant table must include:

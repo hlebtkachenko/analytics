@@ -23,6 +23,7 @@ import {
   sendMail,
 } from '../mail/index.ts';
 import { disabledAuthPaths, resourceJwtConfiguration } from './contract.ts';
+import { cookieSecureForOrigin } from './reset-capability.ts';
 import {
   adminAuthSchema,
   coreAuthModels,
@@ -484,7 +485,7 @@ async function createAuth() {
       defaultCookieAttributes: {
         httpOnly: true,
         sameSite: 'lax',
-        secure: true,
+        secure: cookieSecureForOrigin(environment.BAP_PUBLIC_ORIGIN),
       },
       ipAddress: {
         ipAddressHeaders: ['x-bap-client-ip'],
@@ -579,7 +580,7 @@ async function createAuth() {
   });
 }
 
-export { disabledAuthPaths, resourceJwtConfiguration };
+export { cookieSecureForOrigin, disabledAuthPaths, resourceJwtConfiguration };
 
 export async function getAuth() {
   authInstance ??= createAuth();

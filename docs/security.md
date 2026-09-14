@@ -183,11 +183,12 @@ and queue statistics persistence is off because it would otherwise issue
 partition DDL at runtime. Recurring work uses pg-boss cron; there is no second
 scheduler.
 
-Better Auth uses opaque secure cookies for browser identity. Resource JWTs are
-signed only inside the server-side BFF, expire after five minutes, and are never
-returned to browser code. The operational-proof synthetic-account CLI is
-explicitly gated by `BAP_E2E_SETUP=true`; do not set that variable in a normal
-runtime.
+Better Auth uses opaque cookies for browser identity, `Secure` whenever the
+configured public origin is HTTPS, which is every production deployment, and
+plain on an HTTP origin such as the local demo. Resource JWTs are signed only
+inside the server-side BFF, expire after five minutes, and are never returned to
+browser code. The operational-proof synthetic-account CLI is explicitly gated by
+`BAP_E2E_SETUP=true`; do not set that variable in a normal runtime.
 
 ## Public sign-up boundary
 
@@ -279,7 +280,8 @@ framework messages.
 Reset and activation callbacks are canonicalized before any page render. The
 proxy accepts exactly 1 reset token in Better Auth's installed shape, stores it
 for at most 30 minutes in an `HttpOnly`, `SameSite=Lax`, `/reset-password`
-cookie that is `Secure` in production, and redirects to the clean path. An
+cookie that is `Secure` whenever the configured public origin is HTTPS and plain
+on an HTTP origin such as the local demo, and redirects to the clean path. An
 error, malformed token, or duplicate token clears the capability. A clean
 request without a valid capability fails closed. Raw activation errors redirect
 to the fixed `/activate?state=invalid` state. These responses and the clean
