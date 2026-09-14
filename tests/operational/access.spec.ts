@@ -160,7 +160,7 @@ test('protects the authenticated BAP access contract without browser token leaka
 
   const primaryNavigation = page.getByRole('navigation', {
     exact: true,
-    name: 'Primary navigation',
+    name: 'Side navigation',
   });
   await primaryNavigation.getByRole('link', { name: 'Account' }).click();
   await authenticatedExpect(page).toHaveURL(/\/account$/);

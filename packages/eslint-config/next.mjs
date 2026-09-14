@@ -41,7 +41,10 @@ export default [
   },
   {
     // Every product page renders inside the shared PageContainer scaffold.
-    files: ['src/app/(product)/**/page.tsx', 'src/app/(product)/**/not-found.tsx'],
+    files: [
+      'src/app/(product)/**/page.tsx',
+      'src/app/(product)/**/not-found.tsx',
+    ],
     ignores: [
       'src/app/(product)/(throwaway)/**',
       'src/app/(product)/[[]orgSlug[]]/**',

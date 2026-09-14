@@ -35,12 +35,15 @@ layout, and content primitives through `@bap/design-system`. They establish no
 dashboard or analytics visual design. Do not add another component system,
 utility CSS framework, raw palette values, or copied Carbon source.
 
-Authenticated application routes share a minimal Carbon application shell with a
-skip link and primary navigation for Access, Organizations, Datasets, and
-Account. Identity and invitation routes remain outside that shell. Permanent
-pages use Carbon breadcrumbs for subordinate views, including the inline dataset
-view. The five temporary organization pages and the temporary account page
-remain a deliberate source-level exception: their page modules keep the exact
-throwaway markers, plain semantic HTML, and zero CSS, design-system, or icon
-imports. The shared shell may surround them, and their plain native breadcrumbs
-may link through it, but converting their page content to Carbon is future work.
+Authenticated `app/(product)` routes share a Carbon UI Shell product shell: a
+header branded "Afframe Analytics" with single-purpose panels for search,
+notifications, help, settings, workspace switching, and account, over a
+pinned-persistable left icon rail for Access, Organizations, Datasets, Account,
+and a workspace section. Identity and invitation routes remain outside that
+shell. The layout owns the single `main-content` landmark and renders small
+Carbon breadcrumbs for subordinate views, including the inline dataset view. The
+five temporary organization pages and the temporary account page remain a
+deliberate source-level exception: their page modules keep the exact throwaway
+markers, plain semantic HTML, and zero CSS, design-system, or icon imports, and
+no longer render their own `<main>` or native breadcrumbs now that the layout
+owns both. Converting their page content to Carbon is future work.

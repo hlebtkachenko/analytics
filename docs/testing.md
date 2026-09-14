@@ -13,8 +13,9 @@ pnpm test:coverage
 The suite proves:
 
 - Carbon-backed identity and access surfaces render with translated strings;
-- the authenticated Carbon shell includes one skip target, current-route
-  navigation, mobile navigation labels, and identity-route exclusion;
+- the authenticated product shell layout under `app/(product)` includes one skip
+  target, current-route navigation, mobile navigation labels, and identity-route
+  exclusion;
 - sign-up, activation, password recovery, and welcome pages preserve their
   server gates, generic outcomes, redirects, and alert semantics;
 - invitation-only sign-up retains its form while both backend admission layers
@@ -61,14 +62,14 @@ and pins the reviewed Carbon control-icon callsites plus the direct decorative
 status icons, facade imports, visible labels, and absence of icon-only controls.
 The AST coverage also protects the five temporary pages' exact throwaway marker
 and zero CSS/design-system/icon boundary. That source-level guard scopes the
-temporary page modules, not the shared Carbon shell that surrounds authenticated
-routes. Committed production Playwright coverage verifies real public and
-authenticated controls for keyboard order, axe, label-derived accessible names,
-Carbon SVG semantics and alignment, 44px targets, temporary-content exclusion,
-console and page errors, and 640 CSS-pixel layout-equivalent reflow without
-document overflow. The 640px check is not a browser-zoom claim; true browser
-zoom is recorded only as separate dated local evidence after setting and reading
-the Chrome tab zoom.
+temporary page modules, not the product shell layout under `app/(product)` that
+surrounds authenticated routes. Committed production Playwright coverage
+verifies real public and authenticated controls for keyboard order, axe,
+label-derived accessible names, Carbon SVG semantics and alignment, 44px
+targets, temporary-content exclusion, console and page errors, and 640 CSS-pixel
+layout-equivalent reflow without document overflow. The 640px check is not a
+browser-zoom claim; true browser zoom is recorded only as separate dated local
+evidence after setting and reading the Chrome tab zoom.
 
 ## Integration and operational proof
 
@@ -172,14 +173,14 @@ native breadcrumbs, native keyboard operation, axe, a mobile viewport, 640
 CSS-pixel layout-equivalent reflow, horizontal overflow, and page/console
 errors. This is not a browser-zoom assertion. The temporary page modules
 intentionally retain their marker comments and have no CSS, design-system, or
-icon imports; only the shared root shell is Carbon. The operational workflow
-raises only its disposable synthetic owner's total quota from 1 to 2 through the
-existing migrator command; the second organization consumes that capacity and
-the proof finishes on the zero-quota state. The authenticated access, icon,
-organization, dataset, and final sign-out specs share one worker-scoped
-synthetic browser session. The public access assertions remain unauthenticated,
-and the lexically final sign-out spec closes the shared session and proves the
-post-sign-out 401.
+icon imports; only the product shell layout under `app/(product)` is Carbon. The
+operational workflow raises only its disposable synthetic owner's total quota
+from 1 to 2 through the existing migrator command; the second organization
+consumes that capacity and the proof finishes on the zero-quota state. The
+authenticated access, icon, organization, dataset, and final sign-out specs
+share one worker-scoped synthetic browser session. The public access assertions
+remain unauthenticated, and the lexically final sign-out spec closes the shared
+session and proves the post-sign-out 401.
 
 The combined serial suite issues 5 sign-in requests in total: the shared
 synthetic owner browser session, the synthetic admin and member sessions of the

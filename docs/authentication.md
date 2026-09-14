@@ -122,8 +122,8 @@ interactive client boundary.
 
 ## Authenticated application navigation
 
-Signed-in application routes share a minimal Carbon shell with a skip link to
-the route's single `main-content` landmark. Desktop and collapsible mobile
+Signed-in application routes share a minimal Carbon shell whose layout owns a
+skip link to the single `main-content` landmark. Desktop and collapsible mobile
 navigation use native links to Access, Organizations, Datasets, and Account and
 identify the current route. Identity and invitation routes stay outside the
 shell.

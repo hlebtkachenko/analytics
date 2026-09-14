@@ -70,10 +70,14 @@ opts into workspace transpilation through `transpilePackages`.
 
 ## Themes and colors
 
-The supported Carbon themes are `white`, `g10`, `g90`, and `g100`. The root web
-layout renders `data-carbon-theme="white"` before hydration. The client
+The supported Carbon themes are `white`, `g10`, `g90`, and `g100`. BAP maps
+light mode to the White theme and dark mode to Gray 100. Theme mode defaults to
+system and is persisted in the `bap_theme` cookie, which the root layout reads
+server-side so `data-carbon-theme` is correct on first paint; system mode
+resolves through a `prefers-color-scheme` rule and `matchMedia`. The client
 `DesignSystemProvider` keeps `document.documentElement.dataset.carbonTheme` in
-sync if its `theme` prop changes and also sets Carbon `GlobalTheme` context.
+sync if its `theme` prop changes and also sets Carbon `GlobalTheme` to the
+resolved theme.
 
 Use role-based Carbon color tokens, never palette hex values in BAP source. The
 semantic metadata records Carbon's background, layer, field, border, text, link,

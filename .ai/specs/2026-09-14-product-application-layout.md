@@ -23,48 +23,49 @@ and a global search shell. Product routes move into `app/(product)`; URLs do not
 change. `PageContainer` plus an ESLint rule enforce Grid, Column, FlexGrid, and
 Stack scaffolding in product pages.
 
-Not in scope: identity, invitation, and design-system routes; a real AI Assistant
-route or behavior (it is a placeholder header item with no URL and no reserved
-slug); real search, notification, help, or settings behavior; Carbon conversion
-of the temporary organization and account pages; session data in the shell;
-sample business data. The organization switcher lists the member's own real
-memberships; every other panel body is placeholder copy.
+Not in scope: identity, invitation, and design-system routes; a real AI
+Assistant route or behavior (it is a placeholder header item with no URL and no
+reserved slug); real search, notification, help, or settings behavior; Carbon
+conversion of the temporary organization and account pages; session data in the
+shell; sample business data. The organization switcher lists the member's own
+real memberships; every other panel body is placeholder copy.
 
 ## Design
 
 `app/(product)/layout.tsx` (server) reads the rail cookie and renders the client
-`ProductShell` around RSC children; `not-found.tsx` and `error.tsx` render inside
-the shell; there is no `loading.tsx`. The shell owns `Content id="main-content"`,
-the rail state, the exclusive panels, breadcrumbs from `useSelectedLayoutSegments`
-(route groups filtered, the first segment classified as a module or an
-organization slug), and the toast context. `[orgSlug]/layout.tsx` registers the
-resolved organization into a client context that feeds the breadcrumb label and
-the rail organization menu. The AI Assistant area is a header item with no route;
-activating it raises a placeholder toast. `DesignSystemProvider` gains a `mode`
-prop; the root layout reads `bap_theme` and sets `data-carbon-theme` before
-hydration; `system` resolves through a `prefers-color-scheme` rule and
-`matchMedia`. The icon facade grows to the reviewed exports the shell uses.
-Cookies `bap_theme` and `bap_rail` are validated with zod on read.
+`ProductShell` around RSC children; `not-found.tsx` and `error.tsx` render
+inside the shell; there is no `loading.tsx`. The shell owns
+`Content id="main-content"`, the rail state, the exclusive panels, breadcrumbs
+from `useSelectedLayoutSegments` (route groups filtered, the first segment
+classified as a module or an organization slug), and the toast context.
+`[orgSlug]/layout.tsx` registers the resolved organization into a client context
+that feeds the breadcrumb label and the rail organization menu. The AI Assistant
+area is a header item with no route; activating it raises a placeholder toast.
+`DesignSystemProvider` gains a `mode` prop; the root layout reads `bap_theme`
+and sets `data-carbon-theme` before hydration; `system` resolves through a
+`prefers-color-scheme` rule and `matchMedia`. The icon facade grows to the
+reviewed exports the shell uses. Cookies `bap_theme` and `bap_rail` are
+validated with zod on read.
 
 ## Security
 
-The preference cookies hold only enum values, are not secrets, and grant nothing.
-The shell stays a navigation boundary, not authorization: pages and handlers keep
-their own gates; the organization menu shows only the organization the member
-gate resolved; the switcher lists memberships from the existing Better Auth list
-endpoint. No token, id, email, or dataset value enters shell state or logs. Slugs
-and pathnames choose presentation only.
+The preference cookies hold only enum values, are not secrets, and grant
+nothing. The shell stays a navigation boundary, not authorization: pages and
+handlers keep their own gates; the organization menu shows only the organization
+the member gate resolved; the switcher lists memberships from the existing
+Better Auth list endpoint. No token, id, email, or dataset value enters shell
+state or logs. Slugs and pathnames choose presentation only.
 
 ## Verification
 
 Unit: shell landmarks and labels, rail pin and cookie, exclusive panels,
-breadcrumb trail and overflow, active-organization registration, toast API, theme
-mode resolution and the hydration attribute, preference parsing, reserved-route
-parity derived from the filesystem, the icon facade and AST contract, and the
-ESLint rule tests. Operational: the updated navigation, breadcrumb,
-throwaway-content, axe, reflow, and sign-out proofs. Gate: per-workspace
-commands, then `pnpm check`, `pnpm test:integration`, and the operational
-Playwright suite.
+breadcrumb trail and overflow, active-organization registration, toast API,
+theme mode resolution and the hydration attribute, preference parsing,
+reserved-route parity derived from the filesystem, the icon facade and AST
+contract, and the ESLint rule tests. Operational: the updated navigation,
+breadcrumb, throwaway-content, axe, reflow, and sign-out proofs. Gate:
+per-workspace commands, then `pnpm check`, `pnpm test:integration`, and the
+operational Playwright suite.
 
 ## Open questions
 

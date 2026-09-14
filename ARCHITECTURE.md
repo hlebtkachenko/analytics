@@ -253,12 +253,17 @@ slug resolver remain durable. Publishing the literal `/organizations` route also
 advances the reserved database and TypeScript slug contract through migration
 `20260831.0004`.
 
-Authenticated application pages share a minimal Carbon shell with a skip link
-and primary links to Access, Organizations, Datasets, and Account. The shell is
-not rendered around identity, invitation, or design-system reference routes.
-Subordinate organization pages use plain native breadcrumbs while their page
-content remains temporary; the inline dataset detail uses a Carbon breadcrumb.
-The complete discoverability and state contract is recorded in
+Authenticated `app/(product)` routes share a server layout that renders the
+client `ProductShell`, a Carbon UI Shell header branded "Afframe Analytics" over
+a pinned-persistable left icon rail for Access, Organizations, Datasets,
+Account, and a workspace section shown when an organization is active. Header
+actions open single-purpose panels for search, notifications, help, settings,
+workspace switching, and account, the last holding the light/dark/system theme
+control and sign out. The shell is not rendered around identity, invitation, or
+design-system reference routes. The layout owns the single `main-content`
+landmark and renders small Carbon breadcrumbs from the route segments, including
+subordinate organization pages and the inline dataset detail. The complete
+discoverability and state contract is recorded in
 [the application route map](docs/application-routes.md).
 
 The separately selected development and operational-proof Mailpit overlay adds 1
