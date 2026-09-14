@@ -85,7 +85,7 @@ test('canonicalizes callback secrets before production HTML and RSC rendering', 
     httpOnly: true,
     path: '/reset-password',
     sameSite: 'Lax',
-    secure: true,
+    secure: resetCookieShouldBeSecure,
     value: resetCapability,
   });
 
