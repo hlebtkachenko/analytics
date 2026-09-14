@@ -14,7 +14,7 @@ Nine authentication paths are disabled:
 - `/api/auth/change-email`, because email changes use BAP-owned flows
 - `/api/auth/delete-user/callback`, because deletion has no email-verification
   callback
-- `/api/auth/admin/remove-user`, because Better Auth 1.7.2 bypasses the BAP
+- `/api/auth/admin/remove-user`, because Better Auth 1.7.3 bypasses the BAP
   deletion hook and erasure request on that Admin-plugin path
 - `/api/auth/admin/impersonate-user`, because BAP has no approved
   session-minting impersonation workflow
@@ -152,7 +152,7 @@ content remains future work.
 
 ## Admin HTTP inventory
 
-Installed Better Auth 1.7.2 registers exactly 15 Admin-plugin endpoints. In the
+Installed Better Auth 1.7.3 registers exactly 15 Admin-plugin endpoints. In the
 table below, paths are relative to `/api/auth`. A reachable HTTP endpoint still
 requires the named authoritative browser session and, where listed, permission.
 Requests are JSON unless a query is shown. There is no BAP admin UI or BAP HTTP
@@ -298,10 +298,10 @@ resource-token signatures against it.
 Password change uses Better Auth's installed `/change-password` endpoint. It
 requires `currentPassword`, enforces the configured 14-128 character bounds, and
 accepts `revokeOtherSessions`. The account page exposes that option. No custom
-rate rule is added: Better Auth 1.7.2 already applies its special
+rate rule is added: Better Auth 1.7.3 already applies its special
 3-per-10-second rule to the endpoint.
 
-Account deletion is enabled. Better Auth 1.7.2 accepts either the submitted
+Account deletion is enabled. Better Auth 1.7.3 accepts either the submitted
 password or a session younger than `session.freshAge`; the endpoint is therefore
 not password-protected. BAP sets freshness to 5 minutes to keep passwordless
 acceptance short, and the account page always submits the current password.
@@ -469,7 +469,7 @@ by single hyphens, cannot be all digits, and cannot be one of `access`, `api`,
 constraints use the same literal contract. The normalizer is deterministic and
 never silently renames a reserved, numeric, empty, or too-short result.
 
-Installed Better Auth 1.7.2 has 11 endpoints that otherwise fall back to
+Installed Better Auth 1.7.3 has 11 endpoints that otherwise fall back to
 `session.activeOrganizationId`. BAP's before-hook requires a non-empty explicit
 `organizationId` in the body for `has-permission`, `update`, `invite-member`,
 `remove-member`, and `update-member-role`; and in the query for
@@ -573,7 +573,7 @@ restricted admin or member, setting `all` or an explicit set of legal entity
 ids; the editor rejects an owner target. Before this temporary UI demotes or
 removes an owner, its action rereads the full 100-member-bounded list and
 refuses to remove the final observed owner. This is a non-atomic UI safeguard,
-not a global invariant. Installed Better Auth 1.7.2 checks only self-demotion
+not a global invariant. Installed Better Auth 1.7.3 checks only self-demotion
 and uses its configured member limit when counting owners for removal, so
 concurrent or direct endpoint gaps remain the approved follow-up. Organization
 deletion, active selection, custom roles, and teams remain unavailable.

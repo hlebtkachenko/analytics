@@ -1729,8 +1729,8 @@ describe('PostgreSQL 18 isolation', () => {
         values ('cascade-session', now() + interval '1 hour', 'cascade-token', 'cascade-user')
       `);
       await client.query(`
-        insert into auth.account (id, account_id, issuer, provider_id, user_id, password)
-        values ('cascade-account', 'cascade-user', 'credential', 'credential', 'cascade-user', 'hash')
+        insert into auth.account (id, account_id, provider_id, user_id, password)
+        values ('cascade-account', 'cascade-user', 'credential', 'cascade-user', 'hash')
       `);
       await client.query(`
         insert into auth.member (id, organization_id, user_id, role)
@@ -1765,6 +1765,21 @@ describe('PostgreSQL 18 isolation', () => {
     await asOwner((client) =>
       client.query("delete from auth.organization where id = 'cascade-org'"),
     );
+  });
+
+  it('drops the account issuer column and replaces its unique index', async () => {
+    const columns = await rootPool.query<{ column_name: string }>(
+      `select column_name from information_schema.columns
+       where table_schema = 'auth' and table_name = 'account' and column_name = 'issuer'`,
+    );
+    expect(columns.rows).toEqual([]);
+
+    const indexes = await rootPool.query<{ indexname: string }>(
+      "select indexname from pg_indexes where schemaname = 'auth' and tablename = 'account'",
+    );
+    const indexNames = indexes.rows.map((row) => row.indexname);
+    expect(indexNames).toContain('account_provider_id_account_id_key');
+    expect(indexNames).not.toContain('account_issuer_account_id_key');
   });
 
   it('erases only the requested absent identity with one opaque tombstone', async () => {
