@@ -15,7 +15,7 @@ const reviewedImports = {
   'app/(identity)/sign-in/sign-in-form.tsx': ['Login'],
   'app/(identity)/sign-in/two-factor/page.tsx': ['Checkmark'],
   'app/(identity)/sign-up/sign-up-form.tsx': ['UserFollow'],
-  'app/access/page.tsx': [
+  'app/(product)/access/page.tsx': [
     'AiGenerate',
     'DataSet',
     'Logout',
@@ -23,12 +23,30 @@ const reviewedImports = {
     'Upload',
     'UserMultiple',
   ],
-  'app/datasets/page.tsx': ['Upload', 'View'],
+  'app/(product)/datasets/page.tsx': ['Upload', 'View'],
   'app/invitation/[invitationId]/invitation-client.tsx': ['Checkmark'],
   'components/datasets/dataset-chat.tsx': ['Send'],
   'components/datasets/dataset-export.tsx': ['Download'],
   'components/datasets/dataset-view.tsx': ['ArrowLeft', 'ArrowRight', 'Close'],
   'components/design-system-reference.tsx': ['Launch'],
+  'components/shell/header-panels.tsx': [
+    'Asleep',
+    'Light',
+    'Logout',
+    'UserAvatar',
+  ],
+  'components/shell/product-shell.tsx': [
+    'Close',
+    'DataSet',
+    'Enterprise',
+    'Help',
+    'Notification',
+    'Search',
+    'Security',
+    'Settings',
+    'Switcher',
+    'UserAvatar',
+  ],
 } as const;
 
 const reviewedCallsites = [
@@ -62,24 +80,49 @@ const reviewedCallsites = [
     'UserFollow',
     "{t('signUp.submit')}",
   ],
-  ['app/access/page.tsx', 'Button', 'Logout', "{t('common.signOut')}"],
-  ['app/access/page.tsx', 'Button', 'DataSet', "{t('access.datasets')}"],
   [
-    'app/access/page.tsx',
+    'app/(product)/access/page.tsx',
+    'Button',
+    'Logout',
+    "{t('common.signOut')}",
+  ],
+  [
+    'app/(product)/access/page.tsx',
+    'Button',
+    'DataSet',
+    "{t('access.datasets')}",
+  ],
+  [
+    'app/(product)/access/page.tsx',
     'Button',
     'UserMultiple',
     "{t('access.manageMembers')}",
   ],
   [
-    'app/access/page.tsx',
+    'app/(product)/access/page.tsx',
     'Button',
     'Security',
     "{t('access.manageEntityAccess')}",
   ],
-  ['app/access/page.tsx', 'Button', 'DataSet', "{t('access.manageEntities')}"],
-  ['app/access/page.tsx', 'Button', 'Upload', "{t('access.uploadData')}"],
-  ['app/datasets/page.tsx', 'Button', 'View', "{t('datasets.open')}"],
-  ['app/datasets/page.tsx', 'Button', 'Upload', "{t('datasets.uploadSubmit')}"],
+  [
+    'app/(product)/access/page.tsx',
+    'Button',
+    'DataSet',
+    "{t('access.manageEntities')}",
+  ],
+  [
+    'app/(product)/access/page.tsx',
+    'Button',
+    'Upload',
+    "{t('access.uploadData')}",
+  ],
+  ['app/(product)/datasets/page.tsx', 'Button', 'View', "{t('datasets.open')}"],
+  [
+    'app/(product)/datasets/page.tsx',
+    'Button',
+    'Upload',
+    "{t('datasets.uploadSubmit')}",
+  ],
   [
     'app/invitation/[invitationId]/invitation-client.tsx',
     'Button',
@@ -128,20 +171,41 @@ const reviewedCallsites = [
     'Launch',
     'Open Carbon React documentation',
   ],
+  ['components/shell/header-panels.tsx', 'Button', 'Logout', 'Sign out'],
+  ['components/shell/product-shell.tsx', 'SideNavLink', 'Security', 'Access'],
+  [
+    'components/shell/product-shell.tsx',
+    'SideNavLink',
+    'Enterprise',
+    'Organizations',
+  ],
+  ['components/shell/product-shell.tsx', 'SideNavLink', 'DataSet', 'Datasets'],
+  [
+    'components/shell/product-shell.tsx',
+    'SideNavLink',
+    'UserAvatar',
+    'Account',
+  ],
+  [
+    'components/shell/product-shell.tsx',
+    'SideNavMenu',
+    'Enterprise',
+    'Members Entities Settings',
+  ],
 ] as const;
 
 const throwawayPages = [
-  'app/(throwaway)/organizations/page.tsx',
-  'app/(throwaway)/organizations/new/page.tsx',
-  'app/[orgSlug]/page.tsx',
-  'app/[orgSlug]/entities/page.tsx',
-  'app/[orgSlug]/members/page.tsx',
-  'app/[orgSlug]/settings/page.tsx',
+  'app/(product)/(throwaway)/organizations/page.tsx',
+  'app/(product)/(throwaway)/organizations/new/page.tsx',
+  'app/(product)/[orgSlug]/page.tsx',
+  'app/(product)/[orgSlug]/entities/page.tsx',
+  'app/(product)/[orgSlug]/members/page.tsx',
+  'app/(product)/[orgSlug]/settings/page.tsx',
 ] as const;
 
 const intentionalPlainAccountSources = [
-  'app/account/account-actions.tsx',
-  'app/account/page.tsx',
+  'app/(product)/account/account-actions.tsx',
+  'app/(product)/account/page.tsx',
 ] as const;
 
 type IconImport = Readonly<{
@@ -440,8 +504,80 @@ describe('Carbon application icon AST contract', () => {
           focusable: 'false',
           size: '{20}',
         },
-        file: 'app/access/page.tsx',
+        file: 'app/(product)/access/page.tsx',
         icon: 'AiGenerate',
+        selfClosing: true,
+      },
+      {
+        attributes: {
+          'aria-hidden': 'true',
+          focusable: 'false',
+          size: '{32}',
+        },
+        file: 'components/shell/header-panels.tsx',
+        icon: 'UserAvatar',
+        selfClosing: true,
+      },
+      {
+        attributes: {
+          'aria-hidden': 'true',
+          focusable: 'false',
+          size: '{16}',
+        },
+        file: 'components/shell/header-panels.tsx',
+        icon: 'Light',
+        selfClosing: true,
+      },
+      {
+        attributes: {
+          'aria-hidden': 'true',
+          focusable: 'false',
+          size: '{16}',
+        },
+        file: 'components/shell/header-panels.tsx',
+        icon: 'Asleep',
+        selfClosing: true,
+      },
+      {
+        attributes: { size: '{20}' },
+        file: 'components/shell/product-shell.tsx',
+        icon: 'Close',
+        selfClosing: true,
+      },
+      {
+        attributes: { size: '{20}' },
+        file: 'components/shell/product-shell.tsx',
+        icon: 'Search',
+        selfClosing: true,
+      },
+      {
+        attributes: { size: '{20}' },
+        file: 'components/shell/product-shell.tsx',
+        icon: 'Notification',
+        selfClosing: true,
+      },
+      {
+        attributes: { size: '{20}' },
+        file: 'components/shell/product-shell.tsx',
+        icon: 'Help',
+        selfClosing: true,
+      },
+      {
+        attributes: { size: '{20}' },
+        file: 'components/shell/product-shell.tsx',
+        icon: 'Settings',
+        selfClosing: true,
+      },
+      {
+        attributes: { size: '{20}' },
+        file: 'components/shell/product-shell.tsx',
+        icon: 'UserAvatar',
+        selfClosing: true,
+      },
+      {
+        attributes: { size: '{20}' },
+        file: 'components/shell/product-shell.tsx',
+        icon: 'Switcher',
         selfClosing: true,
       },
     ]);
@@ -486,7 +622,7 @@ describe('Carbon application icon AST contract', () => {
     const form = parsedSources.find(
       (source) =>
         source.file ===
-        'app/(throwaway)/organizations/new/organization-form.tsx',
+        'app/(product)/(throwaway)/organizations/new/organization-form.tsx',
     );
     expect(form).toBeDefined();
     expect(
@@ -520,7 +656,7 @@ describe('Carbon application icon AST contract', () => {
     }
 
     const page = parsedSources.find(
-      (source) => source.file === 'app/account/page.tsx',
+      (source) => source.file === 'app/(product)/account/page.tsx',
     );
     expect(leadingComments(page!.sourceFile)).toContain(
       '// Temporary account UI: delete when the Carbon account screen lands.',

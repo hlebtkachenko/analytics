@@ -34,7 +34,7 @@ peers so an application provides one compatible React runtime.
 | `@bap/design-system/catalog`           | Server-safe, heavy   | Exhaustive generated API, declarations, token, flag, and Sass metadata |
 | `@bap/design-system/component-catalog` | Server-safe, compact | Renderable exports, status, parents, aliases, and controls             |
 | `@bap/design-system/react`             | Client               | Full official `@carbon/react` public API                               |
-| `@bap/design-system/icons`             | Client               | Exact 18 Carbon icons used by reviewed BAP application actions         |
+| `@bap/design-system/icons`             | Client               | Exact 27 Carbon icons used by reviewed BAP application actions         |
 | `@bap/design-system/pictograms`        | Client               | Complete 1,575-export Carbon React pictogram public API                |
 | `@bap/design-system/charts`            | Client               | Full official `@carbon/charts-react` API plus `ChartFrame`             |
 | `@bap/design-system/theme`             | Client               | `DesignSystemProvider`                                                 |
@@ -70,10 +70,14 @@ opts into workspace transpilation through `transpilePackages`.
 
 ## Themes and colors
 
-The supported Carbon themes are `white`, `g10`, `g90`, and `g100`. The root web
-layout renders `data-carbon-theme="white"` before hydration. The client
+The supported Carbon themes are `white`, `g10`, `g90`, and `g100`. BAP maps
+light mode to the White theme and dark mode to Gray 100. Theme mode defaults to
+system and is persisted in the `bap_theme` cookie, which the root layout reads
+server-side so `data-carbon-theme` is correct on first paint; system mode
+resolves through a `prefers-color-scheme` rule and `matchMedia`. The client
 `DesignSystemProvider` keeps `document.documentElement.dataset.carbonTheme` in
-sync if its `theme` prop changes and also sets Carbon `GlobalTheme` context.
+sync if its `theme` prop changes and also sets Carbon `GlobalTheme` to the
+resolved theme.
 
 Use role-based Carbon color tokens, never palette hex values in BAP source. The
 semantic metadata records Carbon's background, layer, field, border, text, link,
@@ -134,7 +138,7 @@ constant surfaces are separate catalog classifications. A source folder or
 upstream story is not proof that a name is a public root export. See the
 [component guide](knowledge-base/05-components.md) and generated workbench.
 
-The icon facade exports exactly the 18 reviewed application glyphs. Use named
+The icon facade exports exactly the 27 reviewed application glyphs. Use named
 imports and Carbon's approved 16, 20, 24, or 32px artboards. Prefer a Carbon
 component's `renderIcon` or equivalent icon prop so glyphs inherit the
 monochrome text color and remain center-aligned. Keep visible action text where
@@ -146,7 +150,7 @@ site, and never import `@carbon/icons-react` from an application.
 The pictogram facade is separate from icons and exports all 1,575 installed
 Carbon React pictograms. Pictograms communicate broader concepts and are not
 compact control glyphs. The workbench virtualizes the complete 1,575-pictogram
-inventory and the exact 18-icon application set. The generated catalog, rather
+inventory and the exact 27-icon application set. The generated catalog, rather
 than the executable icon facade or explorer, preserves exhaustive metadata for
 the complete installed upstream icon inventory.
 

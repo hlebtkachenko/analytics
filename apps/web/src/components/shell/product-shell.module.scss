@@ -1,0 +1,28 @@
+.content {
+  min-inline-size: 0;
+  margin-block-start: 3rem;
+}
+
+// Carbon's large breakpoint; the rail is only laid out beside content above it.
+@media (min-width: 66rem) {
+  .content {
+    // Leaves room for the collapsed icon rail.
+    margin-inline-start: 3rem;
+  }
+
+  .contentExpanded {
+    // The pinned rail is wider, so the content shifts further.
+    margin-inline-start: 16rem;
+  }
+}
+
+// While searching, the field fills the free space so its right edge butts the
+// close action. Otherwise the global bar also grows and leaves a gap.
+.searching :global(.cds--header__global) {
+  flex: 0 0 auto;
+}
+
+// The active area reads as pure white on the dark header, not the dimmer token.
+:global(.cds--header__menu-item--current) {
+  color: #ffffff;
+}

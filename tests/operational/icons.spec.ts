@@ -397,7 +397,11 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   ]) {
     await page.goto(route);
     await authenticatedExpect(page.locator('main')).toHaveCount(1);
-    const temporaryContent = page.locator('main');
+    // The layout owns the Carbon breadcrumb band; assert only the temporary
+    // page's own content stays free of design-system markup.
+    const temporaryContent = page.locator(
+      'main > :not([data-breadcrumb-band])',
+    );
     await authenticatedExpect(
       temporaryContent.locator('svg.cds--btn__icon'),
     ).toHaveCount(0);
@@ -411,11 +415,11 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   await page.setViewportSize({ height: 640, width: 320 });
   await page.goto('/access');
   await expectNoDocumentOverflow(page);
-  await page.getByRole('button', { name: 'Open primary navigation' }).click();
+  await page.getByRole('button', { name: 'Expand side navigation' }).click();
   const smallScreenAccount = page
     .getByRole('navigation', {
       exact: true,
-      name: 'Primary navigation on small screens',
+      name: 'Side navigation',
     })
     .getByRole('link', { name: 'Account' });
   await focusWithKeyboard(page, smallScreenAccount);

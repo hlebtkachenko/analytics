@@ -24,6 +24,7 @@ import { DatasetChart } from './dataset-chart';
 import { DatasetChat } from './dataset-chat';
 import { DatasetExport } from './dataset-export';
 import { DatasetTable } from './dataset-table';
+import styles from './dataset-view.module.scss';
 
 // One entry per visited page: the server hands back the cursor, the browser never slices rows itself.
 type PageRequest = Readonly<{ after: number | undefined }>;
@@ -104,11 +105,7 @@ export function DatasetView({
   return (
     <Section level={2}>
       <Stack gap={7}>
-        <Stack
-          gap={3}
-          orientation="horizontal"
-          style={{ alignItems: 'center' }}
-        >
+        <Stack className={styles.titleRow!} gap={3} orientation="horizontal">
           <Heading>{dataset.name}</Heading>
           <Button
             kind="tertiary"

@@ -1,0 +1,58 @@
+.field {
+  position: relative;
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+}
+
+.field :global(.cds--search) {
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.field :global(.cds--search-input) {
+  block-size: 3rem;
+}
+
+.results {
+  position: absolute;
+  z-index: 8000;
+  inset-block-start: 100%;
+  inset-inline: 0;
+  max-block-size: 60vh;
+  overflow-y: auto;
+  background-color: var(--cds-layer);
+  border-block-end: 1px solid var(--cds-border-subtle);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.group {
+  padding-block: 0.5rem;
+}
+
+.groupLabel {
+  display: block;
+  padding: 0.5rem 1rem 0.25rem;
+  color: var(--cds-text-secondary);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.result {
+  display: block;
+  padding: 0.5rem 1rem;
+  color: var(--cds-text-primary);
+  text-decoration: none;
+}
+
+.result:hover {
+  background-color: var(--cds-layer-hover);
+}
+
+.empty {
+  padding: 1rem;
+  color: var(--cds-text-secondary);
+}

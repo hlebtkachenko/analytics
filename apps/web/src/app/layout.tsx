@@ -1,16 +1,22 @@
 import '@bap/design-system/styles.scss';
 import '@bap/design-system/fonts.scss';
 import '@bap/design-system/charts.css';
-import { DesignSystemProvider } from '@bap/design-system/theme';
+import {
+  DesignSystemProvider,
+  resolveCarbonTheme,
+} from '@bap/design-system/theme';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 
-import ApplicationShell from '../components/application-shell';
 import { I18nProvider } from '../i18n/client-provider';
+import { readThemeMode } from '../lib/preferences/server';
 
 export const metadata: Metadata = {
-  description: 'Business Analytics Platform',
-  title: 'BAP',
+  description: 'Afframe Analytics, a business analytics platform.',
+  title: {
+    default: 'Afframe Analytics',
+    template: '%s | Afframe Analytics',
+  },
 };
 
 export const dynamic = 'force-dynamic';
@@ -19,14 +25,19 @@ type RootLayoutProperties = Readonly<{
   children: ReactNode;
 }>;
 
-export default function RootLayout({ children }: RootLayoutProperties) {
+export default async function RootLayout({ children }: RootLayoutProperties) {
+  const mode = await readThemeMode();
+
   return (
-    <html data-carbon-theme="white" lang="en-US">
+    <html
+      data-carbon-theme={
+        mode === 'system' ? undefined : resolveCarbonTheme(mode, false)
+      }
+      lang="en-US"
+    >
       <body>
-        <DesignSystemProvider theme="white">
-          <I18nProvider>
-            <ApplicationShell>{children}</ApplicationShell>
-          </I18nProvider>
+        <DesignSystemProvider mode={mode}>
+          <I18nProvider>{children}</I18nProvider>
         </DesignSystemProvider>
       </body>
     </html>
