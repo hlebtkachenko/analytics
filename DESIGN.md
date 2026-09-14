@@ -21,12 +21,12 @@ charts, diagrams, icons, and pictograms. The committed generated catalog and
 closed-world source mappings make the same release discoverable without access
 to Carbon websites.
 
-Application icons come from the exact curated 18-export
+Application icons come from the exact curated 27-export
 `@bap/design-system/icons` entrypoint. Add a named export only with a real use
 on an existing Carbon page. Prefer the Carbon component's icon prop, retain
 visible action text, keep repeated glyphs decorative to assistive technology,
 and use only Carbon's 16, 20, 24, or 32px artboards. The executable workbench
-renders those 18 glyphs and all 1,575 pictograms; the generated catalog alone
+renders those 27 glyphs and all 1,575 pictograms; the generated catalog alone
 retains the exhaustive upstream icon inventory. Product applications must never
 import `@carbon/icons-react` directly.
 

@@ -34,7 +34,7 @@ peers so an application provides one compatible React runtime.
 | `@bap/design-system/catalog`           | Server-safe, heavy   | Exhaustive generated API, declarations, token, flag, and Sass metadata |
 | `@bap/design-system/component-catalog` | Server-safe, compact | Renderable exports, status, parents, aliases, and controls             |
 | `@bap/design-system/react`             | Client               | Full official `@carbon/react` public API                               |
-| `@bap/design-system/icons`             | Client               | Exact 18 Carbon icons used by reviewed BAP application actions         |
+| `@bap/design-system/icons`             | Client               | Exact 27 Carbon icons used by reviewed BAP application actions         |
 | `@bap/design-system/pictograms`        | Client               | Complete 1,575-export Carbon React pictogram public API                |
 | `@bap/design-system/charts`            | Client               | Full official `@carbon/charts-react` API plus `ChartFrame`             |
 | `@bap/design-system/theme`             | Client               | `DesignSystemProvider`                                                 |
@@ -134,7 +134,7 @@ constant surfaces are separate catalog classifications. A source folder or
 upstream story is not proof that a name is a public root export. See the
 [component guide](knowledge-base/05-components.md) and generated workbench.
 
-The icon facade exports exactly the 18 reviewed application glyphs. Use named
+The icon facade exports exactly the 27 reviewed application glyphs. Use named
 imports and Carbon's approved 16, 20, 24, or 32px artboards. Prefer a Carbon
 component's `renderIcon` or equivalent icon prop so glyphs inherit the
 monochrome text color and remain center-aligned. Keep visible action text where
@@ -146,7 +146,7 @@ site, and never import `@carbon/icons-react` from an application.
 The pictogram facade is separate from icons and exports all 1,575 installed
 Carbon React pictograms. Pictograms communicate broader concepts and are not
 compact control glyphs. The workbench virtualizes the complete 1,575-pictogram
-inventory and the exact 18-icon application set. The generated catalog, rather
+inventory and the exact 27-icon application set. The generated catalog, rather
 than the executable icon facade or explorer, preserves exhaustive metadata for
 the complete installed upstream icon inventory.
 

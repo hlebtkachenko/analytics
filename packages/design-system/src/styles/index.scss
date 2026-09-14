@@ -21,3 +21,18 @@
 :root[data-carbon-theme='g100'] {
   @include theme.theme(themes.$g100);
 }
+
+// System theme first paint: with no explicit attribute, follow the OS preference
+// before hydration so the client mode resolver never causes a flash.
+@media (prefers-color-scheme: dark) {
+  :root:not([data-carbon-theme]) {
+    @include theme.theme(themes.$g100);
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-carbon-theme='g90'],
+:root[data-carbon-theme='g100'] {
+  color-scheme: dark;
+}
