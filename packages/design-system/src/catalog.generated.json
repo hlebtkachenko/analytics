@@ -3,7 +3,7 @@
   "provenance": {
     "generator": "packages/design-system/scripts/generate-carbon-catalog.mjs",
     "typescript": "6.0.3",
-    "sass": "dart-sass\t1.103.1\t(Sass Compiler)\t[Dart]\ndart2js\t3.13.1\t(Dart Compiler)\t[Dart]",
+    "sass": "dart-sass\t1.104.0\t(Sass Compiler)\t[Dart]\ndart2js\t3.13.3\t(Dart Compiler)\t[Dart]",
     "packages": [
       {
         "name": "@carbon/react",

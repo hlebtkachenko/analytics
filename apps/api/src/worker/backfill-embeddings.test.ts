@@ -109,7 +109,7 @@ function mockRegistry(
         return Promise.reject(new Error('provider refused'));
       }
 
-      // A short answer is a bad answer the SDK accepts, so the job's own guard has to catch it.
+      // A short answer is a bad answer the SDK itself rejects before the job's own guard runs.
       const answered = behaviour === 'short' ? values.slice(1) : values;
 
       return Promise.resolve({
@@ -322,7 +322,7 @@ describe('backfillDatasetEmbeddings', () => {
         registry: () =>
           Promise.resolve(mockRegistry(fake.trace, fake.openDepth, 'short')),
       }),
-    ).rejects.toThrow('fewer vectors than sent');
+    ).rejects.toThrow('Expected 2 embeddings, but received 1.');
 
     const output = await metrics.render();
 
