@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Close,
   DataSet,
   Enterprise,
   Help,
@@ -97,6 +98,7 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
   }
 
   const expanded = (pinned && isLarge) || mobileOpen;
+  const searchOpen = openPanel === 'search';
 
   // Escape dismisses any open panel or the mobile navigation.
   useEffect(() => {
@@ -139,35 +141,41 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
             isCollapsible
             onClick={toggleNavigation}
           />
-          <HeaderName href="/access" prefix="Afframe">
-            Analytics
-          </HeaderName>
-          <HeaderNavigation aria-label="Areas">
-            <HeaderMenuItem href="/access" isActive>
-              Analytics
-            </HeaderMenuItem>
-            <HeaderMenuItem
-              href="#"
-              onClick={(event) => {
-                event.preventDefault();
-                notify({
-                  subtitle: 'The AI Assistant is coming soon.',
-                  title: ASSISTANT_AREA_LABEL,
-                });
-              }}
-            >
-              {ASSISTANT_AREA_LABEL}
-            </HeaderMenuItem>
-          </HeaderNavigation>
-          <GlobalSearch expanded={openPanel === 'search'} />
+          {searchOpen ? (
+            <GlobalSearch onClose={() => setOpenPanel(null)} />
+          ) : (
+            <>
+              <span aria-hidden="true" className={styles.logo!} />
+              <HeaderName href="/access" prefix="Afframe">
+                Analytics
+              </HeaderName>
+              <HeaderNavigation aria-label="Areas">
+                <HeaderMenuItem href="/access" isActive>
+                  Analytics
+                </HeaderMenuItem>
+                <HeaderMenuItem
+                  href="#"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    notify({
+                      subtitle: 'The AI Assistant is coming soon.',
+                      title: ASSISTANT_AREA_LABEL,
+                    });
+                  }}
+                >
+                  {ASSISTANT_AREA_LABEL}
+                </HeaderMenuItem>
+              </HeaderNavigation>
+            </>
+          )}
           <HeaderGlobalBar>
             <HeaderGlobalAction
-              aria-label="Search"
-              isActive={openPanel === 'search'}
+              aria-label={searchOpen ? 'Close search' : 'Search'}
+              isActive={searchOpen}
               onClick={() => togglePanel('search')}
               tooltipAlignment="end"
             >
-              <Search size={20} />
+              {searchOpen ? <Close size={20} /> : <Search size={20} />}
             </HeaderGlobalAction>
             <HeaderGlobalAction
               aria-label="Notifications"
@@ -194,14 +202,6 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
               <Settings size={20} />
             </HeaderGlobalAction>
             <HeaderGlobalAction
-              aria-label="Workspaces"
-              isActive={openPanel === 'switcher'}
-              onClick={() => togglePanel('switcher')}
-              tooltipAlignment="end"
-            >
-              <Switcher size={20} />
-            </HeaderGlobalAction>
-            <HeaderGlobalAction
               aria-label="Account"
               isActive={openPanel === 'account'}
               onClick={() => togglePanel('account')}
@@ -209,15 +209,23 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
             >
               <UserAvatar size={20} />
             </HeaderGlobalAction>
+            <HeaderGlobalAction
+              aria-label="Workspaces"
+              isActive={openPanel === 'switcher'}
+              onClick={() => togglePanel('switcher')}
+              tooltipAlignment="end"
+            >
+              <Switcher size={20} />
+            </HeaderGlobalAction>
           </HeaderGlobalBar>
           <NotificationsPanel expanded={openPanel === 'notifications'} />
           <HelpPanel expanded={openPanel === 'help'} />
           <SettingsPanel expanded={openPanel === 'settings'} />
+          <AccountPanel expanded={openPanel === 'account'} />
           <SwitcherPanel
-            activeSlug={organization?.slug}
+            activeOrganization={organization}
             expanded={openPanel === 'switcher'}
           />
-          <AccountPanel expanded={openPanel === 'account'} />
           <SideNav
             aria-label="Side navigation"
             expanded={expanded}

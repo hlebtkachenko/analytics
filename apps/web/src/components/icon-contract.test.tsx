@@ -29,8 +29,14 @@ const reviewedImports = {
   'components/datasets/dataset-export.tsx': ['Download'],
   'components/datasets/dataset-view.tsx': ['ArrowLeft', 'ArrowRight', 'Close'],
   'components/design-system-reference.tsx': ['Launch'],
-  'components/shell/header-panels.tsx': ['Asleep', 'Light', 'Logout'],
+  'components/shell/header-panels.tsx': [
+    'Asleep',
+    'Light',
+    'Logout',
+    'UserAvatar',
+  ],
   'components/shell/product-shell.tsx': [
+    'Close',
     'DataSet',
     'Enterprise',
     'Help',
@@ -506,6 +512,16 @@ describe('Carbon application icon AST contract', () => {
         attributes: {
           'aria-hidden': 'true',
           focusable: 'false',
+          size: '{32}',
+        },
+        file: 'components/shell/header-panels.tsx',
+        icon: 'UserAvatar',
+        selfClosing: true,
+      },
+      {
+        attributes: {
+          'aria-hidden': 'true',
+          focusable: 'false',
           size: '{16}',
         },
         file: 'components/shell/header-panels.tsx',
@@ -520,6 +536,12 @@ describe('Carbon application icon AST contract', () => {
         },
         file: 'components/shell/header-panels.tsx',
         icon: 'Asleep',
+        selfClosing: true,
+      },
+      {
+        attributes: { size: '{20}' },
+        file: 'components/shell/product-shell.tsx',
+        icon: 'Close',
         selfClosing: true,
       },
       {
@@ -549,13 +571,13 @@ describe('Carbon application icon AST contract', () => {
       {
         attributes: { size: '{20}' },
         file: 'components/shell/product-shell.tsx',
-        icon: 'Switcher',
+        icon: 'UserAvatar',
         selfClosing: true,
       },
       {
         attributes: { size: '{20}' },
         file: 'components/shell/product-shell.tsx',
-        icon: 'UserAvatar',
+        icon: 'Switcher',
         selfClosing: true,
       },
     ]);

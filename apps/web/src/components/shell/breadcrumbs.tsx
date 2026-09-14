@@ -3,6 +3,8 @@
 import {
   Breadcrumb,
   BreadcrumbItem,
+  Column,
+  Grid,
   OverflowMenu,
   OverflowMenuItem,
 } from '@bap/design-system/react';
@@ -12,6 +14,7 @@ import { useSelectedLayoutSegments } from 'next/navigation';
 import { useActiveOrganization } from './active-organization';
 import { buildTrail, collapseTrail } from './breadcrumb-trail';
 import type { Crumb } from './breadcrumb-trail';
+import styles from './breadcrumbs.module.scss';
 
 function renderCrumb(crumb: Crumb) {
   if (crumb.current) {
@@ -44,22 +47,26 @@ export default function Breadcrumbs() {
   const { head, hidden, tail } = collapseTrail(crumbs);
 
   return (
-    <Breadcrumb noTrailingSlash size="sm">
-      {head.map(renderCrumb)}
-      {hidden.length > 0 ? (
-        <BreadcrumbItem data-floating-menu-container>
-          <OverflowMenu aria-label="Show hidden breadcrumbs" size="sm">
-            {hidden.map((crumb) => (
-              <OverflowMenuItem
-                href={crumb.href}
-                itemText={crumb.label}
-                key={crumb.href}
-              />
-            ))}
-          </OverflowMenu>
-        </BreadcrumbItem>
-      ) : null}
-      {tail.map(renderCrumb)}
-    </Breadcrumb>
+    <Grid className={styles.grid!}>
+      <Column lg={16} md={8} sm={4}>
+        <Breadcrumb noTrailingSlash size="sm">
+          {head.map(renderCrumb)}
+          {hidden.length > 0 ? (
+            <BreadcrumbItem data-floating-menu-container>
+              <OverflowMenu aria-label="Show hidden breadcrumbs" size="sm">
+                {hidden.map((crumb) => (
+                  <OverflowMenuItem
+                    href={crumb.href}
+                    itemText={crumb.label}
+                    key={crumb.href}
+                  />
+                ))}
+              </OverflowMenu>
+            </BreadcrumbItem>
+          ) : null}
+          {tail.map(renderCrumb)}
+        </Breadcrumb>
+      </Column>
+    </Grid>
   );
 }

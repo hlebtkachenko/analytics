@@ -1,6 +1,6 @@
 'use client';
 
-import { HeaderPanel, Search } from '@bap/design-system/react';
+import { Search, Theme } from '@bap/design-system/react';
 import Link from 'next/link';
 import { useState } from 'react';
 
@@ -15,9 +15,9 @@ const stubResults = [
   { href: '/account', module: 'Account', title: 'Account settings' },
 ] as const;
 
-type GlobalSearchProperties = Readonly<{ expanded: boolean }>;
+type GlobalSearchProperties = Readonly<{ onClose: () => void }>;
 
-export default function GlobalSearch({ expanded }: GlobalSearchProperties) {
+export default function GlobalSearch({ onClose }: GlobalSearchProperties) {
   const [query, setQuery] = useState('');
   const normalized = query.trim().toLowerCase();
   const matches = stubResults.filter(
@@ -29,43 +29,47 @@ export default function GlobalSearch({ expanded }: GlobalSearchProperties) {
   const modules = [...new Set(matches.map((match) => match.module))];
 
   return (
-    <>
-      {expanded ? (
-        <div className={styles.field!}>
-          <Search
-            closeButtonLabelText="Clear search"
-            labelText="Search"
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search Afframe Analytics"
-            size="lg"
-            value={query}
-          />
-        </div>
-      ) : null}
-      <HeaderPanel aria-label="Search results" expanded={expanded}>
-        {expanded ? (
-          <div className={styles.results!}>
-            {modules.length === 0 ? (
-              <p className={styles.empty!}>No results yet.</p>
-            ) : (
-              modules.map((module) => (
-                <section key={module}>
-                  <h2 className={styles.group!}>{module}</h2>
-                  <ul className={styles.list!}>
-                    {matches
-                      .filter((match) => match.module === module)
-                      .map((match) => (
-                        <li key={`${module}-${match.title}`}>
-                          <Link href={match.href}>{match.title}</Link>
-                        </li>
-                      ))}
-                  </ul>
-                </section>
-              ))
-            )}
-          </div>
-        ) : null}
-      </HeaderPanel>
-    </>
+    <Theme className={styles.field!} theme="white">
+      <Search
+        autoFocus
+        closeButtonLabelText="Clear search"
+        labelText="Search"
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            onClose();
+          }
+        }}
+        placeholder="Search Afframe Analytics"
+        size="lg"
+        value={query}
+      />
+      <div
+        aria-label="Search results"
+        className={styles.results!}
+        role="listbox"
+      >
+        {modules.length === 0 ? (
+          <p className={styles.empty!}>No results.</p>
+        ) : (
+          modules.map((module) => (
+            <div className={styles.group!} key={module}>
+              <span className={styles.groupLabel!}>{module}</span>
+              {matches
+                .filter((match) => match.module === module)
+                .map((match) => (
+                  <Link
+                    className={styles.result!}
+                    href={{ pathname: match.href }}
+                    key={`${module}-${match.title}`}
+                  >
+                    {match.title}
+                  </Link>
+                ))}
+            </div>
+          ))
+        )}
+      </div>
+    </Theme>
   );
 }

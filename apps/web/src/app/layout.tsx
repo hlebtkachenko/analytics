@@ -12,8 +12,11 @@ import { I18nProvider } from '../i18n/client-provider';
 import { readThemeMode } from '../lib/preferences/server';
 
 export const metadata: Metadata = {
-  description: 'Business Analytics Platform',
-  title: 'BAP',
+  description: 'Afframe Analytics, a business analytics platform.',
+  title: {
+    default: 'Afframe Analytics',
+    template: '%s | Afframe Analytics',
+  },
 };
 
 export const dynamic = 'force-dynamic';

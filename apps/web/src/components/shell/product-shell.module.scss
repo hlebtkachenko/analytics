@@ -15,3 +15,17 @@
     margin-inline-start: 16rem;
   }
 }
+
+.logo {
+  display: block;
+  align-self: center;
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  margin-inline: 1rem 0.5rem;
+  background: url('/logomark.svg') center / contain no-repeat;
+}
+
+// The active area reads as pure white on the dark header, not the dimmer token.
+:global(.cds--header__menu-item--current) {
+  color: #ffffff;
+}
