@@ -5,6 +5,8 @@ set -euo pipefail
 repository_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repository_root"
 
+# The proof runs three accounts back to back, which needs more than the production rate budget.
+export BAP_API_RATE_LIMIT=${BAP_API_RATE_LIMIT:-240}
 export BAP_OPERATIONAL_ADMIN_EMAIL=${BAP_OPERATIONAL_ADMIN_EMAIL:-admin@bap.invalid}
 export BAP_OPERATIONAL_BASE_URL=${BAP_OPERATIONAL_BASE_URL:-http://localhost:39100}
 export BAP_OPERATIONAL_EMAIL=${BAP_OPERATIONAL_EMAIL:-owner@bap.invalid}

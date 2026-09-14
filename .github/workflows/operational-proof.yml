@@ -59,6 +59,7 @@ jobs:
       POSTGRES_PORT: '39432'
       MAILPIT_HTTP_PORT: '39825'
       WEB_PORT: '39100'
+      BAP_API_RATE_LIMIT: '240'
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
