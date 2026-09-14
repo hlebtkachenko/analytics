@@ -41,7 +41,7 @@ export default function Breadcrumbs() {
   const { head, hidden, tail } = collapseTrail(ancestors);
 
   return (
-    <div className={styles.band!}>
+    <div className={styles.band!} data-breadcrumb-band>
       <Grid className={styles.grid!}>
         <Column lg={16} md={8} sm={4}>
           <Breadcrumb size="sm">
