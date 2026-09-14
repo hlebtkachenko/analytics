@@ -36,6 +36,10 @@ financial, operational, or development data.
 - Add a shared package only when at least 2 real consumers justify it.
 - Keep product logic out of operational health routes and infrastructure code.
 - Keep visual implementation aligned with `DESIGN.md`.
+- Every page under `apps/web/src/app/(product)/` renders inside the shared
+  product shell owned by that group's `layout.tsx`; write page content only,
+  render it inside `PageContainer`, and never recreate the header, rail, `main`,
+  or breadcrumb. See [Building a product page](docs/development.md).
 - Adding a top-level application route must add its segment to the reserved
   organization slug contract in the same pull request.
 

@@ -169,6 +169,7 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
           ) : null}
           <HeaderGlobalBar>
             <HeaderGlobalAction
+              aria-expanded={searchOpen}
               aria-label={searchOpen ? 'Close search' : 'Search'}
               isActive={searchOpen}
               onClick={() => togglePanel('search')}
@@ -177,6 +178,7 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
               {searchOpen ? <Close size={20} /> : <Search size={20} />}
             </HeaderGlobalAction>
             <HeaderGlobalAction
+              aria-expanded={openPanel === 'notifications'}
               aria-label="Notifications"
               isActive={openPanel === 'notifications'}
               onClick={() => togglePanel('notifications')}
@@ -185,6 +187,7 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
               <Notification size={20} />
             </HeaderGlobalAction>
             <HeaderGlobalAction
+              aria-expanded={openPanel === 'help'}
               aria-label="Help"
               isActive={openPanel === 'help'}
               onClick={() => togglePanel('help')}
@@ -193,6 +196,7 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
               <Help size={20} />
             </HeaderGlobalAction>
             <HeaderGlobalAction
+              aria-expanded={openPanel === 'settings'}
               aria-label="Settings"
               isActive={openPanel === 'settings'}
               onClick={() => togglePanel('settings')}
@@ -201,6 +205,7 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
               <Settings size={20} />
             </HeaderGlobalAction>
             <HeaderGlobalAction
+              aria-expanded={openPanel === 'account'}
               aria-label="Account"
               isActive={openPanel === 'account'}
               onClick={() => togglePanel('account')}
@@ -209,6 +214,7 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
               <UserAvatar size={20} />
             </HeaderGlobalAction>
             <HeaderGlobalAction
+              aria-expanded={openPanel === 'switcher'}
               aria-label="Workspaces"
               isActive={openPanel === 'switcher'}
               onClick={() => togglePanel('switcher')}

@@ -151,3 +151,39 @@ not public browser configuration.
 Do not add fake domain models or sample business records to demonstrate a
 framework. Tests must use minimal synthetic values tied to the behavior under
 test.
+
+## Building a product page
+
+Every route under `apps/web/src/app/(product)/` renders inside the shared
+product shell automatically. The group's `layout.tsx` mounts `ProductShell`,
+which owns the Carbon UI Shell header, the left icon rail, the single
+`main-content` landmark, the breadcrumbs, the toast host, and the theme mode. A
+new page never recreates any of that, and must not add its own header,
+navigation, `<main>`, or breadcrumb.
+
+To add a product page:
+
+- Create `apps/web/src/app/(product)/<segment>/page.tsx`. It inherits the shell
+  with no extra wiring; write page content only.
+- Render the body inside `PageContainer` from
+  `apps/web/src/components/page-container.tsx`. The `bap/product-page-container`
+  ESLint rule fails the build for a product `page.tsx` or `not-found.tsx` that
+  does not. `PageContainer` is the only sanctioned content scaffold: a Carbon
+  `Grid`, `Column`, and `Stack`.
+- Consume Carbon through `@bap/design-system` and icons through the curated
+  `@bap/design-system/icons` facade. Inline `style=` attributes are banned in
+  product UI by ESLint; use CSS modules and semantic Carbon tokens.
+- Breadcrumbs are derived from the route segments by the layout. Give a new
+  segment a human label in `moduleLabels` in
+  `apps/web/src/components/shell/breadcrumb-trail.ts`.
+- Adding a new top-level segment (a direct child of `(product)`, for example
+  `/reports`) also requires adding that segment to `reservedOrganizationSlugs`
+  in `apps/web/src/lib/organizations/slug.ts`, a rail link in
+  `apps/web/src/components/shell/product-shell.tsx`, and a row in
+  [the route table](application-routes.md), all in the same change, so the
+  segment can never collide with an organization slug and stays discoverable.
+
+The `(product)/(throwaway)` organization pages, `(product)/account`, and the
+`[orgSlug]` workspace routes are a deliberate legacy exception: they use plain
+semantic HTML and are exempt from the `PageContainer` rule. New pages follow the
+rule above, not that exception.

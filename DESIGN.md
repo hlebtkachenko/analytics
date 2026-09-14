@@ -47,3 +47,8 @@ deliberate source-level exception: their page modules keep the exact throwaway
 markers, plain semantic HTML, and zero CSS, design-system, or icon imports, and
 no longer render their own `<main>` or native breadcrumbs now that the layout
 owns both. Converting their page content to Carbon is future work.
+
+Every other product page renders its content inside the shared `PageContainer`
+scaffold; the `bap/product-page-container` ESLint rule enforces it and bans
+inline layout styles, so pages compose inside the shell and never hand-roll
+layout. See [Building a product page](docs/development.md).
