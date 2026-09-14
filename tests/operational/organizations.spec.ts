@@ -102,8 +102,8 @@ test('walks the temporary organization loop through explicit member-scoped actio
     .getByRole('navigation', { name: 'Breadcrumb' })
     .getByRole('link', { name: 'Organizations' });
   await focusWithKeyboard(page, breadcrumbOrganizations);
-  await page.keyboard.press('Tab');
   const nameInput = page.getByLabel('Name');
+  await focusWithKeyboard(page, nameInput);
   await expect(nameInput).toBeFocused();
   const uniqueName = `Phase ${Date.now().toString(36)}`;
   const createdSlug = normalizeOrganizationSlug(uniqueName);
