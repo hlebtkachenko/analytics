@@ -84,6 +84,7 @@ type Flags = {
   batch: boolean;
   toolbarAction: boolean;
   rowActions: boolean;
+  rowDetail: boolean;
   persist: boolean;
 };
 
@@ -113,6 +114,7 @@ const TOGGLES: readonly { key: keyof Flags; label: string }[] = [
   { key: 'batch', label: 'Bulk actions' },
   { key: 'toolbarAction', label: 'Toolbar action' },
   { key: 'rowActions', label: 'Row actions' },
+  { key: 'rowDetail', label: 'Detail rows' },
   { key: 'persist', label: 'Persist layout' },
 ];
 
@@ -155,6 +157,7 @@ const DEFAULT_FLAGS: Flags = {
   batch: false,
   toolbarAction: false,
   rowActions: false,
+  rowDetail: false,
   persist: false,
 };
 
@@ -285,6 +288,16 @@ export function TablesShowcase() {
     ],
     [],
   );
+  const renderRowDetail = useCallback(
+    (row: GridRow): ReactNode => (
+      <Stack gap={5} orientation="horizontal">
+        <Detail label="Region" value={String(row.region)} />
+        <Detail label="Format" value={String(row.format)} />
+        <Detail label="Last updated" value={String(row.updated)} />
+      </Stack>
+    ),
+    [],
+  );
 
   // Assemble grid props, spreading optional entries so none is ever undefined.
   const gridProps: DataGridProps = {
@@ -319,6 +332,7 @@ export function TablesShowcase() {
     ...(flags.batch ? { batchActions } : {}),
     ...(flags.toolbarAction ? { toolbarActions } : {}),
     ...(flags.rowActions ? { rowActions } : {}),
+    ...(flags.rowDetail ? { renderRowDetail } : {}),
     ...(flags.scroll || flags.virtualized ? { maxHeight } : {}),
     ...(flags.infinite ? { infiniteScroll: true, hasMore, onLoadMore } : {}),
     ...(flags.reorderableRows ? { reorderableRows: true } : {}),
