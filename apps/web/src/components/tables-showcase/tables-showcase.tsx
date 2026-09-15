@@ -459,8 +459,11 @@ export function TablesShowcase() {
                       title="Dataset size pivot"
                     />
                     <p className={styles.note}>
-                      Pivot is a showcase capability only. Product analytics
-                      surfaces stay deferred per DESIGN.md.
+                      This is a live client-side crosstab: steward (rows) by
+                      status (columns), summing dataset size, with row, column,
+                      and grand totals. It is a working component; only wiring
+                      it into a product analytics surface stays deferred per
+                      DESIGN.md.
                     </p>
                   </Stack>
                 </Column>
