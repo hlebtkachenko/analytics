@@ -18,6 +18,52 @@
   z-index: 2;
 }
 
+// Fixed layout makes the specified column widths authoritative so pinned
+// sticky-left offsets line up exactly; the table shrink-wraps to its content
+// and still fills the viewport, giving horizontal scroll for pins to matter.
+.fixedLayout {
+  table-layout: fixed;
+  inline-size: max-content;
+  min-inline-size: 100%;
+}
+
+// Pinned body cells stay opaque with the row background so scrolling content
+// never shows through; the header sits above both axes.
+td.pinned {
+  position: sticky;
+  z-index: 1;
+  background-color: var(--cds-layer);
+}
+
+th.pinned {
+  position: sticky;
+  z-index: 3;
+  background-color: var(--cds-layer-accent);
+}
+
+// Pinned cells track the row state so the frozen columns read as one row.
+:global(.cds--data-table--zebra) tbody tr:nth-child(even) td.pinned {
+  background-color: var(--cds-layer-accent);
+}
+
+tbody tr:hover td.pinned {
+  background-color: var(--cds-layer-hover);
+}
+
+tbody tr:global(.cds--data-table--selected) td.pinned {
+  background-color: var(--cds-layer-selected);
+}
+
+// Divider on the last frozen column marks the seam with the scrolling area.
+.pinnedEdge {
+  box-shadow: inset -1px 0 0 0 var(--cds-border-strong);
+}
+
+// Leading sticky column (selection) anchors at the very left edge.
+.pinnedLead {
+  left: 0;
+}
+
 // Header cell anchors the resize handle and drag affordance.
 .headerCell {
   position: relative;
