@@ -5,6 +5,7 @@ import {
   PivotGrid,
   TreeDataGrid,
   type BatchAction,
+  type CellValue,
   type DataGridProps,
   type DensitySize,
   type GridColumn,
@@ -23,6 +24,7 @@ import {
   treeColumns,
 } from '@bap/design-system/blocks/fixtures';
 import {
+  Button,
   Column,
   Dropdown,
   Grid,
@@ -85,8 +87,18 @@ type Flags = {
   toolbarAction: boolean;
   rowActions: boolean;
   rowDetail: boolean;
+  inlineEdit: boolean;
+  actionColumn: boolean;
   persist: boolean;
 };
+
+// Inline-edit options for the steward select editor.
+const STEWARD_OPTIONS = [
+  'Platform',
+  'Ingestion',
+  'Reporting',
+  'Governance',
+] as const;
 
 const TOGGLES: readonly { key: keyof Flags; label: string }[] = [
   { key: 'sortable', label: 'Sortable' },
@@ -115,6 +127,8 @@ const TOGGLES: readonly { key: keyof Flags; label: string }[] = [
   { key: 'toolbarAction', label: 'Toolbar action' },
   { key: 'rowActions', label: 'Row actions' },
   { key: 'rowDetail', label: 'Detail rows' },
+  { key: 'inlineEdit', label: 'Inline edit' },
+  { key: 'actionColumn', label: 'Action column' },
   { key: 'persist', label: 'Persist layout' },
 ];
 
@@ -158,6 +172,8 @@ const DEFAULT_FLAGS: Flags = {
   toolbarAction: false,
   rowActions: false,
   rowDetail: false,
+  inlineEdit: false,
+  actionColumn: false,
   persist: false,
 };
 
@@ -183,7 +199,17 @@ export function TablesShowcase() {
   const [treeSelectedCount, setTreeSelectedCount] = useState(0);
 
   const allRows = useMemo(() => makeDatasetRows(TOTAL_ROWS), []);
-  const gridRows = flags.infinite ? allRows.slice(0, loaded) : allRows;
+  // Inline edits overlay the source rows so committed values persist on screen.
+  const [rowEdits, setRowEdits] = useState<
+    Record<string, Record<string, CellValue>>
+  >({});
+  const gridRows = useMemo(() => {
+    const base = flags.infinite ? allRows.slice(0, loaded) : allRows;
+    return base.map((row) => {
+      const edits = rowEdits[row.id];
+      return edits ? { ...row, ...edits } : row;
+    });
+  }, [allRows, flags.infinite, loaded, rowEdits]);
   const hasMore = flags.infinite && loaded < allRows.length;
 
   const setFlag = (key: keyof Flags) => (checked: boolean) =>
@@ -192,26 +218,59 @@ export function TablesShowcase() {
     setTreeFlags((current) => ({ ...current, [key]: checked }));
 
   // Attach per-column visuals and colors when their toggles are on.
-  const columns = useMemo<readonly GridColumn[]>(
-    () =>
-      datasetColumns.map((column) => {
-        if (column.key === 'status' && flags.perRowVisuals) {
-          return {
-            ...column,
-            renderCell: (row: GridRow) => (
-              <Tag size="sm" type={statusTagType[String(row.status)] ?? 'gray'}>
-                {String(row.status)}
-              </Tag>
-            ),
-          };
-        }
-        if (column.key === 'sizeMb' && flags.columnColors) {
-          return { ...column, colorToken: '--cds-text-secondary' };
-        }
-        return column;
-      }),
-    [flags.perRowVisuals, flags.columnColors],
-  );
+  const columns = useMemo<readonly GridColumn[]>(() => {
+    const mapped = datasetColumns.map((column) => {
+      if (column.key === 'name' && flags.inlineEdit) {
+        return { ...column, editor: { type: 'text' } as const };
+      }
+      if (column.key === 'steward' && flags.inlineEdit) {
+        return {
+          ...column,
+          editor: { type: 'select', options: STEWARD_OPTIONS } as const,
+        };
+      }
+      if (column.key === 'status' && flags.perRowVisuals) {
+        return {
+          ...column,
+          renderCell: (row: GridRow) => (
+            <Tag size="sm" type={statusTagType[String(row.status)] ?? 'gray'}>
+              {String(row.status)}
+            </Tag>
+          ),
+        };
+      }
+      if (column.key === 'sizeMb' && flags.columnColors) {
+        return { ...column, colorToken: '--cds-text-secondary' };
+      }
+      return column;
+    });
+    if (!flags.actionColumn) return mapped;
+    // No dedicated API: an action column is just a renderCell button.
+    return [
+      ...mapped,
+      {
+        key: '__open',
+        header: 'Action',
+        renderCell: (row: GridRow) => (
+          <Button
+            kind="ghost"
+            onClick={(event) => {
+              event.stopPropagation();
+              setLastAction(`Open ${String(row.name)}`);
+            }}
+            size="sm"
+          >
+            Open
+          </Button>
+        ),
+      },
+    ];
+  }, [
+    flags.perRowVisuals,
+    flags.columnColors,
+    flags.inlineEdit,
+    flags.actionColumn,
+  ]);
 
   const totalsRow = useMemo(
     () => ({
@@ -298,6 +357,16 @@ export function TablesShowcase() {
     ),
     [],
   );
+  const onCellEdit = useCallback(
+    (rowId: string, key: string, value: CellValue) => {
+      setRowEdits((current) => ({
+        ...current,
+        [rowId]: { ...current[rowId], [key]: value },
+      }));
+      setLastAction(`Edit ${rowId}.${key}`);
+    },
+    [],
+  );
 
   // Assemble grid props, spreading optional entries so none is ever undefined.
   const gridProps: DataGridProps = {
@@ -333,6 +402,7 @@ export function TablesShowcase() {
     ...(flags.toolbarAction ? { toolbarActions } : {}),
     ...(flags.rowActions ? { rowActions } : {}),
     ...(flags.rowDetail ? { renderRowDetail } : {}),
+    ...(flags.inlineEdit ? { onCellEdit } : {}),
     ...(flags.scroll || flags.virtualized ? { maxHeight } : {}),
     ...(flags.infinite ? { infiniteScroll: true, hasMore, onLoadMore } : {}),
     ...(flags.reorderableRows ? { reorderableRows: true } : {}),

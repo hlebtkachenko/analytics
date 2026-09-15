@@ -20,6 +20,12 @@ export type SortSpec = Readonly<{
   direction: Exclude<SortDirection, 'NONE'>;
 }>;
 
+// Opt-in inline editor for a column; needs DataGridProps.onCellEdit to commit.
+export type ColumnEditor =
+  | Readonly<{ type: 'text' }>
+  | Readonly<{ type: 'checkbox' }>
+  | Readonly<{ type: 'select'; options: readonly string[] }>;
+
 // A column definition shared by the core grid and its variants.
 export type GridColumn = Readonly<{
   key: string;
@@ -38,6 +44,8 @@ export type GridColumn = Readonly<{
   colorToken?: string;
   // Custom cell content for tags, status, and other per-row visuals.
   renderCell?: (row: GridRow) => ReactNode;
+  // Inline editor for this column; commits through DataGridProps.onCellEdit.
+  editor?: ColumnEditor;
 }>;
 
 // A text-only toolbar batch action shown while rows are selected.
@@ -144,6 +152,9 @@ export type DataGridProps = Readonly<{
 
   // Spreadsheet-style cell range selection.
   cellSelection?: boolean;
+
+  // Inline editing; columns opt in with `editor` and commits arrive here.
+  onCellEdit?: (rowId: string, key: string, value: CellValue) => void;
 
   // Totals and footer.
   totalsRow?: Readonly<Record<string, ReactNode>>;

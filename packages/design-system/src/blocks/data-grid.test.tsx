@@ -142,6 +142,47 @@ describe('DataGrid', () => {
     expect(screen.getByText('Detail for beta')).toBeInTheDocument();
   });
 
+  it('commits an inline text edit on Enter', () => {
+    const onCellEdit = vi.fn();
+    const editableColumns: readonly GridColumn[] = [
+      { key: 'name', header: 'Name', editor: { type: 'text' } },
+      { key: 'score', header: 'Score', align: 'end' },
+    ];
+    render(
+      <DataGrid
+        columns={editableColumns}
+        onCellEdit={onCellEdit}
+        rows={rows}
+      />,
+    );
+    const firstBodyRow = screen.getAllByRole('row')[1] as HTMLElement;
+    fireEvent.click(within(firstBodyRow).getByText('beta'));
+    const input = within(firstBodyRow).getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'beta-2' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onCellEdit).toHaveBeenCalledWith('1', 'name', 'beta-2');
+  });
+
+  it('commits an inline checkbox edit immediately', () => {
+    const onCellEdit = vi.fn();
+    const editableColumns: readonly GridColumn[] = [
+      { key: 'name', header: 'Name' },
+      { key: 'active', header: 'Active', editor: { type: 'checkbox' } },
+    ];
+    const boolRows: readonly GridRow[] = [
+      { id: '1', name: 'beta', active: false },
+    ];
+    render(
+      <DataGrid
+        columns={editableColumns}
+        onCellEdit={onCellEdit}
+        rows={boolRows}
+      />,
+    );
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(onCellEdit).toHaveBeenCalledWith('1', 'active', true);
+  });
+
   it('shows the empty state when there are no rows', () => {
     render(<DataGrid columns={columns} emptyLabel="Nothing here" rows={[]} />);
     expect(screen.getByText('Nothing here')).toBeInTheDocument();

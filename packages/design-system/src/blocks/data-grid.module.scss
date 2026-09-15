@@ -107,6 +107,18 @@ tbody tr:global(.cds--data-table--selected) td.pinned {
   inline-size: 3rem;
 }
 
+// Inline-edit trigger fills the cell and shows the value until clicked.
+.editTrigger {
+  inline-size: 100%;
+  text-align: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: text;
+}
+
 // Veil the body and center a spinner while stale rows load in overlay mode.
 // The accent surface is a visible tonal step from the table layer in every theme.
 .overlay {
