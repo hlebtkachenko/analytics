@@ -690,7 +690,11 @@ export function DataGrid(props: DataGridProps) {
                   );
                 })}
                 {hasRowActions && (
-                  <TableHeader aria-label="Row actions" scope="col" />
+                  <TableHeader scope="col">
+                    <span className={cx(styles.visuallyHidden)}>
+                      Row actions
+                    </span>
+                  </TableHeader>
                 )}
               </TableRow>
             </TableHead>
