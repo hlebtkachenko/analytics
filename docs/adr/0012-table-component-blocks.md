@@ -30,8 +30,12 @@ are BAP extensions built on Carbon primitives, not native Carbon:
   clickable rows, sticky header, scroll region, virtualization, infinite scroll,
   column menu, column reorder, column resize, pinned columns, persisted layout,
   totals row, footer, per-row visuals, column colors, and loading, empty, and
-  error states are all props. Stateful concerns are split into focused hooks
-  (sort, column layout, virtual window, cell selection).
+  error states are all props. It also carries the richer Carbon data-table
+  affordances: persistent toolbar actions, a per-row overflow menu, expandable
+  detail rows, opt-in inline cell editing (text, checkbox, select), and the
+  action-column and drill-in pattern (`renderCell` plus `onRowClick`, no new
+  API). Stateful concerns are split into focused hooks (sort, column layout,
+  virtual window, cell selection).
 - `TreeDataGrid`: multi-level expandable rows for the tree variation.
 - `PivotGrid`: a client-side crosstab that aggregates one or more measures
   across a row and a column dimension, with grouped column headers for multiple
@@ -62,7 +66,15 @@ all three with a controls panel that toggles every feature.
   Carbon and clearly distinguished from it. The app also has a live showcase at
   `/design-system/tables` with a controls panel.
 - `PivotGrid` is not wired to any product analytics surface; analytics
-  dashboards stay deferred per `DESIGN.md`.
+  dashboards stay deferred per `DESIGN.md`. Nested pivot row groups (tree pivot)
+  are designed but deferred; the plan is in
+  `.ai/specs/2026-09-15-pivot-row-groups.md`.
+- Pinned columns switch the table to `table-layout: fixed` so declared widths
+  are authoritative and sticky offsets line up; pinned cells track zebra, hover,
+  and selection through classes rather than a hard-coded background.
+- Inline editing builds on the stable `TextInput`, `Checkbox`, and `Select`
+  primitives, not Carbon's `unstable__*` editable data table, and is opt-in per
+  column so existing grids are unaffected.
 - Number formatting is pinned to `en-US` to keep server and client render
   identical.
 
