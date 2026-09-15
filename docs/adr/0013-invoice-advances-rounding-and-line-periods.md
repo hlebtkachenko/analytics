@@ -20,10 +20,11 @@ with a plain group by.
 
 An advance deduction is an `app.invoice_line` with
 `line_kind = 'advance_deduction'`. It carries base, VAT mode, VAT rate and VAT
-amount like a supply line and no category. The paper itemises deducted advances
-by VAT regime, and several advances at several rates may be deducted on one
-final invoice, so a header scalar cannot hold it. Amounts stay non negative:
-direction lives in the line kind.
+amount like a supply line and no category, no tax point date and no period: its
+legs take the final invoice's tax point, never the month the advance was paid.
+The paper itemises deducted advances by VAT regime, and several advances at
+several rates may be deducted on one final invoice, so a header scalar cannot
+hold it. Amounts stay non negative: direction lives in the line kind.
 
 A rounding difference is a signed header scalar, `app.invoice.rounding_amount`,
 with a check `abs(rounding_amount) < 1`. It is the one signed money column in

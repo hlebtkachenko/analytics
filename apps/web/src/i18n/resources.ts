@@ -222,7 +222,6 @@ export const resources = {
         lineActivity: 'Activity',
         lineBaseAmount: 'Base amount',
         lineCategory: 'Category',
-        lineCategoryNone: 'Not set',
         lineDescription: 'Description',
         lineKind: 'Line kind',
         lineKindAdvanceDeduction: 'Advance deduction',

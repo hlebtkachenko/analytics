@@ -51,6 +51,7 @@ import {
   documentDetailSchema,
   documentKindSchema,
   formatDecimalUnits,
+  grossUnits,
   invoiceLineCategorySchema,
   invoiceLineKindSchema,
   isInvoiceKind,
@@ -78,8 +79,8 @@ import styles from './page.module.scss';
 type LineDraft = Readonly<{
   activityCode: string;
   baseAmount: string;
-  // An advance deduction line carries no category, so the draft holds the empty choice.
-  category: '' | InvoiceLineCategory;
+  // An advance deduction line sends no category, but the draft always holds a real one.
+  category: InvoiceLineCategory;
   description: string;
   key: string;
   lineKind: InvoiceLineKind;
@@ -123,9 +124,9 @@ function asKind(value: string): DocumentKind {
   return parsed.success ? parsed.data : 'other';
 }
 
-function asCategory(value: string): '' | InvoiceLineCategory {
+function asCategory(value: string): InvoiceLineCategory {
   const parsed = invoiceLineCategorySchema.safeParse(value);
-  return parsed.success ? parsed.data : '';
+  return parsed.success ? parsed.data : 'services';
 }
 
 function asLineKind(value: string): InvoiceLineKind {
@@ -143,22 +144,6 @@ function derivedVat(line: LineDraft): string {
   return line.vatMode === 'standard'
     ? (derivedVatAmount(line.baseAmount, line.vatRate) ?? '0')
     : '0';
-}
-
-// Base plus VAT over the lines of one kind, in 10^-4 units, as the contract sums them.
-function grossUnits(
-  lines: readonly LineDraft[],
-  lineKind: InvoiceLineKind,
-): bigint {
-  return lines
-    .filter((line) => line.lineKind === lineKind)
-    .reduce(
-      (total, line) =>
-        total +
-        (decimalUnits(line.baseAmount) ?? 0n) +
-        (decimalUnits(line.vatAmount) ?? 0n),
-      0n,
-    );
 }
 
 // A blank field is an absent field; the contract trims whatever is actually sent.
@@ -266,14 +251,11 @@ export default function NewDocumentPage() {
           return line;
         }
         const next = { ...line, ...patch };
-        // A deducted advance has no category; a supply gets the default one back.
-        if (patch.lineKind !== undefined) {
-          next.category =
-            patch.lineKind === 'advance_deduction'
-              ? ''
-              : next.category === ''
-                ? 'services'
-                : next.category;
+        // A deducted advance takes its dates from the invoice it settles, so the line drops its own.
+        if (patch.lineKind === 'advance_deduction') {
+          next.periodEnd = '';
+          next.periodStart = '';
+          next.taxPointDate = '';
         }
         // Only a standard line carries VAT, and only an edited amount survives a recompute.
         if (next.vatMode !== 'standard') {
@@ -302,20 +284,25 @@ export default function NewDocumentPage() {
             lines: lines.map((line) => ({
               activityCode: optional(line.activityCode),
               baseAmount: line.baseAmount,
-              category: line.category === '' ? undefined : line.category,
               description: line.description,
               lineKind: line.lineKind,
-              periodEnd: optional(line.periodEnd),
-              periodStart: optional(line.periodStart),
               quantity: optional(line.quantity),
-              taxPointDate: optional(line.taxPointDate),
               unitPrice: optional(line.unitPrice),
               vatAmount: line.vatAmount,
               vatMode: line.vatMode,
               vatRate: line.vatRate,
+              // A deducted advance carries no category and books on the tax point of this invoice.
+              ...(line.lineKind === 'item'
+                ? {
+                    category: line.category,
+                    periodEnd: optional(line.periodEnd),
+                    periodStart: optional(line.periodStart),
+                    taxPointDate: optional(line.taxPointDate),
+                  }
+                : {}),
             })),
             receivedDate: optional(receivedDate),
-            roundingAmount,
+            roundingAmount: optional(roundingAmount),
             taxPointDate: optional(taxPointDate),
             variableSymbol: optional(variableSymbol),
           }
@@ -665,10 +652,6 @@ export default function NewDocumentPage() {
                                 }}
                                 value={line.category}
                               >
-                                <SelectItem
-                                  text={t('documents.lineCategoryNone')}
-                                  value=""
-                                />
                                 {invoiceLineCategorySchema.options.map(
                                   (option) => (
                                     <SelectItem
@@ -787,6 +770,9 @@ export default function NewDocumentPage() {
                             <TableCell colSpan={10}>
                               <div className={styles.lineDetails!}>
                                 <TextInput
+                                  disabled={
+                                    line.lineKind === 'advance_deduction'
+                                  }
                                   id={`line-tax-point-${String(index)}`}
                                   labelText={`${t('documents.lineTaxPointDate')} ${String(index + 1)}`}
                                   onChange={(event) => {
@@ -798,6 +784,9 @@ export default function NewDocumentPage() {
                                   value={line.taxPointDate}
                                 />
                                 <TextInput
+                                  disabled={
+                                    line.lineKind === 'advance_deduction'
+                                  }
                                   id={`line-period-start-${String(index)}`}
                                   labelText={`${t('documents.linePeriodStart')} ${String(index + 1)}`}
                                   onChange={(event) => {
@@ -809,6 +798,9 @@ export default function NewDocumentPage() {
                                   value={line.periodStart}
                                 />
                                 <TextInput
+                                  disabled={
+                                    line.lineKind === 'advance_deduction'
+                                  }
                                   id={`line-period-end-${String(index)}`}
                                   labelText={`${t('documents.linePeriodEnd')} ${String(index + 1)}`}
                                   onChange={(event) => {

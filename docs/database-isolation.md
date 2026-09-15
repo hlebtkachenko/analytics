@@ -259,10 +259,18 @@ write, with `invoice_amount_due_check` keeping the advance at or below the
 printed total. `app.economic_event_line` gains `effective_date` and
 `activity_code`, so a monthly report groups legs by their own tax point while
 the event header keeps the document date; existing legs are backfilled from
-`app.economic_event.event_date` before `effective_date` becomes non-null, and
-`economic_event_line_effective_date_idx` on
-`(organization_id, effective_date, account_code)` serves that read. Row level
-security, policies, and grants are table level and unchanged.
+`coalesce(app.invoice.tax_point_date, app.economic_event.event_date)` before
+`effective_date` becomes non-null, and `economic_event_line_effective_date_idx`
+on `(organization_id, effective_date, account_code)` serves that read. Because
+`bap_owner` is `NOBYPASSRLS` and a migration sets no tenant, that backfill drops
+`FORCE ROW LEVEL SECURITY` on `app.economic_event`, `app.economic_event_line`,
+and `app.invoice` and restores it in the same migration transaction, so the
+update sees every existing leg and no table is ever left unforced; it also
+replaces `economic_event_line_account_idx` with
+`economic_event_line_account_date_idx` on
+`(organization_id, account_code, effective_date)`, because the account
+drill-down now reads one account over a period. Row level security, policies,
+and grants are otherwise table level and unchanged.
 `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
 `20260915.0001`; rolling application code back after this migration leaves
 readiness at 503 until code expecting that exact version is deployed or the
@@ -412,4 +420,10 @@ activity code regex is enforced on both the invoice line and the event line, a
 rounding of one unit is refused while `0.99` and `-0.99` pass, an advance above
 the printed total is refused, `amount_due` is computed by the database and
 refuses a direct write with `428C9`, and `effective_date` is non-null and
-indexed by `economic_event_line_effective_date_idx`.
+indexed by `economic_event_line_effective_date_idx`. One further test builds a
+second database on the same container, migrates it to the state before
+`20260915.0001`, writes an event line there, and then applies the migration, so
+the backfill is proven against rows that already exist: the line takes the
+invoice tax point, all 3 tables are forced again, and
+`economic_event_line_account_date_idx` has replaced
+`economic_event_line_account_idx`.

@@ -77,6 +77,19 @@ describe('createInvoiceLineSchema', () => {
     ).toBe(true);
   });
 
+  it('refuses a tax point and a period on an advance deduction line', () => {
+    expect(createInvoiceLineSchema.safeParse(deductionLine).success).toBe(true);
+
+    for (const field of ['periodEnd', 'periodStart', 'taxPointDate']) {
+      expect(
+        createInvoiceLineSchema.safeParse({
+          ...deductionLine,
+          [field]: '2026-09-30',
+        }).success,
+      ).toBe(false);
+    }
+  });
+
   it('refuses a negative amount and a rate outside the percentage range', () => {
     expect(
       createInvoiceLineSchema.safeParse({

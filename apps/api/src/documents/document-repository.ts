@@ -560,11 +560,24 @@ async function rederive(
   }
 }
 
-// The lines of an invoice as derivation reads them, which an update needs because the patch never carries them.
-async function loadDerivationLines(
+// Everything derivation reads from the stored invoice, which an update needs because the patch never carries it.
+async function loadDerivationInput(
   transaction: PoolClient,
   documentId: string,
-): Promise<DerivationLine[]> {
+): Promise<{
+  lines: DerivationLine[];
+  roundingAmount: string;
+  taxPointDate: string | null;
+}> {
+  const header = await transaction.query<{
+    rounding_amount: string;
+    tax_point_date: string | null;
+  }>(
+    `select rounding_amount::text as rounding_amount, tax_point_date::text as tax_point_date
+       from app.invoice
+      where document_id = $1`,
+    [documentId],
+  );
   const lines = await transaction.query<{
     activity_code: string | null;
     base_amount: string;
@@ -585,41 +598,28 @@ async function loadDerivationLines(
       order by line_no`,
     [documentId],
   );
+  const headerRow = header.rows[0];
 
-  return lines.rows.map((row) => ({
-    activityCode: row.activity_code,
-    baseAmount: row.base_amount,
-    category: row.category as DerivationLine['category'],
-    description: row.description,
-    id: row.id,
-    lineKind: row.line_kind as DerivationLine['lineKind'],
-    taxPointDate: row.tax_point_date,
-    vatAmount: row.vat_amount,
-    vatMode: row.vat_mode as DerivationLine['vatMode'],
-    vatRate: row.vat_rate,
-  }));
-}
+  // Only a document that already carries an event is rederived, and every such document is an invoice.
+  if (headerRow === undefined) {
+    throw new Error('The rederived document carries no invoice row.');
+  }
 
-// The invoice header fields derivation reads, which the patch never carries either.
-async function loadInvoiceHeader(
-  transaction: PoolClient,
-  documentId: string,
-): Promise<{ roundingAmount: string; taxPointDate: string | null }> {
-  const header = await transaction.query<{
-    rounding_amount: string;
-    tax_point_date: string | null;
-  }>(
-    `select rounding_amount::text as rounding_amount, tax_point_date::text as tax_point_date
-       from app.invoice
-      where document_id = $1`,
-    [documentId],
-  );
-  const row = header.rows[0];
-
-  // A document without invoice content books no rounding and falls back to its own date.
   return {
-    roundingAmount: row?.rounding_amount ?? '0',
-    taxPointDate: row?.tax_point_date ?? null,
+    lines: lines.rows.map((row) => ({
+      activityCode: row.activity_code,
+      baseAmount: row.base_amount,
+      category: row.category as DerivationLine['category'],
+      description: row.description,
+      id: row.id,
+      lineKind: row.line_kind as DerivationLine['lineKind'],
+      taxPointDate: row.tax_point_date,
+      vatAmount: row.vat_amount,
+      vatMode: row.vat_mode as DerivationLine['vatMode'],
+      vatRate: row.vat_rate,
+    })),
+    roundingAmount: headerRow.rounding_amount,
+    taxPointDate: headerRow.tax_point_date,
   };
 }
 
@@ -990,13 +990,21 @@ export async function updateDocument(
         after.documentDate !== before.documentDate)
     ) {
       // The invoice header rides along, or a patch would drop the rounding legs and the invoice-level tax point.
-      const header = await loadInvoiceHeader(transaction, input.documentId);
+      const invoice = await loadDerivationInput(transaction, input.documentId);
 
       await rederive(
         transaction,
         input.organizationId,
-        { ...after, ...header },
-        await loadDerivationLines(transaction, input.documentId),
+        {
+          documentDate: after.documentDate,
+          id: after.id,
+          kind: after.kind,
+          legalEntityId: after.legalEntityId,
+          partnerId: after.partnerId,
+          roundingAmount: invoice.roundingAmount,
+          taxPointDate: invoice.taxPointDate,
+        },
+        invoice.lines,
       );
     }
 

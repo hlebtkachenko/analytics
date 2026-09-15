@@ -52,18 +52,18 @@ policy, exactly as ADR 0011 describes for datasets.
 
 ## Table inventory
 
-| Table                     | Purpose                                                                                                                                               |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app.directive_account`   | Shared, RLS-free Czech synthetic chart of accounts, 218 rows from decree 500/2002 Sb.                                                                 |
-| `app.partner`             | Organization-wide counterparty, optionally naming one of the organization's own legal entities.                                                       |
-| `app.document`            | The uniform register: one row per document, every kind, per legal entity.                                                                             |
-| `app.document_attribute`  | Free key/value pairs for kinds with no dedicated content table.                                                                                       |
-| `app.invoice`             | Invoice content, one row per invoice kind document: dates, totals, signed `rounding_amount`, `advance_total`, generated `amount_due`.                 |
-| `app.invoice_line`        | Invoice lines: `line_kind` (`item` or `advance_deduction`), category, VAT mode, VAT rate, amounts, own tax point date, service period, activity code. |
-| `app.economic_event`      | Derived, rebuildable debit/credit event, one current event per document.                                                                              |
-| `app.economic_event_line` | Derived event lines: account code, side, amount, `effective_date`, `activity_code`, and the invoice line it came from.                                |
-| `app.document_link`       | Directed link of any kind between two documents.                                                                                                      |
-| `app.data_issue`          | What derivation found: an open or resolved issue against a document.                                                                                  |
+| Table                     | Purpose                                                                                                                                                                                                                      |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app.directive_account`   | Shared, RLS-free Czech synthetic chart of accounts, 218 rows from decree 500/2002 Sb.                                                                                                                                        |
+| `app.partner`             | Organization-wide counterparty, optionally naming one of the organization's own legal entities.                                                                                                                              |
+| `app.document`            | The uniform register: one row per document, every kind, per legal entity.                                                                                                                                                    |
+| `app.document_attribute`  | Free key/value pairs for kinds with no dedicated content table.                                                                                                                                                              |
+| `app.invoice`             | Invoice content, one row per invoice kind document: dates, totals, signed `rounding_amount`, `advance_total`, generated `amount_due`.                                                                                        |
+| `app.invoice_line`        | Invoice lines: `line_kind` (`item` or `advance_deduction`), category, VAT mode, VAT rate, amounts, own tax point date, service period, activity code. A deduction line carries no category, no tax point date and no period. |
+| `app.economic_event`      | Derived, rebuildable debit/credit event, one current event per document.                                                                                                                                                     |
+| `app.economic_event_line` | Derived event lines: account code, side, amount, `effective_date`, `activity_code`, and the invoice line it came from.                                                                                                       |
+| `app.document_link`       | Directed link of any kind between two documents.                                                                                                                                                                             |
+| `app.data_issue`          | What derivation found: an open or resolved issue against a document.                                                                                                                                                         |
 
 ## Lifecycle statuses and versioning
 
@@ -112,7 +112,14 @@ Those rows describe an `item` line. The two other sources of legs are:
 | `rounding_amount` < 0                        | debit 548; credit 311                                                                              | debit 321; credit 648                                 |
 
 Rounding legs carry `abs(rounding_amount)`, no `invoice_line_id` and no
-`activity_code`; the 311 or 321 leg carries the partner.
+`activity_code`; the 311 or 321 leg carries the partner. Advance deduction legs
+take the invoice tax point date, then the document date: the contract refuses a
+tax point date or a period on a deduction line, because the settlement belongs
+to the final invoice, never to the month the advance was paid.
+
+For an invoice kind `app.document.total_amount` is the printed total,
+`gross_total + rounding_amount`, before any advance deduction; the list page and
+its totals by currency sum that number. `amount_due` lives on `app.invoice`.
 
 ### Category to account
 
@@ -194,7 +201,7 @@ code only emits two of them today.
 | `unbalanced_event` | error    | Yes             | Debit total does not equal credit total after derivation. In practice this cannot currently happen: every rule pairs its legs so they always balance.                                                                                             |
 | `missing_partner`  | warning  | Yes             | An invoice kind's `partnerId` is null, so the receivable or payable line is unattributed.                                                                                                                                                         |
 | `total_mismatch`   | warning  | Vocabulary only | Reserved for when invoice totals disagree with the sum of their lines. Not reachable today because `base_total`, `vat_total`, and `gross_total` are always computed server-side as the sum of the submitted lines, never taken from client input. |
-| `unmapped_line`    | warning  | Vocabulary only | Reserved for a line the rule set cannot map to an account. Not reachable today because the five invoice line categories cover every entry in both the revenue and the expense account maps.                                                       |
+| `unmapped_line`    | warning  | Vocabulary only | Reserved for a line the rule set cannot map to an account. Not reachable today because the seven invoice line categories cover every entry in both the revenue and the expense account maps.                                                      |
 
 Open issues are unique per `(document_id, code)`; a resolved issue can repeat.
 Every re-derivation deletes unresolved issues for the document before inserting

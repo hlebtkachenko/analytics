@@ -113,6 +113,12 @@ interface PendingLine {
   side: EventSide;
 }
 
+// What every leg of one invoice line shares, so only the account, the amount, the partner and the side differ.
+type CommonLeg = Omit<
+  PendingLine,
+  'accountCode' | 'amount' | 'partnerId' | 'side'
+>;
+
 // A refund reverses nothing here: credit_note is its own kind, so no rule ever sees a negative invoice line.
 const EVENT_KINDS: readonly DocumentKind[] = [
   'issued_invoice',
@@ -134,15 +140,6 @@ function storedVat(line: DerivationLine): bigint {
     : DECIMAL_ZERO;
 }
 
-// An item line always carries a category by check constraint, and a deduction line never reaches these maps.
-function revenueAccount(line: DerivationLine): string {
-  return REVENUE_ACCOUNTS[line.category ?? 'other'];
-}
-
-function expenseAccount(line: DerivationLine): string {
-  return EXPENSE_ACCOUNTS[line.category ?? 'other'];
-}
-
 // The tax point of the supply, with the invoice and then the document date behind it.
 function effectiveDate(line: DerivationLine, input: DerivationInput): string {
   return line.taxPointDate ?? input.taxPointDate ?? input.documentDate;
@@ -151,7 +148,8 @@ function effectiveDate(line: DerivationLine, input: DerivationInput): string {
 function issuedItemLines(
   line: DerivationLine,
   input: DerivationInput,
-  common: Omit<PendingLine, 'accountCode' | 'amount' | 'partnerId' | 'side'>,
+  common: CommonLeg,
+  category: InvoiceLineCategory,
 ): PendingLine[] {
   const base = parseDecimal(line.baseAmount);
   const vat = storedVat(line);
@@ -166,7 +164,7 @@ function issuedItemLines(
     },
     {
       ...common,
-      accountCode: revenueAccount(line),
+      accountCode: REVENUE_ACCOUNTS[category],
       amount: base,
       partnerId: null,
       side: 'credit',
@@ -185,7 +183,7 @@ function issuedItemLines(
 function issuedAdvanceLines(
   line: DerivationLine,
   input: DerivationInput,
-  common: Omit<PendingLine, 'accountCode' | 'amount' | 'partnerId' | 'side'>,
+  common: CommonLeg,
 ): PendingLine[] {
   const base = parseDecimal(line.baseAmount);
   const vat = storedVat(line);
@@ -218,7 +216,8 @@ function issuedAdvanceLines(
 function receivedItemLines(
   line: DerivationLine,
   input: DerivationInput,
-  common: Omit<PendingLine, 'accountCode' | 'amount' | 'partnerId' | 'side'>,
+  common: CommonLeg,
+  category: InvoiceLineCategory,
 ): PendingLine[] {
   const base = parseDecimal(line.baseAmount);
   const vat = storedVat(line);
@@ -228,7 +227,7 @@ function receivedItemLines(
   return [
     {
       ...common,
-      accountCode: expenseAccount(line),
+      accountCode: EXPENSE_ACCOUNTS[category],
       amount: base,
       partnerId: null,
       side: 'debit',
@@ -269,7 +268,7 @@ function receivedItemLines(
 function receivedAdvanceLines(
   line: DerivationLine,
   input: DerivationInput,
-  common: Omit<PendingLine, 'accountCode' | 'amount' | 'partnerId' | 'side'>,
+  common: CommonLeg,
 ): PendingLine[] {
   const base = parseDecimal(line.baseAmount);
   const vat = storedVat(line);
@@ -307,15 +306,20 @@ function bookLine(line: DerivationLine, input: DerivationInput): PendingLine[] {
     invoiceLineId: line.id,
   };
 
-  if (input.kind === 'issued_invoice') {
-    return line.lineKind === 'advance_deduction'
+  if (line.lineKind === 'advance_deduction') {
+    return input.kind === 'issued_invoice'
       ? issuedAdvanceLines(line, input, common)
-      : issuedItemLines(line, input, common);
+      : receivedAdvanceLines(line, input, common);
   }
 
-  return line.lineKind === 'advance_deduction'
-    ? receivedAdvanceLines(line, input, common)
-    : receivedItemLines(line, input, common);
+  // The check constraint and the contract both put a category on every item line.
+  if (line.category === null) {
+    throw new Error('An item line carries a category.');
+  }
+
+  return input.kind === 'issued_invoice'
+    ? issuedItemLines(line, input, common, line.category)
+    : receivedItemLines(line, input, common, line.category);
 }
 
 // The rounding belongs to the invoice as a whole: no line, no activity, and the invoice tax point as its date.

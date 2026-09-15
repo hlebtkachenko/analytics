@@ -2,6 +2,7 @@
 
 ## Delivered and historical records
 
+- [Invoice line periods, advance deductions and rounding](2026-09-15-invoice-periods-advances.md)
 - [Documents register and derived economic events](2026-09-14-documents-register.md)
 - [Product application layout](2026-09-14-product-application-layout.md)
 - [Account issuer column removal](2026-09-14-account-issuer-removal.md)

@@ -1,3 +1,8 @@
+import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
 import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
@@ -1054,5 +1059,162 @@ describe('documents register isolation', () => {
     await rootPool.query(
       'delete from app.economic_event_line where line_no = 10',
     );
+  });
+
+  // The regression this guards: bap_owner is NOBYPASSRLS and no tenant is set, so a forced policy hid every existing leg.
+  it('backfills event lines that already exist and restores forced row level security', async () => {
+    const backfillDatabase = 'bap_backfill';
+    const source = new URL('../drizzle/', import.meta.url);
+    const directory = await mkdtemp(join(tmpdir(), 'bap-migrations-'));
+    await rootPool.query(`create database ${backfillDatabase}`);
+    const poolOn = (user: string): Pool =>
+      new Pool({
+        database: backfillDatabase,
+        host: container.getHost(),
+        password: testPassword,
+        port: container.getPort(),
+        user,
+      });
+    const backfillRootPool = poolOn('postgres');
+    const backfillMigratorPool = poolOn('bap_migrator');
+    const backfillApiPool = poolOn('bap_api');
+
+    try {
+      const root = await backfillRootPool.connect();
+
+      try {
+        await bootstrapDatabaseRoles(root, {
+          bap_api: testPassword,
+          bap_auth: testPassword,
+          bap_backup: testPassword,
+          bap_migrator: testPassword,
+          bap_reporting: testPassword,
+        });
+      } finally {
+        root.release();
+      }
+
+      // Everything except the migration under test, so the register is populated the way an existing database is.
+      for (const entry of await readdir(source)) {
+        if (entry.endsWith('.sql') && !entry.startsWith('20260915.0001')) {
+          await copyFile(new URL(entry, source), join(directory, entry));
+        }
+      }
+
+      const before = await runMigrations(backfillMigratorPool, {
+        directory: pathToFileURL(`${directory}/`),
+      });
+
+      expect(before.applied).not.toContain('20260915.0001');
+
+      const owner = await backfillMigratorPool.connect();
+
+      try {
+        await owner.query('begin');
+        await owner.query('set local role bap_owner');
+        await owner.query(`
+          insert into auth."user" (id, name, email, email_verified)
+          values ('user-1', 'Owner', 'owner@example.test', true)
+        `);
+        await owner.query(`
+          insert into auth.organization (id, name, slug)
+          values ('org-1', 'One', 'one')
+        `);
+        await owner.query(`
+          insert into auth.member (id, organization_id, user_id, role)
+          values ('member-1', 'org-1', 'user-1', 'owner')
+        `);
+        await owner.query('commit');
+      } catch (error) {
+        await owner.query('rollback');
+        throw error;
+      } finally {
+        owner.release();
+      }
+
+      await backfillRootPool.query(
+        `insert into app.legal_entity (id, organization_id, name, kind, created_by)
+         values ($1, 'org-1', 'Placeholder Holding', 'company', 'user-1')`,
+        [ownedEntityId],
+      );
+      await asTenant(backfillApiPool, orgOneOwner, async (transaction) => {
+        await transaction.query(
+          `insert into app.document (
+             id, organization_id, legal_entity_id, kind, reference, title,
+             document_date, currency_code, total_amount, created_by
+           )
+           values ($1, 'org-1', $2, 'received_invoice', 'REF-0001', 'Placeholder received invoice',
+                   '2026-09-02', 'CZK', 121.00, 'user-1')`,
+          [documentId, ownedEntityId],
+        );
+        await transaction.query(
+          `insert into app.invoice (
+             document_id, organization_id, tax_point_date, base_total, vat_total, gross_total
+           )
+           values ($1, 'org-1', '2026-08-31', 100.00, 21.00, 121.00)`,
+          [documentId],
+        );
+        await transaction.query(
+          `insert into app.economic_event (
+             id, organization_id, legal_entity_id, document_id, event_date,
+             rule_set_version, is_balanced, debit_total, credit_total
+           )
+           values ($1, 'org-1', $2, $3, '2026-09-02', 'cz-default-2026-09', true, 121.00, 121.00)`,
+          [eventId, ownedEntityId, documentId],
+        );
+        await transaction.query(
+          `insert into app.economic_event_line (
+             organization_id, event_id, line_no, account_code, side, amount, description
+           )
+           values ('org-1', $1, 1, '518', 'debit', 100.00, 'Placeholder line')`,
+          [eventId],
+        );
+      });
+
+      const applied = await runMigrations(backfillMigratorPool);
+
+      expect(applied.applied).toContain('20260915.0001');
+      // The invoice tax point wins over the event date, exactly as rule set cz-default-2026-09.1 would derive it.
+      await expect(
+        backfillRootPool.query<{ effective_date: string }>(
+          'select effective_date::text as effective_date from app.economic_event_line',
+        ),
+      ).resolves.toMatchObject({ rows: [{ effective_date: '2026-08-31' }] });
+      await expect(
+        backfillRootPool.query<{
+          relforcerowsecurity: boolean;
+          relname: string;
+        }>(
+          `select relname, relforcerowsecurity
+           from pg_class
+           where oid in ('app.economic_event'::regclass, 'app.economic_event_line'::regclass, 'app.invoice'::regclass)
+           order by relname`,
+        ),
+      ).resolves.toMatchObject({
+        rows: [
+          { relforcerowsecurity: true, relname: 'economic_event' },
+          { relforcerowsecurity: true, relname: 'economic_event_line' },
+          { relforcerowsecurity: true, relname: 'invoice' },
+        ],
+      });
+      await expect(
+        backfillRootPool.query<{ indexname: string }>(
+          `select indexname
+           from pg_indexes
+           where schemaname = 'app'
+             and indexname in ('economic_event_line_account_idx', 'economic_event_line_account_date_idx')`,
+        ),
+      ).resolves.toMatchObject({
+        rows: [{ indexname: 'economic_event_line_account_date_idx' }],
+      });
+    } finally {
+      await Promise.all([
+        backfillApiPool.end(),
+        backfillMigratorPool.end(),
+        backfillRootPool.end(),
+      ]);
+      await rootPool.query(`drop database if exists ${backfillDatabase}`);
+      await rm(directory, { force: true, recursive: true });
+    }
   });
 });

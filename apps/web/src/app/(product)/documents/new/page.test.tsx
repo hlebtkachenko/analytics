@@ -276,20 +276,113 @@ describe('NewDocumentPage', () => {
     });
   });
 
-  it('disables and clears the category once a line becomes an advance deduction', async () => {
+  it('disables the category, the tax point and the period on an advance deduction', async () => {
     vi.stubGlobal('fetch', respond());
 
     renderNewDocumentPage();
     await screen.findByDisplayValue('Placeholder Holding');
 
     expect(screen.getByLabelText('Category 1')).toHaveValue('services');
+    fireEvent.change(screen.getByLabelText('Tax point date 1'), {
+      target: { value: '2026-09-30' },
+    });
 
     fireEvent.change(screen.getByLabelText('Line kind 1'), {
       target: { value: 'advance_deduction' },
     });
 
     expect(screen.getByLabelText('Category 1')).toBeDisabled();
-    expect(screen.getByLabelText('Category 1')).toHaveValue('');
+    // The settlement legs take the tax point of this invoice, so the line drops its own dates.
+    expect(screen.getByLabelText('Tax point date 1')).toBeDisabled();
+    expect(screen.getByLabelText('Tax point date 1')).toHaveValue('');
+    expect(screen.getByLabelText('Period start 1')).toBeDisabled();
+    expect(screen.getByLabelText('Period end 1')).toBeDisabled();
+  });
+
+  it('sends no category and no dates on an advance deduction line', async () => {
+    vi.stubGlobal('fetch', respond());
+
+    renderNewDocumentPage();
+    await screen.findByDisplayValue('Placeholder Holding');
+
+    fireEvent.change(screen.getByLabelText('Kind'), {
+      target: { value: 'issued_invoice' },
+    });
+    fireEvent.change(screen.getByLabelText('Title'), {
+      target: { value: 'Placeholder document' },
+    });
+    fireEvent.change(screen.getByLabelText('Document date'), {
+      target: { value: '2026-09-01' },
+    });
+    fireEvent.change(screen.getByLabelText('Description 1'), {
+      target: { value: 'Placeholder line' },
+    });
+    fireEvent.change(screen.getByLabelText('Base amount 1'), {
+      target: { value: '1000' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    fireEvent.change(screen.getByLabelText('Description 2'), {
+      target: { value: 'Placeholder advance' },
+    });
+    fireEvent.change(screen.getByLabelText('Line kind 2'), {
+      target: { value: 'advance_deduction' },
+    });
+    fireEvent.change(screen.getByLabelText('Base amount 2'), {
+      target: { value: '500' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Register document' }));
+
+    await waitFor(() => {
+      expect(posted.body).toBeDefined();
+    });
+    expect(
+      (posted.body as { invoice: { lines: unknown[] } }).invoice.lines[1],
+    ).toEqual({
+      baseAmount: '500',
+      description: 'Placeholder advance',
+      lineKind: 'advance_deduction',
+      vatAmount: '105.00',
+      vatMode: 'standard',
+      vatRate: '21',
+    });
+  });
+
+  it('registers the invoice when the rounding field is cleared', async () => {
+    vi.stubGlobal('fetch', respond());
+
+    renderNewDocumentPage();
+    await screen.findByDisplayValue('Placeholder Holding');
+
+    fireEvent.change(screen.getByLabelText('Kind'), {
+      target: { value: 'issued_invoice' },
+    });
+    fireEvent.change(screen.getByLabelText('Title'), {
+      target: { value: 'Placeholder document' },
+    });
+    fireEvent.change(screen.getByLabelText('Document date'), {
+      target: { value: '2026-09-01' },
+    });
+    fireEvent.change(screen.getByLabelText('Description 1'), {
+      target: { value: 'Placeholder line' },
+    });
+    fireEvent.change(screen.getByLabelText('Base amount 1'), {
+      target: { value: '1000' },
+    });
+    // A cleared field is an absent field, so the contract default stands instead of an empty string.
+    fireEvent.change(screen.getByLabelText('Rounding'), {
+      target: { value: '' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Register document' }));
+
+    await waitFor(() => {
+      expect(posted.body).toBeDefined();
+    });
+    expect(
+      (posted.body as { invoice: { roundingAmount: string } }).invoice
+        .roundingAmount,
+    ).toBe('0');
   });
 
   it('previews the amount due from the supply lines, the advance and the rounding', async () => {

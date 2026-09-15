@@ -601,6 +601,58 @@ describe('application document routes', () => {
     expect(createCalls).toEqual([]);
   });
 
+  it('answers an unparsable amount with a bad request, never a server error', async () => {
+    for (const invoice of [
+      { ...invoiceBody.invoice, roundingAmount: 'abc' },
+      // A decimal comma is not the money contract, so the rounding rule must refuse it instead of throwing.
+      { ...invoiceBody.invoice, roundingAmount: '0,20' },
+      {
+        lines: [
+          {
+            ...invoiceBody.invoice.lines[0],
+            baseAmount: 'abc',
+            vatAmount: '0',
+            vatMode: 'exempt',
+          },
+        ],
+      },
+      { lines: [{ ...invoiceBody.invoice.lines[0], vatAmount: 'x' }] },
+    ]) {
+      const response = await request(application.getHttpServer())
+        .post('/v1/organizations/organization_1/documents')
+        .set('Authorization', 'Bearer caller')
+        .send({ ...invoiceBody, invoice })
+        .expect(400);
+
+      expect(response.body).toMatchObject({
+        status: 400,
+        type: 'https://bap.invalid/problems/invalid-request',
+      });
+    }
+
+    expect(createCalls).toEqual([]);
+  });
+
+  it('refuses a tax point and a period on an advance deduction line', async () => {
+    for (const field of ['periodEnd', 'periodStart', 'taxPointDate']) {
+      await request(application.getHttpServer())
+        .post('/v1/organizations/organization_1/documents')
+        .set('Authorization', 'Bearer caller')
+        .send({
+          ...invoiceBody,
+          invoice: {
+            lines: [
+              invoiceBody.invoice.lines[0],
+              { ...deductionLine, [field]: '2026-09-30' },
+            ],
+          },
+        })
+        .expect(400);
+    }
+
+    expect(createCalls).toEqual([]);
+  });
+
   it('accepts an advance deduction beside an item line and normalises the activity', async () => {
     await request(application.getHttpServer())
       .post('/v1/organizations/organization_1/documents')

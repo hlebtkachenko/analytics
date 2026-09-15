@@ -232,7 +232,7 @@ export const invoiceSchema = z
     grossTotal: decimalStringSchema,
     lines: z.array(invoiceLineSchema),
     receivedDate: documentDateSchema.nullable(),
-    roundingAmount: decimalStringSchema,
+    roundingAmount: roundingAmountSchema,
     taxPointDate: documentDateSchema.nullable(),
     variableSymbol: z.string().nullable(),
     vatTotal: decimalStringSchema,
@@ -409,6 +409,23 @@ export const createInvoiceLineSchema = z
         path: ['category'],
       });
     }
+    // The settlement legs take the tax point of the invoice, so a date here would re-date them into the advance's month.
+    if (line.lineKind === 'advance_deduction') {
+      for (const field of [
+        'periodEnd',
+        'periodStart',
+        'taxPointDate',
+      ] as const) {
+        if (line[field] !== undefined) {
+          context.addIssue({
+            code: 'custom',
+            message:
+              'An advance deduction line carries no tax point and no period.',
+            path: [field],
+          });
+        }
+      }
+    }
     if (
       line.periodStart !== undefined &&
       line.periodEnd !== undefined &&
@@ -453,7 +470,7 @@ export const createInvoiceLineSchema = z
   });
 
 // Base plus VAT over the lines of one kind, in 10^-4 units, ignoring what does not parse.
-function grossUnits(
+export function grossUnits(
   lines: readonly { baseAmount: string; lineKind: string; vatAmount: string }[],
   lineKind: string,
 ): bigint {

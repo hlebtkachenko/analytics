@@ -9,6 +9,7 @@ import {
   multiplyByRatePercent,
   NON_NEGATIVE_DECIMAL_PATTERN,
   parseDecimal,
+  tryParseDecimal,
 } from './decimal.js';
 
 // The closed vocabularies of the migration. Both Zod and the published OpenAPI read these arrays, so they cannot drift.
@@ -127,7 +128,12 @@ const ROUNDING_BOUND = parseDecimal('1');
 
 // The supplier rounded up when it is positive and down when it is negative, so this amount alone carries a sign.
 export const signedRoundingSchema = decimalStringSchema.refine(
-  (value) => absDecimal(parseDecimal(value)) < ROUNDING_BOUND,
+  (value) => {
+    const rounding = tryParseDecimal(value);
+
+    // Zod keeps refining after the regex fails, and the regex issue already reports that value.
+    return rounding === null || absDecimal(rounding) < ROUNDING_BOUND;
+  },
   { message: 'A rounding difference is smaller than one unit.' },
 );
 
@@ -152,14 +158,29 @@ function vatWithinTolerance(line: {
     return true;
   }
 
-  const difference =
-    parseDecimal(line.vatAmount) -
-    multiplyByRatePercent(
-      parseDecimal(line.baseAmount),
-      parseDecimal(line.vatRate),
-    );
+  const vatAmount = tryParseDecimal(line.vatAmount);
+  const baseAmount = tryParseDecimal(line.baseAmount);
+  const vatRate = tryParseDecimal(line.vatRate);
 
-  return (difference < 0n ? -difference : difference) <= VAT_TOLERANCE;
+  // Zod keeps refining after a child regex fails, and that regex issue already reports the field.
+  if (vatAmount === null || baseAmount === null || vatRate === null) {
+    return true;
+  }
+
+  const difference = vatAmount - multiplyByRatePercent(baseAmount, vatRate);
+
+  return absDecimal(difference) <= VAT_TOLERANCE;
+}
+
+// Base plus VAT of one line, or null when either amount is still failing its own pattern.
+function lineGross(line: {
+  baseAmount: string;
+  vatAmount: string;
+}): bigint | null {
+  const base = tryParseDecimal(line.baseAmount);
+  const vat = tryParseDecimal(line.vatAmount);
+
+  return base === null || vat === null ? null : addDecimal(base, vat);
 }
 
 // Lower-cased at the boundary like every other identifier, because PostgreSQL emits lower-case uuids.
@@ -457,6 +478,24 @@ export const createInvoiceLineSchema = z
       });
     }
 
+    // The settlement legs take the tax point of the final invoice, so a date here would re-date them into the advance's month.
+    if (line.lineKind === 'advance_deduction') {
+      for (const field of [
+        'periodEnd',
+        'periodStart',
+        'taxPointDate',
+      ] as const) {
+        if (line[field] !== undefined) {
+          context.addIssue({
+            code: 'custom',
+            message:
+              'An advance deduction line carries no tax point and no period.',
+            path: [field],
+          });
+        }
+      }
+    }
+
     if (
       line.periodStart !== undefined &&
       line.periodEnd !== undefined &&
@@ -470,8 +509,16 @@ export const createInvoiceLineSchema = z
     }
   })
   .refine(
-    (line) =>
-      line.vatMode === 'standard' || parseDecimal(line.vatAmount) === 0n,
+    (line) => {
+      const vatAmount = tryParseDecimal(line.vatAmount);
+
+      // An amount that is still failing its own pattern already reports that issue.
+      return (
+        line.vatMode === 'standard' ||
+        vatAmount === null ||
+        vatAmount === DECIMAL_ZERO
+      );
+    },
     {
       message: 'Only a standard line carries a VAT amount.',
       path: ['vatAmount'],
@@ -498,31 +545,37 @@ export const createInvoiceSchema = z
   })
   .strict()
   .superRefine((invoice, context) => {
-    let supplied = parseDecimal(invoice.roundingAmount);
-    let deducted = DECIMAL_ZERO;
-    let itemCount = 0;
-
-    for (const line of invoice.lines) {
-      const gross = addDecimal(
-        parseDecimal(line.baseAmount),
-        parseDecimal(line.vatAmount),
-      );
-
-      if (line.lineKind === 'item') {
-        itemCount += 1;
-        supplied = addDecimal(supplied, gross);
-      } else {
-        deducted = addDecimal(deducted, gross);
-      }
-    }
-
     // An invoice that deducts an advance still invoices a supply; a settlement on its own is another document.
-    if (itemCount === 0) {
+    if (!invoice.lines.some((line) => line.lineKind === 'item')) {
       context.addIssue({
         code: 'custom',
         message: 'An invoice requires at least one item line.',
         path: ['lines'],
       });
+    }
+
+    const rounding = tryParseDecimal(invoice.roundingAmount);
+
+    // Zod keeps refining after a child regex fails, and an unparsable amount already reports its own issue.
+    if (rounding === null) {
+      return;
+    }
+
+    let supplied = rounding;
+    let deducted = DECIMAL_ZERO;
+
+    for (const line of invoice.lines) {
+      const gross = lineGross(line);
+
+      if (gross === null) {
+        return;
+      }
+
+      if (line.lineKind === 'item') {
+        supplied = addDecimal(supplied, gross);
+      } else {
+        deducted = addDecimal(deducted, gross);
+      }
     }
 
     // An overpaid advance is settled by a credit note, so the amount due can never fall below zero.
@@ -750,6 +803,13 @@ const activityCodeProperty = {
   type: 'string',
 };
 const fxRateProperty = { pattern: FX_RATE_PATTERN.source, type: 'string' };
+// The only signed money field, bounded below one unit in both directions by the invoice check constraint.
+const roundingProperty = {
+  description:
+    'Rounding of the printed total to whole crowns, strictly below 1 in absolute value, positive when the issuer rounded up.',
+  pattern: '^-?0(\\.\\d{1,4})?$',
+  type: 'string',
+};
 const sourceAccountCodeProperty = {
   pattern: '^[0-9]{3}(\\.[0-9A-Za-z]+)?$',
   type: 'string',
@@ -774,7 +834,12 @@ export const documentSummaryOpenApiSchema = {
     source: { enum: [...DOCUMENT_SOURCES], type: 'string' },
     status: { enum: [...DOCUMENT_STATUSES], type: 'string' },
     title: { maxLength: 200, minLength: 1, type: 'string' },
-    totalAmount: { ...moneyProperty, nullable: true },
+    totalAmount: {
+      ...moneyProperty,
+      description:
+        'For an invoice kind this is the printed total, gross plus rounding, before any advance deduction.',
+      nullable: true,
+    },
     updatedAt: dateTimeProperty,
     validFrom: { ...dateProperty, nullable: true },
     validTo: { ...dateProperty, nullable: true },
@@ -861,10 +926,14 @@ const invoiceOpenApiSchema = {
     baseTotal: amountProperty,
     dueDate: { ...dateProperty, nullable: true },
     fxRate: { ...fxRateProperty, nullable: true },
-    grossTotal: amountProperty,
+    grossTotal: {
+      ...amountProperty,
+      description:
+        'Base plus VAT over the supply lines; the printed total is this plus the rounding, before any advance deduction.',
+    },
     lines: { items: invoiceLineOpenApiSchema, type: 'array' },
     receivedDate: { ...dateProperty, nullable: true },
-    roundingAmount: moneyProperty,
+    roundingAmount: roundingProperty,
     taxPointDate: { ...dateProperty, nullable: true },
     variableSymbol: {
       nullable: true,
@@ -1019,20 +1088,33 @@ export const documentListOpenApiSchema = {
   type: 'object',
 };
 
+// An advance deduction line settles a prepayment, so it takes its dates from the invoice it settles.
+const deductionForbiddenDescription =
+  'Refused on an advance deduction line, whose legs carry the tax point of the invoice itself.';
+
 const createInvoiceLineOpenApiSchema = {
   additionalProperties: false,
   properties: {
-    activityCode: activityCodeProperty,
+    activityCode: {
+      ...activityCodeProperty,
+      description: 'Trimmed and lower cased before validation.',
+    },
     baseAmount: amountProperty,
     // Required on an item line and refused on an advance deduction line, which the body schema decides.
     category: { enum: [...INVOICE_LINE_CATEGORIES], type: 'string' },
     description: { maxLength: 500, minLength: 1, type: 'string' },
     lineKind: { enum: [...INVOICE_LINE_KINDS], type: 'string' },
-    periodEnd: dateProperty,
-    periodStart: dateProperty,
+    periodEnd: { ...dateProperty, description: deductionForbiddenDescription },
+    periodStart: {
+      ...dateProperty,
+      description: deductionForbiddenDescription,
+    },
     quantity: amountProperty,
     sourceAccountCode: sourceAccountCodeProperty,
-    taxPointDate: dateProperty,
+    taxPointDate: {
+      ...dateProperty,
+      description: deductionForbiddenDescription,
+    },
     unit: { maxLength: 16, minLength: 1, type: 'string' },
     unitPrice: amountProperty,
     vatAmount: amountProperty,
@@ -1061,7 +1143,7 @@ export const createDocumentBodyOpenApiSchema = {
           type: 'array',
         },
         receivedDate: dateProperty,
-        roundingAmount: moneyProperty,
+        roundingAmount: roundingProperty,
         taxPointDate: dateProperty,
         variableSymbol: { pattern: '^[0-9]{1,10}$', type: 'string' },
       },

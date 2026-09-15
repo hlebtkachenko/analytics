@@ -56,12 +56,21 @@ ALTER TABLE app.economic_event_line
   -- Copied from the invoice line so a grouping by activity never has to join the register.
   ADD COLUMN IF NOT EXISTS activity_code text;
 
--- Existing legs all carry the document date, which is exactly what the event header holds.
+-- bap_owner is NOBYPASSRLS and no tenant is set during a migration, so FORCE would hide every row from the backfill.
+ALTER TABLE app.economic_event NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE app.economic_event_line NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE app.invoice NO FORCE ROW LEVEL SECURITY;
+
+-- Old legs carry no line tax point, so the invoice tax point is the first fallback rule set cz-default-2026-09.1 takes.
 UPDATE app.economic_event_line AS line
-SET effective_date = event.event_date
+SET effective_date = coalesce(invoice.tax_point_date, event.event_date)
 FROM app.economic_event AS event
-WHERE event.id = line.event_id
-  AND line.effective_date IS NULL;
+  LEFT JOIN app.invoice AS invoice ON invoice.document_id = event.document_id
+WHERE event.id = line.event_id;
+
+ALTER TABLE app.economic_event FORCE ROW LEVEL SECURITY;
+ALTER TABLE app.economic_event_line FORCE ROW LEVEL SECURITY;
+ALTER TABLE app.invoice FORCE ROW LEVEL SECURITY;
 
 ALTER TABLE app.economic_event_line ALTER COLUMN effective_date SET NOT NULL;
 
@@ -73,3 +82,8 @@ ALTER TABLE app.economic_event_line
 -- No activity index yet: it ships with its first reporting consumer.
 CREATE INDEX IF NOT EXISTS economic_event_line_effective_date_idx
   ON app.economic_event_line(organization_id, effective_date, account_code);
+
+-- The account drill-down now reads one account over a period, so the date replaces the event id as its second key.
+DROP INDEX IF EXISTS app.economic_event_line_account_idx;
+CREATE INDEX IF NOT EXISTS economic_event_line_account_date_idx
+  ON app.economic_event_line(organization_id, account_code, effective_date);
