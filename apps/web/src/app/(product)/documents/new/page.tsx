@@ -9,6 +9,10 @@ import {
   Select,
   SelectItem,
   Stack,
+  StructuredListBody,
+  StructuredListCell,
+  StructuredListRow,
+  StructuredListWrapper,
   Table,
   TableBody,
   TableCell,
@@ -21,7 +25,7 @@ import {
 } from '@bap/design-system/react';
 import type { Route } from 'next';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import PageContainer from '../../../../components/page-container';
@@ -35,16 +39,20 @@ import {
 import type { LegalEntity } from '../../../../lib/datasets/client';
 import {
   documentsPath,
+  formatAmount,
   partnersPath,
   sendJson,
 } from '../../../../lib/documents/client';
 import {
   createDocumentRequestSchema,
   createPartnerRequestSchema,
+  decimalUnits,
   derivedVatAmount,
   documentDetailSchema,
   documentKindSchema,
+  formatDecimalUnits,
   invoiceLineCategorySchema,
+  invoiceLineKindSchema,
   isInvoiceKind,
   partnerListSchema,
   partnerSchema,
@@ -53,6 +61,7 @@ import {
 import type {
   DocumentKind,
   InvoiceLineCategory,
+  InvoiceLineKind,
   NewDocument,
   Partner,
   VatMode,
@@ -60,17 +69,24 @@ import type {
 import {
   documentKindLabelKeys,
   invoiceLineCategoryLabelKeys,
+  invoiceLineKindLabelKeys,
   vatModeLabelKeys,
 } from '../../../../lib/documents/labels.ts';
 import { useOrganizationSelection } from '../../../../lib/organizations/use-organization-selection';
 import styles from './page.module.scss';
 
 type LineDraft = Readonly<{
+  activityCode: string;
   baseAmount: string;
-  category: InvoiceLineCategory;
+  // An advance deduction line carries no category, so the draft holds the empty choice.
+  category: '' | InvoiceLineCategory;
   description: string;
   key: string;
+  lineKind: InvoiceLineKind;
+  periodEnd: string;
+  periodStart: string;
   quantity: string;
+  taxPointDate: string;
   unitPrice: string;
   vatAmount: string;
   vatEdited: boolean;
@@ -83,11 +99,16 @@ let nextLineKey = 0;
 function emptyLine(): LineDraft {
   nextLineKey += 1;
   return {
+    activityCode: '',
     baseAmount: '',
     category: 'services',
     description: '',
     key: `line-${String(nextLineKey)}`,
+    lineKind: 'item',
+    periodEnd: '',
+    periodStart: '',
     quantity: '',
+    taxPointDate: '',
     unitPrice: '',
     vatAmount: '0',
     vatEdited: false,
@@ -102,9 +123,14 @@ function asKind(value: string): DocumentKind {
   return parsed.success ? parsed.data : 'other';
 }
 
-function asCategory(value: string): InvoiceLineCategory {
+function asCategory(value: string): '' | InvoiceLineCategory {
   const parsed = invoiceLineCategorySchema.safeParse(value);
-  return parsed.success ? parsed.data : 'other';
+  return parsed.success ? parsed.data : '';
+}
+
+function asLineKind(value: string): InvoiceLineKind {
+  const parsed = invoiceLineKindSchema.safeParse(value);
+  return parsed.success ? parsed.data : 'item';
 }
 
 function asVatMode(value: string): VatMode {
@@ -117,6 +143,22 @@ function derivedVat(line: LineDraft): string {
   return line.vatMode === 'standard'
     ? (derivedVatAmount(line.baseAmount, line.vatRate) ?? '0')
     : '0';
+}
+
+// Base plus VAT over the lines of one kind, in 10^-4 units, as the contract sums them.
+function grossUnits(
+  lines: readonly LineDraft[],
+  lineKind: InvoiceLineKind,
+): bigint {
+  return lines
+    .filter((line) => line.lineKind === lineKind)
+    .reduce(
+      (total, line) =>
+        total +
+        (decimalUnits(line.baseAmount) ?? 0n) +
+        (decimalUnits(line.vatAmount) ?? 0n),
+      0n,
+    );
 }
 
 // A blank field is an absent field; the contract trims whatever is actually sent.
@@ -145,6 +187,7 @@ export default function NewDocumentPage() {
   const [dueDate, setDueDate] = useState('');
   const [receivedDate, setReceivedDate] = useState('');
   const [variableSymbol, setVariableSymbol] = useState('');
+  const [roundingAmount, setRoundingAmount] = useState('0');
   const [lines, setLines] = useState<LineDraft[]>(() => [emptyLine()]);
   const [submitting, setSubmitting] = useState(false);
   const [invalid, setInvalid] = useState(false);
@@ -206,6 +249,15 @@ export default function NewDocumentPage() {
   }, [organizationId, partnerQuery]);
 
   const invoiceKind = isInvoiceKind(kind);
+  // The preview adds the very decimal strings the request carries, so no float touches money.
+  const previewGross = grossUnits(lines, 'item');
+  const previewAdvance = grossUnits(lines, 'advance_deduction');
+  const previewRounding = decimalUnits(roundingAmount) ?? 0n;
+  const previewAmountDue = previewGross + previewRounding - previewAdvance;
+
+  function previewAmount(units: bigint): string {
+    return formatAmount(formatDecimalUnits(units), currencyCode);
+  }
 
   function updateLine(index: number, patch: Partial<LineDraft>): void {
     setLines((current) =>
@@ -214,6 +266,15 @@ export default function NewDocumentPage() {
           return line;
         }
         const next = { ...line, ...patch };
+        // A deducted advance has no category; a supply gets the default one back.
+        if (patch.lineKind !== undefined) {
+          next.category =
+            patch.lineKind === 'advance_deduction'
+              ? ''
+              : next.category === ''
+                ? 'services'
+                : next.category;
+        }
         // Only a standard line carries VAT, and only an edited amount survives a recompute.
         if (next.vatMode !== 'standard') {
           // Exempt and outside-scope supplies carry no rate either, reverse charge keeps one.
@@ -239,16 +300,22 @@ export default function NewDocumentPage() {
         ? {
             dueDate: optional(dueDate),
             lines: lines.map((line) => ({
+              activityCode: optional(line.activityCode),
               baseAmount: line.baseAmount,
-              category: line.category,
+              category: line.category === '' ? undefined : line.category,
               description: line.description,
+              lineKind: line.lineKind,
+              periodEnd: optional(line.periodEnd),
+              periodStart: optional(line.periodStart),
               quantity: optional(line.quantity),
+              taxPointDate: optional(line.taxPointDate),
               unitPrice: optional(line.unitPrice),
               vatAmount: line.vatAmount,
               vatMode: line.vatMode,
               vatRate: line.vatRate,
             })),
             receivedDate: optional(receivedDate),
+            roundingAmount,
             taxPointDate: optional(taxPointDate),
             variableSymbol: optional(variableSymbol),
           }
@@ -496,6 +563,14 @@ export default function NewDocumentPage() {
                   value={receivedDate}
                 />
                 <TextInput
+                  id="invoice-rounding-amount"
+                  labelText={t('documents.fieldRoundingAmount')}
+                  onChange={(event) => {
+                    setRoundingAmount(event.target.value);
+                  }}
+                  value={roundingAmount}
+                />
+                <TextInput
                   id="invoice-variable-symbol"
                   labelText={t('documents.fieldVariableSymbol')}
                   onChange={(event) => {
@@ -512,6 +587,9 @@ export default function NewDocumentPage() {
                       <TableRow>
                         <TableHeader scope="col">
                           {t('documents.lineDescription')}
+                        </TableHeader>
+                        <TableHeader scope="col">
+                          {t('documents.lineKind')}
                         </TableHeader>
                         <TableHeader scope="col">
                           {t('documents.lineCategory')}
@@ -541,144 +619,220 @@ export default function NewDocumentPage() {
                     </TableHead>
                     <TableBody>
                       {lines.map((line, index) => (
-                        <TableRow key={line.key}>
-                          <TableCell>
-                            <TextInput
-                              id={`line-description-${String(index)}`}
-                              labelText={`${t('documents.lineDescription')} ${String(index + 1)}`}
-                              onChange={(event) => {
-                                updateLine(index, {
-                                  description: event.target.value,
-                                });
-                              }}
-                              value={line.description}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Select
-                              id={`line-category-${String(index)}`}
-                              labelText={`${t('documents.lineCategory')} ${String(index + 1)}`}
-                              onChange={(event) => {
-                                updateLine(index, {
-                                  category: asCategory(event.target.value),
-                                });
-                              }}
-                              value={line.category}
-                            >
-                              {invoiceLineCategorySchema.options.map(
-                                (option) => (
+                        <Fragment key={line.key}>
+                          <TableRow>
+                            <TableCell>
+                              <TextInput
+                                id={`line-description-${String(index)}`}
+                                labelText={`${t('documents.lineDescription')} ${String(index + 1)}`}
+                                onChange={(event) => {
+                                  updateLine(index, {
+                                    description: event.target.value,
+                                  });
+                                }}
+                                value={line.description}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Select
+                                id={`line-kind-${String(index)}`}
+                                labelText={`${t('documents.lineKind')} ${String(index + 1)}`}
+                                onChange={(event) => {
+                                  updateLine(index, {
+                                    lineKind: asLineKind(event.target.value),
+                                  });
+                                }}
+                                value={line.lineKind}
+                              >
+                                {invoiceLineKindSchema.options.map((option) => (
                                   <SelectItem
                                     key={option}
-                                    text={t(
-                                      invoiceLineCategoryLabelKeys[option],
-                                    )}
+                                    text={t(invoiceLineKindLabelKeys[option])}
                                     value={option}
                                   />
-                                ),
-                              )}
-                            </Select>
-                          </TableCell>
-                          <TableCell>
-                            <TextInput
-                              id={`line-quantity-${String(index)}`}
-                              labelText={`${t('documents.lineQuantity')} ${String(index + 1)}`}
-                              onChange={(event) => {
-                                updateLine(index, {
-                                  quantity: event.target.value,
-                                });
-                              }}
-                              value={line.quantity}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <TextInput
-                              id={`line-unit-price-${String(index)}`}
-                              labelText={`${t('documents.lineUnitPrice')} ${String(index + 1)}`}
-                              onChange={(event) => {
-                                updateLine(index, {
-                                  unitPrice: event.target.value,
-                                });
-                              }}
-                              value={line.unitPrice}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <TextInput
-                              id={`line-base-${String(index)}`}
-                              labelText={`${t('documents.lineBaseAmount')} ${String(index + 1)}`}
-                              onChange={(event) => {
-                                updateLine(index, {
-                                  baseAmount: event.target.value,
-                                });
-                              }}
-                              value={line.baseAmount}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Select
-                              id={`line-vat-mode-${String(index)}`}
-                              labelText={`${t('documents.lineVatMode')} ${String(index + 1)}`}
-                              onChange={(event) => {
-                                updateLine(index, {
-                                  vatMode: asVatMode(event.target.value),
-                                });
-                              }}
-                              value={line.vatMode}
-                            >
-                              {vatModeSchema.options.map((option) => (
+                                ))}
+                              </Select>
+                            </TableCell>
+                            <TableCell>
+                              <Select
+                                disabled={line.lineKind === 'advance_deduction'}
+                                id={`line-category-${String(index)}`}
+                                labelText={`${t('documents.lineCategory')} ${String(index + 1)}`}
+                                onChange={(event) => {
+                                  updateLine(index, {
+                                    category: asCategory(event.target.value),
+                                  });
+                                }}
+                                value={line.category}
+                              >
                                 <SelectItem
-                                  key={option}
-                                  text={t(vatModeLabelKeys[option])}
-                                  value={option}
+                                  text={t('documents.lineCategoryNone')}
+                                  value=""
                                 />
-                              ))}
-                            </Select>
-                          </TableCell>
-                          <TableCell>
-                            <TextInput
-                              id={`line-vat-rate-${String(index)}`}
-                              labelText={`${t('documents.lineVatRate')} ${String(index + 1)}`}
-                              onChange={(event) => {
-                                updateLine(index, {
-                                  vatRate: event.target.value,
-                                });
-                              }}
-                              value={line.vatRate}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <TextInput
-                              id={`line-vat-amount-${String(index)}`}
-                              labelText={`${t('documents.lineVatAmount')} ${String(index + 1)}`}
-                              onChange={(event) => {
-                                updateLine(index, {
-                                  vatAmount: event.target.value,
-                                  vatEdited: true,
-                                });
-                              }}
-                              value={line.vatAmount}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Button
-                              disabled={lines.length === 1}
-                              kind="ghost"
-                              onClick={() => {
-                                setLines((current) =>
-                                  current.filter(
-                                    (_line, position) => position !== index,
+                                {invoiceLineCategorySchema.options.map(
+                                  (option) => (
+                                    <SelectItem
+                                      key={option}
+                                      text={t(
+                                        invoiceLineCategoryLabelKeys[option],
+                                      )}
+                                      value={option}
+                                    />
                                   ),
-                                );
-                              }}
-                              size="sm"
-                              type="button"
-                            >
-                              {t('documents.removeLine', {
-                                line: index + 1,
-                              })}
-                            </Button>
-                          </TableCell>
-                        </TableRow>
+                                )}
+                              </Select>
+                            </TableCell>
+                            <TableCell>
+                              <TextInput
+                                id={`line-quantity-${String(index)}`}
+                                labelText={`${t('documents.lineQuantity')} ${String(index + 1)}`}
+                                onChange={(event) => {
+                                  updateLine(index, {
+                                    quantity: event.target.value,
+                                  });
+                                }}
+                                value={line.quantity}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <TextInput
+                                id={`line-unit-price-${String(index)}`}
+                                labelText={`${t('documents.lineUnitPrice')} ${String(index + 1)}`}
+                                onChange={(event) => {
+                                  updateLine(index, {
+                                    unitPrice: event.target.value,
+                                  });
+                                }}
+                                value={line.unitPrice}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <TextInput
+                                id={`line-base-${String(index)}`}
+                                labelText={`${t('documents.lineBaseAmount')} ${String(index + 1)}`}
+                                onChange={(event) => {
+                                  updateLine(index, {
+                                    baseAmount: event.target.value,
+                                  });
+                                }}
+                                value={line.baseAmount}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Select
+                                id={`line-vat-mode-${String(index)}`}
+                                labelText={`${t('documents.lineVatMode')} ${String(index + 1)}`}
+                                onChange={(event) => {
+                                  updateLine(index, {
+                                    vatMode: asVatMode(event.target.value),
+                                  });
+                                }}
+                                value={line.vatMode}
+                              >
+                                {vatModeSchema.options.map((option) => (
+                                  <SelectItem
+                                    key={option}
+                                    text={t(vatModeLabelKeys[option])}
+                                    value={option}
+                                  />
+                                ))}
+                              </Select>
+                            </TableCell>
+                            <TableCell>
+                              <TextInput
+                                id={`line-vat-rate-${String(index)}`}
+                                labelText={`${t('documents.lineVatRate')} ${String(index + 1)}`}
+                                onChange={(event) => {
+                                  updateLine(index, {
+                                    vatRate: event.target.value,
+                                  });
+                                }}
+                                value={line.vatRate}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <TextInput
+                                id={`line-vat-amount-${String(index)}`}
+                                labelText={`${t('documents.lineVatAmount')} ${String(index + 1)}`}
+                                onChange={(event) => {
+                                  updateLine(index, {
+                                    vatAmount: event.target.value,
+                                    vatEdited: true,
+                                  });
+                                }}
+                                value={line.vatAmount}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                disabled={lines.length === 1}
+                                kind="ghost"
+                                onClick={() => {
+                                  setLines((current) =>
+                                    current.filter(
+                                      (_line, position) => position !== index,
+                                    ),
+                                  );
+                                }}
+                                size="sm"
+                                type="button"
+                              >
+                                {t('documents.removeLine', {
+                                  line: index + 1,
+                                })}
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell colSpan={10}>
+                              <div className={styles.lineDetails!}>
+                                <TextInput
+                                  id={`line-tax-point-${String(index)}`}
+                                  labelText={`${t('documents.lineTaxPointDate')} ${String(index + 1)}`}
+                                  onChange={(event) => {
+                                    updateLine(index, {
+                                      taxPointDate: event.target.value,
+                                    });
+                                  }}
+                                  type="date"
+                                  value={line.taxPointDate}
+                                />
+                                <TextInput
+                                  id={`line-period-start-${String(index)}`}
+                                  labelText={`${t('documents.linePeriodStart')} ${String(index + 1)}`}
+                                  onChange={(event) => {
+                                    updateLine(index, {
+                                      periodStart: event.target.value,
+                                    });
+                                  }}
+                                  type="date"
+                                  value={line.periodStart}
+                                />
+                                <TextInput
+                                  id={`line-period-end-${String(index)}`}
+                                  labelText={`${t('documents.linePeriodEnd')} ${String(index + 1)}`}
+                                  onChange={(event) => {
+                                    updateLine(index, {
+                                      periodEnd: event.target.value,
+                                    });
+                                  }}
+                                  type="date"
+                                  value={line.periodEnd}
+                                />
+                                <TextInput
+                                  id={`line-activity-${String(index)}`}
+                                  labelText={`${t('documents.lineActivity')} ${String(index + 1)}`}
+                                  onChange={(event) => {
+                                    updateLine(index, {
+                                      activityCode: event.target.value,
+                                    });
+                                  }}
+                                  value={line.activityCode}
+                                />
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        </Fragment>
                       ))}
                     </TableBody>
                   </Table>
@@ -692,6 +846,45 @@ export default function NewDocumentPage() {
                 >
                   {t('documents.addLine')}
                 </Button>
+                <StructuredListWrapper
+                  aria-label={t('documents.totalsInvoice')}
+                  isCondensed
+                >
+                  <StructuredListBody>
+                    <StructuredListRow>
+                      <StructuredListCell>
+                        {t('documents.totalGross')}
+                      </StructuredListCell>
+                      <StructuredListCell>
+                        {previewAmount(previewGross)}
+                      </StructuredListCell>
+                    </StructuredListRow>
+                    <StructuredListRow>
+                      <StructuredListCell>
+                        {t('documents.totalRounding')}
+                      </StructuredListCell>
+                      <StructuredListCell>
+                        {previewAmount(previewRounding)}
+                      </StructuredListCell>
+                    </StructuredListRow>
+                    <StructuredListRow>
+                      <StructuredListCell>
+                        {t('documents.totalAdvance')}
+                      </StructuredListCell>
+                      <StructuredListCell>
+                        {previewAmount(previewAdvance)}
+                      </StructuredListCell>
+                    </StructuredListRow>
+                    <StructuredListRow>
+                      <StructuredListCell>
+                        {t('documents.totalAmountDue')}
+                      </StructuredListCell>
+                      <StructuredListCell>
+                        {previewAmount(previewAmountDue)}
+                      </StructuredListCell>
+                    </StructuredListRow>
+                  </StructuredListBody>
+                </StructuredListWrapper>
               </Stack>
             </section>
           ) : null}

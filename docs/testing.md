@@ -107,6 +107,14 @@ member write is refused, list filtering, counting, and totals are exact, a
 duplicate partner registration number and a duplicate document link are refused,
 the shared directive chart publishes to every tenant, and a document read
 returns its derived event and open issues together.
+`apps/api/src/documents/invoice-scenario.integration.test.ts` registers one
+received invoice for five months of work, four lines per month, mixed reverse
+charge and standard lines, two deducted advances and a rounding difference, then
+reads every fact back with a plain SQL `group by`: totals and the generated
+`amount_due`, VAT by line kind and regime, the payable and expense per month of
+`effective_date`, the expense per `activity_code`, exact account totals on 321,
+314, 343, 548, 501 and 518, that a document date patch keeps the rounding leg,
+and that a negative rounding books 648.
 
 The database suite also proves the account lifecycle: exact `bap_eraser`
 attributes and memberships, no login or CONNECT leakage, exact request and

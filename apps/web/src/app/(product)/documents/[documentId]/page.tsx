@@ -61,6 +61,7 @@ import {
   documentStatusLabelKeys,
   documentStatusTagTypes,
   invoiceLineCategoryLabelKeys,
+  invoiceLineKindLabelKeys,
   vatModeLabelKeys,
 } from '../../../../lib/documents/labels.ts';
 import { useOrganizationSelection } from '../../../../lib/organizations/use-organization-selection';
@@ -380,53 +381,138 @@ export default function DocumentDetailPage() {
         </section>
       ) : null}
       {detail.invoice === null ? null : (
-        <TableContainer
-          className={styles.tableContainer!}
-          title={t('documents.invoiceLines')}
-        >
-          <Table aria-label={t('documents.invoiceLines')} size="sm">
-            <TableHead>
-              <TableRow>
-                <TableHeader scope="col">
-                  {t('documents.lineNumber')}
-                </TableHeader>
-                <TableHeader scope="col">
-                  {t('documents.lineDescription')}
-                </TableHeader>
-                <TableHeader scope="col">
-                  {t('documents.lineCategory')}
-                </TableHeader>
-                <TableHeader scope="col">
-                  {t('documents.lineBaseAmount')}
-                </TableHeader>
-                <TableHeader scope="col">
-                  {t('documents.lineVatMode')}
-                </TableHeader>
-                <TableHeader scope="col">
-                  {t('documents.lineVatAmount')}
-                </TableHeader>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {detail.invoice.lines.map((line) => (
-                <TableRow key={line.id}>
-                  <TableCell>{line.lineNo}</TableCell>
-                  <TableCell>{line.description}</TableCell>
-                  <TableCell>
-                    {t(invoiceLineCategoryLabelKeys[line.category])}
-                  </TableCell>
-                  <TableCell className={styles.amount!}>
-                    {formatAmount(line.baseAmount, document.currencyCode)}
-                  </TableCell>
-                  <TableCell>{t(vatModeLabelKeys[line.vatMode])}</TableCell>
-                  <TableCell className={styles.amount!}>
-                    {formatAmount(line.vatAmount, document.currencyCode)}
-                  </TableCell>
+        <>
+          <TableContainer
+            className={styles.tableContainer!}
+            title={t('documents.invoiceLines')}
+          >
+            <Table aria-label={t('documents.invoiceLines')} size="sm">
+              <TableHead>
+                <TableRow>
+                  <TableHeader scope="col">
+                    {t('documents.lineNumber')}
+                  </TableHeader>
+                  <TableHeader scope="col">
+                    {t('documents.lineDescription')}
+                  </TableHeader>
+                  <TableHeader scope="col">
+                    {t('documents.lineKind')}
+                  </TableHeader>
+                  <TableHeader scope="col">
+                    {t('documents.lineCategory')}
+                  </TableHeader>
+                  <TableHeader scope="col">
+                    {t('documents.linePeriod')}
+                  </TableHeader>
+                  <TableHeader scope="col">
+                    {t('documents.lineTaxPointDate')}
+                  </TableHeader>
+                  <TableHeader scope="col">
+                    {t('documents.lineActivity')}
+                  </TableHeader>
+                  <TableHeader scope="col">
+                    {t('documents.lineBaseAmount')}
+                  </TableHeader>
+                  <TableHeader scope="col">
+                    {t('documents.lineVatMode')}
+                  </TableHeader>
+                  <TableHeader scope="col">
+                    {t('documents.lineVatAmount')}
+                  </TableHeader>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+              </TableHead>
+              <TableBody>
+                {detail.invoice.lines.map((line) => (
+                  <TableRow key={line.id}>
+                    <TableCell>{line.lineNo}</TableCell>
+                    <TableCell>{line.description}</TableCell>
+                    <TableCell>
+                      {t(invoiceLineKindLabelKeys[line.lineKind])}
+                    </TableCell>
+                    <TableCell>
+                      {line.category === null
+                        ? t('documents.notAvailable')
+                        : t(invoiceLineCategoryLabelKeys[line.category])}
+                    </TableCell>
+                    <TableCell>
+                      {line.periodStart === null && line.periodEnd === null
+                        ? t('documents.notAvailable')
+                        : t('documents.linePeriodRange', {
+                            end: line.periodEnd ?? t('documents.notAvailable'),
+                            start:
+                              line.periodStart ?? t('documents.notAvailable'),
+                          })}
+                    </TableCell>
+                    <TableCell>
+                      {line.taxPointDate ?? t('documents.notAvailable')}
+                    </TableCell>
+                    <TableCell>
+                      {line.activityCode ?? t('documents.notAvailable')}
+                    </TableCell>
+                    <TableCell className={styles.amount!}>
+                      {formatAmount(line.baseAmount, document.currencyCode)}
+                    </TableCell>
+                    <TableCell>{t(vatModeLabelKeys[line.vatMode])}</TableCell>
+                    <TableCell className={styles.amount!}>
+                      {formatAmount(line.vatAmount, document.currencyCode)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          <StructuredListWrapper
+            aria-label={t('documents.totalsInvoice')}
+            isCondensed
+          >
+            <StructuredListBody>
+              <StructuredListRow>
+                <StructuredListCell>
+                  {t('documents.totalGross')}
+                </StructuredListCell>
+                <StructuredListCell className={styles.amount!}>
+                  {formatAmount(
+                    detail.invoice.grossTotal,
+                    document.currencyCode,
+                  )}
+                </StructuredListCell>
+              </StructuredListRow>
+              <StructuredListRow>
+                <StructuredListCell>
+                  {t('documents.totalRounding')}
+                </StructuredListCell>
+                <StructuredListCell className={styles.amount!}>
+                  {formatAmount(
+                    detail.invoice.roundingAmount,
+                    document.currencyCode,
+                  )}
+                </StructuredListCell>
+              </StructuredListRow>
+              <StructuredListRow>
+                <StructuredListCell>
+                  {t('documents.totalAdvance')}
+                </StructuredListCell>
+                <StructuredListCell className={styles.amount!}>
+                  {formatAmount(
+                    detail.invoice.advanceTotal,
+                    document.currencyCode,
+                  )}
+                </StructuredListCell>
+              </StructuredListRow>
+              <StructuredListRow>
+                <StructuredListCell>
+                  {t('documents.totalAmountDue')}
+                </StructuredListCell>
+                <StructuredListCell className={styles.amount!}>
+                  {formatAmount(
+                    detail.invoice.amountDue,
+                    document.currencyCode,
+                  )}
+                </StructuredListCell>
+              </StructuredListRow>
+            </StructuredListBody>
+          </StructuredListWrapper>
+        </>
       )}
       <section aria-labelledby="document-event-heading">
         <Stack gap={5}>
@@ -469,6 +555,12 @@ export default function DocumentDetailPage() {
                         {t('documents.eventColumnAccount')}
                       </TableHeader>
                       <TableHeader scope="col">
+                        {t('documents.eventColumnEffectiveDate')}
+                      </TableHeader>
+                      <TableHeader scope="col">
+                        {t('documents.eventColumnActivity')}
+                      </TableHeader>
+                      <TableHeader scope="col">
                         {t('documents.eventColumnDebit')}
                       </TableHeader>
                       <TableHeader scope="col">
@@ -485,6 +577,10 @@ export default function DocumentDetailPage() {
                         <TableCell>{line.lineNo}</TableCell>
                         <TableCell>
                           {line.accountCode} {line.accountName}
+                        </TableCell>
+                        <TableCell>{line.effectiveDate}</TableCell>
+                        <TableCell>
+                          {line.activityCode ?? t('documents.notAvailable')}
                         </TableCell>
                         <TableCell className={styles.amount!}>
                           {line.side === 'debit'

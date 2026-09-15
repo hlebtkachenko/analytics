@@ -14,3 +14,10 @@
 .tableContainer {
   min-inline-size: 0;
 }
+
+.lineDetails {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-05;
+}

@@ -247,11 +247,14 @@ async function loadDetail(
     [documentId],
   );
   const invoice = await transaction.query<{
+    advance_total: string;
+    amount_due: string;
     base_total: string;
     due_date: string | null;
     fx_rate: string | null;
     gross_total: string;
     received_date: string | null;
+    rounding_amount: string;
     tax_point_date: string | null;
     variable_symbol: string | null;
     vat_total: string;
@@ -263,27 +266,39 @@ async function loadDetail(
             fx_rate::text as fx_rate,
             base_total,
             vat_total,
-            gross_total
+            gross_total,
+            rounding_amount::text as rounding_amount,
+            advance_total,
+            amount_due::text as amount_due
        from app.invoice
       where document_id = $1`,
     [documentId],
   );
   const invoiceLines = await transaction.query<{
+    activity_code: string | null;
     base_amount: string;
-    category: string;
+    category: string | null;
     description: string;
     id: string;
+    line_kind: string;
     line_no: number;
+    period_end: string | null;
+    period_start: string | null;
     quantity: string | null;
     source_account_code: string | null;
+    tax_point_date: string | null;
     unit: string | null;
     unit_price: string | null;
     vat_amount: string;
     vat_mode: string;
     vat_rate: string;
   }>(
-    `select id, line_no, description, category, quantity, unit, unit_price,
-            base_amount, vat_mode, vat_rate, vat_amount, source_account_code
+    `select id, line_no, line_kind, description, category, quantity, unit, unit_price,
+            base_amount, vat_mode, vat_rate, vat_amount, source_account_code,
+            tax_point_date::text as tax_point_date,
+            period_start::text as period_start,
+            period_end::text as period_end,
+            activity_code
        from app.invoice_line
       where document_id = $1
       order by line_no`,
@@ -307,15 +322,19 @@ async function loadDetail(
   const eventLines = await transaction.query<{
     account_code: string;
     account_name: string;
+    activity_code: string | null;
     amount: string;
     description: string | null;
+    effective_date: string;
     invoice_line_id: string | null;
     line_no: number;
     partner_id: string | null;
     side: string;
   }>(
     `select l.line_no, l.account_code, a.name_en as account_name, l.side, l.amount,
-            l.partner_id, l.invoice_line_id, l.description
+            l.partner_id, l.invoice_line_id, l.description,
+            l.effective_date::text as effective_date,
+            l.activity_code
        from app.economic_event_line as l
        join app.directive_account as a on a.code = l.account_code
        join app.economic_event as e on e.id = l.event_id
@@ -377,8 +396,10 @@ async function loadDetail(
             lines: eventLines.rows.map((row) => ({
               accountCode: row.account_code,
               accountName: row.account_name,
+              activityCode: row.activity_code,
               amount: row.amount,
               description: row.description,
+              effectiveDate: row.effective_date,
               invoiceLineId: row.invoice_line_id,
               lineNo: row.line_no,
               partnerId: row.partner_id,
@@ -390,18 +411,25 @@ async function loadDetail(
       invoiceRow === undefined
         ? null
         : {
+            advanceTotal: invoiceRow.advance_total,
+            amountDue: invoiceRow.amount_due,
             baseTotal: invoiceRow.base_total,
             dueDate: invoiceRow.due_date,
             fxRate: invoiceRow.fx_rate,
             grossTotal: invoiceRow.gross_total,
             lines: invoiceLines.rows.map((row) => ({
+              activityCode: row.activity_code,
               baseAmount: row.base_amount,
               category: row.category as DerivationLine['category'],
               description: row.description,
               id: row.id,
+              lineKind: row.line_kind as DerivationLine['lineKind'],
               lineNo: row.line_no,
+              periodEnd: row.period_end,
+              periodStart: row.period_start,
               quantity: row.quantity,
               sourceAccountCode: row.source_account_code,
+              taxPointDate: row.tax_point_date,
               unit: row.unit,
               unitPrice: row.unit_price,
               vatAmount: row.vat_amount,
@@ -409,6 +437,7 @@ async function loadDetail(
               vatRate: row.vat_rate,
             })),
             receivedDate: invoiceRow.received_date,
+            roundingAmount: invoiceRow.rounding_amount,
             taxPointDate: invoiceRow.tax_point_date,
             variableSymbol: invoiceRow.variable_symbol,
             vatTotal: invoiceRow.vat_total,
@@ -432,13 +461,15 @@ async function loadDetail(
   };
 }
 
-// Everything derivation needs about the document; a summary already satisfies it.
+// Everything derivation needs about the document and its invoice header.
 interface DerivationTarget {
   documentDate: string;
   id: string;
   kind: DocumentKind;
   legalEntityId: string;
   partnerId: string | null;
+  roundingAmount: string;
+  taxPointDate: string | null;
 }
 
 // Derived data is rebuildable: every write of an invoice throws the stored event and issues away and derives again.
@@ -449,9 +480,12 @@ async function rederive(
   lines: readonly DerivationLine[],
 ): Promise<void> {
   const derived = deriveEconomicEvent({
+    documentDate: target.documentDate,
     kind: target.kind,
     lines,
     partnerId: target.partnerId,
+    roundingAmount: target.roundingAmount,
+    taxPointDate: target.taxPointDate,
   });
 
   await transaction.query(
@@ -493,10 +527,14 @@ async function rederive(
   if (derived.lines.length > 0) {
     await transaction.query(
       `insert into app.economic_event_line
-         (organization_id, event_id, line_no, account_code, side, amount, partner_id, invoice_line_id, description)
-       select $1, $2, line_no, account_code, side, amount, partner_id, invoice_line_id, description
-         from unnest($3::int[], $4::text[], $5::text[], $6::numeric[], $7::uuid[], $8::uuid[], $9::text[])
-           as line(line_no, account_code, side, amount, partner_id, invoice_line_id, description)`,
+         (organization_id, event_id, line_no, account_code, side, amount, partner_id, invoice_line_id,
+          description, effective_date, activity_code)
+       select $1, $2, line_no, account_code, side, amount, partner_id, invoice_line_id,
+              description, effective_date, activity_code
+         from unnest($3::int[], $4::text[], $5::text[], $6::numeric[], $7::uuid[], $8::uuid[], $9::text[],
+                     $10::date[], $11::text[])
+           as line(line_no, account_code, side, amount, partner_id, invoice_line_id, description,
+                   effective_date, activity_code)`,
       [
         organizationId,
         eventId,
@@ -507,6 +545,8 @@ async function rederive(
         derived.lines.map((line) => line.partnerId),
         derived.lines.map((line) => line.invoiceLineId),
         derived.lines.map((line) => line.description),
+        derived.lines.map((line) => line.effectiveDate),
+        derived.lines.map((line) => line.activityCode),
       ],
     );
   }
@@ -526,15 +566,20 @@ async function loadDerivationLines(
   documentId: string,
 ): Promise<DerivationLine[]> {
   const lines = await transaction.query<{
+    activity_code: string | null;
     base_amount: string;
-    category: string;
+    category: string | null;
     description: string;
     id: string;
+    line_kind: string;
+    tax_point_date: string | null;
     vat_amount: string;
     vat_mode: string;
     vat_rate: string;
   }>(
-    `select id, description, category, base_amount, vat_mode, vat_rate, vat_amount
+    `select id, line_kind, description, category, base_amount, vat_mode, vat_rate, vat_amount,
+            tax_point_date::text as tax_point_date,
+            activity_code
        from app.invoice_line
       where document_id = $1
       order by line_no`,
@@ -542,14 +587,40 @@ async function loadDerivationLines(
   );
 
   return lines.rows.map((row) => ({
+    activityCode: row.activity_code,
     baseAmount: row.base_amount,
     category: row.category as DerivationLine['category'],
     description: row.description,
     id: row.id,
+    lineKind: row.line_kind as DerivationLine['lineKind'],
+    taxPointDate: row.tax_point_date,
     vatAmount: row.vat_amount,
     vatMode: row.vat_mode as DerivationLine['vatMode'],
     vatRate: row.vat_rate,
   }));
+}
+
+// The invoice header fields derivation reads, which the patch never carries either.
+async function loadInvoiceHeader(
+  transaction: PoolClient,
+  documentId: string,
+): Promise<{ roundingAmount: string; taxPointDate: string | null }> {
+  const header = await transaction.query<{
+    rounding_amount: string;
+    tax_point_date: string | null;
+  }>(
+    `select rounding_amount::text as rounding_amount, tax_point_date::text as tax_point_date
+       from app.invoice
+      where document_id = $1`,
+    [documentId],
+  );
+  const row = header.rows[0];
+
+  // A document without invoice content books no rounding and falls back to its own date.
+  return {
+    roundingAmount: row?.rounding_amount ?? '0',
+    taxPointDate: row?.tax_point_date ?? null,
+  };
 }
 
 async function writeAttributes(
@@ -615,13 +686,26 @@ export async function createDocument(
 
     let baseTotal = DECIMAL_ZERO;
     let vatTotal = DECIMAL_ZERO;
+    let advanceTotal = DECIMAL_ZERO;
 
     for (const line of body.invoice?.lines ?? []) {
-      baseTotal = addDecimal(baseTotal, parseDecimal(line.baseAmount));
-      vatTotal = addDecimal(vatTotal, parseDecimal(line.vatAmount));
+      const base = parseDecimal(line.baseAmount);
+      const vat = parseDecimal(line.vatAmount);
+
+      // The three totals are the supply value of the invoice, so a deduction line feeds the advance total instead.
+      if (line.lineKind === 'advance_deduction') {
+        advanceTotal = addDecimal(advanceTotal, addDecimal(base, vat));
+        continue;
+      }
+
+      baseTotal = addDecimal(baseTotal, base);
+      vatTotal = addDecimal(vatTotal, vat);
     }
 
     const grossTotal = addDecimal(baseTotal, vatTotal);
+    const roundingAmount = parseDecimal(body.invoice?.roundingAmount ?? '0');
+    // What the paper says to pay before the advance is deducted; the database generates the amount due from it.
+    const invoiceTotal = addDecimal(grossTotal, roundingAmount);
     const created = await transaction.query<{ id: string }>(
       `insert into app.document
          (organization_id, legal_entity_id, kind, reference, title, partner_id, document_date,
@@ -642,7 +726,7 @@ export async function createDocument(
         // Invoice totals are computed from the lines, so a client value is only used when there is no invoice.
         body.invoice === undefined
           ? (body.totalAmount ?? null)
-          : formatDecimal(grossTotal),
+          : formatDecimal(invoiceTotal),
         body.notes ?? null,
         input.userId,
       ],
@@ -664,11 +748,12 @@ export async function createDocument(
     const derivationLines: DerivationLine[] = [];
 
     if (body.invoice !== undefined) {
+      // amount_due is generated and stored by the database, so it is never in this column list.
       await transaction.query(
         `insert into app.invoice
            (document_id, organization_id, tax_point_date, due_date, received_date, variable_symbol, fx_rate,
-            base_total, vat_total, gross_total)
-         values ($1, $2, $3::date, $4::date, $5::date, $6, $7, $8, $9, $10)`,
+            base_total, vat_total, gross_total, rounding_amount, advance_total)
+         values ($1, $2, $3::date, $4::date, $5::date, $6, $7, $8, $9, $10, $11, $12)`,
         [
           documentId,
           input.organizationId,
@@ -680,6 +765,8 @@ export async function createDocument(
           formatDecimal(baseTotal),
           formatDecimal(vatTotal),
           formatDecimal(grossTotal),
+          formatDecimal(roundingAmount),
+          formatDecimal(advanceTotal),
         ],
       );
 
@@ -689,20 +776,24 @@ export async function createDocument(
       }>(
         `insert into app.invoice_line
            (organization_id, document_id, line_no, description, category, quantity, unit, unit_price,
-            base_amount, vat_mode, vat_rate, vat_amount, source_account_code)
+            base_amount, vat_mode, vat_rate, vat_amount, source_account_code,
+            line_kind, tax_point_date, period_start, period_end, activity_code)
          select $1, $2, line_no, description, category, quantity, unit, unit_price,
-                base_amount, vat_mode, vat_rate, vat_amount, source_account_code
+                base_amount, vat_mode, vat_rate, vat_amount, source_account_code,
+                line_kind, tax_point_date, period_start, period_end, activity_code
            from unnest($3::int[], $4::text[], $5::text[], $6::numeric[], $7::text[], $8::numeric[],
-                       $9::numeric[], $10::text[], $11::numeric[], $12::numeric[], $13::text[])
+                       $9::numeric[], $10::text[], $11::numeric[], $12::numeric[], $13::text[],
+                       $14::text[], $15::date[], $16::date[], $17::date[], $18::text[])
              as line(line_no, description, category, quantity, unit, unit_price,
-                     base_amount, vat_mode, vat_rate, vat_amount, source_account_code)
+                     base_amount, vat_mode, vat_rate, vat_amount, source_account_code,
+                     line_kind, tax_point_date, period_start, period_end, activity_code)
          returning id, line_no`,
         [
           input.organizationId,
           documentId,
           lines.map((_line, index) => index + 1),
           lines.map((line) => line.description),
-          lines.map((line) => line.category),
+          lines.map((line) => line.category ?? null),
           lines.map((line) => line.quantity ?? null),
           lines.map((line) => line.unit ?? null),
           lines.map((line) => line.unitPrice ?? null),
@@ -711,6 +802,11 @@ export async function createDocument(
           lines.map((line) => line.vatRate),
           lines.map((line) => line.vatAmount),
           lines.map((line) => line.sourceAccountCode ?? null),
+          lines.map((line) => line.lineKind),
+          lines.map((line) => line.taxPointDate ?? null),
+          lines.map((line) => line.periodStart ?? null),
+          lines.map((line) => line.periodEnd ?? null),
+          lines.map((line) => line.activityCode ?? null),
         ],
       );
 
@@ -725,10 +821,13 @@ export async function createDocument(
         }
 
         derivationLines.push({
+          activityCode: line.activityCode ?? null,
           baseAmount: line.baseAmount,
-          category: line.category,
+          category: line.category ?? null,
           description: line.description,
           id: row.id,
+          lineKind: line.lineKind,
+          taxPointDate: line.taxPointDate ?? null,
           vatAmount: line.vatAmount,
           vatMode: line.vatMode,
           vatRate: line.vatRate,
@@ -745,6 +844,8 @@ export async function createDocument(
         kind: body.kind,
         legalEntityId: body.legalEntityId,
         partnerId: body.partnerId ?? null,
+        roundingAmount: body.invoice?.roundingAmount ?? '0',
+        taxPointDate: body.invoice?.taxPointDate ?? null,
       },
       derivationLines,
     );
@@ -888,10 +989,13 @@ export async function updateDocument(
       (after.partnerId !== before.partnerId ||
         after.documentDate !== before.documentDate)
     ) {
+      // The invoice header rides along, or a patch would drop the rounding legs and the invoice-level tax point.
+      const header = await loadInvoiceHeader(transaction, input.documentId);
+
       await rederive(
         transaction,
         input.organizationId,
-        after,
+        { ...after, ...header },
         await loadDerivationLines(transaction, input.documentId),
       );
     }

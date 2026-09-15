@@ -2,7 +2,10 @@ import { legalEntityIdentifierSchema } from '@bap/security';
 import { z } from 'zod';
 
 import {
+  absDecimal,
+  addDecimal,
   DECIMAL_PATTERN,
+  DECIMAL_ZERO,
   multiplyByRatePercent,
   NON_NEGATIVE_DECIMAL_PATTERN,
   parseDecimal,
@@ -36,9 +39,14 @@ export const INVOICE_LINE_CATEGORIES = [
   'goods',
   'material',
   'services',
+  'labour',
+  'transport',
   'asset',
   'other',
 ] as const;
+
+// An advance deduction is a line kind, because the paper itemises the deducted advance by VAT rate.
+export const INVOICE_LINE_KINDS = ['item', 'advance_deduction'] as const;
 
 export const VAT_MODES = [
   'standard',
@@ -90,6 +98,7 @@ export const documentKindSchema = z.enum(DOCUMENT_KINDS);
 export const documentStatusSchema = z.enum(DOCUMENT_STATUSES);
 export const documentSourceSchema = z.enum(DOCUMENT_SOURCES);
 export const invoiceLineCategorySchema = z.enum(INVOICE_LINE_CATEGORIES);
+export const invoiceLineKindSchema = z.enum(INVOICE_LINE_KINDS);
 export const vatModeSchema = z.enum(VAT_MODES);
 export const documentLinkKindSchema = z.enum(DOCUMENT_LINK_KINDS);
 export const dataIssueCodeSchema = z.enum(DATA_ISSUE_CODES);
@@ -104,6 +113,23 @@ export const nonNegativeDecimalStringSchema = z
   .string()
   .trim()
   .regex(NON_NEGATIVE_DECIMAL_PATTERN);
+
+// The analytic activity of a line: a free code, normalised here so grouping never depends on how it was typed.
+export const ACTIVITY_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+export const activityCodeSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(ACTIVITY_CODE_PATTERN);
+
+// One unit, the bound the invoice check constraint enforces on the only signed money column in the register.
+const ROUNDING_BOUND = parseDecimal('1');
+
+// The supplier rounded up when it is positive and down when it is negative, so this amount alone carries a sign.
+export const signedRoundingSchema = decimalStringSchema.refine(
+  (value) => absDecimal(parseDecimal(value)) < ROUNDING_BOUND,
+  { message: 'A rounding difference is smaller than one unit.' },
+);
 
 // Zero to one hundred with at most two decimal places, the exact range numeric(5,2) and the check constraint accept.
 export const VAT_RATE_PATTERN = /^(100(\.0{1,2})?|\d{1,2}(\.\d{1,2})?)$/;
@@ -208,13 +234,19 @@ export type DocumentSummary = z.infer<typeof documentSummarySchema>;
 
 export const invoiceLineSchema = z
   .object({
+    activityCode: activityCodeSchema.nullable(),
     baseAmount: nonNegativeDecimalStringSchema,
-    category: invoiceLineCategorySchema,
+    // Null on an advance deduction line, which settles a prepayment instead of describing a supply.
+    category: invoiceLineCategorySchema.nullable(),
     description: z.string().min(1).max(500),
     id: z.string().toLowerCase().uuid(),
+    lineKind: invoiceLineKindSchema,
     lineNo: z.number().int().min(1),
+    periodEnd: z.iso.date().nullable(),
+    periodStart: z.iso.date().nullable(),
     quantity: nonNegativeDecimalStringSchema.nullable(),
     sourceAccountCode: sourceAccountCodeSchema.nullable(),
+    taxPointDate: z.iso.date().nullable(),
     unit: z.string().max(16).nullable(),
     unitPrice: nonNegativeDecimalStringSchema.nullable(),
     vatAmount: nonNegativeDecimalStringSchema,
@@ -225,6 +257,9 @@ export const invoiceLineSchema = z
 
 export const invoiceSchema = z
   .object({
+    advanceTotal: nonNegativeDecimalStringSchema,
+    // Generated and stored by the database as gross plus rounding minus the advance; the API never writes it.
+    amountDue: nonNegativeDecimalStringSchema,
     baseTotal: nonNegativeDecimalStringSchema,
     dueDate: z.iso.date().nullable(),
     // numeric(18,6) reaches the boundary as text, so the response carries all six decimal places.
@@ -232,6 +267,7 @@ export const invoiceSchema = z
     grossTotal: nonNegativeDecimalStringSchema,
     lines: z.array(invoiceLineSchema),
     receivedDate: z.iso.date().nullable(),
+    roundingAmount: signedRoundingSchema,
     taxPointDate: z.iso.date().nullable(),
     variableSymbol: z
       .string()
@@ -245,8 +281,11 @@ export const economicEventLineSchema = z
   .object({
     accountCode: accountCodeSchema,
     accountName: z.string(),
+    activityCode: activityCodeSchema.nullable(),
     amount: decimalStringSchema,
     description: z.string().max(500).nullable(),
+    // The tax point of this leg, which is what a report by month groups on; the event date stays the register date.
+    effectiveDate: z.iso.date(),
     invoiceLineId: z.string().toLowerCase().uuid().nullable(),
     lineNo: z.number().int().min(1),
     partnerId: partnerIdentifierSchema.nullable(),
@@ -383,11 +422,16 @@ export type DocumentListQuery = z.infer<typeof documentListQuerySchema>;
 
 export const createInvoiceLineSchema = z
   .object({
+    activityCode: activityCodeSchema.optional(),
     baseAmount: nonNegativeDecimalStringSchema,
-    category: invoiceLineCategorySchema,
+    category: invoiceLineCategorySchema.optional(),
     description: z.string().trim().min(1).max(500),
+    lineKind: invoiceLineKindSchema.default('item'),
+    periodEnd: z.iso.date().optional(),
+    periodStart: z.iso.date().optional(),
     quantity: nonNegativeDecimalStringSchema.optional(),
     sourceAccountCode: sourceAccountCodeSchema.optional(),
+    taxPointDate: z.iso.date().optional(),
     unit: z.string().trim().min(1).max(16).optional(),
     unitPrice: nonNegativeDecimalStringSchema.optional(),
     vatAmount: nonNegativeDecimalStringSchema.default('0'),
@@ -395,6 +439,36 @@ export const createInvoiceLineSchema = z
     vatRate: vatRateSchema.default('0'),
   })
   .strict()
+  .superRefine((line, context) => {
+    // A supply is categorised and a deduction is not, exactly as the invoice_line check constraint demands.
+    if (line.lineKind === 'item' && line.category === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'An item line requires a category.',
+        path: ['category'],
+      });
+    }
+
+    if (line.lineKind === 'advance_deduction' && line.category !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'An advance deduction line carries no category.',
+        path: ['category'],
+      });
+    }
+
+    if (
+      line.periodStart !== undefined &&
+      line.periodEnd !== undefined &&
+      line.periodStart > line.periodEnd
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'periodStart must not be later than periodEnd.',
+        path: ['periodStart'],
+      });
+    }
+  })
   .refine(
     (line) =>
       line.vatMode === 'standard' || parseDecimal(line.vatAmount) === 0n,
@@ -414,6 +488,7 @@ export const createInvoiceSchema = z
     fxRate: fxRateSchema.optional(),
     lines: z.array(createInvoiceLineSchema).min(1).max(MAX_INVOICE_LINES),
     receivedDate: z.iso.date().optional(),
+    roundingAmount: signedRoundingSchema.default('0'),
     taxPointDate: z.iso.date().optional(),
     variableSymbol: z
       .string()
@@ -421,7 +496,45 @@ export const createInvoiceSchema = z
       .regex(/^[0-9]{1,10}$/)
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((invoice, context) => {
+    let supplied = parseDecimal(invoice.roundingAmount);
+    let deducted = DECIMAL_ZERO;
+    let itemCount = 0;
+
+    for (const line of invoice.lines) {
+      const gross = addDecimal(
+        parseDecimal(line.baseAmount),
+        parseDecimal(line.vatAmount),
+      );
+
+      if (line.lineKind === 'item') {
+        itemCount += 1;
+        supplied = addDecimal(supplied, gross);
+      } else {
+        deducted = addDecimal(deducted, gross);
+      }
+    }
+
+    // An invoice that deducts an advance still invoices a supply; a settlement on its own is another document.
+    if (itemCount === 0) {
+      context.addIssue({
+        code: 'custom',
+        message: 'An invoice requires at least one item line.',
+        path: ['lines'],
+      });
+    }
+
+    // An overpaid advance is settled by a credit note, so the amount due can never fall below zero.
+    if (deducted > supplied) {
+      context.addIssue({
+        code: 'custom',
+        message:
+          'The deducted advance must not exceed the supplied amount plus the rounding.',
+        path: ['lines'],
+      });
+    }
+  });
 
 const documentAttributesSchema = z
   .record(attributeKeySchema, attributeValueSchema)
@@ -619,6 +732,7 @@ export type DocumentLinkKind = z.infer<typeof documentLinkKindSchema>;
 export type DocumentStatus = z.infer<typeof documentStatusSchema>;
 export type EventSide = z.infer<typeof eventSideSchema>;
 export type InvoiceLineCategory = z.infer<typeof invoiceLineCategorySchema>;
+export type InvoiceLineKind = z.infer<typeof invoiceLineKindSchema>;
 export type IssueSeverity = z.infer<typeof issueSeveritySchema>;
 export type VatMode = z.infer<typeof vatModeSchema>;
 
@@ -631,6 +745,10 @@ const amountProperty = {
   type: 'string',
 };
 const vatRateProperty = { pattern: VAT_RATE_PATTERN.source, type: 'string' };
+const activityCodeProperty = {
+  pattern: ACTIVITY_CODE_PATTERN.source,
+  type: 'string',
+};
 const fxRateProperty = { pattern: FX_RATE_PATTERN.source, type: 'string' };
 const sourceAccountCodeProperty = {
   pattern: '^[0-9]{3}(\\.[0-9A-Za-z]+)?$',
@@ -691,13 +809,22 @@ export const documentSummaryOpenApiSchema = {
 const invoiceLineOpenApiSchema = {
   additionalProperties: false,
   properties: {
+    activityCode: { ...activityCodeProperty, nullable: true },
     baseAmount: amountProperty,
-    category: { enum: [...INVOICE_LINE_CATEGORIES], type: 'string' },
+    category: {
+      enum: [...INVOICE_LINE_CATEGORIES],
+      nullable: true,
+      type: 'string',
+    },
     description: { maxLength: 500, minLength: 1, type: 'string' },
     id: uuidProperty,
+    lineKind: { enum: [...INVOICE_LINE_KINDS], type: 'string' },
     lineNo: { minimum: 1, type: 'integer' },
+    periodEnd: { ...dateProperty, nullable: true },
+    periodStart: { ...dateProperty, nullable: true },
     quantity: { ...amountProperty, nullable: true },
     sourceAccountCode: { ...sourceAccountCodeProperty, nullable: true },
+    taxPointDate: { ...dateProperty, nullable: true },
     unit: { maxLength: 16, nullable: true, type: 'string' },
     unitPrice: { ...amountProperty, nullable: true },
     vatAmount: amountProperty,
@@ -705,13 +832,18 @@ const invoiceLineOpenApiSchema = {
     vatRate: vatRateProperty,
   },
   required: [
+    'activityCode',
     'baseAmount',
     'category',
     'description',
     'id',
+    'lineKind',
     'lineNo',
+    'periodEnd',
+    'periodStart',
     'quantity',
     'sourceAccountCode',
+    'taxPointDate',
     'unit',
     'unitPrice',
     'vatAmount',
@@ -724,12 +856,15 @@ const invoiceLineOpenApiSchema = {
 const invoiceOpenApiSchema = {
   additionalProperties: false,
   properties: {
+    advanceTotal: amountProperty,
+    amountDue: amountProperty,
     baseTotal: amountProperty,
     dueDate: { ...dateProperty, nullable: true },
     fxRate: { ...fxRateProperty, nullable: true },
     grossTotal: amountProperty,
     lines: { items: invoiceLineOpenApiSchema, type: 'array' },
     receivedDate: { ...dateProperty, nullable: true },
+    roundingAmount: moneyProperty,
     taxPointDate: { ...dateProperty, nullable: true },
     variableSymbol: {
       nullable: true,
@@ -739,12 +874,15 @@ const invoiceOpenApiSchema = {
     vatTotal: amountProperty,
   },
   required: [
+    'advanceTotal',
+    'amountDue',
     'baseTotal',
     'dueDate',
     'fxRate',
     'grossTotal',
     'lines',
     'receivedDate',
+    'roundingAmount',
     'taxPointDate',
     'variableSymbol',
     'vatTotal',
@@ -767,8 +905,10 @@ const economicEventOpenApiSchema = {
         properties: {
           accountCode: { pattern: '^[0-9]{3}$', type: 'string' },
           accountName: { type: 'string' },
+          activityCode: { ...activityCodeProperty, nullable: true },
           amount: moneyProperty,
           description: { maxLength: 500, nullable: true, type: 'string' },
+          effectiveDate: dateProperty,
           invoiceLineId: { ...uuidProperty, nullable: true },
           lineNo: { minimum: 1, type: 'integer' },
           partnerId: { ...uuidProperty, nullable: true },
@@ -777,8 +917,10 @@ const economicEventOpenApiSchema = {
         required: [
           'accountCode',
           'accountName',
+          'activityCode',
           'amount',
           'description',
+          'effectiveDate',
           'invoiceLineId',
           'lineNo',
           'partnerId',
@@ -880,18 +1022,24 @@ export const documentListOpenApiSchema = {
 const createInvoiceLineOpenApiSchema = {
   additionalProperties: false,
   properties: {
+    activityCode: activityCodeProperty,
     baseAmount: amountProperty,
+    // Required on an item line and refused on an advance deduction line, which the body schema decides.
     category: { enum: [...INVOICE_LINE_CATEGORIES], type: 'string' },
     description: { maxLength: 500, minLength: 1, type: 'string' },
+    lineKind: { enum: [...INVOICE_LINE_KINDS], type: 'string' },
+    periodEnd: dateProperty,
+    periodStart: dateProperty,
     quantity: amountProperty,
     sourceAccountCode: sourceAccountCodeProperty,
+    taxPointDate: dateProperty,
     unit: { maxLength: 16, minLength: 1, type: 'string' },
     unitPrice: amountProperty,
     vatAmount: amountProperty,
     vatMode: { enum: [...VAT_MODES], type: 'string' },
     vatRate: vatRateProperty,
   },
-  required: ['baseAmount', 'category', 'description', 'vatMode'],
+  required: ['baseAmount', 'description', 'vatMode'],
   type: 'object',
 };
 
@@ -913,6 +1061,7 @@ export const createDocumentBodyOpenApiSchema = {
           type: 'array',
         },
         receivedDate: dateProperty,
+        roundingAmount: moneyProperty,
         taxPointDate: dateProperty,
         variableSymbol: { pattern: '^[0-9]{1,10}$', type: 'string' },
       },

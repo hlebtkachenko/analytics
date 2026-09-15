@@ -43,6 +43,11 @@ export function addDecimal(left: bigint, right: bigint): bigint {
   return left + right;
 }
 
+// The magnitude of a signed amount: only the rounding difference ever reaches the rules with a sign.
+export function absDecimal(value: bigint): bigint {
+  return value < 0n ? -value : value;
+}
+
 export function compareDecimal(left: bigint, right: bigint): number {
   if (left < right) {
     return -1;

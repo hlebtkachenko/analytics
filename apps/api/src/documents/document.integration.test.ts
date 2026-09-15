@@ -354,7 +354,7 @@ describe('document register and derived events against PostgreSQL', () => {
       debitTotal: '1815.0000',
       eventDate: '2026-03-01',
       isBalanced: true,
-      ruleSetVersion: 'cz-default-2026-09',
+      ruleSetVersion: 'cz-default-2026-09.1',
     });
     // The receivable carries the partner; the revenue and VAT legs do not.
     expect(detail?.event?.lines.map((line) => line.partnerId)).toEqual([

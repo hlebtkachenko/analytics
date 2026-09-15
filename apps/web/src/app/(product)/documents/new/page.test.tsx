@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -174,11 +175,13 @@ describe('NewDocumentPage', () => {
             baseAmount: '1000',
             category: 'services',
             description: 'Placeholder line',
+            lineKind: 'item',
             vatAmount: '210.00',
             vatMode: 'standard',
             vatRate: '21',
           },
         ],
+        roundingAmount: '0',
       },
       kind: 'issued_invoice',
       legalEntityId: LEGAL_ENTITY_ID,
@@ -271,5 +274,49 @@ describe('NewDocumentPage', () => {
         'Placeholder Supplier',
       );
     });
+  });
+
+  it('disables and clears the category once a line becomes an advance deduction', async () => {
+    vi.stubGlobal('fetch', respond());
+
+    renderNewDocumentPage();
+    await screen.findByDisplayValue('Placeholder Holding');
+
+    expect(screen.getByLabelText('Category 1')).toHaveValue('services');
+
+    fireEvent.change(screen.getByLabelText('Line kind 1'), {
+      target: { value: 'advance_deduction' },
+    });
+
+    expect(screen.getByLabelText('Category 1')).toBeDisabled();
+    expect(screen.getByLabelText('Category 1')).toHaveValue('');
+  });
+
+  it('previews the amount due from the supply lines, the advance and the rounding', async () => {
+    vi.stubGlobal('fetch', respond());
+
+    renderNewDocumentPage();
+    await screen.findByDisplayValue('Placeholder Holding');
+
+    fireEvent.change(screen.getByLabelText('Base amount 1'), {
+      target: { value: '1000' },
+    });
+    fireEvent.change(screen.getByLabelText('Rounding'), {
+      target: { value: '0.20' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    fireEvent.change(screen.getByLabelText('Line kind 2'), {
+      target: { value: 'advance_deduction' },
+    });
+    fireEvent.change(screen.getByLabelText('Base amount 2'), {
+      target: { value: '500' },
+    });
+
+    const totals = screen.getByLabelText('Invoice totals');
+    // Gross 1210.00 plus rounding 0.20 less the deducted 605.00 leaves 605.20 to pay.
+    expect(within(totals).getByText('CZK 1,210.00')).toBeVisible();
+    expect(within(totals).getByText('CZK 0.20')).toBeVisible();
+    expect(within(totals).getByText('CZK 605.00')).toBeVisible();
+    expect(within(totals).getByText('CZK 605.20')).toBeVisible();
   });
 });

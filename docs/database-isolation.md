@@ -197,10 +197,6 @@ replaces it, matching the pair Better Auth 1.7.3 now uses to identify an
 account.
 
 Migration `20260914.0002` adds the documents register.
-`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
-`20260914.0002`; rolling application code back after this migration leaves
-readiness at 503 until code expecting that exact version is deployed or the
-expected version is deliberately advanced.
 
 It adds one shared reference table and 9 tenant tables. `app.directive_account`
 holds the Czech synthetic chart of accounts keyed by a 3 digit `code`, seeded
@@ -249,6 +245,28 @@ which tolerates per line or per rate rounding in a source system without
 tolerating a wrong number. `data_issue_open_key` is unique on
 `(document_id, code)` only while `resolved_at` is null, so one issue per code
 stays open while resolved history may repeat.
+
+Migration `20260915.0001` makes one invoice able to describe several months.
+`app.invoice_line` gains `line_kind` (`item` or `advance_deduction`, default
+`item`), `tax_point_date`, `period_start`, `period_end`, and `activity_code`;
+`category` becomes nullable, gains the `labour` and `transport` values, and is
+tied to the kind by `invoice_line_category_kind_check`, so a supply always names
+a category and an advance deduction never does. `app.invoice` gains the signed
+`rounding_amount` bounded to under one unit, `advance_total`, and `amount_due`,
+a stored generated column equal to
+`gross_total + rounding_amount - advance_total` that the application can never
+write, with `invoice_amount_due_check` keeping the advance at or below the
+printed total. `app.economic_event_line` gains `effective_date` and
+`activity_code`, so a monthly report groups legs by their own tax point while
+the event header keeps the document date; existing legs are backfilled from
+`app.economic_event.event_date` before `effective_date` becomes non-null, and
+`economic_event_line_effective_date_idx` on
+`(organization_id, effective_date, account_code)` serves that read. Row level
+security, policies, and grants are table level and unchanged.
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
+`20260915.0001`; rolling application code back after this migration leaves
+readiness at 503 until code expecting that exact version is deployed or the
+expected version is deliberately advanced.
 
 ## Tenant policy contract
 
@@ -368,7 +386,7 @@ its data. The dimension is fixed by the embedding model the AI credential names:
 adopting a model of another width needs a new migration and a full re-backfill.
 
 `packages/db/src/documents.integration.test.ts` covers the documents register on
-its own container. It proves that migration `20260914.0002` applies and records
+its own container. It proves that migration `20260915.0001` applies and records
 exactly the version `DATABASE_MIGRATION_COMPATIBILITY` expects, that
 `app.directive_account` holds all 218 seeded accounts, is readable by
 `bap_reporting`, and carries no row level security, and that an owner writing
@@ -386,3 +404,12 @@ tombstones `created_by` on documents, partners, and links while leaving another
 subject's rows alone, that `bap_backup` reads every new table, that
 `bap_reporting` may not insert a document, and that the reserved `documents`
 slug is refused by `organization_slug_reserved_check`.
+
+The same file covers the `20260915.0001` columns: an item line without a
+category and an advance deduction line with one are both refused, `labour` and
+`transport` are accepted, a period whose start is after its end is refused, the
+activity code regex is enforced on both the invoice line and the event line, a
+rounding of one unit is refused while `0.99` and `-0.99` pass, an advance above
+the printed total is refused, `amount_due` is computed by the database and
+refuses a direct write with `428C9`, and `effective_date` is non-null and
+indexed by `economic_event_line_effective_date_idx`.

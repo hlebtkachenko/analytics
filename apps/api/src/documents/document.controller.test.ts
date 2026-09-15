@@ -91,30 +91,39 @@ const detail: DocumentDetail = {
       {
         accountCode: '311',
         accountName: 'Trade receivables',
+        activityCode: null,
         amount: '1210.0000',
         description: 'placeholder line',
+        effectiveDate: '2026-09-14',
         invoiceLineId: INVOICE_LINE_ID,
         lineNo: 1,
         partnerId: PARTNER_ID,
         side: 'debit',
       },
     ],
-    ruleSetVersion: 'cz-default-2026-09',
+    ruleSetVersion: 'cz-default-2026-09.1',
   },
   invoice: {
+    advanceTotal: '0.0000',
+    amountDue: '1210.0000',
     baseTotal: '1000.0000',
     dueDate: null,
     fxRate: null,
     grossTotal: '1210.0000',
     lines: [
       {
+        activityCode: null,
         baseAmount: '1000.0000',
         category: 'services',
         description: 'placeholder line',
         id: INVOICE_LINE_ID,
+        lineKind: 'item',
         lineNo: 1,
+        periodEnd: null,
+        periodStart: null,
         quantity: null,
         sourceAccountCode: null,
+        taxPointDate: null,
         unit: null,
         unitPrice: null,
         vatAmount: '210.0000',
@@ -123,6 +132,7 @@ const detail: DocumentDetail = {
       },
     ],
     receivedDate: null,
+    roundingAmount: '0.0000',
     taxPointDate: null,
     variableSymbol: null,
     vatTotal: '210.0000',
@@ -181,6 +191,16 @@ const invoiceBody = {
   kind: 'issued_invoice',
   legalEntityId: ENTITY_ID,
   title: 'Placeholder document',
+};
+
+// The minimal advance deduction line: it carries amounts and a VAT mode, never a category.
+const deductionLine = {
+  baseAmount: '1000.0000',
+  description: 'placeholder advance deduction',
+  lineKind: 'advance_deduction',
+  vatAmount: '210.0000',
+  vatMode: 'standard',
+  vatRate: '21.00',
 };
 
 describe('application document routes', () => {
@@ -503,6 +523,73 @@ describe('application document routes', () => {
         ...invoiceBody,
         invoice: { ...invoiceBody.invoice, fxRate: '24.5000001' },
       },
+      // An item line is categorised and an advance deduction line is not.
+      {
+        ...invoiceBody,
+        invoice: {
+          lines: [{ ...invoiceBody.invoice.lines[0], category: undefined }],
+        },
+      },
+      {
+        ...invoiceBody,
+        invoice: {
+          lines: [
+            { ...invoiceBody.invoice.lines[0], lineKind: 'advance_deduction' },
+          ],
+        },
+      },
+      {
+        ...invoiceBody,
+        invoice: {
+          lines: [{ ...invoiceBody.invoice.lines[0], lineKind: 'rounding' }],
+        },
+      },
+      // A service period never ends before it starts.
+      {
+        ...invoiceBody,
+        invoice: {
+          lines: [
+            {
+              ...invoiceBody.invoice.lines[0],
+              periodEnd: '2026-09-01',
+              periodStart: '2026-09-30',
+            },
+          ],
+        },
+      },
+      // An activity code is a bounded lower-case identifier, never free text.
+      {
+        ...invoiceBody,
+        invoice: {
+          lines: [{ ...invoiceBody.invoice.lines[0], activityCode: 'site a!' }],
+        },
+      },
+      // A rounding difference stays below one unit in both directions.
+      {
+        ...invoiceBody,
+        invoice: { ...invoiceBody.invoice, roundingAmount: '1.00' },
+      },
+      {
+        ...invoiceBody,
+        invoice: { ...invoiceBody.invoice, roundingAmount: '-1.00' },
+      },
+      // An invoice that only deducts an advance invoices no supply at all.
+      { ...invoiceBody, invoice: { lines: [deductionLine] } },
+      // The deducted advance never exceeds the supplied amount plus the rounding.
+      {
+        ...invoiceBody,
+        invoice: {
+          lines: [
+            invoiceBody.invoice.lines[0],
+            {
+              ...deductionLine,
+              baseAmount: '1300.0000',
+              vatAmount: '0',
+              vatMode: 'exempt',
+            },
+          ],
+        },
+      },
     ]) {
       await request(application.getHttpServer())
         .post('/v1/organizations/organization_1/documents')
@@ -512,6 +599,43 @@ describe('application document routes', () => {
     }
 
     expect(createCalls).toEqual([]);
+  });
+
+  it('accepts an advance deduction beside an item line and normalises the activity', async () => {
+    await request(application.getHttpServer())
+      .post('/v1/organizations/organization_1/documents')
+      .set('Authorization', 'Bearer caller')
+      .send({
+        ...invoiceBody,
+        invoice: {
+          lines: [
+            {
+              ...invoiceBody.invoice.lines[0],
+              activityCode: '  SITE-A  ',
+              periodEnd: '2026-09-30',
+              periodStart: '2026-09-01',
+              taxPointDate: '2026-09-30',
+            },
+            deductionLine,
+          ],
+          roundingAmount: '0.20',
+        },
+      })
+      .expect(201);
+
+    // The activity is trimmed and lower-cased at the boundary, so grouping never depends on how it was typed.
+    expect(createCalls[0]?.body.invoice?.lines[0]).toMatchObject({
+      activityCode: 'site-a',
+      lineKind: 'item',
+      periodEnd: '2026-09-30',
+      periodStart: '2026-09-01',
+      taxPointDate: '2026-09-30',
+    });
+    expect(createCalls[0]?.body.invoice?.lines[1]?.lineKind).toBe(
+      'advance_deduction',
+    );
+    expect(createCalls[0]?.body.invoice?.lines[1]?.category).toBeUndefined();
+    expect(createCalls[0]?.body.invoice?.roundingAmount).toBe('0.20');
   });
 
   it('answers a value the database refuses with a bad request, never a server error', async () => {

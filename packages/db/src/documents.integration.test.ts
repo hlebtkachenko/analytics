@@ -212,12 +212,12 @@ describe('documents register isolation', () => {
     const compatibility = await checkMigrationCompatibility(apiPool);
 
     expect(result.applied).toEqual([]);
-    expect(result.currentVersion).toBe('20260914.0002');
-    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260914.0002');
+    expect(result.currentVersion).toBe('20260915.0001');
+    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260915.0001');
     expect(compatibility).toEqual({
       compatible: true,
-      expectedVersion: '20260914.0002',
-      version: '20260914.0002',
+      expectedVersion: '20260915.0001',
+      version: '20260915.0001',
     });
   });
 
@@ -296,11 +296,12 @@ describe('documents register isolation', () => {
       );
       await transaction.query(
         `insert into app.economic_event_line (
-           organization_id, event_id, line_no, account_code, side, amount, partner_id, invoice_line_id, description
+           organization_id, event_id, line_no, account_code, side, amount, effective_date,
+           partner_id, invoice_line_id, description
          )
-         values ('org-1', $1, 1, '518', 'debit', 100.00, null, $2, 'Placeholder line'),
-                ('org-1', $1, 2, '343', 'debit', 21.00, null, $2, 'Placeholder line'),
-                ('org-1', $1, 3, '321', 'credit', 121.00, $3, $2, 'Placeholder line')`,
+         values ('org-1', $1, 1, '518', 'debit', 100.00, '2026-09-01', null, $2, 'Placeholder line'),
+                ('org-1', $1, 2, '343', 'debit', 21.00, '2026-09-01', null, $2, 'Placeholder line'),
+                ('org-1', $1, 3, '321', 'credit', 121.00, '2026-09-01', $3, $2, 'Placeholder line')`,
         [eventId, invoiceLineId, partnerId],
       );
       await transaction.query(
@@ -493,6 +494,20 @@ describe('documents register isolation', () => {
       constraint: 'invoice_line_vat_amount_check',
     });
     // Direction lives in the document kind, so a refund is a credit note and never a negative invoice.
+    // The VAT offsets the base so the gross stays at zero and the amount due bound is not what refuses the row.
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.invoice (document_id, organization_id, base_total, vat_total, gross_total)
+           values ($1, 'org-1', -100.00, 100.00, 0)`,
+          [relatedDocumentId],
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'invoice_totals_sign_check',
+    });
+    // A negative gross now trips the amount due bound first, because a zero advance already exceeds it.
     await expect(
       asTenant(apiPool, orgOneOwner, (transaction) =>
         transaction.query(
@@ -503,7 +518,7 @@ describe('documents register isolation', () => {
       ),
     ).rejects.toMatchObject({
       code: '23514',
-      constraint: 'invoice_totals_sign_check',
+      constraint: 'invoice_amount_due_check',
     });
   });
 
@@ -605,11 +620,11 @@ describe('documents register isolation', () => {
       );
       await transaction.query(
         `insert into app.economic_event_line (
-           organization_id, event_id, line_no, account_code, side, amount, invoice_line_id
+           organization_id, event_id, line_no, account_code, side, amount, effective_date, invoice_line_id
          )
-         values ('org-1', $1, 1, '311', 'debit', 242.00, $2),
-                ('org-1', $1, 2, '604', 'credit', 200.00, $2),
-                ('org-1', $1, 3, '343', 'credit', 42.00, $2)`,
+         values ('org-1', $1, 1, '311', 'debit', 242.00, '2026-09-04', $2),
+                ('org-1', $1, 2, '604', 'credit', 200.00, '2026-09-04', $2),
+                ('org-1', $1, 3, '343', 'credit', 42.00, '2026-09-04', $2)`,
         [cascadeEventId, cascadeLineId],
       );
       await transaction.query(
@@ -772,5 +787,272 @@ describe('documents register isolation', () => {
       code: '23514',
       constraint: 'organization_slug_reserved_check',
     });
+  });
+
+  it('ties the line category to the line kind', async () => {
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.invoice_line (
+             organization_id, document_id, line_no, description,
+             base_amount, vat_mode, vat_rate, vat_amount
+           )
+           values ('org-1', $1, 10, 'Placeholder uncategorized supply', 100.00, 'exempt', 0, 0)`,
+          [documentId],
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'invoice_line_category_kind_check',
+    });
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.invoice_line (
+             organization_id, document_id, line_no, description, category, line_kind,
+             base_amount, vat_mode, vat_rate, vat_amount
+           )
+           values ('org-1', $1, 11, 'Placeholder categorized advance', 'services', 'advance_deduction',
+                   100.00, 'exempt', 0, 0)`,
+          [documentId],
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'invoice_line_category_kind_check',
+    });
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.invoice_line (
+             organization_id, document_id, line_no, description, line_kind,
+             base_amount, vat_mode, vat_rate, vat_amount
+           )
+           values ('org-1', $1, 12, 'Placeholder advance deduction', 'advance_deduction',
+                   100.00, 'standard', 21.00, 21.00)`,
+          [documentId],
+        ),
+      ),
+    ).resolves.toMatchObject({ rowCount: 1 });
+    await rootPool.query('delete from app.invoice_line where line_no = 12');
+  });
+
+  it('accepts labour and transport and still refuses an unknown category', async () => {
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.invoice_line (
+             organization_id, document_id, line_no, description, category,
+             base_amount, vat_mode, vat_rate, vat_amount
+           )
+           values ('org-1', $1, 13, 'Placeholder labour', 'labour', 100.00, 'exempt', 0, 0),
+                  ('org-1', $1, 14, 'Placeholder transport', 'transport', 100.00, 'exempt', 0, 0)`,
+          [documentId],
+        ),
+      ),
+    ).resolves.toMatchObject({ rowCount: 2 });
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.invoice_line (
+             organization_id, document_id, line_no, description, category,
+             base_amount, vat_mode, vat_rate, vat_amount
+           )
+           values ('org-1', $1, 15, 'Placeholder unknown', 'consulting', 100.00, 'exempt', 0, 0)`,
+          [documentId],
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'invoice_line_category_check',
+    });
+    await rootPool.query(
+      'delete from app.invoice_line where line_no in (13, 14)',
+    );
+  });
+
+  it('bounds the service period and the activity code on a line', async () => {
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.invoice_line (
+             organization_id, document_id, line_no, description, category,
+             base_amount, vat_mode, vat_rate, vat_amount, period_start, period_end
+           )
+           values ('org-1', $1, 16, 'Placeholder reversed period', 'services', 100.00, 'exempt', 0, 0,
+                   '2026-03-31', '2026-03-01')`,
+          [documentId],
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'invoice_line_period_check',
+    });
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.invoice_line (
+             organization_id, document_id, line_no, description, category,
+             base_amount, vat_mode, vat_rate, vat_amount, activity_code
+           )
+           values ('org-1', $1, 17, 'Placeholder loud activity', 'services', 100.00, 'exempt', 0, 0,
+                   'March Works')`,
+          [documentId],
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'invoice_line_activity_code_check',
+    });
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.invoice_line (
+             organization_id, document_id, line_no, description, category,
+             base_amount, vat_mode, vat_rate, vat_amount,
+             tax_point_date, period_start, period_end, activity_code
+           )
+           values ('org-1', $1, 18, 'Placeholder March supply', 'labour', 100.00, 'exempt', 0, 0,
+                   '2026-03-31', '2026-03-01', '2026-03-31', 'march-works_1')`,
+          [documentId],
+        ),
+      ),
+    ).resolves.toMatchObject({ rowCount: 1 });
+    await rootPool.query('delete from app.invoice_line where line_no = 18');
+  });
+
+  it('generates the amount due and bounds the rounding and the advance', async () => {
+    // The related contract carries no invoice row, so it is free to hold these throwaway headers.
+    const insertInvoice = async (rounding: string, advance: string) =>
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.invoice (
+             document_id, organization_id, base_total, vat_total, gross_total,
+             rounding_amount, advance_total
+           )
+           values ($1, 'org-1', 999999.80, 0, 999999.80, $2, $3)`,
+          [relatedDocumentId, rounding, advance],
+        ),
+      );
+
+    await expect(insertInvoice('1.00', '0')).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'invoice_rounding_amount_check',
+    });
+    await expect(insertInvoice('-1.00', '0')).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'invoice_rounding_amount_check',
+    });
+    await expect(insertInvoice('0', '-1.00')).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'invoice_advance_total_check',
+    });
+    // One hundredth above the printed total is already an overpaid advance, which is a credit note.
+    await expect(insertInvoice('0.20', '1000000.01')).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'invoice_amount_due_check',
+    });
+
+    await expect(insertInvoice('0.99', '0')).resolves.toMatchObject({
+      rowCount: 1,
+    });
+    await rootPool.query('delete from app.invoice where document_id = $1', [
+      relatedDocumentId,
+    ]);
+    await expect(insertInvoice('-0.99', '0')).resolves.toMatchObject({
+      rowCount: 1,
+    });
+    await rootPool.query('delete from app.invoice where document_id = $1', [
+      relatedDocumentId,
+    ]);
+
+    await expect(insertInvoice('0.20', '500000.00')).resolves.toMatchObject({
+      rowCount: 1,
+    });
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query<{ amount_due: string }>(
+          'select amount_due from app.invoice where document_id = $1',
+          [relatedDocumentId],
+        ),
+      ),
+    ).resolves.toMatchObject({ rows: [{ amount_due: '500000.0000' }] });
+    await rootPool.query('delete from app.invoice where document_id = $1', [
+      relatedDocumentId,
+    ]);
+
+    // PostgreSQL computes the column, so no writer can store a total that disagrees with the parts.
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.invoice (
+             document_id, organization_id, base_total, vat_total, gross_total, amount_due
+           )
+           values ($1, 'org-1', 100.00, 0, 100.00, 100.00)`,
+          [relatedDocumentId],
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '428C9' });
+  });
+
+  it('dates every event line and bounds its activity code', async () => {
+    const column = await rootPool.query<{ is_nullable: 'NO' | 'YES' }>(
+      `select is_nullable
+       from information_schema.columns
+       where table_schema = 'app'
+         and table_name = 'economic_event_line'
+         and column_name = 'effective_date'`,
+    );
+    expect(column.rows).toEqual([{ is_nullable: 'NO' }]);
+    // The migration backfills from the event header, so no leg is left without a date to group by.
+    await expect(
+      rootPool.query<{ total: number }>(
+        'select count(*)::integer as total from app.economic_event_line where effective_date is null',
+      ),
+    ).resolves.toMatchObject({ rows: [{ total: 0 }] });
+    await expect(
+      rootPool.query<{ indexdef: string }>(
+        `select indexdef from pg_indexes
+         where schemaname = 'app'
+           and indexname = 'economic_event_line_effective_date_idx'`,
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          indexdef: expect.stringContaining(
+            '(organization_id, effective_date, account_code)',
+          ),
+        },
+      ],
+    });
+
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.economic_event_line (
+             organization_id, event_id, line_no, account_code, side, amount, effective_date, activity_code
+           )
+           values ('org-1', $1, 10, '518', 'debit', 1.00, '2026-03-31', 'March Works')`,
+          [eventId],
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'economic_event_line_activity_code_check',
+    });
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.economic_event_line (
+             organization_id, event_id, line_no, account_code, side, amount, effective_date, activity_code
+           )
+           values ('org-1', $1, 10, '518', 'debit', 1.00, '2026-03-31', 'march-works_1')`,
+          [eventId],
+        ),
+      ),
+    ).resolves.toMatchObject({ rowCount: 1 });
+    await rootPool.query(
+      'delete from app.economic_event_line where line_no = 10',
+    );
   });
 });

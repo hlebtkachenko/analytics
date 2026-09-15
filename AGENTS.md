@@ -48,6 +48,11 @@ financial, operational, or development data.
 - Document data enters through the documents register in
   `apps/api/src/documents` (see `docs/documents.md`); economic events are
   derived by the rule set, never written by hand.
+- Invoice content (lines, advance deductions, rounding) is a create-time fact.
+  An advance deduction is an `invoice_line` with
+  `line_kind = 'advance_deduction'`; a rounding difference is the signed header
+  column `invoice.rounding_amount`; never model either as a fake supply line,
+  and never write `invoice.amount_due` (it is generated).
 
 ## Development
 

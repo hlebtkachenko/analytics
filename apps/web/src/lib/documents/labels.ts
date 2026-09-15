@@ -4,6 +4,7 @@ import type {
   DocumentLinkKind,
   DocumentStatus,
   InvoiceLineCategory,
+  InvoiceLineKind,
   VatMode,
 } from './contract.ts';
 
@@ -46,9 +47,18 @@ export const invoiceLineCategoryLabelKeys: Readonly<
 > = {
   asset: 'documents.categoryAsset',
   goods: 'documents.categoryGoods',
+  labour: 'documents.categoryLabour',
   material: 'documents.categoryMaterial',
   other: 'documents.categoryOther',
   services: 'documents.categoryServices',
+  transport: 'documents.categoryTransport',
+};
+
+export const invoiceLineKindLabelKeys: Readonly<
+  Record<InvoiceLineKind, string>
+> = {
+  advance_deduction: 'documents.lineKindAdvanceDeduction',
+  item: 'documents.lineKindItem',
 };
 
 export const vatModeLabelKeys: Readonly<Record<VatMode, string>> = {

@@ -6,6 +6,7 @@ import {
   createInvoiceSchema,
   derivedVatAmount,
   documentListQuerySchema,
+  economicEventLineSchema,
   invoiceSchema,
   updateDocumentRequestSchema,
 } from './contract.ts';
@@ -18,6 +19,15 @@ const standardLine = {
   category: 'services',
   description: 'Placeholder line',
   vatAmount: '210.00',
+  vatMode: 'standard',
+  vatRate: '21',
+};
+
+const deductionLine = {
+  baseAmount: '500',
+  description: 'Advance deducted',
+  lineKind: 'advance_deduction',
+  vatAmount: '105.00',
   vatMode: 'standard',
   vatRate: '21',
 };
@@ -117,18 +127,25 @@ describe('fxRate', () => {
 
   it('reads the stored rate back with the 6 decimals the register keeps', () => {
     const stored = {
+      advanceTotal: '0.0000',
+      amountDue: '1210.0000',
       baseTotal: '1000.0000',
       dueDate: null,
       grossTotal: '1210.0000',
       lines: [
         {
+          activityCode: null,
           baseAmount: '1000.0000',
           category: 'services',
           description: 'Placeholder line',
           id: INVOICE_LINE_ID,
+          lineKind: 'item',
           lineNo: 1,
+          periodEnd: null,
+          periodStart: null,
           quantity: null,
           sourceAccountCode: null,
+          taxPointDate: null,
           unit: null,
           unitPrice: null,
           vatAmount: '210.0000',
@@ -137,6 +154,7 @@ describe('fxRate', () => {
         },
       ],
       receivedDate: null,
+      roundingAmount: '0.0000',
       taxPointDate: null,
       variableSymbol: null,
       vatTotal: '210.0000',
@@ -213,6 +231,159 @@ describe('documentListQuerySchema', () => {
       documentListQuerySchema.safeParse({
         status: new Array(5).fill('registered').join(','),
       }).success,
+    ).toBe(false);
+  });
+});
+
+describe('invoice line kinds', () => {
+  it('requires a category on a supply line and refuses one on a deduction', () => {
+    expect(
+      createInvoiceLineSchema.safeParse({ ...deductionLine, lineKind: 'item' })
+        .success,
+    ).toBe(false);
+    expect(createInvoiceLineSchema.safeParse(deductionLine).success).toBe(true);
+    expect(
+      createInvoiceLineSchema.safeParse({
+        ...deductionLine,
+        category: 'services',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('defaults a line to a supply and keeps the new category values', () => {
+    const parsed = createInvoiceLineSchema.safeParse({
+      ...standardLine,
+      category: 'labour',
+    });
+    expect(parsed.success && parsed.data.lineKind).toBe('item');
+    expect(
+      createInvoiceLineSchema.safeParse({
+        ...standardLine,
+        category: 'transport',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('refuses a period that ends before it starts', () => {
+    expect(
+      createInvoiceLineSchema.safeParse({
+        ...standardLine,
+        periodEnd: '2026-01-31',
+        periodStart: '2026-01-01',
+      }).success,
+    ).toBe(true);
+    expect(
+      createInvoiceLineSchema.safeParse({
+        ...standardLine,
+        periodEnd: '2026-01-01',
+        periodStart: '2026-01-31',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('lower-cases and trims an activity code, and refuses an unusable one', () => {
+    const parsed = createInvoiceLineSchema.safeParse({
+      ...standardLine,
+      activityCode: '  Month-01  ',
+    });
+    expect(parsed.success && parsed.data.activityCode).toBe('month-01');
+    expect(
+      createInvoiceLineSchema.safeParse({
+        ...standardLine,
+        activityCode: '-leading',
+      }).success,
+    ).toBe(false);
+    expect(
+      createInvoiceLineSchema.safeParse({
+        ...standardLine,
+        activityCode: 'a'.repeat(33),
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('invoice totals', () => {
+  it('keeps rounding signed and strictly below a whole unit', () => {
+    const parsed = createInvoiceSchema.safeParse({ lines: [standardLine] });
+    expect(parsed.success && parsed.data.roundingAmount).toBe('0');
+    expect(
+      createInvoiceSchema.safeParse({
+        lines: [standardLine],
+        roundingAmount: '-0.30',
+      }).success,
+    ).toBe(true);
+    expect(
+      createInvoiceSchema.safeParse({
+        lines: [standardLine],
+        roundingAmount: '1.00',
+      }).success,
+    ).toBe(false);
+    expect(
+      createInvoiceSchema.safeParse({
+        lines: [standardLine],
+        roundingAmount: '-1.00',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('refuses an invoice that carries no supply line at all', () => {
+    expect(
+      createInvoiceSchema.safeParse({ lines: [deductionLine] }).success,
+    ).toBe(false);
+  });
+
+  it('refuses a deducted advance above the gross total plus rounding', () => {
+    // Gross is 1210.00 and the deduction is 1210.00, so only the rounding decides.
+    const wholeAdvance = {
+      ...deductionLine,
+      baseAmount: '1000',
+      vatAmount: '210.00',
+    };
+    expect(
+      createInvoiceSchema.safeParse({ lines: [standardLine, wholeAdvance] })
+        .success,
+    ).toBe(true);
+    expect(
+      createInvoiceSchema.safeParse({
+        lines: [standardLine, wholeAdvance],
+        roundingAmount: '-0.10',
+      }).success,
+    ).toBe(false);
+    expect(
+      createInvoiceSchema.safeParse({
+        lines: [
+          standardLine,
+          { ...wholeAdvance, baseAmount: '1000.30', vatAmount: '210.06' },
+        ],
+        roundingAmount: '0.20',
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('economicEventLineSchema', () => {
+  it('reads the leg date and the activity the register now stores', () => {
+    const stored = {
+      accountCode: '518',
+      accountName: 'Other services',
+      activityCode: 'month-01',
+      amount: '1000.0000',
+      description: 'Placeholder line',
+      effectiveDate: '2026-01-31',
+      invoiceLineId: INVOICE_LINE_ID,
+      lineNo: 1,
+      partnerId: null,
+      side: 'debit',
+    };
+
+    expect(economicEventLineSchema.safeParse(stored).success).toBe(true);
+    expect(
+      economicEventLineSchema.safeParse({ ...stored, activityCode: null })
+        .success,
+    ).toBe(true);
+    expect(
+      economicEventLineSchema.safeParse({ ...stored, effectiveDate: null })
+        .success,
     ).toBe(false);
   });
 });
