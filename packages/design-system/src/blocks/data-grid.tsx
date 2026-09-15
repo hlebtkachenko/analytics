@@ -33,7 +33,7 @@ import {
 } from 'react';
 
 import styles from './data-grid.module.scss';
-import type { DataGridProps, GridColumn, GridRow } from './types';
+import type { DataGridProps, DensitySize, GridColumn, GridRow } from './types';
 import { useCellSelection } from './use-cell-selection';
 import { useColumnLayout } from './use-column-layout';
 import { useGridSort } from './use-grid-sort';
@@ -42,6 +42,15 @@ import { useVirtualWindow } from './use-virtual-window';
 const SELECT_WIDTH = 48;
 const NUMBER_WIDTH = 64;
 const DEFAULT_WIDTH = 160;
+
+// Carbon data-table row heights per size, used to size virtualized rows.
+const ROW_HEIGHTS: Record<DensitySize, number> = {
+  xs: 24,
+  sm: 32,
+  md: 40,
+  lg: 48,
+  xl: 64,
+};
 
 // Join truthy class names for CSS module composition.
 function cx(...classes: (string | false | undefined)[]): string {
@@ -95,7 +104,7 @@ export function DataGrid(props: DataGridProps) {
     stickyHeader = false,
     maxHeight,
     virtualized = false,
-    rowHeight = 44,
+    rowHeight,
     infiniteScroll = false,
     hasMore = false,
     onLoadMore,
@@ -192,11 +201,13 @@ export function DataGrid(props: DataGridProps) {
     return () => window.removeEventListener('mouseup', stop);
   }, [cellSelection, endCell]);
 
-  // Fixed row height windowing renders only the visible slice.
+  // Fixed row height windowing renders only the visible slice; default the
+  // row height to the Carbon height for the current size.
+  const rowPx = rowHeight ?? ROW_HEIGHTS[size] ?? ROW_HEIGHTS.sm;
   const scrollMaxHeight = virtualized ? (maxHeight ?? 400) : maxHeight;
   const viewport = useVirtualWindow(
     bodyRows.length,
-    rowHeight,
+    rowPx,
     scrollMaxHeight ?? 400,
   );
   const renderRows = virtualized
@@ -538,7 +549,7 @@ export function DataGrid(props: DataGridProps) {
                           }
                         : undefined
                     }
-                    style={virtualized ? { height: rowHeight } : undefined}
+                    style={virtualized ? { height: rowPx } : undefined}
                   >
                     {selection !== 'none' && (
                       <TableSelectRow
