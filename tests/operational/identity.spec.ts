@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import axe from 'axe-core';
+
+import { expectNoAccessibilityViolations } from './accessibility-support';
 
 const resetCapability = 'ResetSentinelTokenAbc123';
 const resetErrorCode = 'PRIVATE_RESET_CALLBACK_CODE';
@@ -9,27 +10,6 @@ const activationErrorCode = 'PRIVATE_ACTIVATION_CODE';
 const resetCookieShouldBeSecure =
   new URL(process.env.BAP_OPERATIONAL_BASE_URL ?? 'http://localhost:39100')
     .protocol === 'https:';
-
-type AxeViolation = Readonly<{
-  id: string;
-  impact: string | null;
-  nodes: ReadonlyArray<Readonly<{ target: ReadonlyArray<string> }>>;
-}>;
-
-type AxeWindow = Window &
-  typeof globalThis & {
-    axe: {
-      run: (document: Document) => Promise<{ violations: AxeViolation[] }>;
-    };
-  };
-
-async function scanIdentityPage(page: import('@playwright/test').Page) {
-  await page.evaluate(axe.source);
-  return page.evaluate(async () => {
-    const results = await (window as AxeWindow).axe.run(document);
-    return results.violations;
-  });
-}
 
 async function getAccessibilityItems(page: import('@playwright/test').Page) {
   const session = await page.context().newCDPSession(page);
@@ -317,8 +297,7 @@ test('has no axe violations on representative identity states', async ({
   for (const route of routes) {
     await page.goto(route);
     await page.waitForLoadState('networkidle');
-    const violations = await scanIdentityPage(page);
-    expect(violations, `${route}: ${JSON.stringify(violations)}`).toEqual([]);
+    await expectNoAccessibilityViolations(page, route);
   }
 });
 

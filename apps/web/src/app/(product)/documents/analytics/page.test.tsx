@@ -258,22 +258,14 @@ describe('DocumentAnalyticsPage', () => {
   });
 
   it('reports a failed read rather than an empty page', async () => {
+    const fetchMock = respondWith(analytics);
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string) => {
-        if (input === '/api/auth/organization/list') {
-          return Response.json([
-            {
-              id: 'organization_1',
-              name: 'Organization 1',
-              slug: 'organization-1',
-            },
-          ]);
-        }
         if (input.includes('/documents/analytics')) {
           return new Response(null, { status: 500 });
         }
-        return new Response(null, { status: 404 });
+        return await fetchMock(input);
       }),
     );
 
@@ -284,8 +276,9 @@ describe('DocumentAnalyticsPage', () => {
     ).toBeVisible();
   });
 
-  it('warns an account without the read capability', async () => {
-    vi.stubGlobal('fetch', respondWith(analytics, false));
+  it('warns an account without the read capability and never asks the route', async () => {
+    const fetchMock = respondWith(analytics, false);
+    vi.stubGlobal('fetch', fetchMock);
 
     renderAnalyticsPage();
 
@@ -294,5 +287,35 @@ describe('DocumentAnalyticsPage', () => {
         'This account cannot read documents in this organization.',
       ),
     ).toBeVisible();
+    expect(
+      screen.queryByText('Document analytics could not be loaded.'),
+    ).toBeNull();
+    expect(
+      fetchMock.mock.calls
+        .map((call) => String(call[0]))
+        .filter((path) => path.includes('/documents/analytics')),
+    ).toEqual([]);
+  });
+
+  it('keeps a refused access read out of the generic error alert', async () => {
+    const fetchMock = respondWith(analytics);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string) => {
+        if (input.endsWith('/access')) {
+          return new Response(null, { status: 403 });
+        }
+        return await fetchMock(input);
+      }),
+    );
+
+    renderAnalyticsPage();
+
+    expect(
+      await screen.findByText('Organization access could not be checked.'),
+    ).toBeVisible();
+    expect(
+      screen.queryByText('Document analytics could not be loaded.'),
+    ).toBeNull();
   });
 });

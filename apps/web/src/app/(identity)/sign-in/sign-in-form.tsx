@@ -16,10 +16,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { authClient } from '../../../lib/auth/client';
-import {
-  defaultReturnPath,
-  safeReturnPath,
-} from '../../../lib/auth/return-path';
+import { safeReturnPath, twoFactorPath } from '../../../lib/auth/return-path';
 
 // Better Auth answers a two-factor account with this marker instead of a session.
 function requiresTwoFactor(data: unknown): boolean {
@@ -52,12 +49,7 @@ export default function SignInForm({
         return;
       }
       if (requiresTwoFactor(result.data)) {
-        // The challenge page finishes the trip, so it has to carry the return path.
-        router.replace(
-          returnPath === defaultReturnPath
-            ? '/sign-in/two-factor'
-            : `/sign-in/two-factor?next=${encodeURIComponent(returnPath)}`,
-        );
+        router.replace(twoFactorPath(returnPath) as Route);
         return;
       }
       router.replace(returnPath as Route);

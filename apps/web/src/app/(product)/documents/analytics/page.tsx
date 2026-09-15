@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  DataTable,
   DataTableSkeleton,
   InlineNotification,
   Select,
@@ -16,25 +15,16 @@ import {
   Tag,
   Tile,
 } from '@bap/design-system/react';
+import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import PageContainer from '../../../../components/page-container';
-import {
-  accessPath,
-  getJson,
-  isAbortError,
-  legalEntitiesPath,
-  legalEntityListSchema,
-  organizationAccessSchema,
-} from '../../../../lib/datasets/client';
-import type {
-  LegalEntity,
-  OrganizationAccess,
-} from '../../../../lib/datasets/client';
+import { getJson, isAbortError } from '../../../../lib/datasets/client';
 import {
   documentAnalyticsPath,
   formatAmount,
+  withOrganization,
 } from '../../../../lib/documents/client';
 import { documentAnalyticsResponseSchema } from '../../../../lib/documents/contract.ts';
 import type { DocumentAnalyticsResponse } from '../../../../lib/documents/contract.ts';
@@ -44,6 +34,8 @@ import {
   invoiceLineKindLabelKeys,
   vatModeLabelKeys,
 } from '../../../../lib/documents/labels.ts';
+import { useLegalEntities } from '../../../../lib/organizations/use-legal-entities';
+import { useOrganizationAccess } from '../../../../lib/organizations/use-organization-access';
 import { useOrganizationSelection } from '../../../../lib/organizations/use-organization-selection';
 import styles from './page.module.scss';
 
@@ -55,66 +47,61 @@ type AnalyticsResult = Readonly<{
   value?: DocumentAnalyticsResponse;
 }>;
 
+// A row hands over its cells already rendered, so alignment stays with the column that needs it.
+type AnalyticsRow = Readonly<{ cells: ReactNode; id: string }>;
+
 const allEntitiesValue = '';
+
+// The five aggregates differ only in their columns, so one table renders them all.
+function AnalyticsTable({
+  headers,
+  rows,
+  testId,
+  title,
+}: Readonly<{
+  headers: readonly string[];
+  rows: readonly AnalyticsRow[];
+  testId: string;
+  title: string;
+}>) {
+  return (
+    <div data-testid={testId}>
+      <TableContainer className={styles.tableContainer!} title={title}>
+        <Table size="md">
+          <TableHead>
+            <TableRow>
+              {headers.map((header) => (
+                <TableHeader key={header}>{header}</TableHeader>
+              ))}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={row.id}>{row.cells}</TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </div>
+  );
+}
 
 export default function DocumentAnalyticsPage() {
   const { t } = useTranslation();
   const organization = useOrganizationSelection();
   const organizationId = organization.organizationId;
-  const [access, setAccess] = useState<OrganizationAccess>();
-  const [accessState, setAccessState] = useState<LoadState>('loading');
-  const [legalEntities, setLegalEntities] = useState<LegalEntity[]>([]);
+  const { access, state: accessState } = useOrganizationAccess(organizationId);
+  const legalEntities = useLegalEntities(organizationId);
   const [entityId, setEntityId] = useState(allEntitiesValue);
   const [result, setResult] = useState<AnalyticsResult>();
 
-  useEffect(() => {
-    if (organizationId.length === 0) {
-      return;
-    }
-
-    const controller = new AbortController();
-    void getJson(accessPath(organizationId), controller.signal)
-      .then((payload) => organizationAccessSchema.parse(payload))
-      .then((contract) => {
-        setAccess(contract);
-        setAccessState('idle');
-      })
-      .catch((error: unknown) => {
-        if (!isAbortError(error)) {
-          setAccess(undefined);
-          setAccessState('error');
-        }
-      });
-    return () => {
-      controller.abort();
-    };
-  }, [organizationId]);
-
-  useEffect(() => {
-    if (organizationId.length === 0) {
-      return;
-    }
-
-    const controller = new AbortController();
-    void getJson(legalEntitiesPath(organizationId), controller.signal)
-      .then((payload) => legalEntityListSchema.parse(payload))
-      .then((payload) => {
-        setLegalEntities(payload.legalEntities);
-      })
-      .catch((error: unknown) => {
-        if (!isAbortError(error)) {
-          setLegalEntities([]);
-        }
-      });
-    return () => {
-      controller.abort();
-    };
-  }, [organizationId]);
-
+  const canRead = access?.capabilities.readDocuments ?? false;
+  // A denied read is answered by the capability gate, so the route is never asked at all.
+  const allowed = accessState === 'idle' && canRead;
   const analyticsKey = documentAnalyticsPath(organizationId, entityId);
 
   useEffect(() => {
-    if (organizationId.length === 0) {
+    if (organizationId.length === 0 || !allowed) {
       return;
     }
 
@@ -132,7 +119,7 @@ export default function DocumentAnalyticsPage() {
     return () => {
       controller.abort();
     };
-  }, [analyticsKey, organizationId]);
+  }, [allowed, analyticsKey, organizationId]);
 
   const analytics = result?.key === analyticsKey ? result.value : undefined;
   const analyticsState: LoadState =
@@ -141,61 +128,53 @@ export default function DocumentAnalyticsPage() {
       : result.value === undefined
         ? 'error'
         : 'idle';
-  const canRead = access?.capabilities.readDocuments ?? false;
   const loading =
     organization.state === 'loading' ||
     (organizationId.length > 0 &&
-      (accessState === 'loading' || analyticsState === 'loading'));
-  const failed = organization.state === 'error' || analyticsState === 'error';
+      (accessState === 'loading' || (allowed && analyticsState === 'loading')));
+  const failed =
+    organization.state === 'error' || (allowed && analyticsState === 'error');
   const documents = analytics?.documents ?? [];
 
   const documentHeaders = [
-    { header: t('documents.columnReference'), key: 'reference' },
-    { header: t('documents.columnTitle'), key: 'title' },
-    { header: t('documents.columnPartner'), key: 'partnerName' },
-    { header: t('documents.analyticsColumnDate'), key: 'documentDate' },
-    { header: t('documents.analyticsColumnGross'), key: 'grossTotal' },
-    { header: t('documents.analyticsColumnAdvance'), key: 'advanceTotal' },
-    { header: t('documents.analyticsColumnRounding'), key: 'roundingAmount' },
-    { header: t('documents.analyticsColumnAmountDue'), key: 'amountDue' },
-    { header: t('documents.columnStatus'), key: 'status' },
+    t('documents.columnReference'),
+    t('documents.columnTitle'),
+    t('documents.columnPartner'),
+    t('documents.analyticsColumnDate'),
+    t('documents.analyticsColumnGross'),
+    t('documents.analyticsColumnAdvance'),
+    t('documents.analyticsColumnRounding'),
+    t('documents.analyticsColumnAmountDue'),
+    t('documents.columnStatus'),
   ];
   const byMonthHeaders = [
-    { header: t('documents.analyticsColumnMonth'), key: 'month' },
-    { header: t('documents.eventColumnAccount'), key: 'accountCode' },
-    { header: t('documents.analyticsColumnAccountName'), key: 'accountName' },
-    { header: t('documents.eventColumnDebit'), key: 'debit' },
-    { header: t('documents.eventColumnCredit'), key: 'credit' },
+    t('documents.analyticsColumnMonth'),
+    t('documents.eventColumnAccount'),
+    t('documents.analyticsColumnAccountName'),
+    t('documents.eventColumnDebit'),
+    t('documents.eventColumnCredit'),
   ];
   const byActivityHeaders = [
-    { header: t('documents.eventColumnActivity'), key: 'activityCode' },
-    { header: t('documents.eventColumnDebit'), key: 'debit' },
-    { header: t('documents.eventColumnCredit'), key: 'credit' },
-    { header: t('documents.analyticsColumnLines'), key: 'lineCount' },
+    t('documents.eventColumnActivity'),
+    t('documents.eventColumnDebit'),
+    t('documents.eventColumnCredit'),
+    t('documents.analyticsColumnLines'),
   ];
   const byVatRegimeHeaders = [
-    { header: t('documents.lineKind'), key: 'lineKind' },
-    { header: t('documents.lineVatMode'), key: 'vatMode' },
-    { header: t('documents.lineVatRate'), key: 'vatRate' },
-    { header: t('documents.lineBaseAmount'), key: 'baseAmount' },
-    { header: t('documents.lineVatAmount'), key: 'vatAmount' },
-    { header: t('documents.analyticsColumnLines'), key: 'lineCount' },
+    t('documents.lineKind'),
+    t('documents.lineVatMode'),
+    t('documents.lineVatRate'),
+    t('documents.lineBaseAmount'),
+    t('documents.lineVatAmount'),
+    t('documents.analyticsColumnLines'),
   ];
   const byAccountHeaders = [
-    { header: t('documents.eventColumnAccount'), key: 'accountCode' },
-    { header: t('documents.analyticsColumnAccountName'), key: 'accountName' },
-    { header: t('documents.analyticsColumnNature'), key: 'nature' },
-    { header: t('documents.eventColumnDebit'), key: 'debit' },
-    { header: t('documents.eventColumnCredit'), key: 'credit' },
+    t('documents.eventColumnAccount'),
+    t('documents.analyticsColumnAccountName'),
+    t('documents.analyticsColumnNature'),
+    t('documents.eventColumnDebit'),
+    t('documents.eventColumnCredit'),
   ];
-
-  function documentHref(documentId: string): string {
-    const suffix =
-      organization.slug.length > 0
-        ? `?organization=${encodeURIComponent(organization.slug)}`
-        : '';
-    return `/documents/${encodeURIComponent(documentId)}${suffix}`;
-  }
 
   return (
     <PageContainer>
@@ -284,267 +263,138 @@ export default function DocumentAnalyticsPage() {
       ) : null}
       {!loading && analytics !== undefined && documents.length > 0 ? (
         <>
-          <div data-testid="analytics-documents">
-            <DataTable
-              headers={documentHeaders}
-              rows={documents.map((document) => ({ id: document.id }))}
-            >
-              {({ getTableContainerProps, getTableProps }) => (
-                <TableContainer
-                  className={styles.tableContainer!}
-                  title={t('documents.analyticsDocumentsTitle')}
-                  {...getTableContainerProps()}
-                >
-                  <Table {...getTableProps()} size="md">
-                    <TableHead>
-                      <TableRow>
-                        {documentHeaders.map((header) => (
-                          <TableHeader key={header.key}>
-                            {header.header}
-                          </TableHeader>
-                        ))}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {documents.map((document) => (
-                        <TableRow key={document.id}>
-                          <TableCell>
-                            {document.reference ?? t('documents.notAvailable')}
-                          </TableCell>
-                          <TableCell>
-                            <a href={documentHref(document.id)}>
-                              {document.title}
-                            </a>
-                          </TableCell>
-                          <TableCell>
-                            {document.partnerName ??
-                              t('documents.notAvailable')}
-                          </TableCell>
-                          <TableCell>{document.documentDate}</TableCell>
-                          <TableCell className={styles.amount!}>
-                            {formatAmount(
-                              document.grossTotal,
-                              document.currencyCode,
-                            )}
-                          </TableCell>
-                          <TableCell className={styles.amount!}>
-                            {formatAmount(
-                              document.advanceTotal,
-                              document.currencyCode,
-                            )}
-                          </TableCell>
-                          <TableCell className={styles.amount!}>
-                            {formatAmount(
-                              document.roundingAmount,
-                              document.currencyCode,
-                            )}
-                          </TableCell>
-                          <TableCell className={styles.amount!}>
-                            {formatAmount(
-                              document.amountDue,
-                              document.currencyCode,
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <Tag
-                              size="sm"
-                              type={documentStatusTagTypes[document.status]}
-                            >
-                              {t(documentStatusLabelKeys[document.status])}
-                            </Tag>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              )}
-            </DataTable>
-          </div>
-          <div data-testid="analytics-by-month">
-            <DataTable
-              headers={byMonthHeaders}
-              rows={analytics.byMonth.map((row) => ({
-                id: `${row.month}-${row.accountCode}`,
-              }))}
-            >
-              {({ getTableContainerProps, getTableProps }) => (
-                <TableContainer
-                  className={styles.tableContainer!}
-                  title={t('documents.analyticsByMonthTitle')}
-                  {...getTableContainerProps()}
-                >
-                  <Table {...getTableProps()} size="md">
-                    <TableHead>
-                      <TableRow>
-                        {byMonthHeaders.map((header) => (
-                          <TableHeader key={header.key}>
-                            {header.header}
-                          </TableHeader>
-                        ))}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {analytics.byMonth.map((row) => (
-                        <TableRow key={`${row.month}-${row.accountCode}`}>
-                          <TableCell>{monthLabel(row.month)}</TableCell>
-                          <TableCell>{row.accountCode}</TableCell>
-                          <TableCell>{row.accountName}</TableCell>
-                          <TableCell className={styles.amount!}>
-                            {row.debit}
-                          </TableCell>
-                          <TableCell className={styles.amount!}>
-                            {row.credit}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              )}
-            </DataTable>
-          </div>
-          <div data-testid="analytics-by-activity">
-            <DataTable
-              headers={byActivityHeaders}
-              rows={analytics.byActivity.map((row) => ({
-                id: row.activityCode,
-              }))}
-            >
-              {({ getTableContainerProps, getTableProps }) => (
-                <TableContainer
-                  className={styles.tableContainer!}
-                  title={t('documents.analyticsByActivityTitle')}
-                  {...getTableContainerProps()}
-                >
-                  <Table {...getTableProps()} size="md">
-                    <TableHead>
-                      <TableRow>
-                        {byActivityHeaders.map((header) => (
-                          <TableHeader key={header.key}>
-                            {header.header}
-                          </TableHeader>
-                        ))}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {analytics.byActivity.map((row) => (
-                        <TableRow key={row.activityCode}>
-                          <TableCell>{row.activityCode}</TableCell>
-                          <TableCell className={styles.amount!}>
-                            {row.debit}
-                          </TableCell>
-                          <TableCell className={styles.amount!}>
-                            {row.credit}
-                          </TableCell>
-                          <TableCell className={styles.amount!}>
-                            {row.lineCount}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              )}
-            </DataTable>
-          </div>
-          <div data-testid="analytics-by-vat-regime">
-            <DataTable
-              headers={byVatRegimeHeaders}
-              rows={analytics.byVatRegime.map((row) => ({
-                id: `${row.lineKind}-${row.vatMode}-${row.vatRate}`,
-              }))}
-            >
-              {({ getTableContainerProps, getTableProps }) => (
-                <TableContainer
-                  className={styles.tableContainer!}
-                  title={t('documents.analyticsByVatRegimeTitle')}
-                  {...getTableContainerProps()}
-                >
-                  <Table {...getTableProps()} size="md">
-                    <TableHead>
-                      <TableRow>
-                        {byVatRegimeHeaders.map((header) => (
-                          <TableHeader key={header.key}>
-                            {header.header}
-                          </TableHeader>
-                        ))}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {analytics.byVatRegime.map((row) => (
-                        <TableRow
-                          key={`${row.lineKind}-${row.vatMode}-${row.vatRate}`}
-                        >
-                          <TableCell>
-                            {t(invoiceLineKindLabelKeys[row.lineKind])}
-                          </TableCell>
-                          <TableCell>
-                            {t(vatModeLabelKeys[row.vatMode])}
-                          </TableCell>
-                          <TableCell className={styles.amount!}>
-                            {row.vatRate}
-                          </TableCell>
-                          <TableCell className={styles.amount!}>
-                            {row.baseAmount}
-                          </TableCell>
-                          <TableCell className={styles.amount!}>
-                            {row.vatAmount}
-                          </TableCell>
-                          <TableCell className={styles.amount!}>
-                            {row.lineCount}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              )}
-            </DataTable>
-          </div>
-          <div data-testid="analytics-by-account">
-            <DataTable
-              headers={byAccountHeaders}
-              rows={analytics.byAccount.map((row) => ({
-                id: row.accountCode,
-              }))}
-            >
-              {({ getTableContainerProps, getTableProps }) => (
-                <TableContainer
-                  className={styles.tableContainer!}
-                  title={t('documents.analyticsByAccountTitle')}
-                  {...getTableContainerProps()}
-                >
-                  <Table {...getTableProps()} size="md">
-                    <TableHead>
-                      <TableRow>
-                        {byAccountHeaders.map((header) => (
-                          <TableHeader key={header.key}>
-                            {header.header}
-                          </TableHeader>
-                        ))}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {analytics.byAccount.map((row) => (
-                        <TableRow key={row.accountCode}>
-                          <TableCell>{row.accountCode}</TableCell>
-                          <TableCell>{row.accountName}</TableCell>
-                          <TableCell>{row.nature}</TableCell>
-                          <TableCell className={styles.amount!}>
-                            {row.debit}
-                          </TableCell>
-                          <TableCell className={styles.amount!}>
-                            {row.credit}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              )}
-            </DataTable>
-          </div>
+          <AnalyticsTable
+            headers={documentHeaders}
+            rows={documents.map((document) => ({
+              cells: (
+                <>
+                  <TableCell>
+                    {document.reference ?? t('documents.notAvailable')}
+                  </TableCell>
+                  <TableCell>
+                    <a
+                      href={withOrganization(
+                        `/documents/${encodeURIComponent(document.id)}`,
+                        organization.slug,
+                      )}
+                    >
+                      {document.title}
+                    </a>
+                  </TableCell>
+                  <TableCell>
+                    {document.partnerName ?? t('documents.notAvailable')}
+                  </TableCell>
+                  <TableCell>{document.documentDate}</TableCell>
+                  <TableCell className={styles.amount!}>
+                    {formatAmount(document.grossTotal, document.currencyCode)}
+                  </TableCell>
+                  <TableCell className={styles.amount!}>
+                    {formatAmount(document.advanceTotal, document.currencyCode)}
+                  </TableCell>
+                  <TableCell className={styles.amount!}>
+                    {formatAmount(
+                      document.roundingAmount,
+                      document.currencyCode,
+                    )}
+                  </TableCell>
+                  <TableCell className={styles.amount!}>
+                    {formatAmount(document.amountDue, document.currencyCode)}
+                  </TableCell>
+                  <TableCell>
+                    <Tag
+                      size="sm"
+                      type={documentStatusTagTypes[document.status]}
+                    >
+                      {t(documentStatusLabelKeys[document.status])}
+                    </Tag>
+                  </TableCell>
+                </>
+              ),
+              id: document.id,
+            }))}
+            testId="analytics-documents"
+            title={t('documents.analyticsDocumentsTitle')}
+          />
+          <AnalyticsTable
+            headers={byMonthHeaders}
+            rows={analytics.byMonth.map((row) => ({
+              cells: (
+                <>
+                  <TableCell>{monthLabel(row.month)}</TableCell>
+                  <TableCell>{row.accountCode}</TableCell>
+                  <TableCell>{row.accountName}</TableCell>
+                  <TableCell className={styles.amount!}>{row.debit}</TableCell>
+                  <TableCell className={styles.amount!}>{row.credit}</TableCell>
+                </>
+              ),
+              id: `${row.month}-${row.accountCode}`,
+            }))}
+            testId="analytics-by-month"
+            title={t('documents.analyticsByMonthTitle')}
+          />
+          <AnalyticsTable
+            headers={byActivityHeaders}
+            rows={analytics.byActivity.map((row) => ({
+              cells: (
+                <>
+                  <TableCell>{row.activityCode}</TableCell>
+                  <TableCell className={styles.amount!}>{row.debit}</TableCell>
+                  <TableCell className={styles.amount!}>{row.credit}</TableCell>
+                  <TableCell className={styles.amount!}>
+                    {row.lineCount}
+                  </TableCell>
+                </>
+              ),
+              id: row.activityCode,
+            }))}
+            testId="analytics-by-activity"
+            title={t('documents.analyticsByActivityTitle')}
+          />
+          <AnalyticsTable
+            headers={byVatRegimeHeaders}
+            rows={analytics.byVatRegime.map((row) => ({
+              cells: (
+                <>
+                  <TableCell>
+                    {t(invoiceLineKindLabelKeys[row.lineKind])}
+                  </TableCell>
+                  <TableCell>{t(vatModeLabelKeys[row.vatMode])}</TableCell>
+                  <TableCell className={styles.amount!}>
+                    {row.vatRate}
+                  </TableCell>
+                  <TableCell className={styles.amount!}>
+                    {row.baseAmount}
+                  </TableCell>
+                  <TableCell className={styles.amount!}>
+                    {row.vatAmount}
+                  </TableCell>
+                  <TableCell className={styles.amount!}>
+                    {row.lineCount}
+                  </TableCell>
+                </>
+              ),
+              id: `${row.lineKind}-${row.vatMode}-${row.vatRate}`,
+            }))}
+            testId="analytics-by-vat-regime"
+            title={t('documents.analyticsByVatRegimeTitle')}
+          />
+          <AnalyticsTable
+            headers={byAccountHeaders}
+            rows={analytics.byAccount.map((row) => ({
+              cells: (
+                <>
+                  <TableCell>{row.accountCode}</TableCell>
+                  <TableCell>{row.accountName}</TableCell>
+                  <TableCell>{row.nature}</TableCell>
+                  <TableCell className={styles.amount!}>{row.debit}</TableCell>
+                  <TableCell className={styles.amount!}>{row.credit}</TableCell>
+                </>
+              ),
+              id: row.accountCode,
+            }))}
+            testId="analytics-by-account"
+            title={t('documents.analyticsByAccountTitle')}
+          />
         </>
       ) : null}
     </PageContainer>

@@ -335,13 +335,15 @@ event, and it equals `app.invoice.amount_due`, a generated column
 statements over the caller's scope instead of one document: the invoice list
 capped at 50 rows, expense and revenue by month of `effective_date` and account,
 by `activity_code` on expense and revenue accounts, VAT by line kind and regime,
-and totals by account. Every query filters by `organization_id` and by the
-caller's entity scope on `app.document.legal_entity_id`, and each grouping reads
-both sides in one pass with `coalesce(sum(...) filter (where side = ...), 0)`.
-Nothing is recomputed in TypeScript: the amounts cross the boundary as the
-decimal strings PostgreSQL printed. The response also reports its own cost in
-`stats`: the six statements it ran, the event and invoice line counts behind
-them, and the wall clock milliseconds they took.
+and totals by account. Every query filters by `organization_id`, the event line
+aggregates read the caller's entity scope from
+`app.economic_event.legal_entity_id` rather than joining the register, and each
+grouping reads both sides in one pass with
+`coalesce(sum(...) filter (where side = ...), 0)`. Nothing is recomputed in
+TypeScript: the amounts cross the boundary as the decimal strings PostgreSQL
+printed. The response also reports its own cost in `stats`: the five statements
+it ran, the event and invoice line counts those statements already carried, and
+the wall clock milliseconds they took.
 
 ## Out of scope
 

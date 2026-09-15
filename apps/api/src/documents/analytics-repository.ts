@@ -1,7 +1,8 @@
-// The analytics read: six statements over the stored split, no arithmetic in TypeScript beyond the elapsed time.
+// The analytics read: five statements over the stored split, no arithmetic in TypeScript beyond the row counts and the elapsed time.
 
 import { runInTenantContext } from '@bap/db';
 import type { DatabasePool } from '@bap/db/pool';
+import type { QueryResult, QueryResultRow } from 'pg';
 
 import type { EntityScopeSelector } from '../datasets/dataset-repository.js';
 import { MAX_ANALYTICS_DOCUMENTS } from './contract.js';
@@ -18,12 +19,11 @@ import { entityFilter } from './sql.js';
 // Every aggregate reads the same rows: this organization, and only the documents the caller's entity scope allows.
 const EVENT_LINE_SOURCE = `from app.economic_event_line as l
           join app.economic_event as e
-            on e.id = l.event_id and e.organization_id = l.organization_id
-          join app.document as d
-            on d.id = e.document_id and d.organization_id = l.organization_id`;
+            on e.id = l.event_id and e.organization_id = l.organization_id`;
 
+// The event stores its own legal entity, so the entity scope costs no join back to the register.
 const EVENT_LINE_FILTER = `l.organization_id = $1
-            and ($2::uuid[] is null or d.legal_entity_id = any($2::uuid[]))`;
+            and ($2::uuid[] is null or e.legal_entity_id = any($2::uuid[]))`;
 
 const INVOICE_LINE_SOURCE = `from app.invoice_line as il
           join app.document as d
@@ -94,27 +94,18 @@ const BY_VAT_REGIME_QUERY = `select il.line_kind,
     group by 1, 2, 3
     order by 1, 2, 3`;
 
+// The line count rides along with the totals, so the event line count the response reports costs no statement of its own.
 const BY_ACCOUNT_QUERY = `select l.account_code,
           a.name_en as account_name,
           a.nature,
           ${DEBIT_SUM},
-          ${CREDIT_SUM}
+          ${CREDIT_SUM},
+          count(*)::int as line_count
      ${EVENT_LINE_SOURCE}
      join app.directive_account as a on a.code = l.account_code
     where ${EVENT_LINE_FILTER}
     group by 1, 2, 3
     order by 1`;
-
-// The two row counts the response reports come from one statement, so the cost it states stays the cost it paid.
-const COUNTS_QUERY = `select (select count(*)::int
-            ${EVENT_LINE_SOURCE}
-           where ${EVENT_LINE_FILTER}) as event_line_count,
-          (select count(*)::int
-            ${INVOICE_LINE_SOURCE}
-           where ${INVOICE_LINE_FILTER}) as invoice_line_count`;
-
-// The documents list, the four aggregates and the counts.
-const QUERY_COUNT = 6;
 
 interface DocumentRow {
   advance_total: string;
@@ -160,12 +151,8 @@ interface AccountRow {
   account_name: string;
   credit: string;
   debit: string;
+  line_count: number;
   nature: string;
-}
-
-interface CountRow {
-  event_line_count: number;
-  invoice_line_count: number;
 }
 
 export async function readDocumentAnalytics(
@@ -174,25 +161,25 @@ export async function readDocumentAnalytics(
 ): Promise<DocumentAnalyticsResponse> {
   return runInTenantContext(pool, input, async (transaction) => {
     const values = [input.organizationId, entityFilter(input.legalEntityIds)];
+    let queryCount = 0;
+    // Every statement goes through one counter, so the cost the response states is the cost it paid.
+    const run = async <Row extends QueryResultRow>(
+      text: string,
+      parameters: unknown[],
+    ): Promise<QueryResult<Row>> => {
+      queryCount += 1;
+      return transaction.query<Row>(text, parameters);
+    };
+
     const startedAt = performance.now();
-    const documents = await transaction.query<DocumentRow>(DOCUMENTS_QUERY, [
+    const documents = await run<DocumentRow>(DOCUMENTS_QUERY, [
       ...values,
       MAX_ANALYTICS_DOCUMENTS,
     ]);
-    const byMonth = await transaction.query<MonthRow>(BY_MONTH_QUERY, values);
-    const byActivity = await transaction.query<ActivityRow>(
-      BY_ACTIVITY_QUERY,
-      values,
-    );
-    const byVatRegime = await transaction.query<VatRegimeRow>(
-      BY_VAT_REGIME_QUERY,
-      values,
-    );
-    const byAccount = await transaction.query<AccountRow>(
-      BY_ACCOUNT_QUERY,
-      values,
-    );
-    const counts = await transaction.query<CountRow>(COUNTS_QUERY, values);
+    const byMonth = await run<MonthRow>(BY_MONTH_QUERY, values);
+    const byActivity = await run<ActivityRow>(BY_ACTIVITY_QUERY, values);
+    const byVatRegime = await run<VatRegimeRow>(BY_VAT_REGIME_QUERY, values);
+    const byAccount = await run<AccountRow>(BY_ACCOUNT_QUERY, values);
     const elapsedMs = Math.round(performance.now() - startedAt);
 
     return {
@@ -240,9 +227,15 @@ export async function readDocumentAnalytics(
       })),
       stats: {
         elapsedMs,
-        eventLineCount: counts.rows[0]?.event_line_count ?? 0,
-        invoiceLineCount: counts.rows[0]?.invoice_line_count ?? 0,
-        queryCount: QUERY_COUNT,
+        eventLineCount: byAccount.rows.reduce(
+          (total, row) => total + row.line_count,
+          0,
+        ),
+        invoiceLineCount: byVatRegime.rows.reduce(
+          (total, row) => total + row.line_count,
+          0,
+        ),
+        queryCount,
       },
     };
   });

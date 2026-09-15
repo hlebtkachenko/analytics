@@ -68,6 +68,27 @@ describe('ProductLayout', () => {
     expect(mocks.redirect).toHaveBeenCalledWith('/sign-in');
   });
 
+  it('refuses a return path that cannot follow a sign in', async () => {
+    mocks.requestHeaders = new Headers({ 'x-bap-path': '/api/auth/session' });
+    mocks.getSession.mockResolvedValue(null);
+
+    await ProductLayout({ children: <p>Product page</p> });
+
+    expect(mocks.redirect).toHaveBeenCalledWith('/sign-in');
+  });
+
+  it('treats an unverified session as signed out', async () => {
+    mocks.requestHeaders = new Headers({ 'x-bap-path': '/documents' });
+    mocks.getSession.mockResolvedValue({
+      user: { email: 'member@bap.invalid', emailVerified: false },
+    });
+
+    const result = await ProductLayout({ children: <p>Product page</p> });
+
+    expect(mocks.redirect).toHaveBeenCalledWith('/sign-in?next=%2Fdocuments');
+    expect(result).toBeNull();
+  });
+
   it('fails closed when the session read fails', async () => {
     mocks.requestHeaders = new Headers({ 'x-bap-path': '/documents' });
     mocks.getSession.mockRejectedValue(new Error('private session detail'));
@@ -81,7 +102,7 @@ describe('ProductLayout', () => {
   it('renders the page inside the product shell for a session', async () => {
     mocks.requestHeaders = new Headers({ 'x-bap-path': '/documents' });
     mocks.getSession.mockResolvedValue({
-      user: { email: 'member@bap.invalid' },
+      user: { email: 'member@bap.invalid', emailVerified: true },
     });
 
     render(await ProductLayout({ children: <p>Product page</p> }));

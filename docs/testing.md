@@ -206,9 +206,13 @@ operational workflow raises only its disposable synthetic owner's total quota
 from 1 to 2 through the existing migrator command; the second organization
 consumes that capacity and the proof finishes on the zero-quota state. The
 authenticated access, icon, organization, dataset, and final sign-out specs
-share one worker-scoped synthetic browser session. The public access assertions
-remain unauthenticated, and the lexically final sign-out spec closes the shared
-session and proves the post-sign-out 401.
+share one worker-scoped synthetic browser session, and every authenticated spec
+asserts accessibility through the one shared
+`tests/operational/accessibility-support.ts` helper beside the shared sign-in
+and legal entity helpers, so a single definition decides what counts as an
+accessibility violation. The public access assertions remain unauthenticated,
+and the lexically final sign-out spec closes the shared session and proves the
+post-sign-out 401.
 
 The combined serial suite issues 5 sign-in requests in total: the shared
 synthetic owner browser session, the synthetic admin and member sessions of the

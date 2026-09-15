@@ -657,6 +657,17 @@ export const partnerListQuerySchema = z
   .object({ q: z.string().trim().min(1).max(100).optional() })
   .strict();
 
+// The one account nature vocabulary, shared by the directive and by the analytics mirror.
+const accountNatureSchema = z.enum([
+  'ASSET',
+  'LIABILITY',
+  'EQUITY',
+  'EXPENSE',
+  'REVENUE',
+  'CLOSING',
+  'OFF_BALANCE',
+]);
+
 export const directiveAccountSchema = z
   .object({
     class: z.number().int().min(0).max(9),
@@ -664,15 +675,7 @@ export const directiveAccountSchema = z
     groupCode: z.string().regex(/^[0-9]{2}$/),
     nameCs: z.string(),
     nameEn: z.string(),
-    nature: z.enum([
-      'ASSET',
-      'LIABILITY',
-      'EQUITY',
-      'EXPENSE',
-      'REVENUE',
-      'CLOSING',
-      'OFF_BALANCE',
-    ]),
+    nature: accountNatureSchema,
   })
   .strict();
 
@@ -680,8 +683,11 @@ export const directiveAccountListSchema = z
   .object({ directiveAccounts: z.array(directiveAccountSchema) })
   .strict();
 
+// The analytics read answers from stored columns only, so the mirror bounds its document list too.
+export const MAX_ANALYTICS_DOCUMENTS = 50;
+
 // The analytics read: the invoices in scope plus four aggregates read straight from stored columns.
-export const analyticsDocumentSchema = z
+const analyticsDocumentSchema = z
   .object({
     advanceTotal: decimalStringSchema,
     amountDue: decimalStringSchema,
@@ -698,7 +704,7 @@ export const analyticsDocumentSchema = z
   })
   .strict();
 
-export const analyticsByMonthSchema = z
+const analyticsByMonthSchema = z
   .object({
     accountCode: accountCodeSchema,
     accountName: z.string(),
@@ -708,7 +714,7 @@ export const analyticsByMonthSchema = z
   })
   .strict();
 
-export const analyticsByActivitySchema = z
+const analyticsByActivitySchema = z
   .object({
     activityCode: activityCodeSchema,
     credit: decimalStringSchema,
@@ -717,7 +723,7 @@ export const analyticsByActivitySchema = z
   })
   .strict();
 
-export const analyticsByVatRegimeSchema = z
+const analyticsByVatRegimeSchema = z
   .object({
     baseAmount: decimalStringSchema,
     lineCount: z.number().int().min(0),
@@ -728,23 +734,23 @@ export const analyticsByVatRegimeSchema = z
   })
   .strict();
 
-export const analyticsByAccountSchema = z
+const analyticsByAccountSchema = z
   .object({
     accountCode: accountCodeSchema,
     accountName: z.string(),
     credit: decimalStringSchema,
     debit: decimalStringSchema,
-    nature: z.string(),
+    nature: accountNatureSchema,
   })
   .strict();
 
 // The page states its own cost from these counters, so no reader has to trust the docs.
-export const analyticsStatsSchema = z
+const analyticsStatsSchema = z
   .object({
-    elapsedMs: z.number().min(0),
+    elapsedMs: z.number().int().min(0),
     eventLineCount: z.number().int().min(0),
     invoiceLineCount: z.number().int().min(0),
-    queryCount: z.number().int().min(0),
+    queryCount: z.number().int().min(1),
   })
   .strict();
 
@@ -754,7 +760,7 @@ export const documentAnalyticsResponseSchema = z
     byActivity: z.array(analyticsByActivitySchema),
     byMonth: z.array(analyticsByMonthSchema),
     byVatRegime: z.array(analyticsByVatRegimeSchema),
-    documents: z.array(analyticsDocumentSchema),
+    documents: z.array(analyticsDocumentSchema).max(MAX_ANALYTICS_DOCUMENTS),
     stats: analyticsStatsSchema,
   })
   .strict();

@@ -459,7 +459,7 @@ describe('documentAnalyticsResponseSchema', () => {
       },
     ],
     stats: {
-      elapsedMs: 12.5,
+      elapsedMs: 12,
       eventLineCount: 10,
       invoiceLineCount: 5,
       queryCount: 4,
@@ -470,6 +470,36 @@ describe('documentAnalyticsResponseSchema', () => {
     expect(documentAnalyticsResponseSchema.safeParse(analytics).success).toBe(
       true,
     );
+  });
+
+  it('refuses stats looser than the route reports', () => {
+    expect(
+      documentAnalyticsResponseSchema.safeParse({
+        ...analytics,
+        stats: { ...analytics.stats, elapsedMs: 12.5 },
+      }).success,
+    ).toBe(false);
+    expect(
+      documentAnalyticsResponseSchema.safeParse({
+        ...analytics,
+        stats: { ...analytics.stats, queryCount: 0 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('refuses an unknown account nature and more documents than the route publishes', () => {
+    expect(
+      documentAnalyticsResponseSchema.safeParse({
+        ...analytics,
+        byAccount: [{ ...analytics.byAccount[0], nature: 'PROFIT' }],
+      }).success,
+    ).toBe(false);
+    expect(
+      documentAnalyticsResponseSchema.safeParse({
+        ...analytics,
+        documents: Array.from({ length: 51 }, () => analytics.documents[0]),
+      }).success,
+    ).toBe(false);
   });
 
   it('refuses an unexpected key, a float amount, and a malformed month', () => {

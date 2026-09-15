@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { signInPath } from '../auth/return-path';
+
 // Mirrors the dataset contract the BFF already validated, so the browser trusts nothing twice.
 export const datasetSummarySchema = z.object({
   createdAt: z.string().min(1),
@@ -145,6 +147,12 @@ export async function getJson(
 ): Promise<unknown> {
   const response = await fetch(path, { cache: 'no-store', signal });
   if (!response.ok) {
+    // A soft navigation never re-runs the layout, so an expired session is sent back here.
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.location.assign(
+        signInPath(`${window.location.pathname}${window.location.search}`),
+      );
+    }
     throw new Error('Request failed.');
   }
   return await response.json();

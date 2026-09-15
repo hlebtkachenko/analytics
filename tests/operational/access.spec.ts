@@ -30,8 +30,17 @@ publicTest('protects the public BAP access boundary', async ({ page }) => {
     maxRedirects: 0,
   });
   expect(organizations.status()).toBe(307);
-  expect(organizations.headers()['location']).toMatch(/\/sign-in$/);
-  expect((await page.request.get('/bap-operational')).status()).toBe(404);
+  expect(organizations.headers()['location']).toBe(
+    '/sign-in?next=%2Forganizations',
+  );
+  // Every slug answers the same signed-out redirect, so nothing about slug existence leaks.
+  const organizationSlugPage = await page.request.get('/bap-operational', {
+    maxRedirects: 0,
+  });
+  expect(organizationSlugPage.status()).toBe(307);
+  expect(organizationSlugPage.headers()['location']).toBe(
+    '/sign-in?next=%2Fbap-operational',
+  );
   const unauthenticated = await page.request.get(
     '/api/bff/application/organizations/forged_organization/access',
   );

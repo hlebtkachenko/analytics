@@ -715,7 +715,7 @@ describe('a five month invoice with mixed VAT, a deducted advance and rounding',
     expect(analytics.stats).toMatchObject({
       eventLineCount: stored?.count,
       invoiceLineCount: 22,
-      queryCount: 6,
+      queryCount: 5,
     });
     expect(analytics.stats.elapsedMs).toBeGreaterThanOrEqual(0);
   });
@@ -738,7 +738,7 @@ describe('a five month invoice with mixed VAT, a deducted advance and rounding',
         byMonth: [],
         byVatRegime: [],
         documents: [],
-        stats: { eventLineCount: 0, invoiceLineCount: 0, queryCount: 6 },
+        stats: { eventLineCount: 0, invoiceLineCount: 0, queryCount: 5 },
       });
     } finally {
       entityScope = { mode: 'all' };

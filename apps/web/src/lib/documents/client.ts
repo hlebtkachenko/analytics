@@ -50,6 +50,13 @@ export function partnersPath(organizationId: string, q?: string): string {
   return `${organizationPath(organizationId)}/partners${filter}`;
 }
 
+// One product link builder, so every page keeps the chosen organization in the URL.
+export function withOrganization(path: string, slug: string): string {
+  return slug.length === 0
+    ? path
+    : `${path}?organization=${encodeURIComponent(slug)}`;
+}
+
 type Mutation = Readonly<{
   body?: unknown;
   method: 'DELETE' | 'PATCH' | 'POST';

@@ -1,8 +1,11 @@
 import type { Page } from '@playwright/test';
-import axe from 'axe-core';
 
+import { expectNoAccessibilityViolations } from './accessibility-support';
 import { expect, test } from './authenticated-test';
-import { ensureLegalEntity } from './legal-entity-support';
+import {
+  ensureLegalEntity,
+  selectUploadLegalEntity,
+} from './legal-entity-support';
 
 const organizationId =
   process.env.BAP_OPERATIONAL_ORGANIZATION_ID ?? 'bap-operational';
@@ -107,19 +110,6 @@ const fiveMonthDeductionLines = [
 // The amount due is a generated column; formatting differs per locale, so only the digits are asserted.
 const amountDuePattern = /500[\s ,.']?000/;
 
-type AxeWindow = Window &
-  typeof globalThis & {
-    axe: {
-      run: (document: Document) => Promise<{
-        violations: ReadonlyArray<{
-          id: string;
-          impact: string | null;
-          nodes: ReadonlyArray<Readonly<{ target: ReadonlyArray<string> }>>;
-        }>;
-      }>;
-    };
-  };
-
 type LegalEntityList = Readonly<{
   legalEntities: ReadonlyArray<Readonly<{ id: string; name: string }>>;
 }>;
@@ -130,19 +120,6 @@ type PartnerList = Readonly<{
 
 let legalEntityId = '';
 let partnerId = '';
-
-async function expectNoAccessibilityViolations(page: Page): Promise<void> {
-  await page.evaluate(axe.source);
-  const violations = await page.evaluate(async () => {
-    const results = await (window as AxeWindow).axe.run(document);
-    return results.violations.map(({ id, impact, nodes }) => ({
-      id,
-      impact,
-      targets: nodes.map((node) => node.target),
-    }));
-  });
-  expect(violations).toEqual([]);
-}
 
 // The entity is created through the real owner UI, then its identifier is read back from the register.
 async function resolveLegalEntityId(page: Page): Promise<string> {
@@ -188,18 +165,6 @@ async function registerDocument(
 ): Promise<void> {
   const created = await page.request.post(documentsPath, { data: body });
   expect(created.status(), `${label} was refused.`).toBe(201);
-}
-
-// The analytics page may scope itself to one entity; the demo stack holds exactly one, so the select is optional.
-async function selectAnalyticsLegalEntity(page: Page): Promise<void> {
-  const selector = page.getByLabel('Legal entity', { exact: true });
-
-  if ((await selector.count()) === 0) {
-    return;
-  }
-
-  await expect(selector).toBeVisible();
-  await selector.selectOption({ label: entityName });
 }
 
 test.describe.serial('document analytics read from the stored split', () => {
@@ -368,7 +333,7 @@ test.describe.serial('document analytics read from the stored split', () => {
     await page.goto(
       `/documents/analytics?organization=${encodeURIComponent(organizationSlug)}`,
     );
-    await selectAnalyticsLegalEntity(page);
+    await selectUploadLegalEntity(page, entityName);
 
     const documents = page.getByTestId('analytics-documents');
     await expect(documents).toBeVisible();

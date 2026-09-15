@@ -76,7 +76,7 @@ const documentSummary = {
 };
 
 // The ten capabilities the access contract always carries, tuned per test.
-function capabilities(manageDocuments: boolean) {
+function capabilities(manageDocuments: boolean, readDocuments = true) {
   return {
     createEntities: false,
     deleteEntities: false,
@@ -84,7 +84,7 @@ function capabilities(manageDocuments: boolean) {
     manageEntityAccess: false,
     manageMembers: false,
     manageOrganization: false,
-    readDocuments: true,
+    readDocuments,
     updateEntities: false,
     uploadData: false,
     useAi: false,
@@ -92,7 +92,11 @@ function capabilities(manageDocuments: boolean) {
 }
 
 // One router per test, so every request is answered by the shape its route promises.
-function respondWith(documents: unknown[], manageDocuments = true) {
+function respondWith(
+  documents: unknown[],
+  manageDocuments = true,
+  readDocuments = true,
+) {
   return vi.fn(async (input: string) => {
     if (input === '/api/auth/organization/list') {
       return Response.json([
@@ -106,7 +110,7 @@ function respondWith(documents: unknown[], manageDocuments = true) {
 
     if (input.endsWith('/access')) {
       return Response.json({
-        capabilities: capabilities(manageDocuments),
+        capabilities: capabilities(manageDocuments, readDocuments),
         organizationId: 'organization_1',
       });
     }
@@ -269,6 +273,15 @@ describe('DocumentsPage', () => {
       'href',
       '/documents/analytics?organization=organization-1',
     );
+  });
+
+  it('hides analytics from an account without the read capability', async () => {
+    vi.stubGlobal('fetch', respondWith([documentSummary], true, false));
+
+    renderDocumentsPage();
+    await screen.findByText('Placeholder document');
+
+    expect(screen.queryByRole('link', { name: 'Analytics' })).toBeNull();
   });
 
   it('names the document in the row action, so the menus are told apart', async () => {

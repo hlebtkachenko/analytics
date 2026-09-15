@@ -1,37 +1,8 @@
-import axe from 'axe-core';
-
 import { normalizeOrganizationSlug } from '../../apps/web/src/lib/organizations/slug';
+import { expectNoAccessibilityViolations } from './accessibility-support';
 import { expect, test } from './authenticated-test';
 
 const password = process.env.BAP_OPERATIONAL_PASSWORD ?? '';
-
-type AxeWindow = Window &
-  typeof globalThis & {
-    axe: {
-      run: (document: Document) => Promise<{
-        violations: ReadonlyArray<{
-          id: string;
-          impact: string | null;
-          nodes: ReadonlyArray<Readonly<{ target: ReadonlyArray<string> }>>;
-        }>;
-      }>;
-    };
-  };
-
-async function expectNoAccessibilityViolations(
-  page: import('@playwright/test').Page,
-) {
-  await page.evaluate(axe.source);
-  const violations = await page.evaluate(async () => {
-    const results = await (window as AxeWindow).axe.run(document);
-    return results.violations.map(({ id, impact, nodes }) => ({
-      id,
-      impact,
-      targets: nodes.map((node) => node.target),
-    }));
-  });
-  expect(violations).toEqual([]);
-}
 
 async function expectNoHorizontalOverflow(
   page: import('@playwright/test').Page,

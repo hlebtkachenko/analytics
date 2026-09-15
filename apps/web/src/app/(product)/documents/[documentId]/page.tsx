@@ -27,12 +27,7 @@ import { useTranslation } from 'react-i18next';
 
 import PageContainer from '../../../../components/page-container';
 import { useToast } from '../../../../components/shell/toast';
-import {
-  accessPath,
-  getJson,
-  isAbortError,
-  organizationAccessSchema,
-} from '../../../../lib/datasets/client';
+import { getJson, isAbortError } from '../../../../lib/datasets/client';
 import {
   documentLinkPath,
   documentLinksPath,
@@ -64,6 +59,7 @@ import {
   invoiceLineKindLabelKeys,
   vatModeLabelKeys,
 } from '../../../../lib/documents/labels.ts';
+import { useOrganizationAccess } from '../../../../lib/organizations/use-organization-access';
 import { useOrganizationSelection } from '../../../../lib/organizations/use-organization-selection';
 import styles from './page.module.scss';
 
@@ -86,8 +82,9 @@ export default function DocumentDetailPage() {
   const documentId = parameters.documentId;
   const organization = useOrganizationSelection();
   const organizationId = organization.organizationId;
+  const { access } = useOrganizationAccess(organizationId);
+  const canManage = access?.capabilities.manageDocuments ?? false;
   const [result, setResult] = useState<DetailResult>();
-  const [canManage, setCanManage] = useState(false);
   const [statusFailed, setStatusFailed] = useState(false);
   const [linkFailed, setLinkFailed] = useState(false);
   const [linkKind, setLinkKind] = useState<DocumentLinkKind>('relates');
@@ -125,27 +122,6 @@ export default function DocumentDetailPage() {
       controller.abort();
     };
   }, [detailKey, documentId, organizationId]);
-
-  useEffect(() => {
-    if (organizationId.length === 0) {
-      return;
-    }
-
-    const controller = new AbortController();
-    void getJson(accessPath(organizationId), controller.signal)
-      .then((payload) => organizationAccessSchema.parse(payload))
-      .then((contract) => {
-        setCanManage(contract.capabilities.manageDocuments);
-      })
-      .catch((error: unknown) => {
-        if (!isAbortError(error)) {
-          setCanManage(false);
-        }
-      });
-    return () => {
-      controller.abort();
-    };
-  }, [organizationId]);
 
   useEffect(() => {
     if (organizationId.length === 0 || linkQuery.trim().length === 0) {
