@@ -259,6 +259,18 @@ describe('DocumentsPage', () => {
     expect(screen.queryByRole('link', { name: 'New document' })).toBeNull();
   });
 
+  it('offers the analytics page from the heading row, keeping the organization', async () => {
+    vi.stubGlobal('fetch', respondWith([documentSummary]));
+
+    renderDocumentsPage();
+    await screen.findByText('Placeholder document');
+
+    expect(screen.getByRole('link', { name: 'Analytics' })).toHaveAttribute(
+      'href',
+      '/documents/analytics?organization=organization-1',
+    );
+  });
+
   it('names the document in the row action, so the menus are told apart', async () => {
     vi.stubGlobal('fetch', respondWith([documentSummary]));
 

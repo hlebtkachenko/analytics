@@ -30,6 +30,7 @@ import {
 } from '../subject-rate-limit.guard.js';
 import type {
   DirectiveAccount,
+  DocumentAnalyticsResponse,
   DocumentDetail,
   DocumentLink,
 } from './contract.js';
@@ -37,6 +38,7 @@ import { DocumentController } from './document.controller.js';
 import {
   DocumentRepository,
   type CreateDocumentInput,
+  type EntityScopeSelector,
   type ListDocumentsInput,
   type UpdateDocumentInput,
 } from './document-repository.js';
@@ -149,6 +151,68 @@ const documentLink: DocumentLink = {
   toDocumentId: OTHER_DOCUMENT_ID,
 };
 
+// One row per grouping: the route reads the stored split and reports what the read cost.
+const analytics: DocumentAnalyticsResponse = {
+  byAccount: [
+    {
+      accountCode: '311',
+      accountName: 'Trade receivables',
+      credit: '0.0000',
+      debit: '1210.0000',
+      nature: 'ASSET',
+    },
+  ],
+  byActivity: [
+    {
+      activityCode: 'placeholder-activity',
+      credit: '1210.0000',
+      debit: '1210.0000',
+      lineCount: 2,
+    },
+  ],
+  byMonth: [
+    {
+      accountCode: '311',
+      accountName: 'Trade receivables',
+      credit: '0.0000',
+      debit: '1210.0000',
+      month: '2026-09-01',
+    },
+  ],
+  byVatRegime: [
+    {
+      baseAmount: '1000.0000',
+      lineCount: 1,
+      lineKind: 'item',
+      vatAmount: '210.0000',
+      vatMode: 'standard',
+      vatRate: '21.00',
+    },
+  ],
+  documents: [
+    {
+      advanceTotal: '0.0000',
+      amountDue: '1210.0000',
+      currencyCode: 'CZK',
+      documentDate: '2026-09-14',
+      grossTotal: '1210.0000',
+      id: DOCUMENT_ID,
+      kind: 'issued_invoice',
+      partnerName: 'Placeholder Partner',
+      reference: 'PLACEHOLDER-1',
+      roundingAmount: '0.0000',
+      status: 'registered',
+      title: 'Placeholder document',
+    },
+  ],
+  stats: {
+    elapsedMs: 3,
+    eventLineCount: 2,
+    invoiceLineCount: 1,
+    queryCount: 6,
+  },
+};
+
 const directiveAccount: DirectiveAccount = {
   class: 3,
   code: '311',
@@ -206,6 +270,7 @@ const deductionLine = {
 describe('application document routes', () => {
   let application: NestExpressApplication;
   let entityScope: EntityScope = { mode: 'all' };
+  const analyticsCalls: EntityScopeSelector[] = [];
   const createCalls: CreateDocumentInput[] = [];
   const listCalls: ListDocumentsInput[] = [];
   const updateCalls: UpdateDocumentInput[] = [];
@@ -276,6 +341,10 @@ describe('application document routes', () => {
         totalsByCurrency: [{ currencyCode: 'CZK', totalAmount: '1210.0000' }],
       };
     }),
+    readAnalytics: vi.fn(async (input) => {
+      analyticsCalls.push(input);
+      return analytics;
+    }),
     readDocument: vi.fn(async (input) =>
       input.documentId === DOCUMENT_ID ? detail : null,
     ),
@@ -310,6 +379,7 @@ describe('application document routes', () => {
 
   beforeEach(() => {
     entityScope = { mode: 'all' };
+    analyticsCalls.length = 0;
     createCalls.length = 0;
     listCalls.length = 0;
     updateCalls.length = 0;
@@ -877,6 +947,68 @@ describe('application document routes', () => {
     expect(response.body).toEqual({ directiveAccounts: [directiveAccount] });
   });
 
+  it('answers the analytics route with the aggregates and its own cost', async () => {
+    const response = await request(application.getHttpServer())
+      .get('/v1/organizations/organization_3/documents/analytics')
+      .set('Authorization', 'Bearer caller')
+      .expect(200);
+
+    expect(response.body).toEqual(analytics);
+    expect(analyticsCalls[0]).toMatchObject({
+      legalEntityIds: null,
+      organizationId: 'organization_3',
+      role: 'member',
+      userId: 'user_1',
+    });
+
+    // A requested entity inside the scope narrows the read to that entity alone.
+    entityScope = { legalEntityIds: [ENTITY_ID], mode: 'restricted' };
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_3/documents/analytics')
+      .query({ legalEntityId: ENTITY_ID })
+      .set('Authorization', 'Bearer caller')
+      .expect(200);
+    expect(analyticsCalls[1]?.legalEntityIds).toEqual([ENTITY_ID]);
+
+    // One outside it reads nothing at all instead of widening the scope.
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_3/documents/analytics')
+      .query({ legalEntityId: OTHER_ENTITY_ID })
+      .set('Authorization', 'Bearer caller')
+      .expect(200);
+    expect(analyticsCalls[2]?.legalEntityIds).toEqual([]);
+  });
+
+  it('refuses an analytics query outside the fixed contract', async () => {
+    for (const query of [
+      { legalEntityId: 'not-a-uuid' },
+      { page: '1' },
+      { q: 'placeholder' },
+    ]) {
+      await request(application.getHttpServer())
+        .get('/v1/organizations/organization_1/documents/analytics')
+        .query(query)
+        .set('Authorization', 'Bearer caller')
+        .expect(400);
+    }
+
+    expect(analyticsCalls).toEqual([]);
+  });
+
+  it('refuses analytics to a caller without the read capability or a token', async () => {
+    // organization_9 resolves to no membership at all, so no capability is granted.
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_9/documents/analytics')
+      .set('Authorization', 'Bearer caller')
+      .expect(403);
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_1/documents/analytics')
+      .set('Authorization', 'Bearer invalid')
+      .expect(401);
+
+    expect(analyticsCalls).toEqual([]);
+  });
+
   it('refuses every route to a caller outside the organization', async () => {
     await request(application.getHttpServer())
       .get('/v1/organizations/organization_9/documents')
@@ -897,6 +1029,7 @@ describe('application document routes', () => {
     expect(Object.keys(document.paths).sort()).toEqual([
       '/v1/organizations/{organizationId}/directive-accounts',
       '/v1/organizations/{organizationId}/documents',
+      '/v1/organizations/{organizationId}/documents/analytics',
       '/v1/organizations/{organizationId}/documents/{documentId}',
       '/v1/organizations/{organizationId}/documents/{documentId}/links',
       '/v1/organizations/{organizationId}/documents/{documentId}/links/{linkId}',

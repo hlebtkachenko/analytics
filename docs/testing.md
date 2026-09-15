@@ -262,6 +262,31 @@ reporter, and then prints the URLs, the three addresses, the password, and the
 organization slug while leaving the stack running for manual exploration.
 `pnpm demo:tenancy:down` removes it with its volumes.
 
+```sh
+pnpm demo:documents
+pnpm demo:documents:down
+```
+
+`pnpm demo:documents` reuses the same shared steps, which now live in
+`scripts/demo-lib.sh` so both demos create the disposable secrets, reset and
+rebuild the stack, create the three accounts and grant the quota from one place.
+Its sixth step runs `tests/operational/documents-analytics.spec.ts`, which signs
+in as the synthetic owner, creates one neutral legal entity and one synthetic
+partner, then registers five documents through the real BFF routes: the five
+month received invoice with mixed reverse charge and standard lines, a deducted
+advance per regime and a rounding difference, a single month received invoice
+that rounds down, an issued invoice with a deducted advance, an exempt issued
+invoice, and a contract that the rule set does not book. The spec then opens
+`/documents/analytics` and asserts that the document table lists the four
+invoice documents and no contract, that the five month invoice shows its
+generated amount due, that the month, activity, VAT regime and account
+aggregates carry the five months, the five activity codes, the three regimes and
+accounts 548, 314 and 321, that the page states how many event lines it read,
+and that axe reports no violation. Every reference carries a per-run suffix, so
+the spec is independent of run order. The demo prints the analytics URL with the
+summary block and opens it when the host has an `open` command.
+`pnpm demo:documents:down` removes that stack with its volumes.
+
 The scheduled and manually runnable GitHub Actions operational proof creates a
 disposable local Compose stack, creates a gated synthetic account plus a
 synthetic admin and member of the same organization, completes a browser sign-in

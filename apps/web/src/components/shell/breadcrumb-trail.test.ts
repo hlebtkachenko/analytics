@@ -16,6 +16,13 @@ describe('buildTrail', () => {
     );
   });
 
+  it('names the documents analytics child rather than falling back to Document', () => {
+    expect(buildTrail(['(product)', 'documents', 'analytics'])).toEqual([
+      { current: false, href: '/documents', label: 'Documents' },
+      { current: true, href: '/documents/analytics', label: 'Analytics' },
+    ]);
+  });
+
   it('labels an unknown document child by kind rather than by identifier', () => {
     expect(
       buildTrail(['documents', '00000000-0000-4000-8000-000000000010']),

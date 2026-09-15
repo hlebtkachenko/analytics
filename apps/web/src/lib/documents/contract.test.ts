@@ -5,6 +5,8 @@ import {
   createInvoiceLineSchema,
   createInvoiceSchema,
   derivedVatAmount,
+  documentAnalyticsQuerySchema,
+  documentAnalyticsResponseSchema,
   documentListQuerySchema,
   economicEventLineSchema,
   invoiceSchema,
@@ -13,6 +15,7 @@ import {
 
 const LEGAL_ENTITY_ID = '9b7d1c30-6a4b-4d1f-9c2e-7a5f0e3b8d21';
 const INVOICE_LINE_ID = '00000000-0000-4000-8000-000000000020';
+const DOCUMENT_ID = '00000000-0000-4000-8000-000000000010';
 
 const standardLine = {
   baseAmount: '1000',
@@ -398,5 +401,112 @@ describe('economicEventLineSchema', () => {
       economicEventLineSchema.safeParse({ ...stored, effectiveDate: null })
         .success,
     ).toBe(false);
+  });
+});
+
+describe('documentAnalyticsResponseSchema', () => {
+  const analytics = {
+    byAccount: [
+      {
+        accountCode: '518',
+        accountName: 'Other services',
+        credit: '0.0000',
+        debit: '5000.0000',
+        nature: 'EXPENSE',
+      },
+    ],
+    byActivity: [
+      {
+        activityCode: 'month-01',
+        credit: '0.0000',
+        debit: '1000.0000',
+        lineCount: 1,
+      },
+    ],
+    byMonth: [
+      {
+        accountCode: '518',
+        accountName: 'Other services',
+        credit: '0.0000',
+        debit: '1000.0000',
+        month: '2026-01-01',
+      },
+    ],
+    byVatRegime: [
+      {
+        baseAmount: '5000.0000',
+        lineCount: 5,
+        lineKind: 'item',
+        vatAmount: '1050.0000',
+        vatMode: 'standard',
+        vatRate: '21',
+      },
+    ],
+    documents: [
+      {
+        advanceTotal: '0.0000',
+        amountDue: '6050.0000',
+        currencyCode: 'CZK',
+        documentDate: '2026-01-15',
+        grossTotal: '6050.0000',
+        id: DOCUMENT_ID,
+        kind: 'received_invoice',
+        partnerName: null,
+        reference: null,
+        roundingAmount: '0.0000',
+        status: 'registered',
+        title: 'Placeholder document',
+      },
+    ],
+    stats: {
+      elapsedMs: 12.5,
+      eventLineCount: 10,
+      invoiceLineCount: 5,
+      queryCount: 4,
+    },
+  };
+
+  it('reads the aggregates the register stores, including the null partner and reference', () => {
+    expect(documentAnalyticsResponseSchema.safeParse(analytics).success).toBe(
+      true,
+    );
+  });
+
+  it('refuses an unexpected key, a float amount, and a malformed month', () => {
+    expect(
+      documentAnalyticsResponseSchema.safeParse({
+        ...analytics,
+        total: '6050.0000',
+      }).success,
+    ).toBe(false);
+    expect(
+      documentAnalyticsResponseSchema.safeParse({
+        ...analytics,
+        byAccount: [{ ...analytics.byAccount[0], debit: 5000 }],
+      }).success,
+    ).toBe(false);
+    expect(
+      documentAnalyticsResponseSchema.safeParse({
+        ...analytics,
+        byMonth: [{ ...analytics.byMonth[0], month: '2026-01' }],
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('documentAnalyticsQuerySchema', () => {
+  it('accepts the entity filter alone and refuses anything else', () => {
+    expect(documentAnalyticsQuerySchema.safeParse({}).success).toBe(true);
+    expect(
+      documentAnalyticsQuerySchema.safeParse({ legalEntityId: LEGAL_ENTITY_ID })
+        .success,
+    ).toBe(true);
+    expect(
+      documentAnalyticsQuerySchema.safeParse({ legalEntityId: 'not-a-uuid' })
+        .success,
+    ).toBe(false);
+    expect(documentAnalyticsQuerySchema.safeParse({ page: '2' }).success).toBe(
+      false,
+    );
   });
 });

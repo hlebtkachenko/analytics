@@ -9,7 +9,11 @@ import {
 import type { TenantContext } from '@bap/db';
 import type { DatabaseConfiguration, DatabaseRole } from '@bap/db/config';
 import type { DatabasePool } from '@bap/db/pool';
-import { SubjectRateLimiter, type ResourceJwtVerifier } from '@bap/security';
+import {
+  SubjectRateLimiter,
+  type EntityScope,
+  type ResourceJwtVerifier,
+} from '@bap/security';
 import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
@@ -29,6 +33,7 @@ import {
   SUBJECT_RATE_LIMITER,
   SubjectRateLimitGuard,
 } from '../subject-rate-limit.guard.js';
+import { readDocumentAnalytics } from './analytics-repository.js';
 import { DocumentController } from './document.controller.js';
 import {
   createDocument,
@@ -47,6 +52,8 @@ const postgresImage =
   'pgvector/pgvector:pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a';
 const testPassword = 'test-only-database-credential';
 const ORGANIZATION_ID = 'org-1';
+// A legal entity the scenario never creates, so a member scoped to it may see nothing.
+const OUT_OF_SCOPE_ENTITY_ID = '0f9c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f';
 
 let apiPool: DatabasePool;
 let container: StartedPostgreSqlContainer;
@@ -55,6 +62,7 @@ let application: NestExpressApplication;
 let entityId = '';
 let partnerId = '';
 let documentId = '';
+let entityScope: EntityScope = { mode: 'all' };
 
 // The owner of the one organization the scenario uses.
 const creator: TenantContext = {
@@ -252,6 +260,7 @@ beforeAll(async () => {
     listDirectiveAccounts: async (input) =>
       listDirectiveAccounts(apiPool, input),
     listDocuments: async (input) => listDocuments(apiPool, input),
+    readAnalytics: async (input) => readDocumentAnalytics(apiPool, input),
     readDocument: async (input) => readDocument(apiPool, input),
     updateDocument: async (input) => updateDocument(apiPool, input),
   };
@@ -265,7 +274,7 @@ beforeAll(async () => {
   const memberships: MembershipResolver = {
     checkReadiness: vi.fn(async () => true),
     getPoolStatistics: vi.fn(() => ({ idle: 0, total: 0, waiting: 0 })),
-    readEntityScope: vi.fn(async () => ({ mode: 'all' as const })),
+    readEntityScope: vi.fn(async () => entityScope),
     resolve: vi.fn(async () => ({
       emailVerified: true,
       role: 'owner' as const,
@@ -590,6 +599,150 @@ describe('a five month invoice with mixed VAT, a deducted advance and rounding',
       { amount: '199999.9600', month: '2026-04' },
       { amount: '199999.9600', month: '2026-05' },
     ]);
+  });
+
+  it('answers the analytics route from the stored rows and states its cost', async () => {
+    const [stored] = await rows<{ count: number }>(
+      `select count(*)::int as count
+         from app.economic_event_line as l
+         join app.economic_event as e on e.id = l.event_id
+        where e.document_id = $1`,
+      [documentId],
+    );
+    const response = await request(application.getHttpServer())
+      .get(`/v1/organizations/${ORGANIZATION_ID}/documents/analytics`)
+      .set('Authorization', 'Bearer caller')
+      .expect(200);
+    const analytics = response.body;
+
+    expect(analytics.documents).toHaveLength(1);
+    expect(analytics.documents[0]).toMatchObject({
+      advanceTotal: '500000.0000',
+      amountDue: '500000.0000',
+      grossTotal: '999999.8000',
+      kind: 'received_invoice',
+      reference: 'PLACEHOLDER-SCENARIO',
+      roundingAmount: '0.2000',
+    });
+
+    // The payable of every month sits under that month; the header tax point pulls the settlement into May.
+    expect(
+      analytics.byMonth
+        .filter((row: { accountCode: string }) => row.accountCode === '321')
+        .map(
+          ({
+            credit,
+            debit,
+            month,
+          }: {
+            credit: string;
+            debit: string;
+            month: string;
+          }) => ({ credit, debit, month }),
+        ),
+    ).toEqual([
+      { credit: '199999.9600', debit: '0.0000', month: '2026-01-01' },
+      { credit: '199999.9600', debit: '0.0000', month: '2026-02-01' },
+      { credit: '199999.9600', debit: '0.0000', month: '2026-03-01' },
+      { credit: '199999.9600', debit: '0.0000', month: '2026-04-01' },
+      // The deducted advance and the rounding both take the invoice tax point, so both land in May.
+      { credit: '200000.1600', debit: '500000.0000', month: '2026-05-01' },
+    ]);
+
+    // Only the 501 and 518 legs count: the VAT and payable legs carry the activity but are not its cost.
+    expect(analytics.byActivity).toEqual(
+      ['site-a', 'site-b', 'site-c', 'site-d', 'site-e'].map(
+        (activityCode) => ({
+          activityCode,
+          credit: '0.0000',
+          debit: '178999.9600',
+          lineCount: 4,
+        }),
+      ),
+    );
+
+    expect(analytics.byVatRegime).toEqual([
+      {
+        baseAmount: '258000.0000',
+        lineCount: 1,
+        lineKind: 'advance_deduction',
+        vatAmount: '0.0000',
+        vatMode: 'reverse_charge',
+        vatRate: '21.00',
+      },
+      {
+        baseAmount: '200000.0000',
+        lineCount: 1,
+        lineKind: 'advance_deduction',
+        vatAmount: '42000.0000',
+        vatMode: 'standard',
+        vatRate: '21.00',
+      },
+      {
+        baseAmount: '394999.8000',
+        lineCount: 10,
+        lineKind: 'item',
+        vatAmount: '0.0000',
+        vatMode: 'reverse_charge',
+        vatRate: '21.00',
+      },
+      {
+        baseAmount: '500000.0000',
+        lineCount: 10,
+        lineKind: 'item',
+        vatAmount: '105000.0000',
+        vatMode: 'standard',
+        vatRate: '21.00',
+      },
+    ]);
+
+    expect(
+      analytics.byAccount.map(
+        (row: { accountCode: string }) => row.accountCode,
+      ),
+    ).toEqual(['314', '321', '343', '501', '518', '548']);
+    expect(
+      analytics.byAccount.find(
+        (row: { accountCode: string }) => row.accountCode === '548',
+      ),
+    ).toMatchObject({ credit: '0.0000', debit: '0.2000', nature: 'EXPENSE' });
+    expect(
+      analytics.byAccount.find(
+        (row: { accountCode: string }) => row.accountCode === '314',
+      ),
+    ).toMatchObject({ credit: '458000.0000', debit: '0.0000' });
+
+    expect(analytics.stats).toMatchObject({
+      eventLineCount: stored?.count,
+      invoiceLineCount: 22,
+      queryCount: 6,
+    });
+    expect(analytics.stats.elapsedMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('answers a member scoped to another entity with empty aggregates', async () => {
+    entityScope = {
+      legalEntityIds: [OUT_OF_SCOPE_ENTITY_ID],
+      mode: 'restricted',
+    };
+
+    try {
+      const response = await request(application.getHttpServer())
+        .get(`/v1/organizations/${ORGANIZATION_ID}/documents/analytics`)
+        .set('Authorization', 'Bearer caller')
+        .expect(200);
+
+      expect(response.body).toMatchObject({
+        byAccount: [],
+        byActivity: [],
+        byMonth: [],
+        byVatRegime: [],
+        documents: [],
+        stats: { eventLineCount: 0, invoiceLineCount: 0, queryCount: 6 },
+      });
+    } finally {
+      entityScope = { mode: 'all' };
+    }
   });
 
   it('books a supplier who rounded down as an other revenue', async () => {

@@ -218,6 +218,7 @@ missing one.
 | Method | Path                                   | Capability        | Success | Failure                                                                                       |
 | ------ | -------------------------------------- | ----------------- | ------- | --------------------------------------------------------------------------------------------- |
 | GET    | `/documents`                           | `readDocuments`   | 200     | 401, 403                                                                                      |
+| GET    | `/documents/analytics`                 | `readDocuments`   | 200     | 401, 403                                                                                      |
 | POST   | `/documents`                           | `manageDocuments` | 201     | 401, 403, 404 (legal entity not visible), 409 (reference already used)                        |
 | GET    | `/documents/:documentId`               | `readDocuments`   | 200     | 401, 403, 404 (not visible)                                                                   |
 | PATCH  | `/documents/:documentId`               | `manageDocuments` | 200     | 401, 403, 404, 409 (reference already used)                                                   |
@@ -301,11 +302,13 @@ select date_trunc('month', l.effective_date) as month, l.account_code, sum(l.amo
  where e.document_id = $1 and l.side = 'debit'
  group by 1, 2 order by 1, 2;
 
--- expense by economic activity
+-- expense by economic activity (profit and loss accounts only; VAT and payable legs carry the activity too)
 select l.activity_code, sum(l.amount)
   from app.economic_event_line l
   join app.economic_event e on e.id = l.event_id
+  join app.directive_account a on a.code = l.account_code
  where e.document_id = $1 and l.side = 'debit' and l.activity_code is not null
+   and a.nature in ('EXPENSE', 'REVENUE')
  group by 1;
 
 -- VAT by regime, supplies and deducted advances apart
@@ -325,6 +328,20 @@ select il.period_start, il.period_end, sum(l.amount)
 The payable after the advance is `sum(credit 321) - sum(debit 321)` on the
 event, and it equals `app.invoice.amount_due`, a generated column
 (`gross_total + rounding_amount - advance_total`) that no code writes.
+
+### Analytics route
+
+`GET .../documents/analytics?legalEntityId=` runs exactly those group by
+statements over the caller's scope instead of one document: the invoice list
+capped at 50 rows, expense and revenue by month of `effective_date` and account,
+by `activity_code` on expense and revenue accounts, VAT by line kind and regime,
+and totals by account. Every query filters by `organization_id` and by the
+caller's entity scope on `app.document.legal_entity_id`, and each grouping reads
+both sides in one pass with `coalesce(sum(...) filter (where side = ...), 0)`.
+Nothing is recomputed in TypeScript: the amounts cross the boundary as the
+decimal strings PostgreSQL printed. The response also reports its own cost in
+`stats`: the six statements it ran, the event and invoice line counts behind
+them, and the wall clock milliseconds they took.
 
 ## Out of scope
 

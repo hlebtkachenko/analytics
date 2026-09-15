@@ -11,6 +11,7 @@ import type { DatabasePool } from '@bap/db/pool';
 import type { PoolClient } from 'pg';
 
 import type { EntityScopeSelector } from '../datasets/dataset-repository.js';
+import { readDocumentAnalytics } from './analytics-repository.js';
 import {
   addDecimal,
   DECIMAL_ZERO,
@@ -23,6 +24,7 @@ import { entityFilter, isUniqueViolation, likePattern } from './sql.js';
 import type {
   CreateDocumentRequest,
   DirectiveAccount,
+  DocumentAnalyticsResponse,
   DocumentDetail,
   DocumentKind,
   DocumentLink,
@@ -1185,6 +1187,9 @@ export abstract class DocumentRepository {
   abstract listDocuments(
     input: ListDocumentsInput,
   ): Promise<DocumentListResponse>;
+  abstract readAnalytics(
+    input: EntityScopeSelector,
+  ): Promise<DocumentAnalyticsResponse>;
   abstract readDocument(
     input: ReadDocumentInput,
   ): Promise<DocumentDetail | null>;
@@ -1236,6 +1241,12 @@ export class DatabaseDocumentRepository
     if (this.poolPromise !== undefined) {
       await (await this.poolPromise).end();
     }
+  }
+
+  async readAnalytics(
+    input: EntityScopeSelector,
+  ): Promise<DocumentAnalyticsResponse> {
+    return readDocumentAnalytics(await this.getPool(), input);
   }
 
   async readDocument(input: ReadDocumentInput): Promise<DocumentDetail | null> {

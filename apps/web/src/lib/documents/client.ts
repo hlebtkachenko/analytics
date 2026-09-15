@@ -11,6 +11,17 @@ export function documentsPath(
   return `${organizationPath(organizationId)}/documents${search.length === 0 ? '' : `?${search}`}`;
 }
 
+export function documentAnalyticsPath(
+  organizationId: string,
+  legalEntityId?: string,
+): string {
+  const filter =
+    legalEntityId === undefined || legalEntityId.length === 0
+      ? ''
+      : `?legalEntityId=${encodeURIComponent(legalEntityId)}`;
+  return `${documentsPath(organizationId)}/analytics${filter}`;
+}
+
 export function documentPath(
   organizationId: string,
   documentId: string,

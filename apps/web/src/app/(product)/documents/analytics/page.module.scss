@@ -1,0 +1,16 @@
+@use '@bap/design-system/tokens/spacing.scss' as spacing;
+
+.heading {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-03;
+}
+
+.tableContainer {
+  min-inline-size: 0;
+}
+
+.amount {
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}

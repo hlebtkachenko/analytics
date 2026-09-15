@@ -45,6 +45,9 @@ import {
   createDocumentRequestSchema,
   directiveAccountListOpenApiSchema,
   directiveAccountListResponseSchema,
+  documentAnalyticsOpenApiSchema,
+  documentAnalyticsQuerySchema,
+  documentAnalyticsResponseSchema,
   documentDetailOpenApiSchema,
   documentDetailSchema,
   documentIdentifierSchema,
@@ -61,6 +64,8 @@ import type {
   CreateDocumentLinkRequest,
   CreateDocumentRequest,
   DirectiveAccountListResponse,
+  DocumentAnalyticsQuery,
+  DocumentAnalyticsResponse,
   DocumentDetail,
   DocumentLink,
   DocumentListQuery,
@@ -253,6 +258,44 @@ export class DocumentController {
     if (!deleted) {
       throw new NotFoundException();
     }
+  }
+
+  // Declared before the document detail route so 'analytics' is never matched as a document identifier.
+  @Get(':organizationId/documents/analytics')
+  @UseGuards(ResourceJwtGuard, SubjectRateLimitGuard)
+  @ApiOperation({
+    summary: 'Read the stored document aggregates for the caller scope',
+  })
+  @ApiOkResponse({ schema: documentAnalyticsOpenApiSchema })
+  @ApiUnauthorizedResponse({ description: 'The resource token is invalid' })
+  @ApiForbiddenResponse({ description: 'Organization access is denied' })
+  async getAnalytics(
+    @Param('organizationId', { schema: organizationIdentifierSchema })
+    organizationId: string,
+    @Query({ schema: documentAnalyticsQuerySchema })
+    query: DocumentAnalyticsQuery,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<DocumentAnalyticsResponse> {
+    const { entityScope, tenant } = await resolveTenantAccess({
+      capability: 'readDocuments',
+      memberships: this.memberships,
+      organizationId,
+      request,
+    });
+    const requested = query.legalEntityId;
+    // A requested entity outside the scope narrows the read to nothing instead of widening it.
+    const legalEntityIds =
+      requested === undefined
+        ? allowedEntityIds(entityScope)
+        : legalEntityInScope(entityScope, requested)
+          ? [requested]
+          : [];
+    const analytics = await this.documents.readAnalytics({
+      ...tenant,
+      legalEntityIds,
+    });
+
+    return documentAnalyticsResponseSchema.parse(analytics);
   }
 
   @Get(':organizationId/directive-accounts')

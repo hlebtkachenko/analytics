@@ -397,6 +397,12 @@ export default function DocumentsPage() {
       : '/documents/new';
   }
 
+  function analyticsHref(): string {
+    return organization.slug.length > 0
+      ? `/documents/analytics?organization=${encodeURIComponent(organization.slug)}`
+      : '/documents/analytics';
+  }
+
   function documentHref(documentId: string): string {
     const suffix =
       organization.slug.length > 0
@@ -409,11 +415,16 @@ export default function DocumentsPage() {
     <PageContainer>
       <div className={styles.headingRow!}>
         <h1>{t('documents.title')}</h1>
-        {canManage ? (
-          <Button href={newDocumentHref()} renderIcon={DocumentAdd} size="md">
-            {t('documents.newDocument')}
+        <div className={styles.headingActions!}>
+          <Button href={analyticsHref()} kind="tertiary" size="md">
+            {t('documents.analytics')}
           </Button>
-        ) : null}
+          {canManage ? (
+            <Button href={newDocumentHref()} renderIcon={DocumentAdd} size="md">
+              {t('documents.newDocument')}
+            </Button>
+          ) : null}
+        </div>
       </div>
       {accessState === 'error' ? (
         <InlineNotification

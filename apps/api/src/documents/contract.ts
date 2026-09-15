@@ -75,6 +75,17 @@ export const ISSUE_SEVERITIES = ['warning', 'error'] as const;
 
 export const EVENT_SIDES = ['debit', 'credit'] as const;
 
+// The balance sheet or income statement nature of a directive account, the vocabulary the chart itself stores.
+export const ACCOUNT_NATURES = [
+  'ASSET',
+  'LIABILITY',
+  'EQUITY',
+  'EXPENSE',
+  'REVENUE',
+  'CLOSING',
+  'OFF_BALANCE',
+] as const;
+
 export const DOCUMENT_SORT_KEYS = [
   'documentDate',
   'reference',
@@ -105,6 +116,7 @@ export const documentLinkKindSchema = z.enum(DOCUMENT_LINK_KINDS);
 export const dataIssueCodeSchema = z.enum(DATA_ISSUE_CODES);
 export const issueSeveritySchema = z.enum(ISSUE_SEVERITIES);
 export const eventSideSchema = z.enum(EVENT_SIDES);
+export const accountNatureSchema = z.enum(ACCOUNT_NATURES);
 
 // Money crosses the boundary as text only: a JS number cannot hold numeric(19,4) without loss.
 export const decimalStringSchema = z.string().trim().regex(DECIMAL_PATTERN);
@@ -757,15 +769,7 @@ export const directiveAccountSchema = z
     groupCode: z.string().regex(/^[0-9]{2}$/),
     nameCs: z.string().min(1),
     nameEn: z.string().min(1),
-    nature: z.enum([
-      'ASSET',
-      'LIABILITY',
-      'EQUITY',
-      'EXPENSE',
-      'REVENUE',
-      'CLOSING',
-      'OFF_BALANCE',
-    ]),
+    nature: accountNatureSchema,
   })
   .strict();
 
@@ -779,6 +783,103 @@ export type DirectiveAccountListResponse = z.infer<
   typeof directiveAccountListResponseSchema
 >;
 
+// The analytics read answers from stored columns only, so it publishes a bounded document list beside its aggregates.
+export const MAX_ANALYTICS_DOCUMENTS = 50;
+
+export const documentAnalyticsQuerySchema = z
+  .object({ legalEntityId: legalEntityIdentifierSchema.optional() })
+  .strict();
+
+export type DocumentAnalyticsQuery = z.infer<
+  typeof documentAnalyticsQuerySchema
+>;
+
+// One invoice in the caller scope: what it cost, what was prepaid and what is still due.
+export const analyticsDocumentSchema = z
+  .object({
+    advanceTotal: nonNegativeDecimalStringSchema,
+    amountDue: nonNegativeDecimalStringSchema,
+    currencyCode: currencyCodeSchema,
+    documentDate: z.iso.date(),
+    grossTotal: nonNegativeDecimalStringSchema,
+    id: documentIdentifierSchema,
+    kind: documentKindSchema,
+    partnerName: partnerNameSchema.nullable(),
+    reference: documentReferenceSchema.nullable(),
+    roundingAmount: signedRoundingSchema,
+    status: documentStatusSchema,
+    title: documentTitleSchema,
+  })
+  .strict();
+
+// Both sides of a grouping come from one pass, so a reader never has to pair two rows to get a net figure.
+export const analyticsMonthRowSchema = z
+  .object({
+    accountCode: accountCodeSchema,
+    accountName: z.string(),
+    credit: decimalStringSchema,
+    debit: decimalStringSchema,
+    // The first day of the month of the leg tax point, never of the register date.
+    month: z.iso.date(),
+  })
+  .strict();
+
+export const analyticsActivityRowSchema = z
+  .object({
+    activityCode: activityCodeSchema,
+    credit: decimalStringSchema,
+    debit: decimalStringSchema,
+    lineCount: z.number().int().min(0),
+  })
+  .strict();
+
+export const analyticsVatRegimeRowSchema = z
+  .object({
+    baseAmount: decimalStringSchema,
+    lineCount: z.number().int().min(0),
+    lineKind: invoiceLineKindSchema,
+    vatAmount: decimalStringSchema,
+    vatMode: vatModeSchema,
+    vatRate: vatRateSchema,
+  })
+  .strict();
+
+export const analyticsAccountRowSchema = z
+  .object({
+    accountCode: accountCodeSchema,
+    accountName: z.string(),
+    credit: decimalStringSchema,
+    debit: decimalStringSchema,
+    nature: accountNatureSchema,
+  })
+  .strict();
+
+// What the route read and what it cost, so the page can state its own cost instead of implying a free answer.
+export const analyticsStatsSchema = z
+  .object({
+    elapsedMs: z.number().int().min(0),
+    eventLineCount: z.number().int().min(0),
+    invoiceLineCount: z.number().int().min(0),
+    queryCount: z.number().int().min(1),
+  })
+  .strict();
+
+export const documentAnalyticsResponseSchema = z
+  .object({
+    byAccount: z.array(analyticsAccountRowSchema),
+    byActivity: z.array(analyticsActivityRowSchema),
+    byMonth: z.array(analyticsMonthRowSchema),
+    byVatRegime: z.array(analyticsVatRegimeRowSchema),
+    documents: z.array(analyticsDocumentSchema).max(MAX_ANALYTICS_DOCUMENTS),
+    stats: analyticsStatsSchema,
+  })
+  .strict();
+
+export type DocumentAnalyticsResponse = z.infer<
+  typeof documentAnalyticsResponseSchema
+>;
+
+export type AccountNature = z.infer<typeof accountNatureSchema>;
 export type DataIssueCode = z.infer<typeof dataIssueCodeSchema>;
 export type DocumentKind = z.infer<typeof documentKindSchema>;
 export type DocumentLinkKind = z.infer<typeof documentLinkKindSchema>;
@@ -1269,18 +1370,7 @@ export const directiveAccountListOpenApiSchema = {
           groupCode: { pattern: '^[0-9]{2}$', type: 'string' },
           nameCs: { type: 'string' },
           nameEn: { type: 'string' },
-          nature: {
-            enum: [
-              'ASSET',
-              'LIABILITY',
-              'EQUITY',
-              'EXPENSE',
-              'REVENUE',
-              'CLOSING',
-              'OFF_BALANCE',
-            ],
-            type: 'string',
-          },
+          nature: { enum: [...ACCOUNT_NATURES], type: 'string' },
         },
         required: ['class', 'code', 'groupCode', 'nameCs', 'nameEn', 'nature'],
         type: 'object',
@@ -1289,5 +1379,153 @@ export const directiveAccountListOpenApiSchema = {
     },
   },
   required: ['directiveAccounts'],
+  type: 'object',
+};
+
+const lineCountProperty = { minimum: 0, type: 'integer' };
+
+const analyticsDocumentOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    advanceTotal: amountProperty,
+    amountDue: {
+      ...amountProperty,
+      description:
+        'The stored generated column: gross plus rounding, less the deducted advance.',
+    },
+    currencyCode: { pattern: '^[A-Z]{3}$', type: 'string' },
+    documentDate: dateProperty,
+    grossTotal: amountProperty,
+    id: uuidProperty,
+    kind: { enum: [...DOCUMENT_KINDS], type: 'string' },
+    partnerName: { maxLength: 200, nullable: true, type: 'string' },
+    reference: { maxLength: 64, nullable: true, type: 'string' },
+    roundingAmount: roundingProperty,
+    status: { enum: [...DOCUMENT_STATUSES], type: 'string' },
+    title: { maxLength: 200, minLength: 1, type: 'string' },
+  },
+  required: [
+    'advanceTotal',
+    'amountDue',
+    'currencyCode',
+    'documentDate',
+    'grossTotal',
+    'id',
+    'kind',
+    'partnerName',
+    'reference',
+    'roundingAmount',
+    'status',
+    'title',
+  ],
+  type: 'object',
+};
+
+export const documentAnalyticsOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    byAccount: {
+      items: {
+        additionalProperties: false,
+        properties: {
+          accountCode: { pattern: '^[0-9]{3}$', type: 'string' },
+          accountName: { type: 'string' },
+          credit: moneyProperty,
+          debit: moneyProperty,
+          nature: { enum: [...ACCOUNT_NATURES], type: 'string' },
+        },
+        required: ['accountCode', 'accountName', 'credit', 'debit', 'nature'],
+        type: 'object',
+      },
+      type: 'array',
+    },
+    byActivity: {
+      items: {
+        additionalProperties: false,
+        properties: {
+          activityCode: activityCodeProperty,
+          credit: moneyProperty,
+          debit: moneyProperty,
+          lineCount: lineCountProperty,
+        },
+        required: ['activityCode', 'credit', 'debit', 'lineCount'],
+        type: 'object',
+      },
+      type: 'array',
+    },
+    byMonth: {
+      items: {
+        additionalProperties: false,
+        properties: {
+          accountCode: { pattern: '^[0-9]{3}$', type: 'string' },
+          accountName: { type: 'string' },
+          credit: moneyProperty,
+          debit: moneyProperty,
+          month: {
+            ...dateProperty,
+            description:
+              'The first day of the month of the leg tax point, not of the register date.',
+          },
+        },
+        required: ['accountCode', 'accountName', 'credit', 'debit', 'month'],
+        type: 'object',
+      },
+      type: 'array',
+    },
+    byVatRegime: {
+      items: {
+        additionalProperties: false,
+        properties: {
+          baseAmount: moneyProperty,
+          lineCount: lineCountProperty,
+          lineKind: { enum: [...INVOICE_LINE_KINDS], type: 'string' },
+          vatAmount: moneyProperty,
+          vatMode: { enum: [...VAT_MODES], type: 'string' },
+          vatRate: vatRateProperty,
+        },
+        required: [
+          'baseAmount',
+          'lineCount',
+          'lineKind',
+          'vatAmount',
+          'vatMode',
+          'vatRate',
+        ],
+        type: 'object',
+      },
+      type: 'array',
+    },
+    documents: {
+      items: analyticsDocumentOpenApiSchema,
+      maxItems: MAX_ANALYTICS_DOCUMENTS,
+      type: 'array',
+    },
+    stats: {
+      additionalProperties: false,
+      description:
+        'What the route read and what it cost: the six queries it ran, the rows behind them and their wall clock time.',
+      properties: {
+        elapsedMs: lineCountProperty,
+        eventLineCount: lineCountProperty,
+        invoiceLineCount: lineCountProperty,
+        queryCount: { minimum: 1, type: 'integer' },
+      },
+      required: [
+        'elapsedMs',
+        'eventLineCount',
+        'invoiceLineCount',
+        'queryCount',
+      ],
+      type: 'object',
+    },
+  },
+  required: [
+    'byAccount',
+    'byActivity',
+    'byMonth',
+    'byVatRegime',
+    'documents',
+    'stats',
+  ],
   type: 'object',
 };

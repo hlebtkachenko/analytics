@@ -91,6 +91,10 @@ financial, operational, or development data.
 - `pnpm demo:tenancy`: build and start a disposable local stack, create its
   owner, admin, and member accounts, and narrate the legal entity browser proof
 - `pnpm demo:tenancy:down`: stop that demo stack and remove its volumes
+- `pnpm demo:documents`: build and start the same disposable local stack, seed a
+  legal entity, a partner and five synthetic documents, and narrate the document
+  analytics browser proof
+- `pnpm demo:documents:down`: stop that demo stack and remove its volumes
 - `pnpm compose:config`: validate development Compose without starting anything
 - `pnpm compose:verify`: verify development, production, and operations topology
 - `pnpm compose:config:production`: validate production Compose with synthetic

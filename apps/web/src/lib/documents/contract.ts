@@ -680,7 +680,93 @@ export const directiveAccountListSchema = z
   .object({ directiveAccounts: z.array(directiveAccountSchema) })
   .strict();
 
+// The analytics read: the invoices in scope plus four aggregates read straight from stored columns.
+export const analyticsDocumentSchema = z
+  .object({
+    advanceTotal: decimalStringSchema,
+    amountDue: decimalStringSchema,
+    currencyCode: currencyCodeSchema,
+    documentDate: documentDateSchema,
+    grossTotal: decimalStringSchema,
+    id: identifierSchema,
+    kind: documentKindSchema,
+    partnerName: z.string().nullable(),
+    reference: z.string().nullable(),
+    roundingAmount: decimalStringSchema,
+    status: documentStatusSchema,
+    title: z.string(),
+  })
+  .strict();
+
+export const analyticsByMonthSchema = z
+  .object({
+    accountCode: accountCodeSchema,
+    accountName: z.string(),
+    credit: decimalStringSchema,
+    debit: decimalStringSchema,
+    month: documentDateSchema,
+  })
+  .strict();
+
+export const analyticsByActivitySchema = z
+  .object({
+    activityCode: activityCodeSchema,
+    credit: decimalStringSchema,
+    debit: decimalStringSchema,
+    lineCount: z.number().int().min(0),
+  })
+  .strict();
+
+export const analyticsByVatRegimeSchema = z
+  .object({
+    baseAmount: decimalStringSchema,
+    lineCount: z.number().int().min(0),
+    lineKind: invoiceLineKindSchema,
+    vatAmount: decimalStringSchema,
+    vatMode: vatModeSchema,
+    vatRate: vatRateSchema,
+  })
+  .strict();
+
+export const analyticsByAccountSchema = z
+  .object({
+    accountCode: accountCodeSchema,
+    accountName: z.string(),
+    credit: decimalStringSchema,
+    debit: decimalStringSchema,
+    nature: z.string(),
+  })
+  .strict();
+
+// The page states its own cost from these counters, so no reader has to trust the docs.
+export const analyticsStatsSchema = z
+  .object({
+    elapsedMs: z.number().min(0),
+    eventLineCount: z.number().int().min(0),
+    invoiceLineCount: z.number().int().min(0),
+    queryCount: z.number().int().min(0),
+  })
+  .strict();
+
+export const documentAnalyticsResponseSchema = z
+  .object({
+    byAccount: z.array(analyticsByAccountSchema),
+    byActivity: z.array(analyticsByActivitySchema),
+    byMonth: z.array(analyticsByMonthSchema),
+    byVatRegime: z.array(analyticsByVatRegimeSchema),
+    documents: z.array(analyticsDocumentSchema),
+    stats: analyticsStatsSchema,
+  })
+  .strict();
+
+export const documentAnalyticsQuerySchema = z
+  .object({ legalEntityId: identifierSchema.optional() })
+  .strict();
+
 export type DataIssue = z.infer<typeof dataIssueSchema>;
+export type DocumentAnalyticsResponse = z.infer<
+  typeof documentAnalyticsResponseSchema
+>;
 export type DocumentDetail = z.infer<typeof documentDetailSchema>;
 export type DocumentKind = z.infer<typeof documentKindSchema>;
 export type DocumentLinkKind = z.infer<typeof documentLinkKindSchema>;
