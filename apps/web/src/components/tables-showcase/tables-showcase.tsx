@@ -454,7 +454,7 @@ export function TablesShowcase() {
                   <Stack gap={5}>
                     <PivotGrid
                       config={pivotConfig}
-                      description="Total dataset size by steward and status."
+                      description="Dataset size and row count by steward and status."
                       rows={allRows}
                       title="Dataset size pivot"
                     />

@@ -145,14 +145,19 @@ export type TreeDataGridProps = Readonly<{
   size?: DensitySize;
 }>;
 
-// Pivot configuration: group rows and columns, aggregate a numeric measure.
+// Pivot configuration: group rows and columns, aggregate numeric measures.
 export type PivotAggregation = 'sum' | 'count' | 'avg';
+
+export type PivotMeasure = Readonly<{
+  key: string;
+  label: string;
+  aggregation?: PivotAggregation;
+}>;
 
 export type PivotConfig = Readonly<{
   rowDimension: string;
   columnDimension: string;
-  measure: string;
-  aggregation?: PivotAggregation;
+  measures: readonly PivotMeasure[];
 }>;
 
 export type PivotGridProps = Readonly<{

@@ -19,6 +19,7 @@ export type {
   PivotAggregation,
   PivotConfig,
   PivotGridProps,
+  PivotMeasure,
   SearchPlacement,
   SelectionMode,
   SortDirection,
