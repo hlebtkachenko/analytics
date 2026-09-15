@@ -39,7 +39,8 @@ type GridColumn = {
   align?: 'start' | 'end';
   colorToken?: string; // Carbon custom property for the whole column, e.g. '--cds-text-secondary'
   renderCell?: (row: GridRow) => ReactNode; // per-row visuals (tags, status, links)
-  editor?: // inline editor; commits through onCellEdit
+  editor?:
+    // inline editor; commits through onCellEdit
     | { type: 'text' }
     | { type: 'checkbox' }
     | { type: 'select'; options: readonly string[] };
@@ -65,10 +66,10 @@ Everything is off by default; turn on only what the page needs.
   `pageSizes`. Server mode needs `page`, `totalItems`, `onPageChange`.
 - Rows: `rowNumbers`, `onRowClick`, `reorderableRows` (+
   `onRowReorder`/`onRowDrop`).
-- Actions: `toolbarActions` (persistent toolbar buttons such as a primary
-  create action; `kind` defaults to `primary`), `rowActions` (`(row) =>
-  RowAction[]` renders a trailing per-row overflow menu; `isDelete` marks the
-  danger item and sorts it last).
+- Actions: `toolbarActions` (persistent toolbar buttons such as a primary create
+  action; `kind` defaults to `primary`), `rowActions` (`(row) => RowAction[]`
+  renders a trailing per-row overflow menu; `isDelete` marks the danger item and
+  sorts it last).
 - Detail rows: `renderRowDetail` (`(row) => ReactNode`) turns each row into a
   Carbon expandable row that reveals the returned content when opened.
 - Inline edit: mark a column with `editor` (`{ type: 'text' }`,

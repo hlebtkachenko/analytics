@@ -2,6 +2,7 @@
 
 ## Delivered and historical records
 
+- [Pivot row groups (tree pivot)](2026-09-15-pivot-row-groups.md)
 - [Table component blocks](2026-09-15-table-component-blocks.md)
 - [Product application layout](2026-09-14-product-application-layout.md)
 - [Account issuer column removal](2026-09-14-account-issuer-removal.md)

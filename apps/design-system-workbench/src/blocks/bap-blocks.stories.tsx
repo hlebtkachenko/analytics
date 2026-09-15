@@ -38,6 +38,45 @@ export const DataGridStory: Story = {
   ),
 };
 
+export const DataGridExtensionsStory: Story = {
+  name: 'DataGrid (extensions)',
+  render: () => (
+    <DataGrid
+      columns={datasetColumns.map((column) => {
+        if (column.key === 'name') {
+          return { ...column, editor: { type: 'text' } as const };
+        }
+        if (column.key === 'steward') {
+          return {
+            ...column,
+            editor: {
+              type: 'select',
+              options: ['Platform', 'Ingestion', 'Reporting', 'Governance'],
+            } as const,
+          };
+        }
+        return column;
+      })}
+      onCellEdit={() => undefined}
+      rowActions={() => [
+        { id: 'edit', label: 'Edit', onClick: () => undefined },
+        {
+          id: 'delete',
+          label: 'Delete',
+          isDelete: true,
+          onClick: () => undefined,
+        },
+      ]}
+      rows={makeDatasetRows(12)}
+      sortable
+      title="Datasets with BAP extensions"
+      toolbarActions={[
+        { id: 'create', label: 'Create dataset', onClick: () => undefined },
+      ]}
+    />
+  ),
+};
+
 export const TreeStory: Story = {
   render: () => (
     <TreeDataGrid
