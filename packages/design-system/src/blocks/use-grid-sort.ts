@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import type { CellValue, GridRow, SortDirection, SortSpec } from './types';
 
 // Compare two present values; nulls are handled by the caller so they stay last.
-function comparePresent(a: CellValue, b: CellValue): number {
+export function compareCellValues(a: CellValue, b: CellValue): number {
   if (typeof a === 'number' && typeof b === 'number') return a - b;
   return String(a).localeCompare(String(b));
 }
@@ -55,7 +55,7 @@ export function useGridSort(
         if (aMissing && bMissing) continue;
         if (aMissing) return 1;
         if (bMissing) return -1;
-        const order = comparePresent(a, b);
+        const order = compareCellValues(a, b);
         if (order !== 0) return spec.direction === 'ASC' ? order : -order;
       }
       return 0;

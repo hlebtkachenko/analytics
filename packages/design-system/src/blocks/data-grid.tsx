@@ -405,233 +405,243 @@ export function DataGrid(props: DataGridProps) {
         </TableToolbar>
       )}
 
-      <div
-        className={styles.scroll}
-        onScroll={virtualized ? viewport.onScroll : undefined}
-        ref={scrollRef}
-        style={scrollMaxHeight ? { maxHeight: scrollMaxHeight } : undefined}
-      >
+      <div className={styles.viewport}>
+        <div
+          aria-busy={showOverlay}
+          className={styles.scroll}
+          onScroll={virtualized ? viewport.onScroll : undefined}
+          ref={scrollRef}
+          style={scrollMaxHeight ? { maxHeight: scrollMaxHeight } : undefined}
+        >
+          <Table
+            aria-label={title ?? 'Data grid'}
+            className={cx(
+              (stickyHeader || Boolean(scrollMaxHeight)) && styles.stickyHead,
+            )}
+            size={size}
+            useZebraStyles={zebra}
+          >
+            <TableHead>
+              <TableRow>
+                {selection === 'multi' && (
+                  <TableSelectAll
+                    ariaLabel="Select all rows"
+                    checked={allSelected}
+                    id="data-grid-select-all"
+                    name="data-grid-select-all"
+                    onSelect={toggleAll}
+                  />
+                )}
+                {selection === 'single' && <th aria-hidden />}
+                {rowNumbers && (
+                  <TableHeader style={stickyStyle('__number', true)}>
+                    #
+                  </TableHeader>
+                )}
+                {visibleColumns.map((column) => {
+                  const canSort = Boolean(
+                    sortable && column.sortable && !lockSort,
+                  );
+                  // Spread optional handlers so no undefined prop reaches Carbon.
+                  const sortHandler = canSort
+                    ? {
+                        onClick: (event: ReactMouseEvent) =>
+                          sort.toggle(column.key, event.shiftKey),
+                      }
+                    : {};
+                  const dragHandlers = reorderableColumns
+                    ? {
+                        draggable: true,
+                        onDragStart: () => {
+                          dragColumn.current = column.key;
+                        },
+                        onDragOver: (event: ReactMouseEvent) =>
+                          event.preventDefault(),
+                        onDrop: () => {
+                          if (dragColumn.current)
+                            layout.moveColumn(dragColumn.current, column.key);
+                          dragColumn.current = null;
+                        },
+                      }
+                    : {};
+                  return (
+                    <TableHeader
+                      className={cx(
+                        styles.headerCell,
+                        reorderableColumns && styles.reorderable,
+                        column.align === 'end' && styles.alignEnd,
+                      )}
+                      isSortHeader={
+                        canSort && sort.directionFor(column.key) !== 'NONE'
+                      }
+                      isSortable={canSort}
+                      key={column.key}
+                      scope="col"
+                      sortDirection={sort.directionFor(column.key)}
+                      style={columnStyle(column, true)}
+                      {...sortHandler}
+                      {...dragHandlers}
+                    >
+                      {column.header}
+                      {resizableColumns && (
+                        <span
+                          aria-hidden
+                          className={cx(styles.resizeHandle)}
+                          onPointerDown={(event) =>
+                            beginResize(event, column.key)
+                          }
+                        />
+                      )}
+                    </TableHeader>
+                  );
+                })}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {virtualized && viewport.padTop > 0 && (
+                <tr className={styles.spacerRow}>
+                  <td
+                    colSpan={columnCount}
+                    style={{ height: viewport.padTop }}
+                  />
+                </tr>
+              )}
+
+              {isEmpty ? (
+                <TableRow>
+                  <TableCell
+                    className={cx(styles.emptyCell)}
+                    colSpan={columnCount}
+                  >
+                    {emptyLabel}
+                  </TableCell>
+                </TableRow>
+              ) : (
+                renderRows.map((row, index) => {
+                  // Page-aware absolute index so cell selection never leaks across pages.
+                  const rowIndex = numberBase + index;
+                  return (
+                    <TableRow
+                      className={cx(onRowClick && styles.clickableRow)}
+                      draggable={reorderableRows}
+                      key={row.id}
+                      onClick={onRowClick ? () => onRowClick(row) : undefined}
+                      onDragOver={
+                        reorderableRows
+                          ? (event) => event.preventDefault()
+                          : undefined
+                      }
+                      onDragStart={
+                        reorderableRows
+                          ? () => {
+                              dragRow.current = row.id;
+                            }
+                          : undefined
+                      }
+                      onDrop={
+                        reorderableRows
+                          ? () => {
+                              if (dragRow.current) {
+                                onRowReorder?.(dragRow.current, row.id);
+                                onRowDrop?.(dragRow.current, row.id);
+                              }
+                              dragRow.current = null;
+                            }
+                          : undefined
+                      }
+                      style={virtualized ? { height: rowPx } : undefined}
+                    >
+                      {selection !== 'none' && (
+                        <TableSelectRow
+                          ariaLabel={`Select row ${row.id}`}
+                          checked={selected.has(row.id)}
+                          id={`data-grid-select-${row.id}`}
+                          name={`data-grid-select-${row.id}`}
+                          onSelect={() => toggleRow(row.id)}
+                          radio={selection === 'single'}
+                        />
+                      )}
+                      {rowNumbers && (
+                        <TableCell style={stickyStyle('__number', false)}>
+                          {numberBase + index + 1}
+                        </TableCell>
+                      )}
+                      {visibleColumns.map((column, columnIndex) => (
+                        <TableCell
+                          className={cx(
+                            column.align === 'end' && styles.alignEnd,
+                            cellSelection &&
+                              isCellSelected(rowIndex, columnIndex) &&
+                              styles.cellSelected,
+                          )}
+                          key={column.key}
+                          onMouseDown={
+                            cellSelection
+                              ? (event: ReactMouseEvent) =>
+                                  beginCell(
+                                    rowIndex,
+                                    columnIndex,
+                                    event.shiftKey,
+                                  )
+                              : undefined
+                          }
+                          onMouseEnter={
+                            cellSelection
+                              ? () => extendCell(rowIndex, columnIndex)
+                              : undefined
+                          }
+                          style={{
+                            ...columnStyle(column, false),
+                            ...(column.colorToken
+                              ? { color: `var(${column.colorToken})` }
+                              : {}),
+                            whiteSpace: wrapCells ? 'normal' : 'nowrap',
+                          }}
+                        >
+                          {cellContent(row, column)}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  );
+                })
+              )}
+
+              {virtualized && viewport.padBottom > 0 && (
+                <tr className={styles.spacerRow}>
+                  <td
+                    colSpan={columnCount}
+                    style={{ height: viewport.padBottom }}
+                  />
+                </tr>
+              )}
+
+              {totalsRow && !isEmpty && (
+                <TableRow>
+                  {selection !== 'none' && <TableCell />}
+                  {rowNumbers && (
+                    <TableCell style={stickyStyle('__number', false)} />
+                  )}
+                  {visibleColumns.map((column) => (
+                    <TableCell
+                      className={cx(column.align === 'end' && styles.alignEnd)}
+                      key={column.key}
+                      style={columnStyle(column, false)}
+                    >
+                      {totalsRow[column.key] ?? ''}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+          {infiniteScroll && hasMore && (
+            <div aria-hidden className={styles.loadMore} ref={sentinelRef} />
+          )}
+        </div>
         {showOverlay && (
-          <div className={styles.overlay} role="status">
+          <div aria-live="polite" className={styles.overlay} role="status">
             <Loading description="Loading rows" small withOverlay={false} />
           </div>
-        )}
-        <Table
-          aria-label={title ?? 'Data grid'}
-          className={cx(
-            (stickyHeader || Boolean(scrollMaxHeight)) && styles.stickyHead,
-          )}
-          size={size}
-          useZebraStyles={zebra}
-        >
-          <TableHead>
-            <TableRow>
-              {selection === 'multi' && (
-                <TableSelectAll
-                  ariaLabel="Select all rows"
-                  checked={allSelected}
-                  id="data-grid-select-all"
-                  name="data-grid-select-all"
-                  onSelect={toggleAll}
-                />
-              )}
-              {selection === 'single' && <th aria-hidden />}
-              {rowNumbers && (
-                <TableHeader style={stickyStyle('__number', true)}>
-                  #
-                </TableHeader>
-              )}
-              {visibleColumns.map((column) => {
-                const canSort = Boolean(
-                  sortable && column.sortable && !lockSort,
-                );
-                // Spread optional handlers so no undefined prop reaches Carbon.
-                const sortHandler = canSort
-                  ? {
-                      onClick: (event: ReactMouseEvent) =>
-                        sort.toggle(column.key, event.shiftKey),
-                    }
-                  : {};
-                const dragHandlers = reorderableColumns
-                  ? {
-                      draggable: true,
-                      onDragStart: () => {
-                        dragColumn.current = column.key;
-                      },
-                      onDragOver: (event: ReactMouseEvent) =>
-                        event.preventDefault(),
-                      onDrop: () => {
-                        if (dragColumn.current)
-                          layout.moveColumn(dragColumn.current, column.key);
-                        dragColumn.current = null;
-                      },
-                    }
-                  : {};
-                return (
-                  <TableHeader
-                    className={cx(
-                      styles.headerCell,
-                      reorderableColumns && styles.reorderable,
-                      column.align === 'end' && styles.alignEnd,
-                    )}
-                    isSortHeader={
-                      canSort && sort.directionFor(column.key) !== 'NONE'
-                    }
-                    isSortable={canSort}
-                    key={column.key}
-                    scope="col"
-                    sortDirection={sort.directionFor(column.key)}
-                    style={columnStyle(column, true)}
-                    {...sortHandler}
-                    {...dragHandlers}
-                  >
-                    {column.header}
-                    {resizableColumns && (
-                      <span
-                        aria-hidden
-                        className={cx(styles.resizeHandle)}
-                        onPointerDown={(event) =>
-                          beginResize(event, column.key)
-                        }
-                      />
-                    )}
-                  </TableHeader>
-                );
-              })}
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {virtualized && viewport.padTop > 0 && (
-              <tr className={styles.spacerRow}>
-                <td colSpan={columnCount} style={{ height: viewport.padTop }} />
-              </tr>
-            )}
-
-            {isEmpty ? (
-              <TableRow>
-                <TableCell
-                  className={cx(styles.emptyCell)}
-                  colSpan={columnCount}
-                >
-                  {emptyLabel}
-                </TableCell>
-              </TableRow>
-            ) : (
-              renderRows.map((row, index) => {
-                // Page-aware absolute index so cell selection never leaks across pages.
-                const rowIndex = numberBase + index;
-                return (
-                  <TableRow
-                    className={cx(onRowClick && styles.clickableRow)}
-                    draggable={reorderableRows}
-                    key={row.id}
-                    onClick={onRowClick ? () => onRowClick(row) : undefined}
-                    onDragOver={
-                      reorderableRows
-                        ? (event) => event.preventDefault()
-                        : undefined
-                    }
-                    onDragStart={
-                      reorderableRows
-                        ? () => {
-                            dragRow.current = row.id;
-                          }
-                        : undefined
-                    }
-                    onDrop={
-                      reorderableRows
-                        ? () => {
-                            if (dragRow.current) {
-                              onRowReorder?.(dragRow.current, row.id);
-                              onRowDrop?.(dragRow.current, row.id);
-                            }
-                            dragRow.current = null;
-                          }
-                        : undefined
-                    }
-                    style={virtualized ? { height: rowPx } : undefined}
-                  >
-                    {selection !== 'none' && (
-                      <TableSelectRow
-                        ariaLabel={`Select row ${row.id}`}
-                        checked={selected.has(row.id)}
-                        id={`data-grid-select-${row.id}`}
-                        name={`data-grid-select-${row.id}`}
-                        onSelect={() => toggleRow(row.id)}
-                        radio={selection === 'single'}
-                      />
-                    )}
-                    {rowNumbers && (
-                      <TableCell style={stickyStyle('__number', false)}>
-                        {numberBase + index + 1}
-                      </TableCell>
-                    )}
-                    {visibleColumns.map((column, columnIndex) => (
-                      <TableCell
-                        className={cx(
-                          column.align === 'end' && styles.alignEnd,
-                          cellSelection &&
-                            isCellSelected(rowIndex, columnIndex) &&
-                            styles.cellSelected,
-                        )}
-                        key={column.key}
-                        onMouseDown={
-                          cellSelection
-                            ? (event: ReactMouseEvent) =>
-                                beginCell(rowIndex, columnIndex, event.shiftKey)
-                            : undefined
-                        }
-                        onMouseEnter={
-                          cellSelection
-                            ? () => extendCell(rowIndex, columnIndex)
-                            : undefined
-                        }
-                        style={{
-                          ...columnStyle(column, false),
-                          ...(column.colorToken
-                            ? { color: `var(${column.colorToken})` }
-                            : {}),
-                          whiteSpace: wrapCells ? 'normal' : 'nowrap',
-                        }}
-                      >
-                        {cellContent(row, column)}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                );
-              })
-            )}
-
-            {virtualized && viewport.padBottom > 0 && (
-              <tr className={styles.spacerRow}>
-                <td
-                  colSpan={columnCount}
-                  style={{ height: viewport.padBottom }}
-                />
-              </tr>
-            )}
-
-            {totalsRow && !isEmpty && (
-              <TableRow>
-                {selection !== 'none' && <TableCell />}
-                {rowNumbers && (
-                  <TableCell style={stickyStyle('__number', false)} />
-                )}
-                {visibleColumns.map((column) => (
-                  <TableCell
-                    className={cx(column.align === 'end' && styles.alignEnd)}
-                    key={column.key}
-                    style={columnStyle(column, false)}
-                  >
-                    {totalsRow[column.key] ?? ''}
-                  </TableCell>
-                ))}
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-        {infiniteScroll && hasMore && (
-          <div aria-hidden className={styles.loadMore} ref={sentinelRef} />
         )}
       </div>
 

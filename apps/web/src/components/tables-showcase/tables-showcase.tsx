@@ -110,6 +110,19 @@ const TOGGLES: readonly { key: keyof Flags; label: string }[] = [
   { key: 'persist', label: 'Persist layout' },
 ];
 
+// Feature switches that drive the live tree grid.
+type TreeFlags = {
+  sortable: boolean;
+  search: boolean;
+  expandAll: boolean;
+};
+
+const DEFAULT_TREE_FLAGS: TreeFlags = {
+  sortable: true,
+  search: true,
+  expandAll: true,
+};
+
 const DEFAULT_FLAGS: Flags = {
   zebra: false,
   wrapCells: false,
@@ -152,12 +165,20 @@ export function TablesShowcase() {
   const [lastRow, setLastRow] = useState('none');
   const [lastAction, setLastAction] = useState('none');
 
+  // Tree tab controls state, kept independent from the data grid tab.
+  const [treeDensity, setTreeDensity] = useState<DensitySize>('sm');
+  const [treeSelection, setTreeSelection] = useState<SelectionMode>('none');
+  const [treeFlags, setTreeFlags] = useState<TreeFlags>(DEFAULT_TREE_FLAGS);
+  const [treeSelectedCount, setTreeSelectedCount] = useState(0);
+
   const allRows = useMemo(() => makeDatasetRows(TOTAL_ROWS), []);
   const gridRows = flags.infinite ? allRows.slice(0, loaded) : allRows;
   const hasMore = flags.infinite && loaded < allRows.length;
 
   const setFlag = (key: keyof Flags) => (checked: boolean) =>
     setFlags((current) => ({ ...current, [key]: checked }));
+  const setTreeFlag = (key: keyof TreeFlags) => (checked: boolean) =>
+    setTreeFlags((current) => ({ ...current, [key]: checked }));
 
   // Attach per-column visuals and colors when their toggles are on.
   const columns = useMemo<readonly GridColumn[]>(
@@ -204,6 +225,10 @@ export function TablesShowcase() {
   );
   const onSelectionChange = useCallback(
     (ids: readonly string[]) => setSelectedCount(ids.length),
+    [],
+  );
+  const onTreeSelectionChange = useCallback(
+    (ids: readonly string[]) => setTreeSelectedCount(ids.length),
     [],
   );
   const batchActions = useMemo<readonly BatchAction[]>(
@@ -436,14 +461,107 @@ export function TablesShowcase() {
             </TabPanel>
 
             <TabPanel>
-              <Grid>
-                <Column lg={10} md={8} sm={4}>
+              <Grid className={styles.panelGrid ?? ''}>
+                <Column lg={4} md={8} sm={4}>
+                  <Section level={2}>
+                    <Tile>
+                      <Stack gap={5}>
+                        <Heading>Controls</Heading>
+                        <Dropdown
+                          id="tree-density"
+                          items={[...DENSITIES]}
+                          itemToString={(item) => item ?? ''}
+                          label="Density"
+                          onChange={(data) => {
+                            if (data.selectedItem)
+                              setTreeDensity(data.selectedItem);
+                          }}
+                          selectedItem={treeDensity}
+                          titleText="Density"
+                        />
+                        <RadioButtonGroup
+                          legendText="Selection"
+                          name="tree-selection"
+                          onChange={(value) =>
+                            setTreeSelection(value as SelectionMode)
+                          }
+                          valueSelected={treeSelection}
+                        >
+                          <RadioButton
+                            id="tree-sel-none"
+                            labelText="None"
+                            value="none"
+                          />
+                          <RadioButton
+                            id="tree-sel-single"
+                            labelText="Single"
+                            value="single"
+                          />
+                          <RadioButton
+                            id="tree-sel-multi"
+                            labelText="Multi"
+                            value="multi"
+                          />
+                        </RadioButtonGroup>
+                        <div className={styles.toggles}>
+                          <Toggle
+                            id="tree-toggle-sortable"
+                            labelA="Off"
+                            labelB="On"
+                            labelText="Sortable"
+                            onToggle={setTreeFlag('sortable')}
+                            size="sm"
+                            toggled={treeFlags.sortable}
+                          />
+                          <Toggle
+                            id="tree-toggle-search"
+                            labelA="Off"
+                            labelB="On"
+                            labelText="Search"
+                            onToggle={setTreeFlag('search')}
+                            size="sm"
+                            toggled={treeFlags.search}
+                          />
+                          <Toggle
+                            id="tree-toggle-expand-all"
+                            labelA="Off"
+                            labelB="On"
+                            labelText="Expand-collapse all"
+                            onToggle={setTreeFlag('expandAll')}
+                            size="sm"
+                            toggled={treeFlags.expandAll}
+                          />
+                        </div>
+                      </Stack>
+                    </Tile>
+                  </Section>
+                </Column>
+                <Column lg={8} md={8} sm={4}>
                   <TreeDataGrid
                     columns={treeColumns}
                     description="Regions contain clusters that contain nodes."
+                    expandAllControl={treeFlags.expandAll}
                     nodes={infrastructureTree}
+                    onSelectionChange={onTreeSelectionChange}
+                    search={treeFlags.search}
+                    selection={treeSelection}
+                    size={treeDensity}
+                    sortable={treeFlags.sortable}
                     title="Infrastructure"
                   />
+                </Column>
+                <Column lg={4} md={8} sm={4}>
+                  <Section level={2}>
+                    <Tile>
+                      <Stack gap={5}>
+                        <Heading>Details</Heading>
+                        <Detail
+                          label="Selected nodes"
+                          value={String(treeSelectedCount)}
+                        />
+                      </Stack>
+                    </Tile>
+                  </Section>
                 </Column>
               </Grid>
             </TabPanel>
