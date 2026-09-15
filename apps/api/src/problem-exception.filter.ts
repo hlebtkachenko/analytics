@@ -17,6 +17,11 @@ const problemDetails: Record<
     slug: 'invalid-request',
     title: 'Invalid request',
   },
+  [HttpStatus.CONFLICT]: {
+    detail: 'The request conflicts with existing data',
+    slug: 'conflict',
+    title: 'Conflict',
+  },
   [HttpStatus.FORBIDDEN]: {
     detail: 'Organization access is denied',
     slug: 'access-denied',

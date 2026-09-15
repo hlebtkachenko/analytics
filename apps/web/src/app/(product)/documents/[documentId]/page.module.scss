@@ -1,0 +1,17 @@
+@use '@bap/design-system/tokens/spacing.scss' as spacing;
+
+.actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-03;
+}
+
+.tableContainer {
+  min-inline-size: 0;
+}
+
+.amount {
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}

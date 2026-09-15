@@ -9,7 +9,7 @@ connection URLs are not accepted.
 | Role            | Purpose                                  | Owner membership | RLS bypass |
 | --------------- | ---------------------------------------- | ---------------- | ---------- |
 | `bap_owner`     | Own schemas and reviewed objects         | Not a login      | No         |
-| `bap_eraser`    | Anonymize 5 approved subject columns     | SET from owner   | Yes        |
+| `bap_eraser`    | Anonymize 8 approved subject columns     | SET from owner   | Yes        |
 | `bap_migrator`  | Run reviewed migrations after `SET ROLE` | SET only         | No         |
 | `bap_auth`      | Better Auth tables and rate limits       | None             | No         |
 | `bap_api`       | Application membership resolver          | None             | No         |
@@ -125,10 +125,11 @@ no direct execution to runtime roles.
 `app.erase_user(text)` is an invoker-rights, fixed-search-path function. The
 eraser role has schema usage, function execution, SELECT/UPDATE on only
 `audit_log.user_id`, `dataset.created_by`, `legal_entity.created_by`,
-`member_entity_scope.updated_by`, and `legal_entity_access.created_by`, plus
-SELECT on the two scope tables' `user_id` and DELETE on those two tables so a
-subject's own scope rows disappear. `data_grants.user_id` was removed with that
-table under ADR 0011. It has no other table-wide grant. The database CLI
+`member_entity_scope.updated_by`, `legal_entity_access.created_by`,
+`document.created_by`, `partner.created_by`, and `document_link.created_by`,
+plus SELECT on the two scope tables' `user_id` and DELETE on those two tables so
+a subject's own scope rows disappear. `data_grants.user_id` was removed with
+that table under ADR 0011. It has no other table-wide grant. The database CLI
 connects as `bap_migrator`, sets owner to lock and validate the pending request,
 sets eraser for the app function, returns to owner to consume the request, and
 commits once. A live or unrequested id is refused before eraser role entry.
@@ -193,10 +194,61 @@ Migration `20260914.0001` drops `auth.account.issuer` and its
 stale column made every account insert fail.
 `account_provider_id_account_id_key`, unique on `(provider_id, account_id)`,
 replaces it, matching the pair Better Auth 1.7.3 now uses to identify an
-account. `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is
-now `20260914.0001`; rolling application code back after this migration leaves
+account.
+
+Migration `20260914.0002` adds the documents register.
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
+`20260914.0002`; rolling application code back after this migration leaves
 readiness at 503 until code expecting that exact version is deployed or the
 expected version is deliberately advanced.
+
+It adds one shared reference table and 9 tenant tables. `app.directive_account`
+holds the Czech synthetic chart of accounts keyed by a 3 digit `code`, seeded
+with 218 rows from decree 500/2002 Sb., appendix 1. It carries no
+`organization_id` and no row level security, because the same chart is correct
+for every tenant; it is readable by `bap_api`, `bap_reporting`, and `bap_backup`
+and writable by none of them.
+
+The tenant tables are `app.partner` (organization wide, optionally naming one of
+our own legal entities to make an intercompany document detectable),
+`app.document` (the uniform register, per legal entity, with `kind`, `status`, a
+version chain through `supersedes_document_id` and `is_current`, and free
+`app.document_attribute` key and value pairs for kinds with no dedicated
+content), `app.invoice` and `app.invoice_line` (content for the two invoice
+kinds), `app.economic_event` and `app.economic_event_line` (derived, one current
+event per document, rebuildable), `app.document_link` (directed links of any
+kind between two documents), and `app.data_issue` (what derivation found, so an
+imbalance is reported instead of blocking a write). `app.upload` gains
+`upload_id_organization_key` so a document can pin an upload's `organization_id`
+to its own.
+
+Every one of those 9 tables carries `organization_id`, `ENABLE` and `FORCE` row
+level security, and the same 4 per command policies the tenant policy contract
+below describes: `SELECT` is organization-wide and every write requires
+`app.role_can_write()`, plus `created_by = current_setting('bap.user_id', true)`
+on the 3 tables that record authorship. Entity-scoped tables pin
+`legal_entity_id` through a composite foreign key to
+`app.legal_entity(id, organization_id)`, and every child pins its parent the
+same way, so a row can never reference another organization's entity, partner,
+upload, or document. `bap_api` gets full DML, `bap_reporting` and `bap_backup`
+get SELECT. The eraser gains `created_by` column grants on `app.document`,
+`app.partner`, and `app.document_link`, and `app.erase_user` tombstones those 3
+columns alongside the existing ones. The migration also reserves the `documents`
+organization slug with the `20260831.0004` guard-then-replace pattern, bringing
+`organization_slug_reserved_check` to 17 literals.
+
+Three constraints exist because the application boundary is not the only writer.
+`document_current_reference_key` is unique on
+`(legal_entity_id, kind, reference)` only
+`WHERE reference IS NOT NULL AND is_current`, so a superseded version keeps its
+old reference and only the live row claims it. `invoice_line_vat_zero_check`
+refuses VAT on a line that is not `standard`, and
+`invoice_line_vat_tolerance_check` refuses a `standard` line whose `vat_amount`
+differs from `round(base_amount * vat_rate / 100, 2)` by more than half a unit,
+which tolerates per line or per rate rounding in a source system without
+tolerating a wrong number. `data_issue_open_key` is unique on
+`(document_id, code)` only while `resolved_at` is null, so one issue per code
+stays open while resolved history may repeat.
 
 ## Tenant policy contract
 
@@ -208,8 +260,9 @@ Every future tenant table must include:
 - a `USING` policy for reads and changes;
 - a matching `WITH CHECK` policy for inserted or changed rows.
 
-A table that attaches to a legal entity, such as `app.dataset` and `app.upload`,
-also carries a non-null `legal_entity_id` and a composite foreign key against
+A table that attaches to a legal entity, such as `app.dataset`, `app.upload`,
+`app.document`, and `app.economic_event`, also carries a non-null
+`legal_entity_id` and a composite foreign key against
 `app.legal_entity(id, organization_id)` rather than a bare reference to the
 entity id. That composite key pins the entity to the row's own
 `organization_id`, so an entity from another organization can never be attached
@@ -218,11 +271,13 @@ even before row level security is evaluated.
 Split the policies per command whenever a table is readable more widely than it
 is writable. A single `ALL` policy applies its `USING` clause to `DELETE` and to
 the row selection of `UPDATE`, so a read grant would silently confer deletion.
-`app.dataset`, `app.dataset_column`, `app.dataset_row`, and
-`app.dataset_embedding` therefore carry separate `SELECT`, `INSERT`, `UPDATE`,
-and `DELETE` policies: `SELECT` is organization-wide, and writing requires
-`app.role_can_write()` rather than matching the creator, since ADR 0011 made
-`member` read-only and dropped the per-dataset grant.
+`app.dataset`, `app.dataset_column`, `app.dataset_row`, `app.dataset_embedding`,
+`app.partner`, `app.document`, `app.document_attribute`, `app.invoice`,
+`app.invoice_line`, `app.economic_event`, `app.economic_event_line`,
+`app.document_link`, and `app.data_issue` therefore carry separate `SELECT`,
+`INSERT`, `UPDATE`, and `DELETE` policies: `SELECT` is organization-wide, and
+writing requires `app.role_can_write()` rather than matching the creator, since
+ADR 0011 made `member` read-only and dropped the per-dataset grant.
 
 A stored entity scope must not outlive the membership it describes. Migration
 `20260910.0001` therefore adds `app.clear_member_entity_scope()`, a
@@ -272,7 +327,7 @@ deterministic two-backend quota-1 test observes the advisory-lock waiter before
 proving exactly 1 organization succeeds. It also exercises the nullable web
 precheck and the migrator-to-owner quota writer with its stored note and NULL
 auth grantor. A shared corpus proves that PostgreSQL and the web Zod validator
-agree on valid, malformed, overlong, numeric, and all 16 reserved slugs. It also
+agree on valid, malformed, overlong, numeric, and every reserved slug. It also
 verifies that invalid legacy membership is returned as no access instead of a
 server error.
 
@@ -311,3 +366,23 @@ grant confers neither `DELETE`, `UPDATE`, nor a conflicting `INSERT`, that
 vectors and may not delete them, and that `pg_dump` carries both the table and
 its data. The dimension is fixed by the embedding model the AI credential names:
 adopting a model of another width needs a new migration and a full re-backfill.
+
+`packages/db/src/documents.integration.test.ts` covers the documents register on
+its own container. It proves that migration `20260914.0002` applies and records
+exactly the version `DATABASE_MIGRATION_COMPATIBILITY` expects, that
+`app.directive_account` holds all 218 seeded accounts, is readable by
+`bap_reporting`, and carries no row level security, and that an owner writing
+through `bap_api` can register a partner, a document, its attributes, its
+invoice and lines, its derived event and lines, a link, and a data issue in one
+tenant transaction. It then proves that another organization sees 0 rows in all
+9 tables, that a `member` is refused a document insert and still reads, that a
+document naming another organization's legal entity is refused by
+`document_legal_entity_fkey`, that the 2 VAT check constraints refuse a
+contradictory line while a half unit rounding difference passes, that a
+self-directed link is refused, that a second current document cannot claim a
+reference until the first stops being current, that deleting a document destroys
+its content, event, links, and issues by cascade, that `app.erase_user`
+tombstones `created_by` on documents, partners, and links while leaving another
+subject's rows alone, that `bap_backup` reads every new table, that
+`bap_reporting` may not insert a document, and that the reserved `documents`
+slug is refused by `organization_slug_reserved_check`.

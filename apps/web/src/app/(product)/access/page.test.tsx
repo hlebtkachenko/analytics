@@ -20,9 +20,11 @@ afterEach(() => {
 const memberCapabilities = {
   createEntities: false,
   deleteEntities: false,
+  manageDocuments: false,
   manageEntityAccess: false,
   manageMembers: false,
   manageOrganization: false,
+  readDocuments: true,
   updateEntities: false,
   uploadData: false,
   useAi: true,
@@ -30,15 +32,18 @@ const memberCapabilities = {
 const adminCapabilities = {
   ...memberCapabilities,
   createEntities: true,
+  manageDocuments: true,
   updateEntities: true,
   uploadData: true,
 };
 const ownerCapabilities = {
   createEntities: true,
   deleteEntities: true,
+  manageDocuments: true,
   manageEntityAccess: true,
   manageMembers: true,
   manageOrganization: true,
+  readDocuments: true,
   updateEntities: true,
   uploadData: true,
   useAi: true,

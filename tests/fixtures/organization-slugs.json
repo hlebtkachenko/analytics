@@ -27,5 +27,6 @@
   { "slug": "activate", "valid": false },
   { "slug": "welcome", "valid": false },
   { "slug": "account", "valid": false },
-  { "slug": "organizations", "valid": false }
+  { "slug": "organizations", "valid": false },
+  { "slug": "documents", "valid": false }
 ]

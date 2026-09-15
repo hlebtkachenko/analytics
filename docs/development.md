@@ -161,7 +161,8 @@ which owns the Carbon UI Shell header, the left icon rail, the single
 new page never recreates any of that, and must not add its own header,
 navigation, `<main>`, or breadcrumb.
 
-To add a product page:
+The full step-by-step checklist, including navigation, icons, the BFF data path,
+strings, and tests, is [Adding a product page](product-pages.md). In short:
 
 - Create `apps/web/src/app/(product)/<segment>/page.tsx`. It inherits the shell
   with no extra wiring; write page content only.
@@ -178,8 +179,8 @@ To add a product page:
   `apps/web/src/components/shell/breadcrumb-trail.ts`.
 - Adding a new top-level segment (a direct child of `(product)`, for example
   `/reports`) also requires adding that segment to `reservedOrganizationSlugs`
-  in `apps/web/src/lib/organizations/slug.ts`, a rail link in
-  `apps/web/src/components/shell/product-shell.tsx`, and a row in
+  in `apps/web/src/lib/organizations/slug.ts`, an entry in `railDestinations` in
+  `apps/web/src/components/shell/product-navigation.ts`, and a row in
   [the route table](application-routes.md), all in the same change, so the
   segment can never collide with an organization slug and stays discoverable.
 

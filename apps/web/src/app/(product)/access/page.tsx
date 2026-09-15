@@ -27,6 +27,7 @@ import { z } from 'zod';
 
 import PageContainer from '../../../components/page-container';
 import { authClient } from '../../../lib/auth/client';
+import { organizationAccessSchema } from '../../../lib/datasets/client';
 
 const organizationsSchema = z.array(
   z.object({
@@ -35,18 +36,8 @@ const organizationsSchema = z.array(
     slug: z.string().min(1),
   }),
 );
-const capabilitiesSchema = z.object({
-  createEntities: z.boolean(),
-  deleteEntities: z.boolean(),
-  manageEntityAccess: z.boolean(),
-  manageMembers: z.boolean(),
-  manageOrganization: z.boolean(),
-  updateEntities: z.boolean(),
-  uploadData: z.boolean(),
-  useAi: z.boolean(),
-});
-const accessSchema = z.object({
-  capabilities: capabilitiesSchema,
+// The shared capability gate, plus the scope, role and service only this page reads.
+const accessSchema = organizationAccessSchema.extend({
   entityScope: z.discriminatedUnion('mode', [
     z.object({ mode: z.literal('all') }),
     z.object({
@@ -54,12 +45,11 @@ const accessSchema = z.object({
       mode: z.literal('restricted'),
     }),
   ]),
-  organizationId: z.string().min(1),
   role: z.enum(['owner', 'admin', 'member']),
   service: z.enum(['application-api', 'reporting-api']),
 });
 
-// The eight capabilities are listed in one fixed order, whatever the role holds.
+// The ten capabilities are listed in one fixed order, whatever the role holds.
 const capabilityNames = [
   'manageOrganization',
   'manageMembers',
@@ -68,6 +58,8 @@ const capabilityNames = [
   'updateEntities',
   'deleteEntities',
   'uploadData',
+  'readDocuments',
+  'manageDocuments',
   'useAi',
 ] as const;
 

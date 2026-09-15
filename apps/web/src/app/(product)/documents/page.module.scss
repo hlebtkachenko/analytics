@@ -1,0 +1,36 @@
+@use '@bap/design-system/tokens/spacing.scss' as spacing;
+
+.headingRow {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-05;
+  justify-content: space-between;
+}
+
+.totals {
+  display: grid;
+  gap: spacing.$spacing-05;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.totalLabel {
+  margin-block-end: spacing.$spacing-02;
+}
+
+.totalValue {
+  font-variant-numeric: tabular-nums;
+}
+
+.tableContainer {
+  min-inline-size: 0;
+}
+
+.filter {
+  min-inline-size: 12rem;
+}
+
+.amount {
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}

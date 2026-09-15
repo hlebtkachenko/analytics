@@ -96,9 +96,11 @@ describe('application access route', () => {
       capabilities: {
         createEntities: false,
         deleteEntities: false,
+        manageDocuments: false,
         manageEntityAccess: false,
         manageMembers: false,
         manageOrganization: false,
+        readDocuments: true,
         updateEntities: false,
         uploadData: false,
         useAi: true,
@@ -210,9 +212,11 @@ describe('application access route', () => {
     ).toEqual([
       'createEntities',
       'deleteEntities',
+      'manageDocuments',
       'manageEntityAccess',
       'manageMembers',
       'manageOrganization',
+      'readDocuments',
       'updateEntities',
       'uploadData',
       'useAi',

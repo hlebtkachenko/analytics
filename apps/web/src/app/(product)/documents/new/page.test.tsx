@@ -1,0 +1,275 @@
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const push = vi.fn();
+
+vi.mock('next/navigation', () => ({
+  useParams: () => ({}),
+  useRouter: () => ({ push, refresh: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(''),
+}));
+
+import { ToastProvider } from '../../../../components/shell/toast';
+import { I18nProvider } from '../../../../i18n/client-provider';
+import NewDocumentPage from './page';
+
+const LEGAL_ENTITY_ID = '9b7d1c30-6a4b-4d1f-9c2e-7a5f0e3b8d21';
+const PARTNER_ID = '4c2f8b11-8c35-4a2e-9f61-1de2f0a7c934';
+const DOCUMENT_ID = '00000000-0000-4000-8000-000000000010';
+
+const legalEntities = {
+  legalEntities: [
+    {
+      createdAt: '2026-01-01T00:00:00.000Z',
+      id: LEGAL_ENTITY_ID,
+      kind: 'company',
+      name: 'Placeholder Holding',
+      registrationNumber: null,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+  ],
+};
+
+const partner = {
+  countryCode: 'CZ',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  id: PARTNER_ID,
+  legalEntityId: null,
+  name: 'Placeholder Supplier',
+  registrationNumber: null,
+  updatedAt: '2026-01-01T00:00:00.000Z',
+  vatNumber: null,
+};
+
+const createdDetail = {
+  attributes: {},
+  document: {
+    createdAt: '2026-09-01T00:00:00.000Z',
+    currencyCode: 'CZK',
+    documentDate: '2026-09-01',
+    hasEvent: true,
+    id: DOCUMENT_ID,
+    isBalanced: true,
+    isCurrent: true,
+    kind: 'issued_invoice',
+    legalEntityId: LEGAL_ENTITY_ID,
+    openIssueCount: 0,
+    partnerId: null,
+    partnerName: null,
+    reference: null,
+    source: 'manual',
+    status: 'registered',
+    title: 'Placeholder document',
+    totalAmount: '1210.0000',
+    updatedAt: '2026-09-01T00:00:00.000Z',
+    validFrom: null,
+    validTo: null,
+    version: 1,
+  },
+  event: null,
+  invoice: null,
+  issues: [],
+  links: [],
+};
+
+const posted: { body?: unknown; path?: string } = {};
+
+function respond() {
+  return vi.fn(async (input: string, init?: RequestInit) => {
+    if (input === '/api/auth/organization/list') {
+      return Response.json([
+        {
+          id: 'organization_1',
+          name: 'Organization 1',
+          slug: 'organization-1',
+        },
+      ]);
+    }
+
+    if (input.endsWith('/legal-entities')) {
+      return Response.json(legalEntities);
+    }
+
+    if (input.includes('/partners') && init?.method === 'POST') {
+      posted.body = JSON.parse(String(init.body));
+      posted.path = input;
+      return Response.json(partner, { status: 201 });
+    }
+
+    if (input.includes('/partners')) {
+      return Response.json({ partners: [partner] });
+    }
+
+    if (input.includes('/documents') && init?.method === 'POST') {
+      posted.body = JSON.parse(String(init.body));
+      posted.path = input;
+      return Response.json(createdDetail, { status: 201 });
+    }
+
+    return new Response(null, { status: 404 });
+  });
+}
+
+function renderNewDocumentPage() {
+  return render(
+    <I18nProvider>
+      <ToastProvider>
+        <NewDocumentPage />
+      </ToastProvider>
+    </I18nProvider>,
+  );
+}
+
+afterEach(() => {
+  cleanup();
+  delete posted.body;
+  delete posted.path;
+  push.mockReset();
+  vi.unstubAllGlobals();
+});
+
+describe('NewDocumentPage', () => {
+  it('posts a minimal issued invoice and continues to the registered document', async () => {
+    vi.stubGlobal('fetch', respond());
+
+    renderNewDocumentPage();
+    await screen.findByDisplayValue('Placeholder Holding');
+
+    fireEvent.change(screen.getByLabelText('Kind'), {
+      target: { value: 'issued_invoice' },
+    });
+    fireEvent.change(screen.getByLabelText('Title'), {
+      target: { value: 'Placeholder document' },
+    });
+    fireEvent.change(screen.getByLabelText('Document date'), {
+      target: { value: '2026-09-01' },
+    });
+    fireEvent.change(screen.getByLabelText('Description 1'), {
+      target: { value: 'Placeholder line' },
+    });
+    fireEvent.change(screen.getByLabelText('Base amount 1'), {
+      target: { value: '1000' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Register document' }));
+
+    await waitFor(() => {
+      expect(posted.body).toBeDefined();
+    });
+    expect(posted.path).toBe(
+      '/api/bff/application/organizations/organization_1/documents',
+    );
+    expect(posted.body).toEqual({
+      currencyCode: 'CZK',
+      documentDate: '2026-09-01',
+      invoice: {
+        lines: [
+          {
+            baseAmount: '1000',
+            category: 'services',
+            description: 'Placeholder line',
+            vatAmount: '210.00',
+            vatMode: 'standard',
+            vatRate: '21',
+          },
+        ],
+      },
+      kind: 'issued_invoice',
+      legalEntityId: LEGAL_ENTITY_ID,
+      title: 'Placeholder document',
+    });
+    await waitFor(() => {
+      expect(push).toHaveBeenCalledWith(
+        `/documents/${DOCUMENT_ID}?organization=organization-1`,
+      );
+    });
+  });
+
+  it('clears the rate as well as the amount when a line leaves standard VAT', async () => {
+    vi.stubGlobal('fetch', respond());
+
+    renderNewDocumentPage();
+    await screen.findByDisplayValue('Placeholder Holding');
+
+    fireEvent.change(screen.getByLabelText('Kind'), {
+      target: { value: 'issued_invoice' },
+    });
+    fireEvent.change(screen.getByLabelText('Base amount 1'), {
+      target: { value: '1000' },
+    });
+    expect(screen.getByLabelText('VAT amount 1')).toHaveValue('210.00');
+
+    fireEvent.change(screen.getByLabelText('VAT mode 1'), {
+      target: { value: 'exempt' },
+    });
+
+    expect(screen.getByLabelText('VAT rate 1')).toHaveValue('0');
+    expect(screen.getByLabelText('VAT amount 1')).toHaveValue('0');
+  });
+
+  it('rounds the derived VAT half away from zero on the minor unit', async () => {
+    vi.stubGlobal('fetch', respond());
+
+    renderNewDocumentPage();
+    await screen.findByDisplayValue('Placeholder Holding');
+
+    fireEvent.change(screen.getByLabelText('Kind'), {
+      target: { value: 'issued_invoice' },
+    });
+    fireEvent.change(screen.getByLabelText('VAT rate 1'), {
+      target: { value: '15' },
+    });
+    fireEvent.change(screen.getByLabelText('Base amount 1'), {
+      target: { value: '4.10' },
+    });
+
+    // A float would land on 0.61 here, because 4.1 times 15 is not exact in binary.
+    expect(screen.getByLabelText('VAT amount 1')).toHaveValue('0.62');
+  });
+
+  it('refuses an incomplete document before any request is sent', async () => {
+    const fetchMock = respond();
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderNewDocumentPage();
+    await screen.findByDisplayValue('Placeholder Holding');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Register document' }));
+
+    expect(
+      await screen.findByText('Check the highlighted fields and try again.'),
+    ).toBeVisible();
+    expect(posted.body).toBeUndefined();
+  });
+
+  it('creates a partner inline and keeps it selected for the document', async () => {
+    vi.stubGlobal('fetch', respond());
+
+    renderNewDocumentPage();
+    await screen.findByDisplayValue('Placeholder Holding');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create partner' }));
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Placeholder Supplier' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(posted.body).toEqual({ name: 'Placeholder Supplier' });
+    });
+    expect(posted.path).toBe(
+      '/api/bff/application/organizations/organization_1/partners',
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Partner' })).toHaveValue(
+        'Placeholder Supplier',
+      );
+    });
+  });
+});

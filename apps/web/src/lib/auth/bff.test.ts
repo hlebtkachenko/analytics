@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  deleteDocumentLink,
   deleteLegalEntity,
+  getDocument,
+  getDocuments,
   getDatasetExport,
   getDatasetRows,
   getDatasets,
@@ -10,7 +13,9 @@ import {
   getMemberEntityScopes,
   getOrganizationAccess,
   patchLegalEntity,
+  patchPartner,
   postDatasetUpload,
+  postDocument,
   postLegalEntity,
   putMemberEntityScope,
 } from './bff.js';
@@ -19,9 +24,11 @@ import type { BffAuth } from './bff.js';
 const memberCapabilities = {
   createEntities: false,
   deleteEntities: false,
+  manageDocuments: false,
   manageEntityAccess: false,
   manageMembers: false,
   manageOrganization: false,
+  readDocuments: true,
   updateEntities: false,
   uploadData: true,
   useAi: true,
@@ -29,9 +36,11 @@ const memberCapabilities = {
 const ownerCapabilities = {
   createEntities: true,
   deleteEntities: true,
+  manageDocuments: true,
   manageEntityAccess: true,
   manageMembers: true,
   manageOrganization: true,
+  readDocuments: true,
   updateEntities: true,
   uploadData: true,
   useAi: true,
@@ -1147,5 +1156,274 @@ describe('member entity scope', () => {
     });
     expect(forgedMember.status).toBe(404);
     expect(fetchImplementation).toHaveBeenCalledOnce();
+  });
+});
+
+const DOCUMENT_ID = '00000000-0000-4000-8000-000000000010';
+const documentSummary = {
+  createdAt: '2026-09-01T00:00:00.000Z',
+  currencyCode: 'CZK',
+  documentDate: '2026-09-01',
+  hasEvent: true,
+  id: DOCUMENT_ID,
+  isBalanced: true,
+  isCurrent: true,
+  kind: 'received_invoice',
+  legalEntityId: LEGAL_ENTITY_ID,
+  openIssueCount: 0,
+  partnerId: null,
+  partnerName: null,
+  reference: 'REF-1',
+  source: 'manual',
+  status: 'registered',
+  title: 'placeholder register entry',
+  totalAmount: '1210.0000',
+  updatedAt: '2026-09-02T00:00:00.000Z',
+  validFrom: null,
+  validTo: null,
+  version: 1,
+};
+const documentList = {
+  documents: [documentSummary],
+  page: 1,
+  pageSize: 25,
+  total: 1,
+  totalsByCurrency: [{ currencyCode: 'CZK', totalAmount: '1210.0000' }],
+};
+const documentDetail = {
+  attributes: {},
+  document: documentSummary,
+  event: null,
+  invoice: null,
+  issues: [],
+  links: [],
+};
+
+describe('getDocuments', () => {
+  it('rebuilds the query from validated values only', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        `http://api:3001/v1/organizations/org_1/documents?legalEntityId=${LEGAL_ENTITY_ID}&kind=received_invoice&status=registered&page=2&pageSize=50&sort=title&order=asc`,
+      );
+      expect(init?.headers).toEqual({
+        authorization: 'Bearer resource-token',
+        'x-bap-request-id': '123e4567-e89b-42d3-a456-426614174000',
+      });
+      return Response.json(documentList);
+    });
+
+    const response = await getDocuments(
+      auth,
+      datasetRequest(
+        `documents?legalEntityId=${LEGAL_ENTITY_ID.toUpperCase()}&kind=received_invoice&status=registered&page=2&pageSize=50&sort=title&order=asc`,
+      ),
+      'org_1',
+      fetchImplementation,
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual(documentList);
+    expect(JSON.stringify(payload)).not.toContain('resource-token');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+  });
+
+  it('applies the contract defaults when the browser asks for nothing', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/documents?page=1&pageSize=25&sort=documentDate&order=desc',
+      );
+      return Response.json(documentList);
+    });
+
+    const response = await getDocuments(
+      auth,
+      datasetRequest('documents'),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+  });
+
+  it('refuses an unsupported filter, an oversized page, and a window past the bound', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async () =>
+      Response.json(documentList),
+    );
+
+    const unsupported = await getDocuments(
+      auth,
+      datasetRequest('documents?kind=invented_kind'),
+      'org_1',
+      fetchImplementation,
+    );
+    const oversized = await getDocuments(
+      auth,
+      datasetRequest('documents?pageSize=500'),
+      'org_1',
+      fetchImplementation,
+    );
+    const pastBound = await getDocuments(
+      auth,
+      datasetRequest('documents?page=500&pageSize=100'),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(unsupported.status).toBe(400);
+    expect(await unsupported.json()).toEqual({ error: 'invalid_query' });
+    expect(oversized.status).toBe(400);
+    expect(pastBound.status).toBe(400);
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+});
+
+describe('postDocument', () => {
+  it('forwards a validated register entry and answers with the created detail', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/documents',
+      );
+      expect(init?.method).toBe('POST');
+      expect(JSON.parse(String(init?.body))).toEqual({
+        currencyCode: 'CZK',
+        documentDate: '2026-09-01',
+        kind: 'contract',
+        legalEntityId: LEGAL_ENTITY_ID,
+        title: 'placeholder register entry',
+      });
+      return Response.json(documentDetail, { status: 201 });
+    });
+
+    const response = await postDocument(
+      auth,
+      new Request(
+        'https://bap.invalid/api/bff/application/organizations/org_1/documents',
+        {
+          body: JSON.stringify({
+            documentDate: '2026-09-01',
+            kind: 'contract',
+            legalEntityId: LEGAL_ENTITY_ID,
+            title: 'placeholder register entry',
+          }),
+          headers: {
+            'content-type': 'application/json',
+            'x-bap-request-id': '123e4567-e89b-42d3-a456-426614174000',
+          },
+          method: 'POST',
+        },
+      ),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual(documentDetail);
+  });
+
+  it('refuses invoice content on a kind that carries none before a token is minted', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async () =>
+      Response.json(documentDetail, { status: 201 }),
+    );
+
+    const response = await postDocument(
+      auth,
+      new Request(
+        'https://bap.invalid/api/bff/application/organizations/org_1/documents',
+        {
+          body: JSON.stringify({
+            documentDate: '2026-09-01',
+            invoice: {
+              lines: [
+                {
+                  baseAmount: '1000',
+                  category: 'services',
+                  description: 'placeholder line',
+                  vatMode: 'standard',
+                },
+              ],
+            },
+            kind: 'contract',
+            legalEntityId: LEGAL_ENTITY_ID,
+            title: 'placeholder register entry',
+          }),
+          headers: { 'content-type': 'application/json' },
+          method: 'POST',
+        },
+      ),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'invalid_body' });
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+});
+
+describe('parsedIdentifier', () => {
+  it('normalizes a padded upper-case identifier before the outbound call', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe(
+        `http://api:3001/v1/organizations/org_1/documents/${DOCUMENT_ID}`,
+      );
+      return Response.json(documentDetail);
+    });
+
+    const response = await getDocument(
+      auth,
+      datasetRequest(`documents/${DOCUMENT_ID}`),
+      'org_1',
+      ` ${DOCUMENT_ID.toUpperCase()} `,
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+  });
+
+  it('answers a malformed identifier with the not-found code of its own resource', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async () =>
+      Response.json(documentDetail),
+    );
+
+    const document = await getDocument(
+      auth,
+      datasetRequest('documents/not-a-uuid'),
+      'org_1',
+      'not-a-uuid',
+      fetchImplementation,
+    );
+    const link = await deleteDocumentLink(
+      auth,
+      datasetRequest(`documents/${DOCUMENT_ID}/links/not-a-uuid`),
+      'org_1',
+      DOCUMENT_ID,
+      'not-a-uuid',
+      fetchImplementation,
+    );
+    const partner = await patchPartner(
+      auth,
+      new Request(
+        'https://bap.invalid/api/bff/application/organizations/org_1/partners/not-a-uuid',
+        {
+          body: JSON.stringify({ name: 'Placeholder Supplier' }),
+          headers: { 'content-type': 'application/json' },
+          method: 'PATCH',
+        },
+      ),
+      'org_1',
+      'not-a-uuid',
+      fetchImplementation,
+    );
+
+    expect(document.status).toBe(404);
+    expect(await document.json()).toEqual({ error: 'document_not_found' });
+    expect(link.status).toBe(404);
+    expect(await link.json()).toEqual({ error: 'link_not_found' });
+    expect(partner.status).toBe(404);
+    expect(await partner.json()).toEqual({ error: 'partner_not_found' });
+    expect(fetchImplementation).not.toHaveBeenCalled();
   });
 });

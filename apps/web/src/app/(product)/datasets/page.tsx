@@ -21,7 +21,6 @@ import {
 } from '@bap/design-system/react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { z } from 'zod';
 
 import { DatasetView } from '../../../components/datasets/dataset-view';
 import PageContainer from '../../../components/page-container';
@@ -32,32 +31,17 @@ import {
   isAbortError,
   legalEntitiesPath,
   legalEntityListSchema,
+  organizationAccessSchema,
   uploadsPath,
 } from '../../../lib/datasets/client';
-import type { DatasetSummary, LegalEntity } from '../../../lib/datasets/client';
+import type {
+  DatasetSummary,
+  LegalEntity,
+  OrganizationAccess,
+} from '../../../lib/datasets/client';
+import { useOrganizationSelection } from '../../../lib/organizations/use-organization-selection';
 import styles from './page.module.scss';
 
-const organizationsSchema = z.array(
-  z.object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-    slug: z.string().min(1),
-  }),
-);
-// Mirrors the access contract the BFF validated; only the gated capabilities are read back.
-const accessSchema = z.object({
-  capabilities: z.object({
-    createEntities: z.boolean(),
-    deleteEntities: z.boolean(),
-    manageEntityAccess: z.boolean(),
-    manageMembers: z.boolean(),
-    manageOrganization: z.boolean(),
-    updateEntities: z.boolean(),
-    uploadData: z.boolean(),
-    useAi: z.boolean(),
-  }),
-  organizationId: z.string().min(1),
-});
 // The page scope is one entity or none at all; an absent filter is the all-entities view.
 const allEntitiesValue = '';
 
@@ -67,15 +51,13 @@ const statusLabels = {
   ready: 'datasets.statusReady',
 } as const;
 
-type Access = z.infer<typeof accessSchema>;
 type LoadState = 'error' | 'idle' | 'loading';
-type Organization = z.infer<typeof organizationsSchema>[number];
 
 export default function DatasetsPage() {
   const { t } = useTranslation();
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [organizationId, setOrganizationId] = useState('');
-  const [access, setAccess] = useState<Access>();
+  const organization = useOrganizationSelection();
+  const organizationId = organization.organizationId;
+  const [access, setAccess] = useState<OrganizationAccess>();
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
   const [legalEntities, setLegalEntities] = useState<LegalEntity[]>([]);
   const [scopeEntityId, setScopeEntityId] = useState(allEntitiesValue);
@@ -83,8 +65,6 @@ export default function DatasetsPage() {
   const [openDataset, setOpenDataset] = useState<DatasetSummary>();
   const [reloads, setReloads] = useState(0);
   // One status per request, so a success can never repaint another request's failure as healthy.
-  const [organizationsState, setOrganizationsState] =
-    useState<LoadState>('loading');
   const [accessState, setAccessState] = useState<LoadState>('loading');
   const [datasetsState, setDatasetsState] = useState<LoadState>('loading');
   const [entitiesState, setEntitiesState] = useState<LoadState>('loading');
@@ -92,31 +72,6 @@ export default function DatasetsPage() {
   const [uploadState, setUploadState] = useState<
     'accepted' | 'error' | 'idle' | 'uploading'
   >('idle');
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void getJson('/api/auth/organization/list', controller.signal)
-      .then((payload) => organizationsSchema.parse(payload))
-      .then((items) => {
-        const requestedSlug = new URLSearchParams(window.location.search).get(
-          'organization',
-        );
-        const requestedOrganization = items.find(
-          (organization) => organization.slug === requestedSlug,
-        );
-        setOrganizations(items);
-        setOrganizationId(requestedOrganization?.id ?? items[0]?.id ?? '');
-        setOrganizationsState('idle');
-      })
-      .catch((error: unknown) => {
-        if (!isAbortError(error)) {
-          setOrganizationsState('error');
-        }
-      });
-    return () => {
-      controller.abort();
-    };
-  }, []);
 
   useEffect(() => {
     if (organizationId.length === 0) {
@@ -128,7 +83,7 @@ export default function DatasetsPage() {
       `/api/bff/application/organizations/${encodeURIComponent(organizationId)}/access`,
       controller.signal,
     )
-      .then((payload) => accessSchema.parse(payload))
+      .then((payload) => organizationAccessSchema.parse(payload))
       .then((contract) => {
         if (contract.organizationId !== organizationId) {
           throw new Error('Organization mismatch.');
@@ -203,7 +158,7 @@ export default function DatasetsPage() {
     setFile(undefined);
     setLegalEntities([]);
     setOpenDataset(undefined);
-    setOrganizationId(id);
+    organization.select(id);
     // An entity belongs to one organization, so neither selection survives the switch.
     setScopeEntityId(allEntitiesValue);
     setUploadEntityId(allEntitiesValue);
@@ -256,13 +211,13 @@ export default function DatasetsPage() {
 
   // Access and the list are resolved separately, so each failure is reported on its own terms.
   const resolving =
-    organizationsState === 'loading' ||
+    organization.state === 'loading' ||
     (organizationId.length > 0 &&
       (accessState === 'loading' ||
         datasetsState === 'loading' ||
         entitiesState === 'loading'));
   const listFailed =
-    organizationsState === 'error' ||
+    organization.state === 'error' ||
     datasetsState === 'error' ||
     entitiesState === 'error';
   const accessFailed = accessState === 'error';
@@ -289,7 +244,7 @@ export default function DatasetsPage() {
           title={t('datasets.error')}
         />
       ) : null}
-      {organizations.length > 0 ? (
+      {organization.organizations.length > 0 ? (
         <Select
           id="datasets-organization"
           labelText={t('datasets.organization')}
@@ -298,12 +253,8 @@ export default function DatasetsPage() {
           }}
           value={organizationId}
         >
-          {organizations.map((organization) => (
-            <SelectItem
-              key={organization.id}
-              text={organization.name}
-              value={organization.id}
-            />
+          {organization.organizations.map((item) => (
+            <SelectItem key={item.id} text={item.name} value={item.id} />
           ))}
         </Select>
       ) : null}

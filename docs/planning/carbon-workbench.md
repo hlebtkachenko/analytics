@@ -34,7 +34,7 @@ pinned release.
 
 - Every installed public React, pictogram, and chart export, plus exhaustive
   generated metadata for every installed upstream icon export.
-- The exact curated 27-icon BAP application facade and executable explorer,
+- The exact curated 29-icon BAP application facade and executable explorer,
   alongside the complete 1,575-export pictogram facade and explorer.
 - Recursive namespace members, compound children, hooks, contexts, constants,
   preview APIs, unstable APIs, aliases, and deprecated names.

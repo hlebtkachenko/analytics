@@ -322,6 +322,8 @@ describe('Carbon catalog', () => {
       'Checkmark',
       'Close',
       'DataSet',
+      'Document',
+      'DocumentAdd',
       'Download',
       'Email',
       'Enterprise',

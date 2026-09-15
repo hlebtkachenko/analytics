@@ -21,12 +21,12 @@ charts, diagrams, icons, and pictograms. The committed generated catalog and
 closed-world source mappings make the same release discoverable without access
 to Carbon websites.
 
-Application icons come from the exact curated 27-export
+Application icons come from the exact curated 29-export
 `@bap/design-system/icons` entrypoint. Add a named export only with a real use
 on an existing Carbon page. Prefer the Carbon component's icon prop, retain
 visible action text, keep repeated glyphs decorative to assistive technology,
 and use only Carbon's 16, 20, 24, or 32px artboards. The executable workbench
-renders those 27 glyphs and all 1,575 pictograms; the generated catalog alone
+renders those 29 glyphs and all 1,575 pictograms; the generated catalog alone
 retains the exhaustive upstream icon inventory. Product applications must never
 import `@carbon/icons-react` directly.
 
@@ -38,8 +38,9 @@ utility CSS framework, raw palette values, or copied Carbon source.
 Authenticated `app/(product)` routes share a Carbon UI Shell product shell: a
 header branded "Afframe Analytics" with single-purpose panels for search,
 notifications, help, settings, workspace switching, and account, over a
-pinned-persistable left icon rail for Access, Organizations, Datasets, Account,
-and a workspace section. Identity and invitation routes remain outside that
+pinned-persistable left icon rail for Access, Organizations, Datasets,
+Documents, Account, and a workspace section, rendered from the shell's
+`railDestinations` array. Identity and invitation routes remain outside that
 shell. The layout owns the single `main-content` landmark and renders small
 Carbon breadcrumbs for subordinate views, including the inline dataset view. The
 five temporary organization pages and the temporary account page remain a

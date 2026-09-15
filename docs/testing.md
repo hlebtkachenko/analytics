@@ -88,6 +88,26 @@ identifiers only, that a declared format contradicting the file content fails
 the upload with a bounded message, and that the staged file is deleted on both
 the success and the failure path.
 
+`packages/db/src/documents.integration.test.ts` covers the documents register
+against its own container. It proves the migration applies and records the
+expected compatibility version, that `app.directive_account` holds all 218
+seeded accounts with no row level security, that an owner can register a
+partner, a document, its content, its derived event, a link, and a data issue in
+one tenant transaction, that another organization and a restricted member see
+only what their scope allows, that a `member` write is refused while reads still
+work, that the composite foreign keys and VAT check constraints hold, that a
+document delete cascades to its content, event, links, and issues, and that
+erasure tombstones `created_by` on documents, partners, and links.
+`apps/api/src/documents/document.integration.test.ts` proves the same feature
+through the application API and role boundary: an issued standard invoice
+derives a balanced event with exact account codes, a received reverse-charge
+invoice self-assesses VAT on both sides of 343, a missing partner raises and
+then clears a data issue, cross-tenant and out-of-scope reads return nothing, a
+member write is refused, list filtering, counting, and totals are exact, a
+duplicate partner registration number and a duplicate document link are refused,
+the shared directive chart publishes to every tenant, and a document read
+returns its derived event and open issues together.
+
 The database suite also proves the account lifecycle: exact `bap_eraser`
 attributes and memberships, no login or CONNECT leakage, exact request and
 function ACLs, column-only app grants, comma-composed sole-owner versus co-owner

@@ -24,6 +24,7 @@ const reviewedImports = {
     'UserMultiple',
   ],
   'app/(product)/datasets/page.tsx': ['Upload', 'View'],
+  'app/(product)/documents/page.tsx': ['DocumentAdd'],
   'app/invitation/[invitationId]/invitation-client.tsx': ['Checkmark'],
   'components/datasets/dataset-chat.tsx': ['Send'],
   'components/datasets/dataset-export.tsx': ['Download'],
@@ -35,14 +36,19 @@ const reviewedImports = {
     'Logout',
     'UserAvatar',
   ],
+  'components/shell/product-navigation.ts': [
+    'DataSet',
+    'Document',
+    'Enterprise',
+    'Security',
+    'UserAvatar',
+  ],
   'components/shell/product-shell.tsx': [
     'Close',
-    'DataSet',
     'Enterprise',
     'Help',
     'Notification',
     'Search',
-    'Security',
     'Settings',
     'Switcher',
     'UserAvatar',
@@ -124,6 +130,12 @@ const reviewedCallsites = [
     "{t('datasets.uploadSubmit')}",
   ],
   [
+    'app/(product)/documents/page.tsx',
+    'Button',
+    'DocumentAdd',
+    "{t('documents.newDocument')}",
+  ],
+  [
     'app/invitation/[invitationId]/invitation-client.tsx',
     'Button',
     'Checkmark',
@@ -172,25 +184,17 @@ const reviewedCallsites = [
     'Open Carbon React documentation',
   ],
   ['components/shell/header-panels.tsx', 'Button', 'Logout', 'Sign out'],
-  ['components/shell/product-shell.tsx', 'SideNavLink', 'Security', 'Access'],
   [
     'components/shell/product-shell.tsx',
     'SideNavLink',
-    'Enterprise',
-    'Organizations',
-  ],
-  ['components/shell/product-shell.tsx', 'SideNavLink', 'DataSet', 'Datasets'],
-  [
-    'components/shell/product-shell.tsx',
-    'SideNavLink',
-    'UserAvatar',
-    'Account',
+    'destination.icon',
+    '{destination.label}',
   ],
   [
     'components/shell/product-shell.tsx',
     'SideNavMenu',
     'Enterprise',
-    'Members Entities Settings',
+    '{workspaceLinks}',
   ],
 ] as const;
 
@@ -218,6 +222,10 @@ type IconCallsite = Readonly<{
   element: string;
   file: string;
   icon: string;
+  // True for a renderIcon expression like `destination.icon`: a plain member
+  // access on an identifier, read from a reviewed navigation array rather
+  // than a local import.
+  isIndirectMemberIcon: boolean;
   iconOnlyProperties: readonly string[];
   label: string;
   selfClosing: boolean;
@@ -239,17 +247,17 @@ type ParsedSource = Readonly<{
   sourceFile: ts.SourceFile;
 }>;
 
-function productionTsxFiles(directory: string): string[] {
+function productionSourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const candidate = path.join(directory, entry.name);
 
     if (entry.isDirectory()) {
-      return productionTsxFiles(candidate);
+      return productionSourceFiles(candidate);
     }
 
     if (
       !entry.isFile() ||
-      !entry.name.endsWith('.tsx') ||
+      !(entry.name.endsWith('.tsx') || entry.name.endsWith('.ts')) ||
       entry.name.includes('.test.')
     ) {
       return [];
@@ -386,6 +394,10 @@ function parseSource(file: string): ParsedSource {
           element: opening.tagName.getText(sourceFile),
           file: relativeFile,
           icon: expression?.getText(sourceFile) ?? '',
+          isIndirectMemberIcon:
+            !!expression &&
+            ts.isPropertyAccessExpression(expression) &&
+            ts.isIdentifier(expression.expression),
           iconOnlyProperties,
           label: ts.isJsxElement(node)
             ? normalizedJsxLabel(node.children, sourceFile)
@@ -419,7 +431,7 @@ function publicCallsite(callsite: IconCallsite) {
   return [callsite.file, callsite.element, callsite.icon, callsite.label];
 }
 
-const parsedSources = productionTsxFiles(sourceRoot).map(parseSource);
+const parsedSources = productionSourceFiles(sourceRoot).map(parseSource);
 
 describe('Carbon application icon AST contract', () => {
   it('allows reviewed named icon imports only through the BAP facade', () => {
@@ -477,6 +489,13 @@ describe('Carbon application icon AST contract', () => {
         callsite.iconOnlyProperties,
         `${callsite.file}: ${callsite.icon}`,
       ).toEqual([]);
+
+      // A member access like destination.icon reads its icon from a reviewed
+      // navigation array (see product-navigation.ts above), not a local
+      // import, so the local-binding check below does not apply to it.
+      if (callsite.isIndirectMemberIcon) {
+        continue;
+      }
 
       const source = parsedSources.find(
         (candidate) => candidate.file === callsite.file,

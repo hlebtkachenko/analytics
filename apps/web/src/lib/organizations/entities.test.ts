@@ -86,9 +86,11 @@ describe('server-side legal entity reads and writes', () => {
             capabilities: {
               createEntities: true,
               deleteEntities: true,
+              manageDocuments: true,
               manageEntityAccess: true,
               manageMembers: true,
               manageOrganization: true,
+              readDocuments: true,
               updateEntities: true,
               uploadData: true,
               useAi: true,

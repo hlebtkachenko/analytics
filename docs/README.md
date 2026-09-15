@@ -11,7 +11,8 @@ members are read-only aside from the assistant. Each admin or member can be
 scoped to all entities or an explicit subset, and datasets and uploads each
 belong to exactly one legal entity. The platform can ingest, list, view, export,
 summarize, embed, and chat about domain-free datasets while preserving
-organization and per-user data isolation. Business-domain schemas, analytics
+organization and per-user data isolation. The documents register and its derived
+economic events are the first business-domain schema; broader analytics
 semantics, production rollout, and owner-dependent infrastructure remain
 deliberately deferred.
 
@@ -26,6 +27,8 @@ deliberately deferred.
 - [Security](security.md)
 - [Authentication and organization access](authentication.md)
 - [Application and HTTP routes](application-routes.md)
+- [Adding a product page](product-pages.md)
+- [Documents](documents.md)
 - [Database ownership and tenant isolation](database-isolation.md)
 - [Backup and restore proof](backup-and-restore.md)
 - [Phase 5 SaaS foundation report](reports/phase-5-saas-foundation.md)
@@ -58,6 +61,7 @@ deliberately deferred.
 - [ADR 0009: organization creation foundation](adr/0009-organization-creation-foundation.md)
 - [ADR 0010: organization route resolution](adr/0010-organization-route-resolution.md)
 - [ADR 0011: two-level tenancy](adr/0011-two-level-tenancy.md)
+- [ADR 0012: documents register and derived economic events](adr/0012-documents-register-and-derived-events.md)
 
 Documentation must stay synchronized with commands, runtime behavior, and
 architecture decisions in the same change.
