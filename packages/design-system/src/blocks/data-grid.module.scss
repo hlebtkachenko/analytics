@@ -1,0 +1,167 @@
+// Non-scrolling positioning context so the loading veil covers the visible box.
+.viewport {
+  position: relative;
+}
+
+// Scroll region that hosts sticky headers, virtualization, and infinite scroll.
+// Its own stacking context contains the sticky-header and pinned z-indexes.
+.scroll {
+  overflow: auto;
+  position: relative;
+  z-index: 0;
+}
+
+// Pin the header row while the body scrolls vertically.
+.stickyHead thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+// Fixed layout makes the specified column widths authoritative so pinned
+// sticky-left offsets line up exactly; the table shrink-wraps to its content
+// and still fills the viewport, giving horizontal scroll for pins to matter.
+.fixedLayout {
+  table-layout: fixed;
+  inline-size: max-content;
+  min-inline-size: 100%;
+}
+
+// Pinned body cells stay opaque with the row background so scrolling content
+// never shows through; the header sits above both axes.
+td.pinned {
+  position: sticky;
+  z-index: 1;
+  background-color: var(--cds-layer);
+}
+
+th.pinned {
+  position: sticky;
+  z-index: 3;
+  background-color: var(--cds-layer-accent);
+}
+
+// Pinned cells track the row state so the frozen columns read as one row.
+:global(.cds--data-table--zebra) tbody tr:nth-child(even) td.pinned {
+  background-color: var(--cds-layer-accent);
+}
+
+tbody tr:hover td.pinned {
+  background-color: var(--cds-layer-hover);
+}
+
+tbody tr:global(.cds--data-table--selected) td.pinned {
+  background-color: var(--cds-layer-selected);
+}
+
+// Divider on the last frozen column marks the seam with the scrolling area.
+.pinnedEdge {
+  box-shadow: inset -1px 0 0 0 var(--cds-border-strong);
+}
+
+// Leading sticky column (selection) anchors at the very left edge.
+.pinnedLead {
+  left: 0;
+}
+
+// Header cell anchors the resize handle and drag affordance.
+.headerCell {
+  position: relative;
+}
+
+.reorderable {
+  cursor: grab;
+}
+
+// Draggable element while it is being moved.
+.dragging {
+  opacity: 0.5;
+}
+
+// Column resize grip on the trailing edge of a header cell.
+.resizeHandle {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  inline-size: 6px;
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+}
+
+.clickableRow {
+  cursor: pointer;
+}
+
+// Highlight a cell inside the selected range with the Carbon selection token.
+.cellSelected {
+  background: var(--cds-layer-selected);
+}
+
+.alignEnd {
+  text-align: end;
+}
+
+// Trailing overflow-menu column stays compact.
+.rowActionsCell {
+  inline-size: 3rem;
+}
+
+// Screen-reader-only label so an otherwise empty action header is not flagged.
+.visuallyHidden {
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  padding: 0;
+  white-space: nowrap;
+  border: 0;
+}
+
+// Inline-edit trigger fills the cell and shows the value until clicked.
+.editTrigger {
+  inline-size: 100%;
+  text-align: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: text;
+}
+
+// Veil the body and center a spinner while stale rows load in overlay mode.
+// The accent surface is a visible tonal step from the table layer in every theme.
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--cds-layer-accent) 60%, transparent);
+}
+
+// Clip the loading skeleton to its column so wide grids do not overflow.
+.skeletonWrap {
+  overflow: hidden;
+}
+
+// Spacer rows reserve height for off-screen virtualized rows.
+.spacerRow td {
+  padding: 0;
+  border: 0;
+}
+
+.emptyCell {
+  text-align: center;
+  padding: 2rem;
+  color: var(--cds-text-secondary);
+}
+
+.loadMore {
+  block-size: 1px;
+}
