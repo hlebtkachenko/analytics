@@ -209,10 +209,10 @@ export const infrastructureTree: readonly TreeNode[] = [
 ];
 
 export const treeColumns: readonly GridColumn[] = [
-  { key: 'name', header: 'Name' },
-  { key: 'kind', header: 'Kind' },
-  { key: 'status', header: 'Status' },
-  { key: 'capacity', header: 'Capacity', align: 'end' },
+  { key: 'name', header: 'Name', sortable: true },
+  { key: 'kind', header: 'Kind', sortable: true },
+  { key: 'status', header: 'Status', sortable: true },
+  { key: 'capacity', header: 'Capacity', align: 'end', sortable: true },
 ];
 
 // Pivot source: dataset size and row count by steward and status.

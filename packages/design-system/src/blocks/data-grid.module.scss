@@ -1,7 +1,14 @@
+// Non-scrolling positioning context so the loading veil covers the visible box.
+.viewport {
+  position: relative;
+}
+
 // Scroll region that hosts sticky headers, virtualization, and infinite scroll.
+// Its own stacking context contains the sticky-header and pinned z-indexes.
 .scroll {
   overflow: auto;
   position: relative;
+  z-index: 0;
 }
 
 // Pin the header row while the body scrolls vertically.
@@ -50,14 +57,15 @@
 }
 
 // Veil the body and center a spinner while stale rows load in overlay mode.
+// The accent surface is a visible tonal step from the table layer in every theme.
 .overlay {
   position: absolute;
   inset: 0;
-  z-index: 4;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--cds-layer) 55%, transparent);
+  background: color-mix(in srgb, var(--cds-layer-accent) 60%, transparent);
 }
 
 // Clip the loading skeleton to its column so wide grids do not overflow.

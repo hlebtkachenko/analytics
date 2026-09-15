@@ -27,9 +27,10 @@ const numberFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 1,
 });
 
-// Fallback collapses the module's index-signature type to a definite string.
-const totalRowClassName: string = styles.totalRow ?? '';
-const totalCellClassName: string = styles.totalCell ?? '';
+// Join truthy class names for CSS module composition.
+function cx(...classes: (string | false | undefined)[]): string {
+  return classes.filter(Boolean).join(' ');
+}
 
 // A control-character separator that cannot appear in dimension values, so
 // composite map keys never collide when a value contains a space.
@@ -211,30 +212,42 @@ export function PivotGrid({
           <>
             <TableHead>
               <TableRow>
-                <SpannableTableHeader rowSpan={2}>
+                <SpannableTableHeader
+                  className={cx(styles.rowHeader, styles.corner)}
+                  rowSpan={2}
+                >
                   {config.rowDimension}
                 </SpannableTableHeader>
                 {matrix.columnValues.map((columnValue) => (
                   <TableHeader
+                    className={cx(styles.groupHeader, styles.groupStart)}
+                    colSpan={measureCount}
                     key={columnValue}
                     scope="colgroup"
-                    colSpan={measureCount}
                   >
                     {columnValue}
                   </TableHeader>
                 ))}
                 <TableHeader
-                  scope="colgroup"
+                  className={cx(
+                    styles.groupHeader,
+                    styles.groupStart,
+                    styles.totalCell,
+                  )}
                   colSpan={measureCount}
-                  className={totalCellClassName}
+                  scope="colgroup"
                 >
                   Total
                 </TableHeader>
               </TableRow>
               <TableRow>
                 {matrix.columnValues.flatMap((columnValue) =>
-                  matrix.measures.map((measure) => (
+                  matrix.measures.map((measure, measureIndex) => (
                     <TableHeader
+                      className={cx(
+                        styles.num,
+                        measureIndex === 0 && styles.groupStart,
+                      )}
                       key={`${columnValue}-${measure.key}`}
                       scope="col"
                     >
@@ -242,11 +255,15 @@ export function PivotGrid({
                     </TableHeader>
                   )),
                 )}
-                {matrix.measures.map((measure) => (
+                {matrix.measures.map((measure, measureIndex) => (
                   <TableHeader
+                    className={cx(
+                      styles.num,
+                      styles.totalCell,
+                      measureIndex === 0 && styles.groupStart,
+                    )}
                     key={`total-${measure.key}`}
                     scope="col"
-                    className={totalCellClassName}
                   >
                     {measure.label}
                   </TableHeader>
@@ -256,20 +273,32 @@ export function PivotGrid({
             <TableBody>
               {matrix.rowValues.map((rowValue) => (
                 <TableRow key={rowValue}>
-                  <TableHeader scope="row">{rowValue}</TableHeader>
+                  <TableHeader className={cx(styles.rowHeader)} scope="row">
+                    {rowValue}
+                  </TableHeader>
                   {matrix.columnValues.flatMap((columnValue) =>
-                    matrix.measures.map((measure) => (
-                      <TableCell key={`${columnValue}-${measure.key}`}>
+                    matrix.measures.map((measure, measureIndex) => (
+                      <TableCell
+                        className={cx(
+                          styles.num,
+                          measureIndex === 0 && styles.groupStart,
+                        )}
+                        key={`${columnValue}-${measure.key}`}
+                      >
                         {numberFormatter.format(
                           matrix.cell(rowValue, columnValue, measure.key),
                         )}
                       </TableCell>
                     )),
                   )}
-                  {matrix.measures.map((measure) => (
+                  {matrix.measures.map((measure, measureIndex) => (
                     <TableCell
+                      className={cx(
+                        styles.num,
+                        styles.totalCell,
+                        measureIndex === 0 && styles.groupStart,
+                      )}
                       key={`total-${measure.key}`}
-                      className={totalCellClassName}
                     >
                       {numberFormatter.format(
                         matrix.rowTotal(rowValue, measure.key),
@@ -278,15 +307,22 @@ export function PivotGrid({
                   ))}
                 </TableRow>
               ))}
-              <TableRow className={totalRowClassName}>
-                <TableHeader scope="row" className={totalCellClassName}>
+              <TableRow className={cx(styles.totalRow)}>
+                <TableHeader
+                  className={cx(styles.rowHeader, styles.totalCell)}
+                  scope="row"
+                >
                   Total
                 </TableHeader>
                 {matrix.columnValues.flatMap((columnValue) =>
-                  matrix.measures.map((measure) => (
+                  matrix.measures.map((measure, measureIndex) => (
                     <TableCell
+                      className={cx(
+                        styles.num,
+                        styles.totalCell,
+                        measureIndex === 0 && styles.groupStart,
+                      )}
                       key={`${columnValue}-${measure.key}`}
-                      className={totalCellClassName}
                     >
                       {numberFormatter.format(
                         matrix.columnTotal(columnValue, measure.key),
@@ -294,10 +330,14 @@ export function PivotGrid({
                     </TableCell>
                   )),
                 )}
-                {matrix.measures.map((measure) => (
+                {matrix.measures.map((measure, measureIndex) => (
                   <TableCell
+                    className={cx(
+                      styles.num,
+                      styles.totalCell,
+                      measureIndex === 0 && styles.groupStart,
+                    )}
                     key={`grand-${measure.key}`}
-                    className={totalCellClassName}
                   >
                     {numberFormatter.format(matrix.grandTotal(measure.key))}
                   </TableCell>
@@ -309,13 +349,26 @@ export function PivotGrid({
           <>
             <TableHead>
               <TableRow>
-                <TableHeader>{config.rowDimension}</TableHeader>
+                <TableHeader className={cx(styles.rowHeader, styles.corner)}>
+                  {config.rowDimension}
+                </TableHeader>
                 {matrix.columnValues.map((columnValue) => (
-                  <TableHeader key={columnValue} scope="col">
+                  <TableHeader
+                    className={cx(styles.num)}
+                    key={columnValue}
+                    scope="col"
+                  >
                     {columnValue}
                   </TableHeader>
                 ))}
-                <TableHeader scope="col" className={totalCellClassName}>
+                <TableHeader
+                  className={cx(
+                    styles.num,
+                    styles.totalCell,
+                    styles.groupStart,
+                  )}
+                  scope="col"
+                >
                   Total
                 </TableHeader>
               </TableRow>
@@ -323,33 +376,53 @@ export function PivotGrid({
             <TableBody>
               {matrix.rowValues.map((rowValue) => (
                 <TableRow key={rowValue}>
-                  <TableHeader scope="row">{rowValue}</TableHeader>
+                  <TableHeader className={cx(styles.rowHeader)} scope="row">
+                    {rowValue}
+                  </TableHeader>
                   {matrix.columnValues.map((columnValue) => (
-                    <TableCell key={columnValue}>
+                    <TableCell className={cx(styles.num)} key={columnValue}>
                       {numberFormatter.format(
                         matrix.cell(rowValue, columnValue, measureKey),
                       )}
                     </TableCell>
                   ))}
-                  <TableCell className={totalCellClassName}>
+                  <TableCell
+                    className={cx(
+                      styles.num,
+                      styles.totalCell,
+                      styles.groupStart,
+                    )}
+                  >
                     {numberFormatter.format(
                       matrix.rowTotal(rowValue, measureKey),
                     )}
                   </TableCell>
                 </TableRow>
               ))}
-              <TableRow className={totalRowClassName}>
-                <TableHeader scope="row" className={totalCellClassName}>
+              <TableRow className={cx(styles.totalRow)}>
+                <TableHeader
+                  className={cx(styles.rowHeader, styles.totalCell)}
+                  scope="row"
+                >
                   Total
                 </TableHeader>
                 {matrix.columnValues.map((columnValue) => (
-                  <TableCell key={columnValue} className={totalCellClassName}>
+                  <TableCell
+                    className={cx(styles.num, styles.totalCell)}
+                    key={columnValue}
+                  >
                     {numberFormatter.format(
                       matrix.columnTotal(columnValue, measureKey),
                     )}
                   </TableCell>
                 ))}
-                <TableCell className={totalCellClassName}>
+                <TableCell
+                  className={cx(
+                    styles.num,
+                    styles.totalCell,
+                    styles.groupStart,
+                  )}
+                >
                   {numberFormatter.format(matrix.grandTotal(measureKey))}
                 </TableCell>
               </TableRow>

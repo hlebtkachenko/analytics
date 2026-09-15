@@ -143,6 +143,14 @@ export type TreeDataGridProps = Readonly<{
   title?: string;
   description?: string;
   size?: DensitySize;
+  sortable?: boolean;
+  initialSort?: SortSpec;
+  search?: boolean;
+  searchValue?: string;
+  onSearch?: (query: string) => void;
+  selection?: SelectionMode;
+  onSelectionChange?: (ids: readonly string[]) => void;
+  expandAllControl?: boolean;
 }>;
 
 // Pivot configuration: group rows and columns, aggregate numeric measures.
