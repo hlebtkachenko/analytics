@@ -20,10 +20,12 @@ export type {
   PivotConfig,
   PivotGridProps,
   PivotMeasure,
+  RowAction,
   SearchPlacement,
   SelectionMode,
   SortDirection,
   SortSpec,
+  ToolbarAction,
   TreeDataGridProps,
   TreeNode,
 } from './types';

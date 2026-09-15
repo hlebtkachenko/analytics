@@ -11,7 +11,9 @@ import {
   type GridRow,
   type GridState,
   type LoadingMode,
+  type RowAction,
   type SelectionMode,
+  type ToolbarAction,
 } from '@bap/design-system/blocks';
 import {
   datasetColumns,
@@ -80,6 +82,8 @@ type Flags = {
   perRowVisuals: boolean;
   columnColors: boolean;
   batch: boolean;
+  toolbarAction: boolean;
+  rowActions: boolean;
   persist: boolean;
 };
 
@@ -107,6 +111,8 @@ const TOGGLES: readonly { key: keyof Flags; label: string }[] = [
   { key: 'perRowVisuals', label: 'Per row visuals' },
   { key: 'columnColors', label: 'Column colors' },
   { key: 'batch', label: 'Bulk actions' },
+  { key: 'toolbarAction', label: 'Toolbar action' },
+  { key: 'rowActions', label: 'Row actions' },
   { key: 'persist', label: 'Persist layout' },
 ];
 
@@ -147,6 +153,8 @@ const DEFAULT_FLAGS: Flags = {
   perRowVisuals: true,
   columnColors: false,
   batch: false,
+  toolbarAction: false,
+  rowActions: false,
   persist: false,
 };
 
@@ -246,6 +254,37 @@ export function TablesShowcase() {
     ],
     [],
   );
+  const toolbarActions = useMemo<readonly ToolbarAction[]>(
+    () => [
+      {
+        id: 'create',
+        label: 'Create dataset',
+        onClick: () => setLastAction('Create dataset'),
+      },
+    ],
+    [],
+  );
+  const rowActions = useCallback(
+    (row: GridRow): readonly RowAction[] => [
+      {
+        id: 'edit',
+        label: 'Edit',
+        onClick: () => setLastAction(`Edit ${String(row.name)}`),
+      },
+      {
+        id: 'duplicate',
+        label: 'Duplicate',
+        onClick: () => setLastAction(`Duplicate ${String(row.name)}`),
+      },
+      {
+        id: 'delete',
+        label: 'Delete',
+        isDelete: true,
+        onClick: () => setLastAction(`Delete ${String(row.name)}`),
+      },
+    ],
+    [],
+  );
 
   // Assemble grid props, spreading optional entries so none is ever undefined.
   const gridProps: DataGridProps = {
@@ -278,6 +317,8 @@ export function TablesShowcase() {
     ...(flags.footer ? { footer: <Footer count={gridRows.length} /> } : {}),
     ...(flags.clickable ? { onRowClick } : {}),
     ...(flags.batch ? { batchActions } : {}),
+    ...(flags.toolbarAction ? { toolbarActions } : {}),
+    ...(flags.rowActions ? { rowActions } : {}),
     ...(flags.scroll || flags.virtualized ? { maxHeight } : {}),
     ...(flags.infinite ? { infiniteScroll: true, hasMore, onLoadMore } : {}),
     ...(flags.reorderableRows ? { reorderableRows: true } : {}),

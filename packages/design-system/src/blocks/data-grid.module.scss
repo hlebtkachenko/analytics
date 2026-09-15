@@ -102,6 +102,11 @@ tbody tr:global(.cds--data-table--selected) td.pinned {
   text-align: end;
 }
 
+// Trailing overflow-menu column stays compact.
+.rowActionsCell {
+  inline-size: 3rem;
+}
+
 // Veil the body and center a spinner while stale rows load in overlay mode.
 // The accent surface is a visible tonal step from the table layer in every theme.
 .overlay {

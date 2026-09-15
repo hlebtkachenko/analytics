@@ -96,6 +96,34 @@ describe('DataGrid', () => {
     expect((scoreCell as HTMLElement).style.position).toBe('');
   });
 
+  it('renders a toolbar action button and fires its handler', () => {
+    const onClick = vi.fn();
+    render(
+      <DataGrid
+        columns={columns}
+        rows={rows}
+        toolbarActions={[{ id: 'create', label: 'Create dataset', onClick }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Create dataset' }));
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens a per-row overflow menu and runs the chosen action', () => {
+    const onEdit = vi.fn();
+    render(
+      <DataGrid
+        columns={columns}
+        rowActions={() => [{ id: 'edit', label: 'Edit', onClick: onEdit }]}
+        rows={rows}
+      />,
+    );
+    const firstBodyRow = screen.getAllByRole('row')[1] as HTMLElement;
+    fireEvent.click(within(firstBodyRow).getByRole('button'));
+    fireEvent.click(screen.getByText('Edit'));
+    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: '1' }));
+  });
+
   it('shows the empty state when there are no rows', () => {
     render(<DataGrid columns={columns} emptyLabel="Nothing here" rows={[]} />);
     expect(screen.getByText('Nothing here')).toBeInTheDocument();

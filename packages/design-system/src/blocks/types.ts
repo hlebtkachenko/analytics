@@ -48,6 +48,25 @@ export type BatchAction = Readonly<{
   onClick: (selectedIds: readonly string[]) => void;
 }>;
 
+// A persistent toolbar button, e.g. a primary create action.
+export type ToolbarAction = Readonly<{
+  id: string;
+  label: string;
+  kind?: 'primary' | 'secondary' | 'ghost';
+  disabled?: boolean;
+  onClick: () => void;
+}>;
+
+// A per-row action shown in the trailing overflow menu.
+export type RowAction = Readonly<{
+  id: string;
+  label: string;
+  // Renders as the danger variant and sorts to the bottom of the menu.
+  isDelete?: boolean;
+  disabled?: boolean;
+  onClick: (row: GridRow) => void;
+}>;
+
 // The full toggle surface. Every cube DataTable and ItemTable variant maps to
 // one of these props, a variant component, or a data-wiring choice.
 export type DataGridProps = Readonly<{
@@ -93,9 +112,14 @@ export type DataGridProps = Readonly<{
   totalItems?: number;
   onPageChange?: (page: number, pageSize: number) => void;
 
+  // Persistent toolbar buttons, e.g. a primary create action.
+  toolbarActions?: readonly ToolbarAction[];
+
   // Row extras.
   rowNumbers?: boolean;
   onRowClick?: (row: GridRow) => void;
+  // Per-row overflow menu; return the actions available for each row.
+  rowActions?: (row: GridRow) => readonly RowAction[];
   reorderableRows?: boolean;
   onRowReorder?: (fromId: string, toId: string) => void;
   onRowDrop?: (draggedId: string, targetId: string) => void;

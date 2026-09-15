@@ -1,9 +1,11 @@
 'use client';
 
 import {
+  Button,
   DataTableSkeleton,
   InlineNotification,
   Loading,
+  OverflowMenu,
   OverflowMenuItem,
   Pagination,
   Table,
@@ -30,10 +32,17 @@ import {
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from 'react';
 
 import styles from './data-grid.module.scss';
-import type { DataGridProps, DensitySize, GridColumn, GridRow } from './types';
+import type {
+  DataGridProps,
+  DensitySize,
+  GridColumn,
+  GridRow,
+  RowAction,
+} from './types';
 import { useCellSelection } from './use-cell-selection';
 import { useColumnLayout } from './use-column-layout';
 import { useGridSort } from './use-grid-sort';
@@ -55,6 +64,32 @@ const ROW_HEIGHTS: Record<DensitySize, number> = {
 // Join truthy class names for CSS module composition.
 function cx(...classes: (string | false | undefined)[]): string {
   return classes.filter(Boolean).join(' ');
+}
+
+// Trailing per-row overflow menu; delete actions sort last as the danger item.
+function RowActionsMenu({
+  actions,
+  row,
+}: Readonly<{ actions: readonly RowAction[]; row: GridRow }>): ReactNode {
+  if (actions.length === 0) return null;
+  const ordered = [...actions].sort(
+    (first, second) =>
+      Number(Boolean(first.isDelete)) - Number(Boolean(second.isDelete)),
+  );
+  return (
+    <OverflowMenu aria-label="Row actions" flipped size="sm">
+      {ordered.map((action) => (
+        <OverflowMenuItem
+          disabled={Boolean(action.disabled)}
+          hasDivider={Boolean(action.isDelete)}
+          isDelete={Boolean(action.isDelete)}
+          itemText={action.label}
+          key={action.id}
+          onClick={() => action.onClick(row)}
+        />
+      ))}
+    </OverflowMenu>
+  );
 }
 
 // Read a cell as display text unless the column renders custom content.
@@ -92,8 +127,10 @@ export function DataGrid(props: DataGridProps) {
     page,
     totalItems,
     onPageChange,
+    toolbarActions = [],
     rowNumbers = false,
     onRowClick,
+    rowActions,
     reorderableRows = false,
     onRowReorder,
     onRowDrop,
@@ -259,8 +296,10 @@ export function DataGrid(props: DataGridProps) {
     window.addEventListener('pointerup', up);
   };
 
+  const hasRowActions = typeof rowActions === 'function';
   const leadingCount = (selection !== 'none' ? 1 : 0) + (rowNumbers ? 1 : 0);
-  const columnCount = leadingCount + visibleColumns.length;
+  const trailingCount = hasRowActions ? 1 : 0;
+  const columnCount = leadingCount + visibleColumns.length + trailingCount;
 
   // Compute sticky-left offsets so pinned columns stay in view.
   const hasPinned = visibleColumns.some((column) => column.pinned);
@@ -325,6 +364,7 @@ export function DataGrid(props: DataGridProps) {
     search ||
     columnMenu ||
     batchActions.length > 0 ||
+    toolbarActions.length > 0 ||
     reorderableColumns ||
     resizableColumns
       ? true
@@ -413,6 +453,17 @@ export function DataGrid(props: DataGridProps) {
                 />
               </TableToolbarMenu>
             )}
+            {toolbarActions.map((action) => (
+              <Button
+                disabled={Boolean(action.disabled)}
+                key={action.id}
+                kind={action.kind ?? 'primary'}
+                onClick={action.onClick}
+                size="lg"
+              >
+                {action.label}
+              </Button>
+            ))}
           </TableToolbarContent>
         </TableToolbar>
       )}
@@ -515,6 +566,9 @@ export function DataGrid(props: DataGridProps) {
                     </TableHeader>
                   );
                 })}
+                {hasRowActions && (
+                  <TableHeader aria-label="Row actions" scope="col" />
+                )}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -627,6 +681,14 @@ export function DataGrid(props: DataGridProps) {
                           {cellContent(row, column)}
                         </TableCell>
                       ))}
+                      {hasRowActions && (
+                        <TableCell className={cx(styles.rowActionsCell)}>
+                          <RowActionsMenu
+                            actions={rowActions?.(row) ?? []}
+                            row={row}
+                          />
+                        </TableCell>
+                      )}
                     </TableRow>
                   );
                 })
@@ -664,6 +726,7 @@ export function DataGrid(props: DataGridProps) {
                       {totalsRow[column.key] ?? ''}
                     </TableCell>
                   ))}
+                  {hasRowActions && <TableCell />}
                 </TableRow>
               )}
             </TableBody>
