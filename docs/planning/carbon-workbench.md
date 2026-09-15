@@ -110,7 +110,7 @@ chapter is original BAP prose with source and modified-work attribution.
 
 - Frozen install under Node 24.20 and pnpm 11.
 - Exact mode-specific full-facade parity plus exact parity for the curated
-  27-icon application facade.
+  29-icon application facade.
 - Zero unclassified public exports and zero unmapped pinned sources.
 - Default and Playground coverage for each renderable item.
 - Valid chart, diagram, icon, and pictogram fixtures.

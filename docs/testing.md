@@ -54,7 +54,7 @@ pixel mismatch cap and a 0.2 pixelmatch threshold. Chromium baselines are
 platform-specific: `chromium-darwin` supports local development and
 `chromium-linux` is refreshed in Playwright 1.62.1 Noble for GitHub Actions.
 
-Design-system icon tests pin the exact 27 curated `@bap/design-system/icons`
+Design-system icon tests pin the exact 29 curated `@bap/design-system/icons`
 exports and their intrinsic glyph behavior at the supported 16, 20, 24, and 32px
 artboards. A separate TypeScript compiler AST contract parses the actual
 production TSX, rejects direct application imports from `@carbon/icons-react`,

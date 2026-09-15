@@ -187,7 +187,7 @@ owns the model-provider boundary. The web streaming chat route consumes it
 directly, and the worker entrypoint built from `apps/api` consumes it for
 dataset summarization and embedding.
 
-The client-only `@bap/design-system/icons` entrypoint is an exact 27-export
+The client-only `@bap/design-system/icons` entrypoint is an exact 29-export
 curated named facade, not a mirror of the full upstream icon module. Application
 code imports no `@carbon/icons-react` symbol directly. The generated catalog
 retains the complete installed upstream inventory for upgrade inspection, while
