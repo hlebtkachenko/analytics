@@ -4,6 +4,7 @@ import {
   deleteDocumentLink,
   deleteLegalEntity,
   getDocument,
+  getDocumentAnalytics,
   getDocuments,
   getDatasetExport,
   getDatasetRows,
@@ -1275,6 +1276,140 @@ describe('getDocuments', () => {
     expect(await unsupported.json()).toEqual({ error: 'invalid_query' });
     expect(oversized.status).toBe(400);
     expect(pastBound.status).toBe(400);
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+});
+
+const documentAnalytics = {
+  byAccount: [
+    {
+      accountCode: '518',
+      accountName: 'Other services',
+      credit: '0.0000',
+      debit: '5000.0000',
+      nature: 'EXPENSE',
+    },
+  ],
+  byActivity: [
+    {
+      activityCode: 'month-01',
+      credit: '0.0000',
+      debit: '1000.0000',
+      lineCount: 1,
+    },
+  ],
+  byMonth: [
+    {
+      accountCode: '518',
+      accountName: 'Other services',
+      credit: '0.0000',
+      debit: '1000.0000',
+      month: '2026-01-01',
+    },
+  ],
+  byVatRegime: [
+    {
+      baseAmount: '5000.0000',
+      lineCount: 5,
+      lineKind: 'item',
+      vatAmount: '1050.0000',
+      vatMode: 'standard',
+      vatRate: '21',
+    },
+  ],
+  documents: [
+    {
+      advanceTotal: '0.0000',
+      amountDue: '6050.0000',
+      currencyCode: 'CZK',
+      documentDate: '2026-01-15',
+      grossTotal: '6050.0000',
+      id: DOCUMENT_ID,
+      kind: 'received_invoice',
+      partnerName: null,
+      reference: 'REF-1',
+      roundingAmount: '0.0000',
+      status: 'registered',
+      title: 'placeholder register entry',
+    },
+  ],
+  stats: {
+    elapsedMs: 12,
+    eventLineCount: 10,
+    invoiceLineCount: 5,
+    queryCount: 4,
+  },
+};
+
+describe('getDocumentAnalytics', () => {
+  it('rebuilds the entity filter from the validated value only', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        `http://api:3001/v1/organizations/org_1/documents/analytics?legalEntityId=${LEGAL_ENTITY_ID}`,
+      );
+      expect(init?.headers).toEqual({
+        authorization: 'Bearer resource-token',
+        'x-bap-request-id': '123e4567-e89b-42d3-a456-426614174000',
+      });
+      return Response.json(documentAnalytics);
+    });
+
+    const response = await getDocumentAnalytics(
+      auth,
+      datasetRequest(
+        `documents/analytics?legalEntityId=${LEGAL_ENTITY_ID.toUpperCase()}`,
+      ),
+      'org_1',
+      fetchImplementation,
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual(documentAnalytics);
+    expect(JSON.stringify(payload)).not.toContain('resource-token');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+  });
+
+  it('asks for the whole scope when the browser names no entity', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/documents/analytics',
+      );
+      return Response.json(documentAnalytics);
+    });
+
+    const response = await getDocumentAnalytics(
+      auth,
+      datasetRequest('documents/analytics'),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+  });
+
+  it('refuses a malformed entity filter and an unsupported parameter without calling out', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async () =>
+      Response.json(documentAnalytics),
+    );
+
+    const malformed = await getDocumentAnalytics(
+      auth,
+      datasetRequest('documents/analytics?legalEntityId=not-a-uuid'),
+      'org_1',
+      fetchImplementation,
+    );
+    const unsupported = await getDocumentAnalytics(
+      auth,
+      datasetRequest('documents/analytics?page=2'),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toEqual({ error: 'invalid_query' });
+    expect(unsupported.status).toBe(400);
     expect(fetchImplementation).not.toHaveBeenCalled();
   });
 });

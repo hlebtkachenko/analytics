@@ -10,11 +10,13 @@ import {
   Stack,
   TextInput,
 } from '@bap/design-system/react';
-import { useRouter } from 'next/navigation';
+import type { Route } from 'next';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { authClient } from '../../../lib/auth/client';
+import { safeReturnPath, twoFactorPath } from '../../../lib/auth/return-path';
 
 // Better Auth answers a two-factor account with this marker instead of a session.
 function requiresTwoFactor(data: unknown): boolean {
@@ -31,7 +33,9 @@ export default function SignInForm({
 }: Readonly<{ publicSignupEnabled: boolean }>) {
   const { t } = useTranslation();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [error, setError] = useState(false);
+  const returnPath = safeReturnPath(searchParams.get('next'));
 
   async function submit(formData: FormData): Promise<void> {
     setError(false);
@@ -45,10 +49,10 @@ export default function SignInForm({
         return;
       }
       if (requiresTwoFactor(result.data)) {
-        router.replace('/sign-in/two-factor');
+        router.replace(twoFactorPath(returnPath) as Route);
         return;
       }
-      router.replace('/access');
+      router.replace(returnPath as Route);
     } catch {
       setError(true);
     }

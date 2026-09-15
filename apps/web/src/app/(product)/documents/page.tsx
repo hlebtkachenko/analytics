@@ -35,22 +35,12 @@ import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
 
 import PageContainer from '../../../components/page-container';
-import {
-  accessPath,
-  getJson,
-  isAbortError,
-  legalEntitiesPath,
-  legalEntityListSchema,
-  organizationAccessSchema,
-} from '../../../lib/datasets/client';
-import type {
-  LegalEntity,
-  OrganizationAccess,
-} from '../../../lib/datasets/client';
+import { getJson, isAbortError } from '../../../lib/datasets/client';
 import {
   documentsPath,
   formatAmount,
   partnersPath,
+  withOrganization,
 } from '../../../lib/documents/client';
 import {
   DEFAULT_DOCUMENT_PAGE_SIZE,
@@ -74,6 +64,8 @@ import {
   documentStatusLabelKeys,
   documentStatusTagTypes,
 } from '../../../lib/documents/labels.ts';
+import { useLegalEntities } from '../../../lib/organizations/use-legal-entities';
+import { useOrganizationAccess } from '../../../lib/organizations/use-organization-access';
 import { useOrganizationSelection } from '../../../lib/organizations/use-organization-selection';
 import styles from './page.module.scss';
 
@@ -123,9 +115,8 @@ export default function DocumentsPage() {
   const searchParams = useSearchParams();
   const organization = useOrganizationSelection();
   const organizationId = organization.organizationId;
-  const [access, setAccess] = useState<OrganizationAccess>();
-  const [accessState, setAccessState] = useState<LoadState>('loading');
-  const [legalEntities, setLegalEntities] = useState<LegalEntity[]>([]);
+  const { access, state: accessState } = useOrganizationAccess(organizationId);
+  const legalEntities = useLegalEntities(organizationId);
   const [entityId, setEntityId] = useState(
     () => searchParams.get('entity') ?? allEntitiesValue,
   );
@@ -174,53 +165,6 @@ export default function DocumentsPage() {
       clearTimeout(timer);
     };
   }, [search, searchInput]);
-
-  useEffect(() => {
-    if (organizationId.length === 0) {
-      return;
-    }
-
-    const controller = new AbortController();
-    void getJson(accessPath(organizationId), controller.signal)
-      .then((payload) => organizationAccessSchema.parse(payload))
-      .then((contract) => {
-        if (contract.organizationId !== organizationId) {
-          throw new Error('Organization mismatch.');
-        }
-        setAccess(contract);
-        setAccessState('idle');
-      })
-      .catch((error: unknown) => {
-        if (!isAbortError(error)) {
-          setAccess(undefined);
-          setAccessState('error');
-        }
-      });
-    return () => {
-      controller.abort();
-    };
-  }, [organizationId]);
-
-  useEffect(() => {
-    if (organizationId.length === 0) {
-      return;
-    }
-
-    const controller = new AbortController();
-    void getJson(legalEntitiesPath(organizationId), controller.signal)
-      .then((payload) => legalEntityListSchema.parse(payload))
-      .then((payload) => {
-        setLegalEntities(payload.legalEntities);
-      })
-      .catch((error: unknown) => {
-        if (!isAbortError(error)) {
-          setLegalEntities([]);
-        }
-      });
-    return () => {
-      controller.abort();
-    };
-  }, [organizationId]);
 
   useEffect(() => {
     if (organizationId.length === 0) {
@@ -392,28 +336,36 @@ export default function DocumentsPage() {
   }
 
   function newDocumentHref(): string {
-    return organization.slug.length > 0
-      ? `/documents/new?organization=${encodeURIComponent(organization.slug)}`
-      : '/documents/new';
+    return withOrganization('/documents/new', organization.slug);
+  }
+
+  function analyticsHref(): string {
+    return withOrganization('/documents/analytics', organization.slug);
   }
 
   function documentHref(documentId: string): string {
-    const suffix =
-      organization.slug.length > 0
-        ? `?organization=${encodeURIComponent(organization.slug)}`
-        : '';
-    return `/documents/${encodeURIComponent(documentId)}${suffix}`;
+    return withOrganization(
+      `/documents/${encodeURIComponent(documentId)}`,
+      organization.slug,
+    );
   }
 
   return (
     <PageContainer>
       <div className={styles.headingRow!}>
         <h1>{t('documents.title')}</h1>
-        {canManage ? (
-          <Button href={newDocumentHref()} renderIcon={DocumentAdd} size="md">
-            {t('documents.newDocument')}
-          </Button>
-        ) : null}
+        <div className={styles.headingActions!}>
+          {canRead ? (
+            <Button href={analyticsHref()} kind="tertiary" size="md">
+              {t('documents.analytics')}
+            </Button>
+          ) : null}
+          {canManage ? (
+            <Button href={newDocumentHref()} renderIcon={DocumentAdd} size="md">
+              {t('documents.newDocument')}
+            </Button>
+          ) : null}
+        </div>
       </div>
       {accessState === 'error' ? (
         <InlineNotification

@@ -12,9 +12,10 @@ const SCALE_FACTOR = 10n ** BigInt(DECIMAL_SCALE);
 
 export const DECIMAL_ZERO = 0n;
 
-export function parseDecimal(value: string): bigint {
+// Null instead of a throw, because a validation rule may read an operand that is still failing its own pattern.
+export function tryParseDecimal(value: string): bigint | null {
   if (!DECIMAL_PATTERN.test(value)) {
-    throw new Error('A decimal string must match the money contract.');
+    return null;
   }
 
   const negative = value.startsWith('-');
@@ -27,9 +28,19 @@ export function parseDecimal(value: string): bigint {
   return negative ? -scaled : scaled;
 }
 
+export function parseDecimal(value: string): bigint {
+  const parsed = tryParseDecimal(value);
+
+  if (parsed === null) {
+    throw new Error('A decimal string must match the money contract.');
+  }
+
+  return parsed;
+}
+
 export function formatDecimal(value: bigint): string {
   const negative = value < 0n;
-  const absolute = negative ? -value : value;
+  const absolute = absDecimal(value);
   const whole = absolute / SCALE_FACTOR;
   const fraction = (absolute % SCALE_FACTOR)
     .toString()
@@ -41,6 +52,11 @@ export function formatDecimal(value: bigint): string {
 
 export function addDecimal(left: bigint, right: bigint): bigint {
   return left + right;
+}
+
+// The magnitude of a signed amount: only the rounding difference ever reaches the rules with a sign.
+export function absDecimal(value: bigint): bigint {
+  return value < 0n ? -value : value;
 }
 
 export function compareDecimal(left: bigint, right: bigint): number {
@@ -57,8 +73,8 @@ function divideRoundedHalfAwayFromZero(
   denominator: bigint,
 ): bigint {
   const negative = numerator < 0n !== denominator < 0n;
-  const absoluteNumerator = numerator < 0n ? -numerator : numerator;
-  const absoluteDenominator = denominator < 0n ? -denominator : denominator;
+  const absoluteNumerator = absDecimal(numerator);
+  const absoluteDenominator = absDecimal(denominator);
   const quotient = absoluteNumerator / absoluteDenominator;
   const remainder = absoluteNumerator % absoluteDenominator;
   const rounded =

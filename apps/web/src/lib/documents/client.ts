@@ -11,6 +11,17 @@ export function documentsPath(
   return `${organizationPath(organizationId)}/documents${search.length === 0 ? '' : `?${search}`}`;
 }
 
+export function documentAnalyticsPath(
+  organizationId: string,
+  legalEntityId?: string,
+): string {
+  const filter =
+    legalEntityId === undefined || legalEntityId.length === 0
+      ? ''
+      : `?legalEntityId=${encodeURIComponent(legalEntityId)}`;
+  return `${documentsPath(organizationId)}/analytics${filter}`;
+}
+
 export function documentPath(
   organizationId: string,
   documentId: string,
@@ -37,6 +48,13 @@ export function partnersPath(organizationId: string, q?: string): string {
   const filter =
     q === undefined || q.length === 0 ? '' : `?q=${encodeURIComponent(q)}`;
   return `${organizationPath(organizationId)}/partners${filter}`;
+}
+
+// One product link builder, so every page keeps the chosen organization in the URL.
+export function withOrganization(path: string, slug: string): string {
+  return slug.length === 0
+    ? path
+    : `${path}?organization=${encodeURIComponent(slug)}`;
 }
 
 type Mutation = Readonly<{

@@ -1,6 +1,6 @@
 import type { Browser, BrowserContext, Locator, Page } from '@playwright/test';
-import axe from 'axe-core';
 
+import { expectNoAccessibilityViolations } from './accessibility-support';
 import { expect, test } from './authenticated-test';
 import { selectUploadLegalEntity } from './legal-entity-support';
 import { rateLimitDelayMs, signInThroughForm } from './sign-in';
@@ -28,38 +28,12 @@ const companyRegistration = 'PLACEHOLDER-1';
 const fixture = `${['label,value', 'alpha,10', 'beta,20', 'gamma,30'].join('\n')}\n`;
 const fixtureName = `operational-entities-${Date.now()}.csv`;
 
-type AxeWindow = Window &
-  typeof globalThis & {
-    axe: {
-      run: (document: Document) => Promise<{
-        violations: ReadonlyArray<{
-          id: string;
-          impact: string | null;
-          nodes: ReadonlyArray<Readonly<{ target: ReadonlyArray<string> }>>;
-        }>;
-      }>;
-    };
-  };
-
 type DatasetList = Readonly<{
   datasets: ReadonlyArray<Readonly<{ name: string; status: string }>>;
 }>;
 
 let adminContext: BrowserContext | undefined;
 let memberContext: BrowserContext | undefined;
-
-async function expectNoAccessibilityViolations(page: Page): Promise<void> {
-  await page.evaluate(axe.source);
-  const violations = await page.evaluate(async () => {
-    const results = await (window as AxeWindow).axe.run(document);
-    return results.violations.map(({ id, impact, nodes }) => ({
-      id,
-      impact,
-      targets: nodes.map((node) => node.target),
-    }));
-  });
-  expect(violations).toEqual([]);
-}
 
 const datasetsPathname = `/api/bff/application/organizations/${organizationId}/datasets`;
 

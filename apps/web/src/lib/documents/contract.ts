@@ -25,6 +25,19 @@ function scaledUnits(value: string, scale: number): bigint | undefined {
   return match[1] === '-' ? -digits : digits;
 }
 
+// Money crosses the wire at 4 decimals, so a total is summed in 10^-4 units.
+export function decimalUnits(value: string): bigint | undefined {
+  return scaledUnits(value, 4);
+}
+
+// Renders 10^-4 units back as the 4 decimal string the register itself stores.
+export function formatDecimalUnits(units: bigint): string {
+  const magnitude = units < 0n ? -units : units;
+  const whole = magnitude / 10_000n;
+  const fraction = magnitude % 10_000n;
+  return `${units < 0n ? '-' : ''}${whole.toString()}.${fraction.toString().padStart(4, '0')}`;
+}
+
 // The VAT a standard line carries: base times rate, half away from zero at 2 decimals.
 export function derivedVatAmount(
   baseAmount: string,
@@ -75,9 +88,13 @@ export const invoiceLineCategorySchema = z.enum([
   'goods',
   'material',
   'services',
+  'labour',
+  'transport',
   'asset',
   'other',
 ]);
+// A deducted advance is a line of its own kind, never a supply with a negative amount.
+export const invoiceLineKindSchema = z.enum(['item', 'advance_deduction']);
 export const vatModeSchema = z.enum([
   'standard',
   'reverse_charge',
@@ -132,6 +149,17 @@ const fxRateSchema = z
   .trim()
   .regex(/^\d{1,15}(\.\d{1,6})?$/)
   .refine((value) => Number(value) > 0);
+// A free analytic code, lower-cased at the boundary exactly like the API does.
+const activityCodeSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9][a-z0-9_-]{0,31}$/);
+// Rounding is the one signed money field, and it is always under a whole unit.
+const roundingAmountSchema = decimalStringSchema.refine((value) => {
+  const units = decimalUnits(value);
+  return units !== undefined && (units < 0n ? -units : units) < 10_000n;
+});
 // numeric(18,6) comes back scaled, so a stored rate always reads with 6 decimals.
 const storedFxRateSchema = z
   .string()
@@ -174,13 +202,18 @@ export const documentSummarySchema = z
 
 export const invoiceLineSchema = z
   .object({
+    activityCode: activityCodeSchema.nullable(),
     baseAmount: nonNegativeDecimalSchema,
-    category: invoiceLineCategorySchema,
+    category: invoiceLineCategorySchema.nullable(),
     description: z.string(),
     id: identifierSchema,
+    lineKind: invoiceLineKindSchema,
     lineNo: z.number().int().min(1),
+    periodEnd: documentDateSchema.nullable(),
+    periodStart: documentDateSchema.nullable(),
     quantity: nonNegativeDecimalSchema.nullable(),
     sourceAccountCode: z.string().nullable(),
+    taxPointDate: documentDateSchema.nullable(),
     unit: z.string().nullable(),
     unitPrice: nonNegativeDecimalSchema.nullable(),
     vatAmount: nonNegativeDecimalSchema,
@@ -191,12 +224,15 @@ export const invoiceLineSchema = z
 
 export const invoiceSchema = z
   .object({
+    advanceTotal: nonNegativeDecimalSchema,
+    amountDue: nonNegativeDecimalSchema,
     baseTotal: decimalStringSchema,
     dueDate: documentDateSchema.nullable(),
     fxRate: storedFxRateSchema.nullable(),
     grossTotal: decimalStringSchema,
     lines: z.array(invoiceLineSchema),
     receivedDate: documentDateSchema.nullable(),
+    roundingAmount: roundingAmountSchema,
     taxPointDate: documentDateSchema.nullable(),
     variableSymbol: z.string().nullable(),
     vatTotal: decimalStringSchema,
@@ -207,8 +243,10 @@ export const economicEventLineSchema = z
   .object({
     accountCode: accountCodeSchema,
     accountName: z.string(),
+    activityCode: activityCodeSchema.nullable(),
     amount: decimalStringSchema,
     description: z.string().nullable(),
+    effectiveDate: documentDateSchema,
     invoiceLineId: identifierSchema.nullable(),
     lineNo: z.number().int().min(1),
     partnerId: identifierSchema.nullable(),
@@ -338,11 +376,16 @@ const VAT_TOLERANCE_UNITS = 5000n;
 
 export const createInvoiceLineSchema = z
   .object({
+    activityCode: activityCodeSchema.optional(),
     baseAmount: nonNegativeDecimalSchema,
-    category: invoiceLineCategorySchema,
+    category: invoiceLineCategorySchema.optional(),
     description: z.string().trim().min(1).max(500),
+    lineKind: invoiceLineKindSchema.default('item'),
+    periodEnd: documentDateSchema.optional(),
+    periodStart: documentDateSchema.optional(),
     quantity: nonNegativeDecimalSchema.optional(),
     sourceAccountCode: sourceAccountCodeSchema.optional(),
+    taxPointDate: documentDateSchema.optional(),
     unit: z.string().trim().min(1).max(16).optional(),
     unitPrice: nonNegativeDecimalSchema.optional(),
     vatAmount: nonNegativeDecimalSchema.default('0'),
@@ -351,6 +394,49 @@ export const createInvoiceLineSchema = z
   })
   .strict()
   .superRefine((line, context) => {
+    // A supply is classified by category; a deducted advance carries no category at all.
+    if (line.lineKind === 'item' && line.category === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'A supply line carries a category.',
+        path: ['category'],
+      });
+    }
+    if (line.lineKind === 'advance_deduction' && line.category !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'An advance deduction line carries no category.',
+        path: ['category'],
+      });
+    }
+    // The settlement legs take the tax point of the invoice, so a date here would re-date them into the advance's month.
+    if (line.lineKind === 'advance_deduction') {
+      for (const field of [
+        'periodEnd',
+        'periodStart',
+        'taxPointDate',
+      ] as const) {
+        if (line[field] !== undefined) {
+          context.addIssue({
+            code: 'custom',
+            message:
+              'An advance deduction line carries no tax point and no period.',
+            path: [field],
+          });
+        }
+      }
+    }
+    if (
+      line.periodStart !== undefined &&
+      line.periodEnd !== undefined &&
+      line.periodStart > line.periodEnd
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'periodStart must not be later than periodEnd.',
+        path: ['periodStart'],
+      });
+    }
     const actual = scaledUnits(line.vatAmount, 4);
     if (actual === undefined) {
       return;
@@ -383,16 +469,54 @@ export const createInvoiceLineSchema = z
     });
   });
 
+// Base plus VAT over the lines of one kind, in 10^-4 units, ignoring what does not parse.
+export function grossUnits(
+  lines: readonly { baseAmount: string; lineKind: string; vatAmount: string }[],
+  lineKind: string,
+): bigint {
+  return lines
+    .filter((line) => line.lineKind === lineKind)
+    .reduce(
+      (total, line) =>
+        total +
+        (decimalUnits(line.baseAmount) ?? 0n) +
+        (decimalUnits(line.vatAmount) ?? 0n),
+      0n,
+    );
+}
+
 export const createInvoiceSchema = z
   .object({
     dueDate: documentDateSchema.optional(),
     fxRate: fxRateSchema.optional(),
     lines: z.array(createInvoiceLineSchema).min(1).max(MAX_INVOICE_LINES),
     receivedDate: documentDateSchema.optional(),
+    roundingAmount: roundingAmountSchema.default('0'),
     taxPointDate: documentDateSchema.optional(),
     variableSymbol: variableSymbolSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((invoice, context) => {
+    // An invoice is a supply first; a deduction alone is not an invoice.
+    if (!invoice.lines.some((line) => line.lineKind === 'item')) {
+      context.addIssue({
+        code: 'custom',
+        message: 'An invoice carries at least one supply line.',
+        path: ['lines'],
+      });
+    }
+    // An overpaid advance is settled by a credit note, never by a negative amount due.
+    const payable =
+      grossUnits(invoice.lines, 'item') +
+      (decimalUnits(invoice.roundingAmount) ?? 0n);
+    if (grossUnits(invoice.lines, 'advance_deduction') > payable) {
+      context.addIssue({
+        code: 'custom',
+        message: 'The deducted advance exceeds the invoiced amount.',
+        path: ['lines'],
+      });
+    }
+  });
 
 // The two kinds that carry invoice content; every other kind is register plus attributes.
 export const invoiceDocumentKinds = [
@@ -533,6 +657,17 @@ export const partnerListQuerySchema = z
   .object({ q: z.string().trim().min(1).max(100).optional() })
   .strict();
 
+// The one account nature vocabulary, shared by the directive and by the analytics mirror.
+const accountNatureSchema = z.enum([
+  'ASSET',
+  'LIABILITY',
+  'EQUITY',
+  'EXPENSE',
+  'REVENUE',
+  'CLOSING',
+  'OFF_BALANCE',
+]);
+
 export const directiveAccountSchema = z
   .object({
     class: z.number().int().min(0).max(9),
@@ -540,15 +675,7 @@ export const directiveAccountSchema = z
     groupCode: z.string().regex(/^[0-9]{2}$/),
     nameCs: z.string(),
     nameEn: z.string(),
-    nature: z.enum([
-      'ASSET',
-      'LIABILITY',
-      'EQUITY',
-      'EXPENSE',
-      'REVENUE',
-      'CLOSING',
-      'OFF_BALANCE',
-    ]),
+    nature: accountNatureSchema,
   })
   .strict();
 
@@ -556,7 +683,96 @@ export const directiveAccountListSchema = z
   .object({ directiveAccounts: z.array(directiveAccountSchema) })
   .strict();
 
+// The analytics read answers from stored columns only, so the mirror bounds its document list too.
+export const MAX_ANALYTICS_DOCUMENTS = 50;
+
+// The analytics read: the invoices in scope plus four aggregates read straight from stored columns.
+const analyticsDocumentSchema = z
+  .object({
+    advanceTotal: decimalStringSchema,
+    amountDue: decimalStringSchema,
+    currencyCode: currencyCodeSchema,
+    documentDate: documentDateSchema,
+    grossTotal: decimalStringSchema,
+    id: identifierSchema,
+    kind: documentKindSchema,
+    partnerName: z.string().nullable(),
+    reference: z.string().nullable(),
+    roundingAmount: decimalStringSchema,
+    status: documentStatusSchema,
+    title: z.string(),
+  })
+  .strict();
+
+const analyticsByMonthSchema = z
+  .object({
+    accountCode: accountCodeSchema,
+    accountName: z.string(),
+    credit: decimalStringSchema,
+    debit: decimalStringSchema,
+    month: documentDateSchema,
+  })
+  .strict();
+
+const analyticsByActivitySchema = z
+  .object({
+    activityCode: activityCodeSchema,
+    credit: decimalStringSchema,
+    debit: decimalStringSchema,
+    lineCount: z.number().int().min(0),
+  })
+  .strict();
+
+const analyticsByVatRegimeSchema = z
+  .object({
+    baseAmount: decimalStringSchema,
+    lineCount: z.number().int().min(0),
+    lineKind: invoiceLineKindSchema,
+    vatAmount: decimalStringSchema,
+    vatMode: vatModeSchema,
+    vatRate: vatRateSchema,
+  })
+  .strict();
+
+const analyticsByAccountSchema = z
+  .object({
+    accountCode: accountCodeSchema,
+    accountName: z.string(),
+    credit: decimalStringSchema,
+    debit: decimalStringSchema,
+    nature: accountNatureSchema,
+  })
+  .strict();
+
+// The page states its own cost from these counters, so no reader has to trust the docs.
+const analyticsStatsSchema = z
+  .object({
+    elapsedMs: z.number().int().min(0),
+    eventLineCount: z.number().int().min(0),
+    invoiceLineCount: z.number().int().min(0),
+    queryCount: z.number().int().min(1),
+  })
+  .strict();
+
+export const documentAnalyticsResponseSchema = z
+  .object({
+    byAccount: z.array(analyticsByAccountSchema),
+    byActivity: z.array(analyticsByActivitySchema),
+    byMonth: z.array(analyticsByMonthSchema),
+    byVatRegime: z.array(analyticsByVatRegimeSchema),
+    documents: z.array(analyticsDocumentSchema).max(MAX_ANALYTICS_DOCUMENTS),
+    stats: analyticsStatsSchema,
+  })
+  .strict();
+
+export const documentAnalyticsQuerySchema = z
+  .object({ legalEntityId: identifierSchema.optional() })
+  .strict();
+
 export type DataIssue = z.infer<typeof dataIssueSchema>;
+export type DocumentAnalyticsResponse = z.infer<
+  typeof documentAnalyticsResponseSchema
+>;
 export type DocumentDetail = z.infer<typeof documentDetailSchema>;
 export type DocumentKind = z.infer<typeof documentKindSchema>;
 export type DocumentLinkKind = z.infer<typeof documentLinkKindSchema>;
@@ -566,6 +782,7 @@ export type DocumentSort = z.infer<typeof documentSortSchema>;
 export type DocumentStatus = z.infer<typeof documentStatusSchema>;
 export type DocumentSummary = z.infer<typeof documentSummarySchema>;
 export type InvoiceLineCategory = z.infer<typeof invoiceLineCategorySchema>;
+export type InvoiceLineKind = z.infer<typeof invoiceLineKindSchema>;
 export type NewDocument = z.input<typeof createDocumentRequestSchema>;
 export type Partner = z.infer<typeof partnerSchema>;
 export type VatMode = z.infer<typeof vatModeSchema>;

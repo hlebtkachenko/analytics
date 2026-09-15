@@ -58,6 +58,18 @@ describe('proxy', () => {
     expect(response.headers.get('x-middleware-request-x-nonce')).toBeTruthy();
   });
 
+  it('forwards the requested path and query so the product layout can build a return path', () => {
+    const response = proxy(
+      new NextRequest(
+        'https://bap.invalid/documents/analytics?organization=bap-operational',
+      ),
+    );
+
+    expect(response.headers.get('x-middleware-request-x-bap-path')).toBe(
+      '/documents/analytics?organization=bap-operational',
+    );
+  });
+
   it('canonicalizes a reset token into a secure capability cookie when the public origin is https', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     const response = proxy(

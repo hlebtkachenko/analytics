@@ -12,6 +12,7 @@ import TwoFactorPage from './page';
 
 const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
+  searchParams: new URLSearchParams(),
   verifyTotp: vi.fn(),
 }));
 
@@ -21,10 +22,12 @@ vi.mock('../../../../lib/auth/client', () => ({
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: mocks.replace }),
+  useSearchParams: () => mocks.searchParams,
 }));
 
 afterEach(() => {
   cleanup();
+  mocks.searchParams = new URLSearchParams();
   vi.clearAllMocks();
 });
 
@@ -51,6 +54,34 @@ describe('TwoFactorPage', () => {
       expect(mocks.verifyTotp).toHaveBeenCalledWith({ code: '123456' }),
     );
     expect(mocks.replace).toHaveBeenCalledWith('/access');
+  });
+
+  it('returns to a safe next path after a valid code', async () => {
+    mocks.searchParams = new URLSearchParams({
+      next: '/documents/analytics?organization=bap-operational',
+    });
+    mocks.verifyTotp.mockResolvedValue({ data: {}, error: null });
+    renderTwoFactor();
+    fireEvent.submit(
+      screen.getByRole('form', { name: 'Two-step verification' }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.replace).toHaveBeenCalledWith(
+        '/documents/analytics?organization=bap-operational',
+      ),
+    );
+  });
+
+  it('ignores a next path that leaves this origin', async () => {
+    mocks.searchParams = new URLSearchParams({ next: 'https://evil.example' });
+    mocks.verifyTotp.mockResolvedValue({ data: {}, error: null });
+    renderTwoFactor();
+    fireEvent.submit(
+      screen.getByRole('form', { name: 'Two-step verification' }),
+    );
+
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/access'));
   });
 
   it('shows the localized error and stays on the page after rejection', async () => {

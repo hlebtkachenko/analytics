@@ -62,6 +62,7 @@ deliberately deferred.
 - [ADR 0010: organization route resolution](adr/0010-organization-route-resolution.md)
 - [ADR 0011: two-level tenancy](adr/0011-two-level-tenancy.md)
 - [ADR 0012: documents register and derived economic events](adr/0012-documents-register-and-derived-events.md)
+- [ADR 0013: invoice advances, rounding and line periods](adr/0013-invoice-advances-rounding-and-line-periods.md)
 
 Documentation must stay synchronized with commands, runtime behavior, and
 architecture decisions in the same change.

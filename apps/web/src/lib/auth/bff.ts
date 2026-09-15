@@ -5,6 +5,8 @@ import {
   createDocumentRequestSchema,
   createPartnerRequestSchema,
   directiveAccountListSchema,
+  documentAnalyticsQuerySchema,
+  documentAnalyticsResponseSchema,
   documentDetailSchema,
   documentLinkSchema,
   documentListQuerySchema,
@@ -1167,6 +1169,47 @@ export async function getDocuments(
       operation: 'getDocuments',
       path: `documents?${documentListQuery(query.data)}`,
       schema: documentListResponseSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function getDocumentAnalytics(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const query = documentAnalyticsQuerySchema.safeParse(
+    Object.fromEntries(new URL(request.url).searchParams),
+  );
+
+  // A malformed entity filter is refused here, never widened into an unfiltered read.
+  if (!query.success) {
+    return jsonResponse({ error: 'invalid_query' }, 400);
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  // Rebuilt from the validated value only, so no client query string is forwarded verbatim.
+  const filter =
+    query.data.legalEntityId === undefined
+      ? ''
+      : `?legalEntityId=${encodeURIComponent(query.data.legalEntityId)}`;
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'document_analytics_unavailable',
+      method: 'GET',
+      operation: 'getDocumentAnalytics',
+      path: `documents/analytics${filter}`,
+      schema: documentAnalyticsResponseSchema,
       successStatus: 200,
     },
     fetchImplementation,

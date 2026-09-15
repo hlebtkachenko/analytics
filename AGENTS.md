@@ -48,6 +48,11 @@ financial, operational, or development data.
 - Document data enters through the documents register in
   `apps/api/src/documents` (see `docs/documents.md`); economic events are
   derived by the rule set, never written by hand.
+- Invoice content (lines, advance deductions, rounding) is a create-time fact.
+  An advance deduction is an `invoice_line` with
+  `line_kind = 'advance_deduction'`; a rounding difference is the signed header
+  column `invoice.rounding_amount`; never model either as a fake supply line,
+  and never write `invoice.amount_due` (it is generated).
 
 ## Development
 
@@ -86,6 +91,10 @@ financial, operational, or development data.
 - `pnpm demo:tenancy`: build and start a disposable local stack, create its
   owner, admin, and member accounts, and narrate the legal entity browser proof
 - `pnpm demo:tenancy:down`: stop that demo stack and remove its volumes
+- `pnpm demo:documents`: build and start the same disposable local stack, seed a
+  legal entity, a partner and five synthetic documents, and narrate the document
+  analytics browser proof
+- `pnpm demo:documents:down`: stop that demo stack and remove its volumes
 - `pnpm compose:config`: validate development Compose without starting anything
 - `pnpm compose:verify`: verify development, production, and operations topology
 - `pnpm compose:config:production`: validate production Compose with synthetic

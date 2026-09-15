@@ -23,6 +23,7 @@ import DocumentDetailPage from './page';
 const LEGAL_ENTITY_ID = '9b7d1c30-6a4b-4d1f-9c2e-7a5f0e3b8d21';
 const PARTNER_ID = '4c2f8b11-8c35-4a2e-9f61-1de2f0a7c934';
 const INVOICE_LINE_ID = '00000000-0000-4000-8000-000000000020';
+const ADVANCE_LINE_ID = '00000000-0000-4000-8000-000000000021';
 const EVENT_ID = '00000000-0000-4000-8000-000000000030';
 const ISSUE_ID = '00000000-0000-4000-8000-000000000040';
 
@@ -62,8 +63,10 @@ const detail = {
       {
         accountCode: '518',
         accountName: 'Other services',
+        activityCode: 'month-01',
         amount: '1000.0000',
         description: 'Placeholder line',
+        effectiveDate: '2026-01-31',
         invoiceLineId: INVOICE_LINE_ID,
         lineNo: 1,
         partnerId: null,
@@ -72,8 +75,10 @@ const detail = {
       {
         accountCode: '343',
         accountName: 'Value added tax',
+        activityCode: 'month-01',
         amount: '210.0000',
         description: 'Placeholder line',
+        effectiveDate: '2026-01-31',
         invoiceLineId: INVOICE_LINE_ID,
         lineNo: 2,
         partnerId: null,
@@ -82,8 +87,10 @@ const detail = {
       {
         accountCode: '321',
         accountName: 'Trade payables',
+        activityCode: null,
         amount: '1210.0000',
         description: 'Placeholder line',
+        effectiveDate: '2026-01-31',
         invoiceLineId: INVOICE_LINE_ID,
         lineNo: 3,
         partnerId: PARTNER_ID,
@@ -93,27 +100,54 @@ const detail = {
     ruleSetVersion: 'cz-default-2026-09',
   },
   invoice: {
+    advanceTotal: '605.0000',
+    amountDue: '605.2000',
     baseTotal: '1000.0000',
     dueDate: '2026-09-15',
     fxRate: null,
     grossTotal: '1210.0000',
     lines: [
       {
+        activityCode: 'month-01',
         baseAmount: '1000.0000',
         category: 'services',
         description: 'Placeholder line',
         id: INVOICE_LINE_ID,
+        lineKind: 'item',
         lineNo: 1,
+        periodEnd: '2026-01-31',
+        periodStart: '2026-01-01',
         quantity: null,
         sourceAccountCode: null,
+        taxPointDate: '2026-01-31',
         unit: null,
         unitPrice: null,
         vatAmount: '210.0000',
         vatMode: 'standard',
         vatRate: '21.00',
       },
+      {
+        activityCode: null,
+        baseAmount: '500.0000',
+        category: null,
+        description: 'Advance deducted',
+        id: ADVANCE_LINE_ID,
+        lineKind: 'advance_deduction',
+        lineNo: 2,
+        periodEnd: null,
+        periodStart: null,
+        quantity: null,
+        sourceAccountCode: null,
+        taxPointDate: null,
+        unit: null,
+        unitPrice: null,
+        vatAmount: '105.0000',
+        vatMode: 'standard',
+        vatRate: '21.00',
+      },
     ],
     receivedDate: null,
+    roundingAmount: '0.2000',
     taxPointDate: '2026-09-01',
     variableSymbol: '1234567890',
     vatTotal: '210.0000',
@@ -246,6 +280,46 @@ describe('DocumentDetailPage', () => {
     expect(within(eventTable).getByText('518 Other services')).toBeVisible();
     expect(within(eventTable).getByText('343 Value added tax')).toBeVisible();
     expect(within(eventTable).getByText('321 Trade payables')).toBeVisible();
+  });
+
+  it('shows the kind, the period, the tax point and the activity on every line', async () => {
+    vi.stubGlobal('fetch', respond());
+
+    renderDetailPage();
+    await screen.findByRole('heading', { name: 'Placeholder document' });
+
+    const invoiceTable = screen.getByRole('table', { name: 'Invoice lines' });
+    expect(within(invoiceTable).getByText('Supply')).toBeVisible();
+    expect(within(invoiceTable).getByText('Advance deduction')).toBeVisible();
+    expect(
+      within(invoiceTable).getByText('2026-01-01 to 2026-01-31'),
+    ).toBeVisible();
+    expect(within(invoiceTable).getAllByText('2026-01-31')).toHaveLength(1);
+    expect(within(invoiceTable).getAllByText('month-01')).toHaveLength(1);
+  });
+
+  it('shows the rounding, the deducted advance and the amount due beside the gross', async () => {
+    vi.stubGlobal('fetch', respond());
+
+    renderDetailPage();
+    await screen.findByRole('heading', { name: 'Placeholder document' });
+
+    const totals = screen.getByLabelText('Invoice totals');
+    expect(within(totals).getByText('CZK 1,210.00')).toBeVisible();
+    expect(within(totals).getByText('CZK 0.20')).toBeVisible();
+    expect(within(totals).getByText('CZK 605.00')).toBeVisible();
+    expect(within(totals).getByText('CZK 605.20')).toBeVisible();
+  });
+
+  it('shows the effective date and the activity on every event line', async () => {
+    vi.stubGlobal('fetch', respond());
+
+    renderDetailPage();
+    await screen.findByRole('heading', { name: 'Placeholder document' });
+
+    const eventTable = screen.getByRole('table', { name: 'Economic event' });
+    expect(within(eventTable).getAllByText('2026-01-31')).toHaveLength(3);
+    expect(within(eventTable).getAllByText('month-01')).toHaveLength(2);
   });
 
   it('reports every open data issue', async () => {

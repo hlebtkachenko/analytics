@@ -30,6 +30,7 @@ import {
 } from '../subject-rate-limit.guard.js';
 import type {
   DirectiveAccount,
+  DocumentAnalyticsResponse,
   DocumentDetail,
   DocumentLink,
 } from './contract.js';
@@ -37,6 +38,7 @@ import { DocumentController } from './document.controller.js';
 import {
   DocumentRepository,
   type CreateDocumentInput,
+  type EntityScopeSelector,
   type ListDocumentsInput,
   type UpdateDocumentInput,
 } from './document-repository.js';
@@ -91,30 +93,39 @@ const detail: DocumentDetail = {
       {
         accountCode: '311',
         accountName: 'Trade receivables',
+        activityCode: null,
         amount: '1210.0000',
         description: 'placeholder line',
+        effectiveDate: '2026-09-14',
         invoiceLineId: INVOICE_LINE_ID,
         lineNo: 1,
         partnerId: PARTNER_ID,
         side: 'debit',
       },
     ],
-    ruleSetVersion: 'cz-default-2026-09',
+    ruleSetVersion: 'cz-default-2026-09.1',
   },
   invoice: {
+    advanceTotal: '0.0000',
+    amountDue: '1210.0000',
     baseTotal: '1000.0000',
     dueDate: null,
     fxRate: null,
     grossTotal: '1210.0000',
     lines: [
       {
+        activityCode: null,
         baseAmount: '1000.0000',
         category: 'services',
         description: 'placeholder line',
         id: INVOICE_LINE_ID,
+        lineKind: 'item',
         lineNo: 1,
+        periodEnd: null,
+        periodStart: null,
         quantity: null,
         sourceAccountCode: null,
+        taxPointDate: null,
         unit: null,
         unitPrice: null,
         vatAmount: '210.0000',
@@ -123,6 +134,7 @@ const detail: DocumentDetail = {
       },
     ],
     receivedDate: null,
+    roundingAmount: '0.0000',
     taxPointDate: null,
     variableSymbol: null,
     vatTotal: '210.0000',
@@ -137,6 +149,68 @@ const documentLink: DocumentLink = {
   id: LINK_ID,
   kind: 'relates',
   toDocumentId: OTHER_DOCUMENT_ID,
+};
+
+// One row per grouping: the route reads the stored split and reports what the read cost.
+const analytics: DocumentAnalyticsResponse = {
+  byAccount: [
+    {
+      accountCode: '311',
+      accountName: 'Trade receivables',
+      credit: '0.0000',
+      debit: '1210.0000',
+      nature: 'ASSET',
+    },
+  ],
+  byActivity: [
+    {
+      activityCode: 'placeholder-activity',
+      credit: '1210.0000',
+      debit: '1210.0000',
+      lineCount: 2,
+    },
+  ],
+  byMonth: [
+    {
+      accountCode: '311',
+      accountName: 'Trade receivables',
+      credit: '0.0000',
+      debit: '1210.0000',
+      month: '2026-09-01',
+    },
+  ],
+  byVatRegime: [
+    {
+      baseAmount: '1000.0000',
+      lineCount: 1,
+      lineKind: 'item',
+      vatAmount: '210.0000',
+      vatMode: 'standard',
+      vatRate: '21.00',
+    },
+  ],
+  documents: [
+    {
+      advanceTotal: '0.0000',
+      amountDue: '1210.0000',
+      currencyCode: 'CZK',
+      documentDate: '2026-09-14',
+      grossTotal: '1210.0000',
+      id: DOCUMENT_ID,
+      kind: 'issued_invoice',
+      partnerName: 'Placeholder Partner',
+      reference: 'PLACEHOLDER-1',
+      roundingAmount: '0.0000',
+      status: 'registered',
+      title: 'Placeholder document',
+    },
+  ],
+  stats: {
+    elapsedMs: 3,
+    eventLineCount: 2,
+    invoiceLineCount: 1,
+    queryCount: 6,
+  },
 };
 
 const directiveAccount: DirectiveAccount = {
@@ -183,9 +257,20 @@ const invoiceBody = {
   title: 'Placeholder document',
 };
 
+// The minimal advance deduction line: it carries amounts and a VAT mode, never a category.
+const deductionLine = {
+  baseAmount: '1000.0000',
+  description: 'placeholder advance deduction',
+  lineKind: 'advance_deduction',
+  vatAmount: '210.0000',
+  vatMode: 'standard',
+  vatRate: '21.00',
+};
+
 describe('application document routes', () => {
   let application: NestExpressApplication;
   let entityScope: EntityScope = { mode: 'all' };
+  const analyticsCalls: EntityScopeSelector[] = [];
   const createCalls: CreateDocumentInput[] = [];
   const listCalls: ListDocumentsInput[] = [];
   const updateCalls: UpdateDocumentInput[] = [];
@@ -256,6 +341,10 @@ describe('application document routes', () => {
         totalsByCurrency: [{ currencyCode: 'CZK', totalAmount: '1210.0000' }],
       };
     }),
+    readAnalytics: vi.fn(async (input) => {
+      analyticsCalls.push(input);
+      return analytics;
+    }),
     readDocument: vi.fn(async (input) =>
       input.documentId === DOCUMENT_ID ? detail : null,
     ),
@@ -290,6 +379,7 @@ describe('application document routes', () => {
 
   beforeEach(() => {
     entityScope = { mode: 'all' };
+    analyticsCalls.length = 0;
     createCalls.length = 0;
     listCalls.length = 0;
     updateCalls.length = 0;
@@ -503,6 +593,73 @@ describe('application document routes', () => {
         ...invoiceBody,
         invoice: { ...invoiceBody.invoice, fxRate: '24.5000001' },
       },
+      // An item line is categorised and an advance deduction line is not.
+      {
+        ...invoiceBody,
+        invoice: {
+          lines: [{ ...invoiceBody.invoice.lines[0], category: undefined }],
+        },
+      },
+      {
+        ...invoiceBody,
+        invoice: {
+          lines: [
+            { ...invoiceBody.invoice.lines[0], lineKind: 'advance_deduction' },
+          ],
+        },
+      },
+      {
+        ...invoiceBody,
+        invoice: {
+          lines: [{ ...invoiceBody.invoice.lines[0], lineKind: 'rounding' }],
+        },
+      },
+      // A service period never ends before it starts.
+      {
+        ...invoiceBody,
+        invoice: {
+          lines: [
+            {
+              ...invoiceBody.invoice.lines[0],
+              periodEnd: '2026-09-01',
+              periodStart: '2026-09-30',
+            },
+          ],
+        },
+      },
+      // An activity code is a bounded lower-case identifier, never free text.
+      {
+        ...invoiceBody,
+        invoice: {
+          lines: [{ ...invoiceBody.invoice.lines[0], activityCode: 'site a!' }],
+        },
+      },
+      // A rounding difference stays below one unit in both directions.
+      {
+        ...invoiceBody,
+        invoice: { ...invoiceBody.invoice, roundingAmount: '1.00' },
+      },
+      {
+        ...invoiceBody,
+        invoice: { ...invoiceBody.invoice, roundingAmount: '-1.00' },
+      },
+      // An invoice that only deducts an advance invoices no supply at all.
+      { ...invoiceBody, invoice: { lines: [deductionLine] } },
+      // The deducted advance never exceeds the supplied amount plus the rounding.
+      {
+        ...invoiceBody,
+        invoice: {
+          lines: [
+            invoiceBody.invoice.lines[0],
+            {
+              ...deductionLine,
+              baseAmount: '1300.0000',
+              vatAmount: '0',
+              vatMode: 'exempt',
+            },
+          ],
+        },
+      },
     ]) {
       await request(application.getHttpServer())
         .post('/v1/organizations/organization_1/documents')
@@ -512,6 +669,95 @@ describe('application document routes', () => {
     }
 
     expect(createCalls).toEqual([]);
+  });
+
+  it('answers an unparsable amount with a bad request, never a server error', async () => {
+    for (const invoice of [
+      { ...invoiceBody.invoice, roundingAmount: 'abc' },
+      // A decimal comma is not the money contract, so the rounding rule must refuse it instead of throwing.
+      { ...invoiceBody.invoice, roundingAmount: '0,20' },
+      {
+        lines: [
+          {
+            ...invoiceBody.invoice.lines[0],
+            baseAmount: 'abc',
+            vatAmount: '0',
+            vatMode: 'exempt',
+          },
+        ],
+      },
+      { lines: [{ ...invoiceBody.invoice.lines[0], vatAmount: 'x' }] },
+    ]) {
+      const response = await request(application.getHttpServer())
+        .post('/v1/organizations/organization_1/documents')
+        .set('Authorization', 'Bearer caller')
+        .send({ ...invoiceBody, invoice })
+        .expect(400);
+
+      expect(response.body).toMatchObject({
+        status: 400,
+        type: 'https://bap.invalid/problems/invalid-request',
+      });
+    }
+
+    expect(createCalls).toEqual([]);
+  });
+
+  it('refuses a tax point and a period on an advance deduction line', async () => {
+    for (const field of ['periodEnd', 'periodStart', 'taxPointDate']) {
+      await request(application.getHttpServer())
+        .post('/v1/organizations/organization_1/documents')
+        .set('Authorization', 'Bearer caller')
+        .send({
+          ...invoiceBody,
+          invoice: {
+            lines: [
+              invoiceBody.invoice.lines[0],
+              { ...deductionLine, [field]: '2026-09-30' },
+            ],
+          },
+        })
+        .expect(400);
+    }
+
+    expect(createCalls).toEqual([]);
+  });
+
+  it('accepts an advance deduction beside an item line and normalises the activity', async () => {
+    await request(application.getHttpServer())
+      .post('/v1/organizations/organization_1/documents')
+      .set('Authorization', 'Bearer caller')
+      .send({
+        ...invoiceBody,
+        invoice: {
+          lines: [
+            {
+              ...invoiceBody.invoice.lines[0],
+              activityCode: '  SITE-A  ',
+              periodEnd: '2026-09-30',
+              periodStart: '2026-09-01',
+              taxPointDate: '2026-09-30',
+            },
+            deductionLine,
+          ],
+          roundingAmount: '0.20',
+        },
+      })
+      .expect(201);
+
+    // The activity is trimmed and lower-cased at the boundary, so grouping never depends on how it was typed.
+    expect(createCalls[0]?.body.invoice?.lines[0]).toMatchObject({
+      activityCode: 'site-a',
+      lineKind: 'item',
+      periodEnd: '2026-09-30',
+      periodStart: '2026-09-01',
+      taxPointDate: '2026-09-30',
+    });
+    expect(createCalls[0]?.body.invoice?.lines[1]?.lineKind).toBe(
+      'advance_deduction',
+    );
+    expect(createCalls[0]?.body.invoice?.lines[1]?.category).toBeUndefined();
+    expect(createCalls[0]?.body.invoice?.roundingAmount).toBe('0.20');
   });
 
   it('answers a value the database refuses with a bad request, never a server error', async () => {
@@ -701,6 +947,68 @@ describe('application document routes', () => {
     expect(response.body).toEqual({ directiveAccounts: [directiveAccount] });
   });
 
+  it('answers the analytics route with the aggregates and its own cost', async () => {
+    const response = await request(application.getHttpServer())
+      .get('/v1/organizations/organization_3/documents/analytics')
+      .set('Authorization', 'Bearer caller')
+      .expect(200);
+
+    expect(response.body).toEqual(analytics);
+    expect(analyticsCalls[0]).toMatchObject({
+      legalEntityIds: null,
+      organizationId: 'organization_3',
+      role: 'member',
+      userId: 'user_1',
+    });
+
+    // A requested entity inside the scope narrows the read to that entity alone.
+    entityScope = { legalEntityIds: [ENTITY_ID], mode: 'restricted' };
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_3/documents/analytics')
+      .query({ legalEntityId: ENTITY_ID })
+      .set('Authorization', 'Bearer caller')
+      .expect(200);
+    expect(analyticsCalls[1]?.legalEntityIds).toEqual([ENTITY_ID]);
+
+    // One outside it reads nothing at all instead of widening the scope.
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_3/documents/analytics')
+      .query({ legalEntityId: OTHER_ENTITY_ID })
+      .set('Authorization', 'Bearer caller')
+      .expect(200);
+    expect(analyticsCalls[2]?.legalEntityIds).toEqual([]);
+  });
+
+  it('refuses an analytics query outside the fixed contract', async () => {
+    for (const query of [
+      { legalEntityId: 'not-a-uuid' },
+      { page: '1' },
+      { q: 'placeholder' },
+    ]) {
+      await request(application.getHttpServer())
+        .get('/v1/organizations/organization_1/documents/analytics')
+        .query(query)
+        .set('Authorization', 'Bearer caller')
+        .expect(400);
+    }
+
+    expect(analyticsCalls).toEqual([]);
+  });
+
+  it('refuses analytics to a caller without the read capability or a token', async () => {
+    // organization_9 resolves to no membership at all, so no capability is granted.
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_9/documents/analytics')
+      .set('Authorization', 'Bearer caller')
+      .expect(403);
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_1/documents/analytics')
+      .set('Authorization', 'Bearer invalid')
+      .expect(401);
+
+    expect(analyticsCalls).toEqual([]);
+  });
+
   it('refuses every route to a caller outside the organization', async () => {
     await request(application.getHttpServer())
       .get('/v1/organizations/organization_9/documents')
@@ -721,6 +1029,7 @@ describe('application document routes', () => {
     expect(Object.keys(document.paths).sort()).toEqual([
       '/v1/organizations/{organizationId}/directive-accounts',
       '/v1/organizations/{organizationId}/documents',
+      '/v1/organizations/{organizationId}/documents/analytics',
       '/v1/organizations/{organizationId}/documents/{documentId}',
       '/v1/organizations/{organizationId}/documents/{documentId}/links',
       '/v1/organizations/{organizationId}/documents/{documentId}/links/{linkId}',

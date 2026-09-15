@@ -40,6 +40,11 @@ export function proxy(request: NextRequest): NextResponse {
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('content-security-policy', contentSecurityPolicy);
   requestHeaders.set('x-nonce', nonce);
+  // A layout never receives the URL, so the requested path travels as a header.
+  requestHeaders.set(
+    'x-bap-path',
+    `${request.nextUrl.pathname}${request.nextUrl.search}`,
+  );
 
   const callbackPath =
     request.nextUrl.pathname === '/activate' ||

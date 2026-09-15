@@ -1,7 +1,7 @@
 import { expect, test as publicTest } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
-import axe from 'axe-core';
 
+import { expectNoAccessibilityViolations } from './accessibility-support';
 import { expect as authenticatedExpect, test } from './authenticated-test';
 import {
   ensureLegalEntity,
@@ -25,35 +25,9 @@ const fixtureName = `operational-icons-${Date.now()}.csv`;
 // Neutral placeholder: every upload belongs to exactly one legal entity.
 const legalEntityName = 'Placeholder Icons';
 
-type AxeWindow = Window &
-  typeof globalThis & {
-    axe: {
-      run: (document: Document) => Promise<{
-        violations: ReadonlyArray<{
-          id: string;
-          impact: string | null;
-          nodes: ReadonlyArray<Readonly<{ target: ReadonlyArray<string> }>>;
-        }>;
-      }>;
-    };
-  };
-
 type DatasetList = Readonly<{
   datasets: ReadonlyArray<Readonly<{ name: string; status: string }>>;
 }>;
-
-async function expectNoAccessibilityViolations(page: Page): Promise<void> {
-  await page.evaluate(axe.source);
-  const violations = await page.evaluate(async () => {
-    const results = await (window as AxeWindow).axe.run(document);
-    return results.violations.map(({ id, impact, nodes }) => ({
-      id,
-      impact,
-      targets: nodes.map((node) => node.target),
-    }));
-  });
-  expect(violations).toEqual([]);
-}
 
 async function expectNoDocumentOverflow(page: Page): Promise<void> {
   await expect

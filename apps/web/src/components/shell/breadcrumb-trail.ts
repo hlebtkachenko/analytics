@@ -17,7 +17,7 @@ export const moduleLabels: Readonly<Record<string, string>> = {
 // under two modules. Add the parent, then the child segment, to name one.
 const childLabels: Readonly<Record<string, Readonly<Record<string, string>>>> =
   {
-    documents: { new: 'New document' },
+    documents: { analytics: 'Analytics', new: 'New document' },
     organizations: { new: 'Create organization' },
   };
 

@@ -8,16 +8,29 @@ import {
   Stack,
   TextInput,
 } from '@bap/design-system/react';
-import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import type { Route } from 'next';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { authClient } from '../../../../lib/auth/client';
+import { safeReturnPath } from '../../../../lib/auth/return-path';
 
+// The challenge reads the next parameter, which a prerender cannot know.
 export default function TwoFactorPage() {
+  return (
+    <Suspense>
+      <TwoFactorChallenge />
+    </Suspense>
+  );
+}
+
+function TwoFactorChallenge() {
   const { t } = useTranslation();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [error, setError] = useState(false);
+  const returnPath = safeReturnPath(searchParams.get('next'));
 
   async function submit(formData: FormData): Promise<void> {
     setError(false);
@@ -30,7 +43,7 @@ export default function TwoFactorPage() {
         setError(true);
         return;
       }
-      router.replace('/access');
+      router.replace(returnPath as Route);
     } catch {
       setError(true);
     }
