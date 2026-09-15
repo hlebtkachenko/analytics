@@ -40,9 +40,9 @@
   cursor: pointer;
 }
 
-// Highlight a cell inside the selected range.
+// Highlight a cell inside the selected range with the Carbon selection token.
 .cellSelected {
-  background: var(--cds-highlight);
+  background: var(--cds-layer-selected);
 }
 
 .alignEnd {
