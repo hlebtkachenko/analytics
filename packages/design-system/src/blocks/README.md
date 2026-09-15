@@ -39,6 +39,10 @@ type GridColumn = {
   align?: 'start' | 'end';
   colorToken?: string; // Carbon custom property for the whole column, e.g. '--cds-text-secondary'
   renderCell?: (row: GridRow) => ReactNode; // per-row visuals (tags, status, links)
+  editor?: // inline editor; commits through onCellEdit
+    | { type: 'text' }
+    | { type: 'checkbox' }
+    | { type: 'select'; options: readonly string[] };
 };
 ```
 
@@ -67,6 +71,10 @@ Everything is off by default; turn on only what the page needs.
   danger item and sorts it last).
 - Detail rows: `renderRowDetail` (`(row) => ReactNode`) turns each row into a
   Carbon expandable row that reveals the returned content when opened.
+- Inline edit: mark a column with `editor` (`{ type: 'text' }`,
+  `{ type: 'checkbox' }`, or `{ type: 'select', options }`) and pass
+  `onCellEdit(rowId, key, value)`. A checkbox commits immediately; text and
+  select open on click, commit on blur or Enter, and revert on Escape.
 - Columns: `columnMenu` (show/hide), `reorderableColumns` (drag headers),
   `resizableColumns` (drag edges), `persistKey` (saves order/width/visibility to
   localStorage).
@@ -102,6 +110,13 @@ Full types live in `types.ts`.
 - `renderRowDetail` replaces each row with a Carbon expand row; it takes over
   row interaction, so do not also pass `onRowClick`, and do not combine it with
   `reorderableRows` (drag on an expand row is untested).
+- **Action column / drill-in**: there is no dedicated prop. Use
+  `column.renderCell` to render a `Button` or link (call
+  `event.stopPropagation()` when rows are also clickable) and/or `onRowClick` to
+  drill into a row.
+- **Inline edit** needs `onCellEdit` plus a per-column `editor`. Do not put an
+  `editor` on a column while `cellSelection` is on (both consume the cell's
+  clicks), and keep `row[column.key]` primitive so the editor reads the value.
 
 ## Putting a table on a real page
 

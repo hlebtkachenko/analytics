@@ -10,6 +10,7 @@ export type { PivotMatrix } from './pivot-grid';
 export type {
   BatchAction,
   CellValue,
+  ColumnEditor,
   DataGridProps,
   DensitySize,
   GridColumn,

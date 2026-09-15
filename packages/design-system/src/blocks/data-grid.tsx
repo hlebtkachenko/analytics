@@ -2,12 +2,15 @@
 
 import {
   Button,
+  Checkbox,
   DataTableSkeleton,
   InlineNotification,
   Loading,
   OverflowMenu,
   OverflowMenuItem,
   Pagination,
+  Select,
+  SelectItem,
   Table,
   TableBatchAction,
   TableBatchActions,
@@ -26,6 +29,7 @@ import {
   TableToolbarContent,
   TableToolbarMenu,
   TableToolbarSearch,
+  TextInput,
 } from '../react';
 import {
   Fragment,
@@ -41,6 +45,7 @@ import {
 
 import styles from './data-grid.module.scss';
 import type {
+  CellValue,
   DataGridProps,
   DensitySize,
   GridColumn,
@@ -93,6 +98,98 @@ function RowActionsMenu({
         />
       ))}
     </OverflowMenu>
+  );
+}
+
+// Inline cell editor: a checkbox commits immediately; text and select open on
+// click, commit on blur or Enter, and revert on Escape.
+function EditableCell({
+  row,
+  column,
+  onCommit,
+}: Readonly<{
+  row: GridRow;
+  column: GridColumn;
+  onCommit: (value: CellValue) => void;
+}>): ReactNode {
+  const editor = column.editor;
+  const raw = row[column.key];
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const inputId = `edit-${row.id}-${column.key}`;
+
+  if (!editor) return <>{cellContent(row, column)}</>;
+
+  if (editor.type === 'checkbox') {
+    return (
+      <Checkbox
+        checked={Boolean(raw)}
+        hideLabel
+        id={inputId}
+        labelText={column.header}
+        onChange={(_event, { checked }) => onCommit(checked)}
+      />
+    );
+  }
+
+  if (!editing) {
+    const empty = raw === null || raw === undefined || raw === '';
+    return (
+      <button
+        className={cx(styles.editTrigger)}
+        onClick={() => {
+          setDraft(empty ? '' : String(raw));
+          setEditing(true);
+        }}
+        type="button"
+      >
+        {empty ? '—' : String(raw)}
+      </button>
+    );
+  }
+
+  if (editor.type === 'select') {
+    return (
+      <Select
+        defaultValue={draft}
+        hideLabel
+        id={inputId}
+        labelText={column.header}
+        onBlur={() => setEditing(false)}
+        onChange={(event) => {
+          onCommit(event.target.value);
+          setEditing(false);
+        }}
+        size="sm"
+      >
+        {editor.options.map((option) => (
+          <SelectItem key={option} text={option} value={option} />
+        ))}
+      </Select>
+    );
+  }
+
+  return (
+    <TextInput
+      autoFocus
+      hideLabel
+      id={inputId}
+      labelText={column.header}
+      onBlur={() => {
+        onCommit(draft);
+        setEditing(false);
+      }}
+      onChange={(event) => setDraft(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          onCommit(draft);
+          setEditing(false);
+        }
+        if (event.key === 'Escape') setEditing(false);
+      }}
+      size="sm"
+      value={draft}
+    />
   );
 }
 
@@ -151,6 +248,7 @@ export function DataGrid(props: DataGridProps) {
     hasMore = false,
     onLoadMore,
     cellSelection = false,
+    onCellEdit,
     totalsRow,
     footer,
     state = 'ready',
@@ -673,7 +771,17 @@ export function DataGrid(props: DataGridProps) {
                             whiteSpace: wrapCells ? 'normal' : 'nowrap',
                           }}
                         >
-                          {cellContent(row, column)}
+                          {column.editor && onCellEdit ? (
+                            <EditableCell
+                              column={column}
+                              onCommit={(value) =>
+                                onCellEdit(row.id, column.key, value)
+                              }
+                              row={row}
+                            />
+                          ) : (
+                            cellContent(row, column)
+                          )}
                         </TableCell>
                       ))}
                       {hasRowActions && (
