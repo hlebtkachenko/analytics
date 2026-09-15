@@ -83,6 +83,19 @@ describe('DataGrid', () => {
     expect(onSelectionChange).toHaveBeenCalledWith(['1']);
   });
 
+  it('freezes a pinned column with a sticky left offset', () => {
+    const pinnedColumns: readonly GridColumn[] = [
+      { key: 'name', header: 'Name', pinned: true, width: 200 },
+      { key: 'score', header: 'Score', width: 120, align: 'end' },
+    ];
+    render(<DataGrid columns={pinnedColumns} rows={rows} />);
+    const firstBodyRow = screen.getAllByRole('row')[1] as HTMLElement;
+    const [nameCell, scoreCell] = within(firstBodyRow).getAllByRole('cell');
+    expect((nameCell as HTMLElement).style.position).toBe('sticky');
+    expect((nameCell as HTMLElement).style.left).toBe('0px');
+    expect((scoreCell as HTMLElement).style.position).toBe('');
+  });
+
   it('shows the empty state when there are no rows', () => {
     render(<DataGrid columns={columns} emptyLabel="Nothing here" rows={[]} />);
     expect(screen.getByText('Nothing here')).toBeInTheDocument();

@@ -282,23 +282,35 @@ export function DataGrid(props: DataGridProps) {
       acc += layout.widths[column.key] ?? DEFAULT_WIDTH;
     }
   }
-  const stickyStyle = (key: string, isHeader: boolean): CSSProperties =>
-    key in leftFor
-      ? {
-          position: 'sticky',
-          left: leftFor[key] ?? 0,
-          zIndex: isHeader ? 3 : 1,
-          background: 'var(--cds-layer)',
-        }
-      : {};
-  const columnStyle = (
-    column: GridColumn,
-    isHeader: boolean,
-  ): CSSProperties => ({
+  // Only the left offset stays inline; z-index and background come from the
+  // .pinned classes so pinned cells can track zebra, hover, and selection.
+  const stickyStyle = (key: string): CSSProperties =>
+    key in leftFor ? { position: 'sticky', left: leftFor[key] ?? 0 } : {};
+  const columnStyle = (column: GridColumn): CSSProperties => ({
     width: layout.widths[column.key] ?? DEFAULT_WIDTH,
     minWidth: layout.widths[column.key] ?? DEFAULT_WIDTH,
-    ...stickyStyle(column.key, isHeader),
+    ...stickyStyle(column.key),
   });
+
+  // The last frozen data column carries the seam divider.
+  const pinnedColumnKeys = visibleColumns
+    .filter((column) => column.pinned)
+    .map((column) => column.key);
+  const lastPinnedKey = pinnedColumnKeys[pinnedColumnKeys.length - 1];
+  // Class for any sticky cell; the edge divider lands on the last frozen column.
+  const pinnedClass = (key: string): string =>
+    key in leftFor
+      ? cx(styles.pinned, key === lastPinnedKey && styles.pinnedEdge)
+      : '';
+  // The selection column cannot take inline styles, so it pins via classes.
+  const selectClass =
+    '__select' in leftFor ? cx(styles.pinned, styles.pinnedLead) : '';
+  // Give the number column an authoritative width for the fixed layout.
+  const numberStyle: CSSProperties = {
+    width: NUMBER_WIDTH,
+    minWidth: NUMBER_WIDTH,
+    ...stickyStyle('__number'),
+  };
 
   const handleSearch = (value: string): void => {
     if (serverSearch) onSearch?.(value);
@@ -417,6 +429,7 @@ export function DataGrid(props: DataGridProps) {
             aria-label={title ?? 'Data grid'}
             className={cx(
               (stickyHeader || Boolean(scrollMaxHeight)) && styles.stickyHead,
+              (hasPinned || resizableColumns) && styles.fixedLayout,
             )}
             size={size}
             useZebraStyles={zebra}
@@ -427,14 +440,20 @@ export function DataGrid(props: DataGridProps) {
                   <TableSelectAll
                     ariaLabel="Select all rows"
                     checked={allSelected}
+                    className={selectClass}
                     id="data-grid-select-all"
                     name="data-grid-select-all"
                     onSelect={toggleAll}
                   />
                 )}
-                {selection === 'single' && <th aria-hidden />}
+                {selection === 'single' && (
+                  <th aria-hidden className={selectClass} />
+                )}
                 {rowNumbers && (
-                  <TableHeader style={stickyStyle('__number', true)}>
+                  <TableHeader
+                    className={pinnedClass('__number')}
+                    style={numberStyle}
+                  >
                     #
                   </TableHeader>
                 )}
@@ -470,6 +489,7 @@ export function DataGrid(props: DataGridProps) {
                         styles.headerCell,
                         reorderableColumns && styles.reorderable,
                         column.align === 'end' && styles.alignEnd,
+                        pinnedClass(column.key),
                       )}
                       isSortHeader={
                         canSort && sort.directionFor(column.key) !== 'NONE'
@@ -478,7 +498,7 @@ export function DataGrid(props: DataGridProps) {
                       key={column.key}
                       scope="col"
                       sortDirection={sort.directionFor(column.key)}
-                      style={columnStyle(column, true)}
+                      style={columnStyle(column)}
                       {...sortHandler}
                       {...dragHandlers}
                     >
@@ -524,6 +544,7 @@ export function DataGrid(props: DataGridProps) {
                     <TableRow
                       className={cx(onRowClick && styles.clickableRow)}
                       draggable={reorderableRows}
+                      isSelected={selection !== 'none' && selected.has(row.id)}
                       key={row.id}
                       onClick={onRowClick ? () => onRowClick(row) : undefined}
                       onDragOver={
@@ -555,6 +576,7 @@ export function DataGrid(props: DataGridProps) {
                         <TableSelectRow
                           ariaLabel={`Select row ${row.id}`}
                           checked={selected.has(row.id)}
+                          className={selectClass}
                           id={`data-grid-select-${row.id}`}
                           name={`data-grid-select-${row.id}`}
                           onSelect={() => toggleRow(row.id)}
@@ -562,7 +584,10 @@ export function DataGrid(props: DataGridProps) {
                         />
                       )}
                       {rowNumbers && (
-                        <TableCell style={stickyStyle('__number', false)}>
+                        <TableCell
+                          className={pinnedClass('__number')}
+                          style={numberStyle}
+                        >
                           {numberBase + index + 1}
                         </TableCell>
                       )}
@@ -573,6 +598,7 @@ export function DataGrid(props: DataGridProps) {
                             cellSelection &&
                               isCellSelected(rowIndex, columnIndex) &&
                               styles.cellSelected,
+                            pinnedClass(column.key),
                           )}
                           key={column.key}
                           onMouseDown={
@@ -591,7 +617,7 @@ export function DataGrid(props: DataGridProps) {
                               : undefined
                           }
                           style={{
-                            ...columnStyle(column, false),
+                            ...columnStyle(column),
                             ...(column.colorToken
                               ? { color: `var(${column.colorToken})` }
                               : {}),
@@ -617,15 +643,23 @@ export function DataGrid(props: DataGridProps) {
 
               {totalsRow && !isEmpty && (
                 <TableRow>
-                  {selection !== 'none' && <TableCell />}
+                  {selection !== 'none' && (
+                    <TableCell className={selectClass} />
+                  )}
                   {rowNumbers && (
-                    <TableCell style={stickyStyle('__number', false)} />
+                    <TableCell
+                      className={pinnedClass('__number')}
+                      style={numberStyle}
+                    />
                   )}
                   {visibleColumns.map((column) => (
                     <TableCell
-                      className={cx(column.align === 'end' && styles.alignEnd)}
+                      className={cx(
+                        column.align === 'end' && styles.alignEnd,
+                        pinnedClass(column.key),
+                      )}
                       key={column.key}
-                      style={columnStyle(column, false)}
+                      style={columnStyle(column)}
                     >
                       {totalsRow[column.key] ?? ''}
                     </TableCell>
