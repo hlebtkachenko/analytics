@@ -49,12 +49,20 @@
   text-align: end;
 }
 
-// Dim the body while stale rows load in overlay mode.
+// Veil the body and center a spinner while stale rows load in overlay mode.
 .overlay {
   position: absolute;
   inset: 0;
-  background: var(--cds-overlay);
   z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--cds-layer) 55%, transparent);
+}
+
+// Clip the loading skeleton to its column so wide grids do not overflow.
+.skeletonWrap {
+  overflow: hidden;
 }
 
 // Spacer rows reserve height for off-screen virtualized rows.

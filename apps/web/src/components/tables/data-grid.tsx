@@ -3,6 +3,7 @@
 import {
   DataTableSkeleton,
   InlineNotification,
+  Loading,
   OverflowMenuItem,
   Pagination,
   Table,
@@ -311,14 +312,17 @@ export function DataGrid(props: DataGridProps) {
   const showOverlay = state === 'loading' && loadingMode === 'overlay';
 
   // The skeleton stands in for the whole grid while first data loads.
+  // The wrapper clips it to the column so wide skeletons do not bleed out.
   if (state === 'loading' && loadingMode === 'skeleton') {
     return (
-      <DataTableSkeleton
-        columnCount={columnCount}
-        rowCount={Math.min(activePageSize, 8)}
-        showHeader={Boolean(title)}
-        showToolbar={showToolbar}
-      />
+      <div className={styles.skeletonWrap}>
+        <DataTableSkeleton
+          columnCount={columnCount}
+          rowCount={Math.min(activePageSize, 8)}
+          showHeader={Boolean(title)}
+          showToolbar={showToolbar}
+        />
+      </div>
     );
   }
 
@@ -396,7 +400,11 @@ export function DataGrid(props: DataGridProps) {
         ref={scrollRef}
         style={scrollMaxHeight ? { maxHeight: scrollMaxHeight } : undefined}
       >
-        {showOverlay && <div aria-hidden className={styles.overlay} />}
+        {showOverlay && (
+          <div className={styles.overlay} role="status">
+            <Loading description="Loading rows" small withOverlay={false} />
+          </div>
+        )}
         <Table
           aria-label={title ?? 'Data grid'}
           className={cx(

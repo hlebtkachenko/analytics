@@ -14,7 +14,8 @@ import { useMemo } from 'react';
 import type { CellValue, GridRow, PivotConfig, PivotGridProps } from './types';
 import styles from './pivot-grid.module.scss';
 
-const numberFormatter = new Intl.NumberFormat(undefined, {
+// Pin the locale so server and client render identical numbers (no hydration mismatch).
+const numberFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 1,
 });
 
