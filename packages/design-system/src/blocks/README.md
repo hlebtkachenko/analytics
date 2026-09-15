@@ -61,6 +61,10 @@ Everything is off by default; turn on only what the page needs.
   `pageSizes`. Server mode needs `page`, `totalItems`, `onPageChange`.
 - Rows: `rowNumbers`, `onRowClick`, `reorderableRows` (+
   `onRowReorder`/`onRowDrop`).
+- Actions: `toolbarActions` (persistent toolbar buttons such as a primary
+  create action; `kind` defaults to `primary`), `rowActions` (`(row) =>
+  RowAction[]` renders a trailing per-row overflow menu; `isDelete` marks the
+  danger item and sorts it last).
 - Columns: `columnMenu` (show/hide), `reorderableColumns` (drag headers),
   `resizableColumns` (drag edges), `persistKey` (saves order/width/visibility to
   localStorage).
