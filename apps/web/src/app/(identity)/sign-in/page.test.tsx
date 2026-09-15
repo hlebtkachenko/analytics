@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   getAuthPool: vi.fn(),
   publicSignupEnabled: vi.fn(),
   replace: vi.fn(),
+  searchParams: new URLSearchParams(),
   signIn: vi.fn(),
 }));
 
@@ -31,12 +32,24 @@ vi.mock('../../../lib/auth/client', () => ({
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: mocks.replace }),
+  useSearchParams: () => mocks.searchParams,
 }));
 
 afterEach(() => {
   cleanup();
+  mocks.searchParams = new URLSearchParams();
   vi.clearAllMocks();
 });
+
+function submitCredentials(): void {
+  fireEvent.change(screen.getByLabelText('Email address'), {
+    target: { value: 'owner@bap.invalid' },
+  });
+  fireEvent.change(screen.getByLabelText('Password'), {
+    target: { value: 'test-only-password' },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Sign in to BAP' }));
+}
 
 async function renderSignIn(publicSignup = true) {
   const pool = {};
@@ -49,15 +62,34 @@ describe('SignInPage', () => {
   it('continues to the access page after successful authentication', async () => {
     mocks.signIn.mockResolvedValue({ data: {}, error: null });
     await renderSignIn();
-    fireEvent.change(screen.getByLabelText('Email address'), {
-      target: { value: 'owner@bap.invalid' },
-    });
-    fireEvent.change(screen.getByLabelText('Password'), {
-      target: { value: 'test-only-password' },
-    });
-    fireEvent.submit(screen.getByRole('form', { name: 'Sign in to BAP' }));
+    submitCredentials();
 
     await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/access'));
+  });
+
+  it('returns to a safe same-origin next path after successful authentication', async () => {
+    mocks.searchParams = new URLSearchParams({
+      next: '/documents/analytics?organization=bap-operational',
+    });
+    mocks.signIn.mockResolvedValue({ data: {}, error: null });
+    await renderSignIn();
+    submitCredentials();
+
+    await waitFor(() =>
+      expect(mocks.replace).toHaveBeenCalledWith(
+        '/documents/analytics?organization=bap-operational',
+      ),
+    );
+  });
+
+  it('ignores a next path that leaves this origin', async () => {
+    mocks.searchParams = new URLSearchParams({ next: '//evil.example' });
+    mocks.signIn.mockResolvedValue({ data: {}, error: null });
+    await renderSignIn();
+    submitCredentials();
+
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/access'));
+    expect(mocks.replace).not.toHaveBeenCalledWith('//evil.example');
   });
 
   it('routes to the challenge when a second factor is pending', async () => {
@@ -66,18 +98,28 @@ describe('SignInPage', () => {
       error: null,
     });
     await renderSignIn();
-    fireEvent.change(screen.getByLabelText('Email address'), {
-      target: { value: 'owner@bap.invalid' },
-    });
-    fireEvent.change(screen.getByLabelText('Password'), {
-      target: { value: 'test-only-password' },
-    });
-    fireEvent.submit(screen.getByRole('form', { name: 'Sign in to BAP' }));
+    submitCredentials();
 
     await waitFor(() =>
       expect(mocks.replace).toHaveBeenCalledWith('/sign-in/two-factor'),
     );
     expect(mocks.replace).not.toHaveBeenCalledWith('/access');
+  });
+
+  it('carries a safe next path into the challenge', async () => {
+    mocks.searchParams = new URLSearchParams({ next: '/documents' });
+    mocks.signIn.mockResolvedValue({
+      data: { twoFactorMethods: ['totp'], twoFactorRedirect: true },
+      error: null,
+    });
+    await renderSignIn();
+    submitCredentials();
+
+    await waitFor(() =>
+      expect(mocks.replace).toHaveBeenCalledWith(
+        '/sign-in/two-factor?next=%2Fdocuments',
+      ),
+    );
   });
 
   it('shows the localized error and stays on the page after rejection', async () => {

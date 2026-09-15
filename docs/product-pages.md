@@ -19,6 +19,10 @@ mode. A page never adds its own header, navigation, `<main>`, or breadcrumb.
 Add `'use client'` only when the page has interactive state. Nested routes are
 ordinary App Router folders: `new/page.tsx`, `[documentId]/page.tsx`.
 
+The group layout also enforces the browser session and redirects an
+unauthenticated request to `/sign-in?next=<encoded path>`, so a page never reads
+or checks the session itself.
+
 ## 2. Render the body inside PageContainer
 
 ```tsx

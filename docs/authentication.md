@@ -71,6 +71,11 @@ header or UI shell:
 - `/activate` for the email-verification callback result
 - `/welcome` for the authenticated post-activation handoff
 
+Both sign-in steps accept an optional `next` parameter, and `safeReturnPath` in
+`apps/web/src/lib/auth/return-path.ts` honours it only when it is a same-origin
+path of at most 2048 characters that starts with a single slash and carries no
+scheme or backslash, otherwise the flow lands on `/access`.
+
 The sign-up page reads the switch through the server-only database boundary. The
 form remains available in every switch state: a true value shows public
 registration copy, while false or a failed read shows invitation-only guidance.
