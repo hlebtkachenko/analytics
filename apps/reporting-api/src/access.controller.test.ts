@@ -36,9 +36,11 @@ describe('AccessController', () => {
       capabilities: {
         createEntities: true,
         deleteEntities: false,
+        manageDocuments: true,
         manageEntityAccess: false,
         manageMembers: false,
         manageOrganization: false,
+        readDocuments: true,
         updateEntities: true,
         uploadData: true,
         useAi: true,

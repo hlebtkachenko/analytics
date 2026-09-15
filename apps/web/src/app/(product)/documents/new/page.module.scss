@@ -1,0 +1,16 @@
+@use '@bap/design-system/tokens/spacing.scss' as spacing;
+
+.partnerRow {
+  align-items: end;
+  display: flex;
+  gap: spacing.$spacing-05;
+}
+
+.partnerField {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+}
+
+.tableContainer {
+  min-inline-size: 0;
+}

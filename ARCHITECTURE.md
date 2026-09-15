@@ -6,8 +6,9 @@ BAP is organized as 3 independently deployable TypeScript applications plus a
 background-worker entrypoint behind Caddy with PostgreSQL 18 persistence. The
 platform implements identity, organization access, database isolation,
 observability, migration, backup, generic dataset ingestion and retrieval,
-streaming export, and bounded AI workflows. Business-domain schemas and
-analytics semantics remain out of scope.
+streaming export, bounded AI workflows, and a first business-domain schema: the
+documents register and its derived economic events. Broader analytics semantics
+remain out of scope.
 
 ## System context
 
@@ -38,7 +39,7 @@ C4Container
   Container_Boundary(bap, "Business Analytics Platform") {
     Container(caddy, "Ingress", "Caddy", "Terminates TLS and is the only public peer")
     Container(web, "Web application", "Next.js, Better Auth, Carbon", "Owns browser sessions, identity and organization pages, fixed BFF routes, and streaming chat")
-    Container(api, "Application API", "NestJS, JOSE", "Authorizes application access, stages uploads, and serves dataset lists, rows, and exports")
+    Container(api, "Application API", "NestJS, JOSE", "Authorizes application access, stages uploads, serves dataset lists, rows, and exports, and registers documents, partners, and derived economic events")
     Container(reporting, "Reporting API", "NestJS, JOSE", "Authorizes reporting access")
     Container(worker, "Background worker", "Node.js, pg-boss, @bap/ai", "Ingests datasets, summarizes metadata, and writes embeddings")
     ContainerDb(database, "Database", "PostgreSQL 18 with pgvector and pg-boss", "Stores identity, organization, dataset, vector, queue, audit, and migration state behind role and RLS boundaries")
@@ -60,12 +61,14 @@ C4Container
 ```
 
 The browser receives only opaque Better Auth cookies. Resource JWTs exist only
-inside the 13 fixed BFF-to-service route shapes: application access, legal
+inside the 23 fixed BFF-to-service route shapes: application access, legal
 entity list/create/update/delete, member entity-scope read/update, the bulk
-entity-scope read, upload, dataset list, dataset rows, dataset export, and
-reporting access. They contain `iss`, `aud`, `sub`, `iat`, and `exp`. The web
-route validates and allow-lists each upstream response or stream. No catch-all
-service proxy or browser Bearer-token flow exists.
+entity-scope read, upload, dataset list, dataset rows, dataset export, document
+list/create/read/update/delete, document link create/delete, partner
+list/create/update, the shared directive-account chart, and reporting access.
+They contain `iss`, `aud`, `sub`, `iat`, and `exp`. The web route validates and
+allow-lists each upstream response or stream. No catch-all service proxy or
+browser Bearer-token flow exists.
 
 The web-local chat route requires a verified session, resolves application
 access through the same fixed BFF boundary, and can optionally resolve one
@@ -132,6 +135,17 @@ field. `apps/web` mirrors every route through the BFF and adds
 capability, an owner-only entity scope editor on `/[orgSlug]/members`, and an
 entity scope switch plus upload entity selector on `/datasets`.
 
+Migration `20260914.0002` adds the documents register on the same tenancy shape:
+`app.document`, `app.invoice`, `app.invoice_line`, `app.economic_event`, and
+`app.economic_event_line` each carry `organization_id` for row level security
+and `legal_entity_id` pinned by a composite foreign key to
+`app.legal_entity(id, organization_id)`, exactly like `app.dataset` and
+`app.upload`. `app.partner` is organization-wide rather than entity-scoped,
+because the same counterparty can transact with several of an organization's
+legal entities, and `app.directive_account` carries no tenant column at all,
+because the shared chart of accounts is identical for every organization. See
+[documents](docs/documents.md) for the full model.
+
 ## Workspace dependency rules
 
 ```mermaid
@@ -173,7 +187,7 @@ owns the model-provider boundary. The web streaming chat route consumes it
 directly, and the worker entrypoint built from `apps/api` consumes it for
 dataset summarization and embedding.
 
-The client-only `@bap/design-system/icons` entrypoint is an exact 27-export
+The client-only `@bap/design-system/icons` entrypoint is an exact 29-export
 curated named facade, not a mirror of the full upstream icon module. Application
 code imports no `@carbon/icons-react` symbol directly. The generated catalog
 retains the complete installed upstream inventory for upgrade inspection, while
@@ -256,14 +270,14 @@ advances the reserved database and TypeScript slug contract through migration
 Authenticated `app/(product)` routes share a server layout that renders the
 client `ProductShell`, a Carbon UI Shell header branded "Afframe Analytics" over
 a pinned-persistable left icon rail for Access, Organizations, Datasets,
-Account, and a workspace section shown when an organization is active. Header
-actions open single-purpose panels for search, notifications, help, settings,
-workspace switching, and account, the last holding the light/dark/system theme
-control and sign out. The shell is not rendered around identity, invitation, or
-design-system reference routes. The layout owns the single `main-content`
-landmark and renders small Carbon breadcrumbs from the route segments, including
-subordinate organization pages and the inline dataset detail. The complete
-discoverability and state contract is recorded in
+Documents, Account, and a workspace section shown when an organization is
+active. Header actions open single-purpose panels for search, notifications,
+help, settings, workspace switching, and account, the last holding the
+light/dark/system theme control and sign out. The shell is not rendered around
+identity, invitation, or design-system reference routes. The layout owns the
+single `main-content` landmark and renders small Carbon breadcrumbs from the
+route segments, including subordinate organization pages and the inline dataset
+detail. The complete discoverability and state contract is recorded in
 [the application route map](docs/application-routes.md).
 
 The separately selected development and operational-proof Mailpit overlay adds 1
@@ -292,12 +306,21 @@ omits the overlay, and production mail continues through Resend on
 
 ## Deliberately deferred
 
-Business-domain tables, metric definitions, aggregation and transformation
-semantics, derived datasets, cross-dataset joins, dataset editing and
-versioning, custom roles, workspace deletion, cross-workspace queries, SSO,
-distributed caches or limits, OpenTelemetry, PDF export, billing, object
-storage, HA, registry publishing, and deployment automation require real owner
-or product requirements. Per-dataset sharing is superseded by legal-entity scope
-rather than deferred. See
+The documents register, described in [documents](docs/documents.md), is the
+first business-domain schema and is no longer deferred. Source adapters that
+import documents from Money S3, Pohoda, ISDOC, or a bank feed, table-driven rule
+overrides in place of the code-and-version-string rule set, a re-versioning
+endpoint for the document version chain, bank matching and settlement beyond the
+generic document link, and reporting-API reads of documents or economic events
+remain deferred; see [documents](docs/documents.md) for the full out-of-scope
+list.
+
+Metric definitions, aggregation and transformation semantics beyond derivation,
+derived datasets, cross-dataset joins, dataset editing and versioning, custom
+roles, workspace deletion, cross-workspace queries, SSO, distributed caches or
+limits, OpenTelemetry, PDF export, billing, object storage, HA, registry
+publishing, and deployment automation require real owner or product
+requirements. Per-dataset sharing is superseded by legal-entity scope rather
+than deferred. See
 [the approved SaaS foundation plan](docs/planning/saas-foundation.md) and
 [the platform batteries plan](docs/planning/platform-batteries.md).

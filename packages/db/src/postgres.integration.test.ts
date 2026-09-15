@@ -524,7 +524,7 @@ describe('PostgreSQL 18 isolation', () => {
         conname: 'organization_slug_reserved_check',
         convalidated: true,
         definition:
-          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text, 'organizations'::text])))",
+          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text, 'organizations'::text, 'documents'::text])))",
         table_name: 'organization',
       },
     ]);
@@ -1578,6 +1578,26 @@ describe('PostgreSQL 18 isolation', () => {
       {
         column_name: 'created_by',
         privilege_type: 'SELECT',
+        table_name: 'document',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'document',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'document_link',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'document_link',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
         table_name: 'legal_entity',
       },
       {
@@ -1614,6 +1634,16 @@ describe('PostgreSQL 18 isolation', () => {
         column_name: 'user_id',
         privilege_type: 'SELECT',
         table_name: 'member_entity_scope',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'partner',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'partner',
       },
     ]);
 

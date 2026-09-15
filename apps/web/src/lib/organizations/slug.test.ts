@@ -43,6 +43,7 @@ describe('organization slugs', () => {
       'welcome',
       'account',
       'organizations',
+      'documents',
     ]);
   });
 

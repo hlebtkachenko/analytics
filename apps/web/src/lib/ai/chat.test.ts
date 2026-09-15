@@ -73,9 +73,11 @@ const memberAccess = {
   capabilities: {
     createEntities: false,
     deleteEntities: false,
+    manageDocuments: false,
     manageEntityAccess: false,
     manageMembers: false,
     manageOrganization: false,
+    readDocuments: true,
     updateEntities: false,
     uploadData: false,
     useAi: true,

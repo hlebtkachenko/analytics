@@ -28,7 +28,7 @@ financial, operational, or development data.
 - Database access must go through `@bap/db`.
 - Service JWT and access contracts must go through `@bap/security`.
 - Application UI must import Carbon through `@bap/design-system`.
-- Application icons must use named exports from the exact curated 27-icon
+- Application icons must use named exports from the exact curated 29-icon
   `@bap/design-system/icons` facade, never `@carbon/icons-react` directly.
 - The design-system workbench must consume only public design-system
   entrypoints.
@@ -42,6 +42,12 @@ financial, operational, or development data.
   or breadcrumb. See [Building a product page](docs/development.md).
 - Adding a top-level application route must add its segment to the reserved
   organization slug contract in the same pull request.
+- Product pages render inside the product shell through `PageContainer` and
+  register navigation through `railDestinations`; follow `docs/product-pages.md`
+  and never re-create shell pieces.
+- Document data enters through the documents register in
+  `apps/api/src/documents` (see `docs/documents.md`); economic events are
+  derived by the rule set, never written by hand.
 
 ## Development
 
@@ -55,6 +61,8 @@ financial, operational, or development data.
 - Move unwanted repository files to `_junk/` instead of permanently deleting
   them.
 - Add tests for non-trivial changes and run the fastest meaningful gate.
+- Read `docs/product-pages.md` before adding a page and `docs/documents.md`
+  before touching document, partner or event tables.
 
 ## Commands
 

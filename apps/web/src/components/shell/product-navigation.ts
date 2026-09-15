@@ -1,24 +1,55 @@
+import {
+  DataSet,
+  Document,
+  Enterprise,
+  Security,
+  UserAvatar,
+} from '@bap/design-system/icons';
+import type { ComponentType } from 'react';
+
 // The AI Assistant area is a placeholder header item with no route yet.
 export const ASSISTANT_AREA_LABEL = 'AI Assistant';
 
-// The rail's whole-app destinations, all real routes; icons live at the callsite.
-export const railDestinations = [
-  { href: '/access', labelKey: 'shell.nav.access', route: 'access' },
+// Carbon icon components accept a Carbon artboard size and nothing the rail sets.
+type RailIcon = ComponentType<Readonly<{ size?: number }>>;
+
+export type RailDestination = Readonly<{
+  href: string;
+  icon: RailIcon;
+  label: string;
+  route: string;
+}>;
+
+export type WorkspaceSectionItem = Readonly<{
+  label: string;
+  segment: string;
+}>;
+
+// The rail's whole-app destinations, all real routes, rendered straight from this array.
+export const railDestinations: readonly RailDestination[] = [
+  { href: '/access', icon: Security, label: 'Access', route: 'access' },
   {
     href: '/organizations',
-    labelKey: 'shell.nav.organizations',
+    icon: Enterprise,
+    label: 'Organizations',
     route: 'organizations',
   },
-  { href: '/datasets', labelKey: 'shell.nav.datasets', route: 'datasets' },
-  { href: '/account', labelKey: 'shell.nav.account', route: 'account' },
-] as const;
+  { href: '/datasets', icon: DataSet, label: 'Datasets', route: 'datasets' },
+  {
+    href: '/documents',
+    icon: Document,
+    label: 'Documents',
+    route: 'documents',
+  },
+  { href: '/account', icon: UserAvatar, label: 'Account', route: 'account' },
+];
 
 // The workspace section links shown when an organization is active.
-export const workspaceSectionItems = [
-  { labelKey: 'shell.nav.members', segment: 'members' },
-  { labelKey: 'shell.nav.entities', segment: 'entities' },
-  { labelKey: 'shell.nav.settings', segment: 'settings' },
-] as const;
+export const workspaceSectionItems: readonly WorkspaceSectionItem[] = [
+  { label: 'Members', segment: 'members' },
+  { label: 'Entities', segment: 'entities' },
+  { label: 'Settings', segment: 'settings' },
+];
 
 // Classifies the current path into the active rail destination id.
 export function activeRoute(pathname: string): string | undefined {
@@ -26,9 +57,9 @@ export function activeRoute(pathname: string): string | undefined {
   if (first === undefined) {
     return undefined;
   }
-  if (first === 'access' || first === 'datasets' || first === 'account') {
-    return first;
-  }
-  // Organizations and every workspace slug belong to the Organizations section.
-  return 'organizations';
+  const destination = railDestinations.find(
+    (candidate) => candidate.route === first,
+  );
+  // Every workspace slug belongs to the Organizations section.
+  return destination?.route ?? 'organizations';
 }

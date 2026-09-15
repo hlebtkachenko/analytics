@@ -279,6 +279,8 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
     'Edit legal entities',
     'Delete legal entities',
     'Upload data',
+    'Read documents',
+    'Manage documents',
     'Ask the assistant',
   ]) {
     await authenticatedExpect(

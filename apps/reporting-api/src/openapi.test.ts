@@ -55,9 +55,11 @@ describe('reporting OpenAPI', () => {
     ).toEqual([
       'createEntities',
       'deleteEntities',
+      'manageDocuments',
       'manageEntityAccess',
       'manageMembers',
       'manageOrganization',
+      'readDocuments',
       'updateEntities',
       'uploadData',
       'useAi',

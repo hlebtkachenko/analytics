@@ -2,6 +2,7 @@
 
 ## Delivered and historical records
 
+- [Documents register and derived economic events](2026-09-14-documents-register.md)
 - [Product application layout](2026-09-14-product-application-layout.md)
 - [Account issuer column removal](2026-09-14-account-issuer-removal.md)
 - [Workspace legal entities](2026-09-10-workspace-legal-entities.md)

@@ -12,6 +12,8 @@ const expectedNames = [
   'Checkmark',
   'Close',
   'DataSet',
+  'Document',
+  'DocumentAdd',
   'Download',
   'Email',
   'Enterprise',

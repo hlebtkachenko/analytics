@@ -43,9 +43,11 @@ const legalEntities = {
 const capabilities = {
   createEntities: false,
   deleteEntities: false,
+  manageDocuments: false,
   manageEntityAccess: false,
   manageMembers: false,
   manageOrganization: false,
+  readDocuments: true,
   updateEntities: false,
   uploadData: true,
   useAi: true,

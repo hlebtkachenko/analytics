@@ -1,17 +1,43 @@
 export type Crumb = Readonly<{ current: boolean; href: string; label: string }>;
 
-// The module label for a top-level or descendant segment.
+// The module label for a top-level segment, and the label a shared descendant reuses.
 export const moduleLabels: Readonly<Record<string, string>> = {
   access: 'Access',
   account: 'Account',
   assistant: 'AI Assistant',
   datasets: 'Datasets',
+  documents: 'Documents',
   entities: 'Entities',
   members: 'Members',
-  new: 'Create organization',
   organizations: 'Organizations',
   settings: 'Settings',
 };
+
+// Child labels are scoped by their parent module, so `new` never reads the same
+// under two modules. Add the parent, then the child segment, to name one.
+const childLabels: Readonly<Record<string, Readonly<Record<string, string>>>> =
+  {
+    documents: { new: 'New document' },
+    organizations: { new: 'Create organization' },
+  };
+
+// The label an unknown child segment takes, so an opaque identifier never reaches the trail.
+const childFallbacks: Readonly<Record<string, string>> = {
+  documents: 'Document',
+};
+
+function segmentLabel(segment: string, parent: string | undefined): string {
+  const scoped =
+    parent === undefined ? undefined : childLabels[parent]?.[segment];
+  if (scoped !== undefined) {
+    return scoped;
+  }
+  return (
+    moduleLabels[segment] ??
+    (parent === undefined ? undefined : childFallbacks[parent]) ??
+    segment
+  );
+}
 
 // Builds the full breadcrumb trail from route segments. Route-group segments are
 // filtered out. The first segment is either a known module or a workspace slug.
@@ -53,7 +79,7 @@ export function buildTrail(
     crumbs.push({
       current: index === parts.length - 1,
       href,
-      label: moduleLabels[segment] ?? segment,
+      label: segmentLabel(segment, index === 0 ? undefined : parts[index - 1]),
     });
   }
 

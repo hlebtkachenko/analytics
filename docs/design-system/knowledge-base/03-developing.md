@@ -22,7 +22,7 @@ Use only the BAP facade:
 Do not deep-import Carbon implementation files. Only public BAP entrypoints are
 covered by upgrade tests.
 
-The icon entrypoint is the exact curated 27-export application set, not the full
+The icon entrypoint is the exact curated 29-export application set, not the full
 upstream namespace. Import only a reviewed icon that already has an application
 use. Add a new facade export and its call-site test together; applications never
 import `@carbon/icons-react` directly. The generated catalog, not this

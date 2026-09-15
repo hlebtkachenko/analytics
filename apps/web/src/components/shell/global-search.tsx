@@ -12,6 +12,7 @@ const stubResults = [
   { href: '/organizations', module: 'Organizations', title: 'Your workspaces' },
   { href: '/datasets', module: 'Datasets', title: 'Recent datasets' },
   { href: '/datasets', module: 'Datasets', title: 'Ingest a CSV or XLSX file' },
+  { href: '/documents', module: 'Documents', title: 'Document register' },
   { href: '/account', module: 'Account', title: 'Account settings' },
 ] as const;
 

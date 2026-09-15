@@ -16,6 +16,25 @@ export const datasetListSchema = z.object({
   datasets: z.array(datasetSummarySchema),
 });
 
+// Mirrors the access contract the BFF already validated, the one gate every product page reads.
+const organizationCapabilitiesSchema = z.object({
+  createEntities: z.boolean(),
+  deleteEntities: z.boolean(),
+  manageDocuments: z.boolean(),
+  manageEntityAccess: z.boolean(),
+  manageMembers: z.boolean(),
+  manageOrganization: z.boolean(),
+  readDocuments: z.boolean(),
+  updateEntities: z.boolean(),
+  uploadData: z.boolean(),
+  useAi: z.boolean(),
+});
+
+export const organizationAccessSchema = z.object({
+  capabilities: organizationCapabilitiesSchema,
+  organizationId: z.string().min(1),
+});
+
 // Mirrors the legal entity contract the BFF already validated.
 export const legalEntitySchema = z.object({
   createdAt: z.string().min(1),
@@ -64,6 +83,7 @@ export type DatasetRow = z.infer<typeof datasetRowSchema>;
 export type DatasetRowPage = z.infer<typeof datasetRowPageSchema>;
 export type DatasetSummary = z.infer<typeof datasetSummarySchema>;
 export type LegalEntity = z.infer<typeof legalEntitySchema>;
+export type OrganizationAccess = z.infer<typeof organizationAccessSchema>;
 
 // Well inside the 500 row ceiling the server refuses to exceed, and small enough to read.
 export const DATASET_PAGE_SIZE = 25;

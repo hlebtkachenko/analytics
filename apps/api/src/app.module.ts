@@ -8,6 +8,16 @@ import {
   DatabaseDatasetRepository,
   DatasetRepository,
 } from './datasets/dataset-repository.js';
+import { DocumentController } from './documents/document.controller.js';
+import {
+  DatabaseDocumentRepository,
+  DocumentRepository,
+} from './documents/document-repository.js';
+import { PartnerController } from './documents/partner.controller.js';
+import {
+  DatabasePartnerRepository,
+  PartnerRepository,
+} from './documents/partner-repository.js';
 import { HealthController } from './health.controller.js';
 import {
   IngestionQueue,
@@ -41,17 +51,21 @@ import {
   controllers: [
     AccessController,
     DatasetController,
+    DocumentController,
     EntityScopeController,
     HealthController,
     LegalEntityController,
     MetricsController,
+    PartnerController,
     ReadyController,
     UploadController,
   ],
   providers: [
     DatabaseDatasetRepository,
+    DatabaseDocumentRepository,
     DatabaseLegalEntityRepository,
     DatabaseMembershipResolver,
+    DatabasePartnerRepository,
     DatabaseUploadRepository,
     PgBossIngestionQueue,
     {
@@ -59,8 +73,16 @@ import {
       useExisting: DatabaseDatasetRepository,
     },
     {
+      provide: DocumentRepository,
+      useExisting: DatabaseDocumentRepository,
+    },
+    {
       provide: LegalEntityRepository,
       useExisting: DatabaseLegalEntityRepository,
+    },
+    {
+      provide: PartnerRepository,
+      useExisting: DatabasePartnerRepository,
     },
     {
       provide: IngestionQueue,

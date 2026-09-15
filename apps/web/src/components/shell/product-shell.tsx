@@ -2,12 +2,10 @@
 
 import {
   Close,
-  DataSet,
   Enterprise,
   Help,
   Notification,
   Search,
-  Security,
   Settings,
   Switcher,
   UserAvatar,
@@ -52,7 +50,12 @@ import {
   SettingsPanel,
   SwitcherPanel,
 } from './header-panels';
-import { activeRoute, ASSISTANT_AREA_LABEL } from './product-navigation';
+import {
+  activeRoute,
+  ASSISTANT_AREA_LABEL,
+  railDestinations,
+  workspaceSectionItems,
+} from './product-navigation';
 import styles from './product-shell.module.scss';
 import { ToastProvider, useToast } from './toast';
 import { largeViewportQuery, useMediaQuery } from './use-media-query';
@@ -125,6 +128,29 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
   function togglePanel(id: PanelId): void {
     setOpenPanel((current) => (current === id ? null : id));
   }
+
+  // The rail and the workspace section are rendered from the navigation arrays alone.
+  const railLinks = railDestinations.map((destination) => (
+    <SideNavLink
+      href={destination.href}
+      isActive={route === destination.route}
+      key={destination.route}
+      renderIcon={destination.icon}
+    >
+      {destination.label}
+    </SideNavLink>
+  ));
+  const workspaceLinks =
+    organization === undefined
+      ? null
+      : workspaceSectionItems.map((item) => (
+          <SideNavMenuItem
+            href={`/${organization.slug}/${item.segment}`}
+            key={item.segment}
+          >
+            {item.label}
+          </SideNavMenuItem>
+        ));
 
   return (
     <>
@@ -240,53 +266,18 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
             onOverlayClick={() => setMobileOpen(false)}
           >
             <SideNavItems>
-              <SideNavLink
-                href="/access"
-                isActive={route === 'access'}
-                renderIcon={Security}
-              >
-                Access
-              </SideNavLink>
-              <SideNavLink
-                href="/organizations"
-                isActive={route === 'organizations'}
-                renderIcon={Enterprise}
-              >
-                Organizations
-              </SideNavLink>
-              <SideNavLink
-                href="/datasets"
-                isActive={route === 'datasets'}
-                renderIcon={DataSet}
-              >
-                Datasets
-              </SideNavLink>
-              <SideNavLink
-                href="/account"
-                isActive={route === 'account'}
-                renderIcon={UserAvatar}
-              >
-                Account
-              </SideNavLink>
-              {organization ? (
+              {railLinks}
+              {organization === undefined ? null : (
                 <>
                   <SideNavDivider />
                   <SideNavMenu
                     renderIcon={Enterprise}
                     title={organization.name}
                   >
-                    <SideNavMenuItem href={`/${organization.slug}/members`}>
-                      Members
-                    </SideNavMenuItem>
-                    <SideNavMenuItem href={`/${organization.slug}/entities`}>
-                      Entities
-                    </SideNavMenuItem>
-                    <SideNavMenuItem href={`/${organization.slug}/settings`}>
-                      Settings
-                    </SideNavMenuItem>
+                    {workspaceLinks}
                   </SideNavMenu>
                 </>
-              ) : null}
+              )}
             </SideNavItems>
           </SideNav>
         </Header>
