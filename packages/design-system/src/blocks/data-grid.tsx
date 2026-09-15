@@ -21,7 +21,7 @@ import {
   TableToolbarContent,
   TableToolbarMenu,
   TableToolbarSearch,
-} from '@bap/design-system/react';
+} from '../react';
 import {
   useEffect,
   useMemo,

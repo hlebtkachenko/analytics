@@ -1,12 +1,16 @@
 # Table component blocks
 
-Canonical Carbon-based tables for the web app. **Reuse these. Do not hand-roll
-Carbon `DataTable`/`Table` markup in a page or component, and do not add another
-table library.** Every cube data-table and item-table variation is covered by
-one of the three components below plus props.
+BAP extension components built on Carbon primitives (not native Carbon). They
+live in the design system so both the app and the workbench can use them.
+**Reuse these. Do not hand-roll Carbon `DataTable`/`Table` markup in a page or
+component, and do not add another table library.** Every cube data-table and
+item-table variation is covered by one of the three components below plus props.
 
-Location: `apps/web/src/components/tables/`. Import directly, for example
-`import { DataGrid } from '../tables/data-grid'`.
+Location: `packages/design-system/src/blocks/`, published as the
+`@bap/design-system/blocks` entrypoint. Import from the entrypoint:
+`import { DataGrid } from '@bap/design-system/blocks'`. Synthetic demo data is at
+`@bap/design-system/blocks/fixtures`. The workbench shows all three under the
+**BAP Extensions** section, tagged `bap-extension`.
 
 ## When to use which
 
@@ -99,9 +103,10 @@ breadcrumbs, navigation) automatically. Do not hand-roll the grid/column layout;
 
 ```tsx
 // apps/web/src/app/(product)/reports/page.tsx
-import PageContainer from '../../../components/page-container';
-import { DataGrid } from '../../../components/tables/data-grid';
+import { DataGrid } from '@bap/design-system/blocks';
 import { Heading } from '@bap/design-system/react';
+
+import PageContainer from '../../../components/page-container';
 
 export default function ReportsPage() {
   return (
@@ -138,6 +143,6 @@ to see a variation before wiring it into a page.
   purpose so they stay within the facade contract.
 - Colors come from Carbon theme custom properties (`var(--cds-*)`), never raw
   hex.
-- These primitives are the only components allowed to use inline `style` in
-  product UI (they compute widths, pin offsets, and virtualization heights at
-  runtime); the ESLint rule exempts `src/components/tables/**` for that reason.
+- They use inline `style` for runtime widths, pin offsets, and virtualization
+  heights. The design-system ESLint config allows this; the product inline-style
+  ban applies only to app UI, which is why these live in the package.
