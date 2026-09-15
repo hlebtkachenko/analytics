@@ -215,10 +215,12 @@ export const treeColumns: readonly GridColumn[] = [
   { key: 'capacity', header: 'Capacity', align: 'end' },
 ];
 
-// Pivot source: dataset counts by steward and status.
+// Pivot source: dataset size and row count by steward and status.
 export const pivotConfig: PivotConfig = {
   rowDimension: 'steward',
   columnDimension: 'status',
-  measure: 'sizeMb',
-  aggregation: 'sum',
+  measures: [
+    { key: 'sizeMb', label: 'Size (MB)', aggregation: 'sum' },
+    { key: 'rows', label: 'Rows', aggregation: 'sum' },
+  ],
 };
