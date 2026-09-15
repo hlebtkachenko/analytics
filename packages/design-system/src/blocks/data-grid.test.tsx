@@ -124,6 +124,24 @@ describe('DataGrid', () => {
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: '1' }));
   });
 
+  it('expands a row to reveal its detail content', () => {
+    render(
+      <DataGrid
+        columns={columns}
+        renderRowDetail={(row) => <div>Detail for {String(row.name)}</div>}
+        rows={rows}
+      />,
+    );
+    expect(screen.queryByText('Detail for beta')).not.toBeInTheDocument();
+    const firstBodyRow = screen.getAllByRole('row')[1] as HTMLElement;
+    fireEvent.click(
+      within(firstBodyRow).getByRole('button', {
+        name: 'Toggle detail for row 1',
+      }),
+    );
+    expect(screen.getByText('Detail for beta')).toBeInTheDocument();
+  });
+
   it('shows the empty state when there are no rows', () => {
     render(<DataGrid columns={columns} emptyLabel="Nothing here" rows={[]} />);
     expect(screen.getByText('Nothing here')).toBeInTheDocument();

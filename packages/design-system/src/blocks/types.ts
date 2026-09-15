@@ -120,6 +120,8 @@ export type DataGridProps = Readonly<{
   onRowClick?: (row: GridRow) => void;
   // Per-row overflow menu; return the actions available for each row.
   rowActions?: (row: GridRow) => readonly RowAction[];
+  // Expandable detail; return the content shown when a row is expanded.
+  renderRowDetail?: (row: GridRow) => ReactNode;
   reorderableRows?: boolean;
   onRowReorder?: (fromId: string, toId: string) => void;
   onRowDrop?: (draggedId: string, targetId: string) => void;

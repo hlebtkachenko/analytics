@@ -65,6 +65,8 @@ Everything is off by default; turn on only what the page needs.
   create action; `kind` defaults to `primary`), `rowActions` (`(row) =>
   RowAction[]` renders a trailing per-row overflow menu; `isDelete` marks the
   danger item and sorts it last).
+- Detail rows: `renderRowDetail` (`(row) => ReactNode`) turns each row into a
+  Carbon expandable row that reveals the returned content when opened.
 - Columns: `columnMenu` (show/hide), `reorderableColumns` (drag headers),
   `resizableColumns` (drag edges), `persistKey` (saves order/width/visibility to
   localStorage).
@@ -97,6 +99,9 @@ Full types live in `types.ts`.
   a fixed presentation order.
 - `cellSelection` is a demo/inspection affordance; do not combine it with
   `onRowClick` (both consume the same clicks).
+- `renderRowDetail` replaces each row with a Carbon expand row; it takes over
+  row interaction, so do not also pass `onRowClick`, and do not combine it with
+  `reorderableRows` (drag on an expand row is untested).
 
 ## Putting a table on a real page
 

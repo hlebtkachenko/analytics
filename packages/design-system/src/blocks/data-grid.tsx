@@ -14,6 +14,9 @@ import {
   TableBody,
   TableCell,
   TableContainer,
+  TableExpandedRow,
+  TableExpandHeader,
+  TableExpandRow,
   TableHead,
   TableHeader,
   TableRow,
@@ -25,6 +28,7 @@ import {
   TableToolbarSearch,
 } from '../react';
 import {
+  Fragment,
   useEffect,
   useMemo,
   useRef,
@@ -131,6 +135,7 @@ export function DataGrid(props: DataGridProps) {
     rowNumbers = false,
     onRowClick,
     rowActions,
+    renderRowDetail,
     reorderableRows = false,
     onRowReorder,
     onRowDrop,
@@ -224,6 +229,17 @@ export function DataGrid(props: DataGridProps) {
   };
   const clearSelection = (): void => commitSelection(new Set());
 
+  // Expandable detail rows track their open ids independently of selection.
+  const expandable = typeof renderRowDetail === 'function';
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const toggleExpanded = (id: string): void =>
+    setExpandedRows((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   // Cell range selection spans the visible column grid.
   const {
     begin: beginCell,
@@ -297,7 +313,10 @@ export function DataGrid(props: DataGridProps) {
   };
 
   const hasRowActions = typeof rowActions === 'function';
-  const leadingCount = (selection !== 'none' ? 1 : 0) + (rowNumbers ? 1 : 0);
+  const leadingCount =
+    (expandable ? 1 : 0) +
+    (selection !== 'none' ? 1 : 0) +
+    (rowNumbers ? 1 : 0);
   const trailingCount = hasRowActions ? 1 : 0;
   const columnCount = leadingCount + visibleColumns.length + trailingCount;
 
@@ -487,6 +506,12 @@ export function DataGrid(props: DataGridProps) {
           >
             <TableHead>
               <TableRow>
+                {expandable && (
+                  <TableExpandHeader
+                    aria-label="Row detail"
+                    id="data-grid-expand"
+                  />
+                )}
                 {selection === 'multi' && (
                   <TableSelectAll
                     ariaLabel="Select all rows"
@@ -594,38 +619,8 @@ export function DataGrid(props: DataGridProps) {
                 renderRows.map((row, index) => {
                   // Page-aware absolute index so cell selection never leaks across pages.
                   const rowIndex = numberBase + index;
-                  return (
-                    <TableRow
-                      className={cx(onRowClick && styles.clickableRow)}
-                      draggable={reorderableRows}
-                      isSelected={selection !== 'none' && selected.has(row.id)}
-                      key={row.id}
-                      onClick={onRowClick ? () => onRowClick(row) : undefined}
-                      onDragOver={
-                        reorderableRows
-                          ? (event) => event.preventDefault()
-                          : undefined
-                      }
-                      onDragStart={
-                        reorderableRows
-                          ? () => {
-                              dragRow.current = row.id;
-                            }
-                          : undefined
-                      }
-                      onDrop={
-                        reorderableRows
-                          ? () => {
-                              if (dragRow.current) {
-                                onRowReorder?.(dragRow.current, row.id);
-                                onRowDrop?.(dragRow.current, row.id);
-                              }
-                              dragRow.current = null;
-                            }
-                          : undefined
-                      }
-                      style={virtualized ? { height: rowPx } : undefined}
-                    >
+                  const rowCells = (
+                    <>
                       {selection !== 'none' && (
                         <TableSelectRow
                           ariaLabel={`Select row ${row.id}`}
@@ -689,6 +684,66 @@ export function DataGrid(props: DataGridProps) {
                           />
                         </TableCell>
                       )}
+                    </>
+                  );
+
+                  // Detail rows swap the row for a Carbon expand/expanded pair.
+                  if (expandable) {
+                    return (
+                      <Fragment key={row.id}>
+                        <TableExpandRow
+                          aria-label={`Toggle detail for row ${row.id}`}
+                          expandHeader="data-grid-expand"
+                          isExpanded={expandedRows.has(row.id)}
+                          isSelected={
+                            selection !== 'none' && selected.has(row.id)
+                          }
+                          onExpand={() => toggleExpanded(row.id)}
+                        >
+                          {rowCells}
+                        </TableExpandRow>
+                        {expandedRows.has(row.id) && (
+                          <TableExpandedRow colSpan={columnCount}>
+                            {renderRowDetail?.(row)}
+                          </TableExpandedRow>
+                        )}
+                      </Fragment>
+                    );
+                  }
+
+                  return (
+                    <TableRow
+                      className={cx(onRowClick && styles.clickableRow)}
+                      draggable={reorderableRows}
+                      isSelected={selection !== 'none' && selected.has(row.id)}
+                      key={row.id}
+                      onClick={onRowClick ? () => onRowClick(row) : undefined}
+                      onDragOver={
+                        reorderableRows
+                          ? (event) => event.preventDefault()
+                          : undefined
+                      }
+                      onDragStart={
+                        reorderableRows
+                          ? () => {
+                              dragRow.current = row.id;
+                            }
+                          : undefined
+                      }
+                      onDrop={
+                        reorderableRows
+                          ? () => {
+                              if (dragRow.current) {
+                                onRowReorder?.(dragRow.current, row.id);
+                                onRowDrop?.(dragRow.current, row.id);
+                              }
+                              dragRow.current = null;
+                            }
+                          : undefined
+                      }
+                      style={virtualized ? { height: rowPx } : undefined}
+                    >
+                      {rowCells}
                     </TableRow>
                   );
                 })
@@ -705,6 +760,7 @@ export function DataGrid(props: DataGridProps) {
 
               {totalsRow && !isEmpty && (
                 <TableRow>
+                  {expandable && <TableCell />}
                   {selection !== 'none' && (
                     <TableCell className={selectClass} />
                   )}
