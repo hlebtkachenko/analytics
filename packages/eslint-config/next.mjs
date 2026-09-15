@@ -24,9 +24,6 @@ export default [
     files: ['src/app/(product)/**/*.tsx', 'src/components/**/*.tsx'],
     ignores: [
       'src/components/shell/**',
-      // Table primitives compute widths, pin offsets, and virtualization
-      // heights at runtime, so they need inline styles like the shell.
-      'src/components/tables/**',
       'src/app/(product)/(throwaway)/**',
       'src/app/(product)/account/**',
       '**/*.test.tsx',

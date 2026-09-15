@@ -1,6 +1,26 @@
 'use client';
 
 import {
+  DataGrid,
+  PivotGrid,
+  TreeDataGrid,
+  type BatchAction,
+  type DataGridProps,
+  type DensitySize,
+  type GridColumn,
+  type GridRow,
+  type GridState,
+  type LoadingMode,
+  type SelectionMode,
+} from '@bap/design-system/blocks';
+import {
+  datasetColumns,
+  infrastructureTree,
+  makeDatasetRows,
+  pivotConfig,
+  treeColumns,
+} from '@bap/design-system/blocks/fixtures';
+import {
   Column,
   Dropdown,
   Grid,
@@ -22,26 +42,6 @@ import {
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 
 import PageContainer from '../page-container';
-import { DataGrid } from '../tables/data-grid';
-import {
-  datasetColumns,
-  infrastructureTree,
-  makeDatasetRows,
-  pivotConfig,
-  treeColumns,
-} from '../tables/fixtures';
-import { PivotGrid } from '../tables/pivot-grid';
-import { TreeDataGrid } from '../tables/tree-data-grid';
-import type {
-  BatchAction,
-  DataGridProps,
-  DensitySize,
-  GridColumn,
-  GridRow,
-  GridState,
-  LoadingMode,
-  SelectionMode,
-} from '../tables/types';
 import styles from './tables-showcase.module.scss';
 
 const DENSITIES: readonly DensitySize[] = ['xs', 'sm', 'md', 'lg', 'xl'];

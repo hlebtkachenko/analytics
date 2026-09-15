@@ -5,6 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./blocks": "./src/blocks/index.ts",
+    "./blocks/fixtures": "./src/blocks/fixtures.ts",
     "./charts": "./src/charts.ts",
     "./charts.css": "./src/styles/charts.css",
     "./catalog": "./src/catalog.ts",

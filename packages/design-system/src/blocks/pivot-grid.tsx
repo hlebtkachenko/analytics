@@ -8,7 +8,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@bap/design-system/react';
+} from '../react';
 import { useMemo } from 'react';
 
 import type { CellValue, GridRow, PivotConfig, PivotGridProps } from './types';

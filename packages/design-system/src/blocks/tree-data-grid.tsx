@@ -10,7 +10,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@bap/design-system/react';
+} from '../react';
 
 import styles from './tree-data-grid.module.scss';
 import type { CellValue, TreeDataGridProps, TreeNode } from './types';
