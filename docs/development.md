@@ -174,14 +174,13 @@ strings, and tests, is [Adding a product page](product-pages.md). In short:
 - Consume Carbon through `@bap/design-system` and icons through the curated
   `@bap/design-system/icons` facade. Inline `style=` attributes are banned in
   product UI by ESLint; use CSS modules and semantic Carbon tokens.
-- For any table, reuse the primitives in `apps/web/src/components/tables/`
-  (`DataGrid`, `TreeDataGrid`, `PivotGrid`) instead of hand-rolling Carbon
-  `DataTable`. `DataGrid` turns every data-table variation (sorting, selection,
-  search, pagination, virtualization, column tools, totals, and loading, empty,
-  and error states) into props. See
-  [the tables README](../apps/web/src/components/tables/README.md). These
-  primitives are the one exception to the inline-style ban because they compute
-  widths, pin offsets, and virtualization heights at runtime.
+- For any table, reuse the `@bap/design-system/blocks` components (`DataGrid`,
+  `TreeDataGrid`, `PivotGrid`) instead of hand-rolling Carbon `DataTable`.
+  `DataGrid` turns every data-table variation (sorting, selection, search,
+  pagination, virtualization, column tools, totals, and loading, empty, and
+  error states) into props. They live in the design system so the workbench
+  shows them too, under **BAP Extensions**. See
+  [the blocks README](../packages/design-system/src/blocks/README.md).
 - Breadcrumbs are derived from the route segments by the layout. Give a new
   segment a human label in `moduleLabels` in
   `apps/web/src/components/shell/breadcrumb-trail.ts`.

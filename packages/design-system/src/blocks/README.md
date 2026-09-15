@@ -8,17 +8,17 @@ item-table variation is covered by one of the three components below plus props.
 
 Location: `packages/design-system/src/blocks/`, published as the
 `@bap/design-system/blocks` entrypoint. Import from the entrypoint:
-`import { DataGrid } from '@bap/design-system/blocks'`. Synthetic demo data is at
-`@bap/design-system/blocks/fixtures`. The workbench shows all three under the
+`import { DataGrid } from '@bap/design-system/blocks'`. Synthetic demo data is
+at `@bap/design-system/blocks/fixtures`. The workbench shows all three under the
 **BAP Extensions** section, tagged `bap-extension`.
 
 ## When to use which
 
-| Need                                                                                                                          | Component                                                                                       |
-| ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| A flat row list with any mix of sorting, selection, search, pagination, scrolling, virtualization, column tools, totals, etc. | `DataGrid` (`data-grid.tsx`)                                                                    |
-| Rows that expand into nested child rows (multi-level tree)                                                                    | `TreeDataGrid` (`tree-data-grid.tsx`)                                                           |
-| A crosstab that aggregates a measure across two dimensions                                                                    | `PivotGrid` (`pivot-grid.tsx`) — showcase only, product analytics stay deferred per `DESIGN.md` |
+| Need                                                                                                                          | Component                                                                                                  |
+| ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| A flat row list with any mix of sorting, selection, search, pagination, scrolling, virtualization, column tools, totals, etc. | `DataGrid` (`data-grid.tsx`)                                                                               |
+| Rows that expand into nested child rows (multi-level tree)                                                                    | `TreeDataGrid` (`tree-data-grid.tsx`)                                                                      |
+| A crosstab that aggregates one or more measures across two dimensions                                                         | `PivotGrid` (`pivot-grid.tsx`) — grouped headers for multiple measures; not wired to product analytics yet |
 
 `DataGrid` is the default. Reach for the other two only for their distinct row
 shapes. States (`ready`, `loading`, `empty`, `error`) are a `DataGrid` prop, not

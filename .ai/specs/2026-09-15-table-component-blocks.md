@@ -13,8 +13,9 @@ would hand-roll Carbon markup or add a grid library, and variations would drift.
 
 ## Scope
 
-Adds three application components under `apps/web/src/components/tables/` and a
-live showcase.
+Adds three components under `packages/design-system/src/blocks/`, exposed as the
+`@bap/design-system/blocks` entrypoint, plus a live app showcase and a workbench
+story.
 
 Does:
 
@@ -26,38 +27,44 @@ Does:
   row, footer, per-row visuals, column colors, and loading, empty, and error
   states.
 - `TreeDataGrid`, multi-level expandable rows.
-- `PivotGrid`, a single-measure client-side crosstab.
+- `PivotGrid`, a client-side crosstab of one or more measures, with grouped
+  column headers for multiple measures.
 - A showcase at `/design-system/tables` with a controls panel and a details
-  panel, rendered inside `PageContainer`.
+  panel, rendered inside `PageContainer`, and a workbench story under **BAP
+  Extensions** tagged `bap-extension`.
 
 Does not:
 
 - Wire any table to a real data source or product analytics surface.
-- Add multi-measure grouped-header pivots.
 - Give `TreeDataGrid` the full `DataGrid` toggle surface.
 - Add a new product route or reserved slug (the showcase reuses the
   already-reserved `design-system` segment).
 
 ## Design
 
-- Components render Carbon primitives from `@bap/design-system/react` and use
-  semantic theme tokens (`var(--cds-*)`) only. No new dependencies, no icons.
+- Components live in the design system so both the app and the workbench can
+  import them; they render Carbon primitives (via the relative `../react`
+  facade) and use semantic theme tokens (`var(--cds-*)`) only. No new
+  dependencies, no icons. The package ships source, like every other entrypoint;
+  a `*.module.scss` ambient type and a `ResizeObserver` test shim were added so
+  they typecheck and their tests run in the package.
 - Stateful concerns are isolated in hooks: `use-grid-sort`, `use-column-layout`
   (order, width, visibility, localStorage persistence), `use-virtual-window`
   (fixed-height windowing), `use-cell-selection` (rectangular range).
 - `types.ts` defines `GridColumn`, `GridRow`, and the `DataGridProps` toggle
-  surface. `fixtures.ts` holds neutral synthetic data (datasets, jobs, nodes).
+  surface. `fixtures.ts` holds neutral synthetic data (datasets, jobs, nodes),
+  exposed at `@bap/design-system/blocks/fixtures`.
 - Advanced features Carbon lacks are hand-rolled dependency-free: HTML5 drag for
   column and row reorder, pointer events for resize, `IntersectionObserver` for
   infinite scroll, fixed-height slicing for virtualization, sticky positioning
   for pinned columns.
 - Number formatting is pinned to `en-US` so server and client agree.
-- The ESLint config exempts `src/components/tables/**` from the product
-  inline-style ban, matching the shell, because the grid computes widths, pin
-  offsets, and virtualization heights at runtime.
+- The design-system ESLint config allows the runtime inline styles the grid
+  needs; the product inline-style ban never reaches the package.
 - Reuse is enforced by a boundary rule in the repository instructions; usage is
-  documented in `components/tables/README.md` and `docs/development.md`. The
-  decision is recorded in `docs/adr/0012-table-component-blocks.md`.
+  documented in `packages/design-system/src/blocks/README.md` and
+  `docs/development.md`. The decision is recorded in
+  `docs/adr/0012-table-component-blocks.md`.
 
 ## Security
 

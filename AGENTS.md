@@ -30,10 +30,10 @@ financial, operational, or development data.
 - Application UI must import Carbon through `@bap/design-system`.
 - Application icons must use named exports from the exact curated 29-icon
   `@bap/design-system/icons` facade, never `@carbon/icons-react` directly.
-- Application tables must reuse `apps/web/src/components/tables` (`DataGrid`,
-  `TreeDataGrid`, `PivotGrid`); never hand-roll Carbon `DataTable` markup or add
-  another table library. See
-  [its README](apps/web/src/components/tables/README.md).
+- Application tables must reuse the `@bap/design-system/blocks` components
+  (`DataGrid`, `TreeDataGrid`, `PivotGrid`); never hand-roll Carbon `DataTable`
+  markup or add another table library. See
+  [its README](packages/design-system/src/blocks/README.md).
 - The design-system workbench must consume only public design-system
   entrypoints.
 - Browser sessions and resource JWTs must never cross their documented boundary.
