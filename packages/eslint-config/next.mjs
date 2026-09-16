@@ -24,7 +24,6 @@ export default [
     files: ['src/app/(product)/**/*.tsx', 'src/components/**/*.tsx'],
     ignores: [
       'src/components/shell/**',
-      'src/app/(product)/(throwaway)/**',
       'src/app/(product)/account/**',
       '**/*.test.tsx',
     ],
@@ -46,7 +45,6 @@ export default [
       'src/app/(product)/**/not-found.tsx',
     ],
     ignores: [
-      'src/app/(product)/(throwaway)/**',
       'src/app/(product)/[[]orgSlug[]]/**',
       'src/app/(product)/account/**',
     ],
