@@ -257,16 +257,17 @@ remain id-only. The root route redirects to `/organizations`. The
 a narrow `@bap/db` membership accessor, shows a get-started checklist when
 empty, and lists pending invitations with accept and decline server actions; the
 create page renders a Carbon form with live slug validation and quota-gated
-creation. The first descendant `[orgSlug]` page and its descendants remain the
-deliberately plain Phase 10 organization loop, exposing navigation, members,
-pending invitations, and name/slug settings. Since ADR 0011 the legal entities
-page at `/[orgSlug]/entities` is a Carbon page that reads its list from the BFF
-and mutates by client fetch, so it is no longer part of that plain loop. Every
-plain-loop mutation is a server action which resolves the slug through the same
-member gate and supplies the resulting organization id to Better Auth; no
-browser-supplied id or ambient active organization selects a tenant.
+creation. The `[orgSlug]` landing page and `/[orgSlug]/settings` remain the
+deliberately plain Phase 10 organization loop, exposing navigation and name/slug
+settings. Since ADR 0011 the legal entities page at `/[orgSlug]/entities` and
+the members page at `/[orgSlug]/members` are Carbon pages that read from the BFF
+and Better Auth and mutate by client call, so they are no longer part of that
+plain loop. Every plain-loop mutation is a server action which resolves the slug
+through the same member gate and supplies the resulting organization id to
+Better Auth; no browser-supplied id or ambient active organization selects a
+tenant.
 
-These three `[orgSlug]` pages remain explicitly throwaway milestone UI. They use
+These two `[orgSlug]` pages remain explicitly throwaway milestone UI. They use
 semantic HTML, native forms, no page CSS, and no design-system import. The
 layout and shared slug resolver remain durable. Publishing the literal
 `/organizations` route advanced the reserved database and TypeScript slug

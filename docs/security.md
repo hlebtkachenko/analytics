@@ -433,23 +433,24 @@ protocol-relative-looking, and encoded-looking values reach only
 only the parsed or durable resolved slug; provider and database failures become
 generic messages and are not logged.
 
-The three `[orgSlug]` page modules retain the exact throwaway markers, plain
+The two `[orgSlug]` page modules retain the exact throwaway markers, plain
 native breadcrumbs, and zero CSS, design-system, or icon imports. A shared
 Carbon shell surrounds these authenticated routes without changing their
 server-action trust boundary. The `/organizations` list and create pages and the
-`/[orgSlug]/entities` page are now Carbon; the remaining Carbon `[orgSlug]` and
-account page content is future work.
+`/[orgSlug]/entities` and `/[orgSlug]/members` pages are now Carbon; the
+remaining Carbon `[orgSlug]` and account page content is future work.
 
 The UI mirrors the access control ADR 0011 added to the Better Auth organization
 plugin: only owners may update settings, invite, assign any of the three roles,
-remove a member, or edit an admin's or a member's entity scope. Admins and
-members are both read-only in this UI. Better Auth remains authoritative and
-independently refuses the same admin actions. Role and removal actions reread up
-to the configured 100-member limit and refuse a final-owner change in the
-temporary UI. That read followed by mutation is not atomic and does not repair
-Better Auth 1.7.2's direct endpoint gaps: its last-owner role check applies only
-to self-demotion and its removal check is bounded by `membershipLimit`. The
-approved plan leaves a global, race-safe solution as follow-up work.
+remove a member, cancel or resend an invitation, or edit an admin's or a
+member's entity scope. Admins and members are both read-only in this UI. Better
+Auth remains authoritative and independently refuses the same admin actions. The
+Carbon members page issues its invite, role, removal, and cancel mutations
+through client `authClient.organization.*` calls that each carry an explicit
+`organizationId`; Better Auth re-derives membership and permission from the
+session and owns the sole-owner invariant, refusing to remove the only owner or
+to let a sole owner self-demote, so the page no longer rereads the member list
+to guard that case.
 
 ## Account erasure boundary
 
