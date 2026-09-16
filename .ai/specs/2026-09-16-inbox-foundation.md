@@ -91,26 +91,31 @@ check runs), hashes it, enforces the existing size limit and the quota, inserts
 the `app.blob`, `app.inbox_item` and `inbox_item_file` rows in one transaction,
 then renames the file into its content-addressed path; on any failure the
 temporary file is deleted, so Phase 0 creates no orphan. The quota is a
-platform-wide `BLOB_QUOTA_BYTES_PER_ORGANIZATION` environment value checked
-against the sum of `blob.byte_size` for the organization. An existing blob with
-the same hash in the organization makes the new item `discarded` with
-`duplicate_of_item_id` set to the earlier item, issue `duplicate_exact` and an
-`inbox_event` with reason `duplicate`, reversible from the UI.
+platform-wide `BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION` environment value checked
+against the sum of `blob.byte_size` for the organization, and
+`BAP_BLOB_STORAGE_DIR` names the mounted volume path the filesystem
+implementation writes under. An existing blob with the same hash in the
+organization makes the new item `discarded` with `duplicate_of_item_id` set to
+the earlier item, issue `duplicate_exact` and an `inbox_event` with reason
+`duplicate`, reversible from the UI.
 
 `apps/api/src/inbox` holds the provider contract (Zod), the `sniff` provider
 (magic bytes, media type, XML root namespace, GPC header, tabular shape), the
 `manual` provider (validates a person's draft against the destination contract),
-the routing service and the controllers. Routing to Documents calls the existing
-documents service inside the same tenant transaction, sets `inbox_item_id` and
-`document_file`, and marks the item `routed` with `decided_by_kind = 'user'` and
-`decided_by_user_id`. Undo runs one transaction that first clears
-`inbox_item.document_id`, sets `status = needs_review` and appends an
-`inbox_event`, then calls the existing `DELETE .../documents/:documentId` path
-(the `@Delete` route in `document.controller.ts`); the `ON DELETE RESTRICT` FK
-refuses any other delete of a routed document, so a delete from the Documents
-page follows the same path (the document repository un-routes the item first).
-Routing target defaults are a code constant (`auto: never` for every type); the
-table arrives in Phase 1.
+the routing service and the controllers. `sniff` runs synchronously inside the
+intake transaction in Phase 0, so the upload response already carries the
+detected type and confidence; a post-commit pg-boss queue job is the Phase 1
+shape, once a provider needs I/O or an external call. Routing to Documents calls
+the existing documents service inside the same tenant transaction, sets
+`inbox_item_id` and `document_file`, and marks the item `routed` with
+`decided_by_kind = 'user'` and `decided_by_user_id`. Undo runs one transaction
+that first clears `inbox_item.document_id`, sets `status = needs_review` and
+appends an `inbox_event`, then calls the existing
+`DELETE .../documents/:documentId` path (the `@Delete` route in
+`document.controller.ts`); the `ON DELETE RESTRICT` FK refuses any other delete
+of a routed document, so a delete from the Documents page follows the same path
+(the document repository un-routes the item first). Routing target defaults are
+a code constant (`auto: never` for every type); the table arrives in Phase 1.
 
 Two blob routes. Download: `Content-Disposition: attachment`, `nosniff`, any
 media type. Inline: only when the sniffed media type is `application/pdf`,

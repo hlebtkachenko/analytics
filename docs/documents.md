@@ -58,6 +58,7 @@ policy, exactly as ADR 0011 describes for datasets.
 | `app.partner`             | Organization-wide counterparty, optionally naming one of the organization's own legal entities.                                                                                                                              |
 | `app.document`            | The uniform register: one row per document, every kind, per legal entity.                                                                                                                                                    |
 | `app.document_attribute`  | Free key/value pairs for kinds with no dedicated content table.                                                                                                                                                              |
+| `app.document_file`       | The originals behind a document, in order: `blob_id`, `position`, optional `page_from`/`page_to`. Added by the Inbox, see below.                                                                                             |
 | `app.invoice`             | Invoice content, one row per invoice kind document: dates, totals, signed `rounding_amount`, `advance_total`, generated `amount_due`.                                                                                        |
 | `app.invoice_line`        | Invoice lines: `line_kind` (`item` or `advance_deduction`), category, VAT mode, VAT rate, amounts, own tax point date, service period, activity code. A deduction line carries no category, no tax point date and no period. |
 | `app.economic_event`      | Derived, rebuildable debit/credit event, one current event per document.                                                                                                                                                     |
@@ -252,6 +253,44 @@ scope is checked on that path document.
 and `false`/`true` for `member`, matching every other write capability under ADR
 0011; a restricted member's scope does not change these booleans.
 
+### Inbox
+
+[ADR 0015](adr/0015-inbox-intake-model.md) makes the Inbox the single intake
+boundary in front of the register: everything from outside becomes an
+`app.inbox_item` first and is routed to a destination, documents included, by a
+rule or a person. Routing to Documents calls this same documents service inside
+one tenant transaction, sets `app.document.inbox_item_id` and inserts
+`app.document_file` rows for every item file, and marks the item `routed`. Undo
+reverses that: it clears `inbox_item.document_id`, sets the item back to
+`needs_review`, appends an `inbox_event`, then deletes the document through the
+same `DELETE .../documents/:documentId` path below, so a delete started from the
+Documents page also un-routes the item first; `ON DELETE RESTRICT` refuses any
+other delete of a routed document. `app.document.upload_id` and
+`app.document.content_hash` are dropped: a document's originals live in
+`app.document_file`, ordered `blob_id` rows pointing at the durable blob
+register, not a single upload reference or a duplicated content hash.
+
+Every route below is mounted under `organizations/:organizationId/...`, is
+versioned `v1`, and is guarded the same way as the document routes above; see
+[the inbox foundation spec](../.ai/specs/2026-09-16-inbox-foundation.md) and
+[the inbox plan](planning/inbox.md) for the full design.
+
+| Method | Path                                  | Capability        | Success | Failure                                          |
+| ------ | ------------------------------------- | ----------------- | ------- | ------------------------------------------------ |
+| POST   | `/inbox/uploads`                      | `manageDocuments` | 201     | 401, 403, 413 (quota refused, nothing stored)    |
+| GET    | `/inbox/items`                        | `readDocuments`   | 200     | 401, 403                                         |
+| GET    | `/inbox/items/:itemId`                | `readDocuments`   | 200     | 401, 403, 404                                    |
+| PATCH  | `/inbox/items/:itemId/hints`          | `manageDocuments` | 200     | 401, 403, 404                                    |
+| POST   | `/inbox/items/:itemId/process`        | `manageDocuments` | 200     | 401, 403, 404, 409 (already routed)              |
+| POST   | `/inbox/items/:itemId/route/document` | `manageDocuments` | 200     | 401, 403, 404, 409 (already routed)              |
+| POST   | `/inbox/items/:itemId/route/undo`     | `manageDocuments` | 200     | 401, 403, 404, 409 (not routed)                  |
+| POST   | `/inbox/items/:itemId/discard`        | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or already discarded) |
+| POST   | `/inbox/items/:itemId/restore`        | `manageDocuments` | 200     | 401, 403, 404, 409 (not discarded)               |
+| POST   | `/inbox/items/:itemId/assign`         | `manageDocuments` | 200     | 401, 403, 404                                    |
+| POST   | `/inbox/items/:itemId/snooze`         | `manageDocuments` | 200     | 401, 403, 404                                    |
+| GET    | `/inbox/blobs/:blobId/download`       | `readDocuments`   | 200     | 401, 403, 404                                    |
+| GET    | `/inbox/blobs/:blobId/inline`         | `readDocuments`   | 200     | 401, 403, 404, 415 (media type not inlineable)   |
+
 ## BFF and page routes
 
 The browser never calls `apps/api` directly. Every documents route above has a
@@ -351,7 +390,10 @@ the wall clock milliseconds they took.
 ## Out of scope
 
 - Source adapters that import documents from Money S3, Pohoda, ISDOC, or a bank
-  feed.
+  feed, and any AI or parser provider that would extract structure from an
+  uploaded file; the Inbox ([ADR 0015](adr/0015-inbox-intake-model.md)) is the
+  intake boundary they will land behind, see [the inbox plan](planning/inbox.md)
+  for that roadmap.
 - Table-driven rule overrides per organization or per legal entity; rules live
   in code, keyed only by `RULE_SET_VERSION`.
 - A re-versioning endpoint; the `version`, `supersedes_document_id`, and
@@ -360,8 +402,6 @@ the wall clock milliseconds they took.
 - Reporting API reads of documents or economic events.
 - A dedicated content table for `credit_note`; it is a register kind today with
   attribute-only content and derives no event.
-- A document kind for the advance tax document; a final invoice links to a
-  registered advance through `app.document_link` with kind `settles`.
 - Editing invoice content after creation; lines, advance deductions and rounding
   are create-time facts.
 - Dimension master tables; `activity_code` is a free normalised code.
