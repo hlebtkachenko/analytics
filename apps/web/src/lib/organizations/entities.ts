@@ -2,14 +2,11 @@ import { headers } from 'next/headers';
 
 import {
   accessResponseSchema,
-  entityScopeSchema,
   getLegalEntities,
-  getMemberEntityScope,
   getMemberEntityScopes,
   getOrganizationAccess,
   legalEntityListSchema,
   memberEntityScopeListSchema,
-  putMemberEntityScope,
 } from '../auth/bff';
 import type { EntityScope, LegalEntity, OrganizationAccess } from '../auth/bff';
 import { getAuth } from '../auth/server';
@@ -17,7 +14,6 @@ import {
   accessPath,
   entityScopesPath,
   legalEntitiesPath,
-  memberEntityScopePath,
 } from '../datasets/client';
 
 export type { EntityScope, LegalEntity, OrganizationAccess };
@@ -93,25 +89,6 @@ export async function readLegalEntities(
   return parsed.success ? parsed.data.legalEntities : null;
 }
 
-export async function readMemberEntityScope(
-  organizationId: string,
-  userId: string,
-): Promise<EntityScope | null> {
-  const response = await getMemberEntityScope(
-    await authApi(),
-    await serverBffRequest(memberEntityScopePath(organizationId, userId)),
-    organizationId,
-    userId,
-  );
-
-  if (!response.ok) {
-    return null;
-  }
-
-  const parsed = entityScopeSchema.safeParse(await response.json());
-  return parsed.success ? parsed.data : null;
-}
-
 // One read for the whole member list; a member without a stored row is unrestricted.
 export async function readMemberEntityScopes(
   organizationId: string,
@@ -133,20 +110,4 @@ export async function readMemberEntityScopes(
         parsed.data.entityScopes.map((row) => [row.userId, row.entityScope]),
       )
     : null;
-}
-
-export async function writeMemberEntityScope(
-  organizationId: string,
-  userId: string,
-  scope: EntityScope,
-): Promise<boolean> {
-  const path = memberEntityScopePath(organizationId, userId);
-  const response = await putMemberEntityScope(
-    await authApi(),
-    await serverBffRequest(path, { body: scope, method: 'PUT' }),
-    organizationId,
-    userId,
-  );
-
-  return response.ok;
 }
