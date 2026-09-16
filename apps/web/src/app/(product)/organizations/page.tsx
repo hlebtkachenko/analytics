@@ -53,6 +53,7 @@ export default async function OrganizationsPage() {
   }
 
   let invitations: InvitationRow[] = [];
+  let invitationsFailed = false;
   try {
     const pending = await auth.api.listUserInvitations({
       headers: requestHeaders,
@@ -64,13 +65,14 @@ export default async function OrganizationsPage() {
       expires: isoDate(invitation.expiresAt),
     }));
   } catch {
-    invitations = [];
+    invitationsFailed = true;
   }
 
   return (
     <PageContainer>
       <WorkspaceList
         invitations={invitations}
+        invitationsFailed={invitationsFailed}
         loadError={loadError}
         workspaces={workspaces}
       />

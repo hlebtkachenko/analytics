@@ -407,6 +407,7 @@ export const resources = {
           accept: 'Accept',
           acceptFailure: 'The invitation could not be accepted.',
           acceptSuccess: 'You joined the workspace.',
+          actions: 'Actions',
           columnExpires: 'Expires',
           columnRole: 'Role',
           columnWorkspace: 'Workspace',
@@ -414,6 +415,7 @@ export const resources = {
           declineFailure: 'The invitation could not be declined.',
           declineSuccess: 'The invitation was declined.',
           heading: 'Invitations for you',
+          loadError: 'Your invitations could not be loaded.',
         },
         list: {
           checklistAddEntity: 'Add a legal entity',

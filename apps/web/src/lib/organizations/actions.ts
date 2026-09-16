@@ -122,7 +122,10 @@ async function respondToInvitation(
   const input = invitationInputIdSchema.safeParse({
     invitationId: formValue(formData, 'invitationId'),
   });
-  let destination = resultPath('/organizations', 'error');
+  let destination = resultPath(
+    '/organizations',
+    decision === 'accept' ? 'accept-error' : 'decline-error',
+  );
 
   if (input.success) {
     try {

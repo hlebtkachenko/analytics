@@ -207,6 +207,24 @@ describe('organization server actions', () => {
     expect(JSON.stringify(mocks.redirect.mock.calls)).not.toContain('private');
   });
 
+  it('redacts a decline invitation response failure behind a fixed marker', async () => {
+    mocks.rejectInvitation.mockRejectedValue(
+      new Error('private invitation detail'),
+    );
+
+    await declineOrganizationInvitationAction(
+      form({ invitationId: 'invitation-1' }),
+    );
+
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      '/organizations?result=decline-error',
+    );
+    expect(JSON.stringify(mocks.redirect.mock.calls)).not.toContain(
+      'invitation-1',
+    );
+    expect(JSON.stringify(mocks.redirect.mock.calls)).not.toContain('private');
+  });
+
   it('rejects an unverified invitation response before any auth write', async () => {
     mocks.getSession.mockResolvedValue({
       user: { emailVerified: false, id: 'user-1' },

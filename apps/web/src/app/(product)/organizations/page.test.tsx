@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     throw new Error('NEXT_REDIRECT');
   }),
   replace: vi.fn(),
+  searchParams: new URLSearchParams(),
 }));
 
 vi.mock('@bap/db/access', () => ({
@@ -36,7 +37,7 @@ vi.mock('next/navigation', () => ({
     refresh: vi.fn(),
     replace: mocks.replace,
   }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => mocks.searchParams,
 }));
 
 import { I18nProvider } from '../../../i18n/client-provider';
@@ -57,6 +58,7 @@ afterEach(cleanup);
 describe('OrganizationsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.searchParams = new URLSearchParams();
     mocks.getSession.mockResolvedValue({
       user: { emailVerified: true, id: 'user-1' },
     });
@@ -129,4 +131,39 @@ describe('OrganizationsPage', () => {
     ).toBeVisible();
     expect(document.body).not.toHaveTextContent('private detail');
   });
+
+  it('does not show the invitations section when there are no invitations', async () => {
+    await renderPage();
+
+    expect(screen.queryByText('Invitations for you')).toBeNull();
+  });
+
+  it('shows an inline error when invitations fail to load', async () => {
+    mocks.listUserInvitations.mockRejectedValue(new Error('private detail'));
+
+    await renderPage();
+
+    expect(
+      screen.getByText('Your invitations could not be loaded.'),
+    ).toBeVisible();
+    expect(document.body).not.toHaveTextContent('private detail');
+  });
+
+  it.each([
+    ['accept-success', 'You joined the workspace.'],
+    ['accept-error', 'The invitation could not be accepted.'],
+    ['decline-success', 'The invitation was declined.'],
+    ['decline-error', 'The invitation could not be declined.'],
+  ])(
+    'turns ?result=%s into a toast and clears the marker',
+    async (result, text) => {
+      mocks.searchParams = new URLSearchParams({ result });
+
+      await renderPage();
+
+      expect(screen.getByText(text)).toBeVisible();
+      expect(mocks.replace).toHaveBeenCalledOnce();
+      expect(mocks.replace).toHaveBeenCalledWith('/organizations');
+    },
+  );
 });

@@ -31,9 +31,9 @@ export default async function NewOrganizationPage({
 
   const title = await translate('workspaces.create.title');
   const back = await translate('workspaces.create.back');
-  const quotaRemaining = (
-    await translate('workspaces.create.quotaRemaining')
-  ).replace('{{remaining}}', String(remaining));
+  const quotaRemaining = await translate('workspaces.create.quotaRemaining', {
+    remaining,
+  });
   const quotaExhausted = await translate('workspaces.create.quotaExhausted');
   const slugTaken = await translate('workspaces.create.slugTaken');
   const unavailable = await translate('workspaces.create.unavailable');

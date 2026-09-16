@@ -93,6 +93,23 @@ describe('NewOrganizationPage', () => {
     ).toBeVisible();
   });
 
+  it('replaces the form with the quota-exhausted marker even with remaining quota', async () => {
+    mocks.getOrganizationCreationQuota.mockResolvedValue({
+      attributedTotal: 1,
+      grantedTotal: 3,
+      remainingTotal: 2,
+    });
+
+    await renderPage('quota-exhausted');
+
+    expect(
+      screen.getByText('Workspace creation is not available for this account.'),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('form', { name: 'Create workspace' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('fails closed to zero when quota cannot be read', async () => {
     mocks.getOrganizationCreationQuota.mockRejectedValue(
       new Error('private database detail'),

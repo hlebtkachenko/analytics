@@ -2,10 +2,10 @@
 
 import { DataGrid } from '@bap/design-system/blocks';
 import type { GridColumn, GridRow } from '@bap/design-system/blocks';
-import { Button, Tile } from '@bap/design-system/react';
+import { Button, InlineNotification, Tile } from '@bap/design-system/react';
 import type { Route } from 'next';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useToast } from '../../../components/shell/toast';
@@ -13,6 +13,7 @@ import {
   acceptOrganizationInvitationAction,
   declineOrganizationInvitationAction,
 } from '../../../lib/organizations/actions';
+import styles from './workspace-list.module.scss';
 
 export type WorkspaceRow = Readonly<{
   id: string;
@@ -31,6 +32,7 @@ export type InvitationRow = Readonly<{
 
 type WorkspaceListProperties = Readonly<{
   invitations: readonly InvitationRow[];
+  invitationsFailed: boolean;
   loadError: boolean;
   workspaces: readonly WorkspaceRow[];
 }>;
@@ -57,6 +59,7 @@ const toastByResult = {
 
 export default function WorkspaceList({
   invitations,
+  invitationsFailed,
   loadError,
   workspaces,
 }: WorkspaceListProperties) {
@@ -65,12 +68,14 @@ export default function WorkspaceList({
   const searchParams = useSearchParams();
   const { notify } = useToast();
   const result = searchParams.get('result');
+  const notifiedResultRef = useRef<string | null>(null);
 
-  // Turn the redirect marker into a toast, then strip it so a reload does not repeat it.
+  // Turn the redirect marker into a toast once per marker, then strip it so a reload does not repeat it.
   useEffect(() => {
-    if (result === null) {
+    if (result === null || notifiedResultRef.current === result) {
       return;
     }
+    notifiedResultRef.current = result;
     const toast = toastByResult[result as keyof typeof toastByResult];
     if (toast !== undefined) {
       notify({ kind: toast.kind, title: t(toast.key) });
@@ -121,10 +126,10 @@ export default function WorkspaceList({
     { header: t('workspaces.invitations.columnRole'), key: 'role' },
     { header: t('workspaces.invitations.columnExpires'), key: 'expires' },
     {
-      header: '',
+      header: t('workspaces.invitations.actions'),
       key: 'actions',
       renderCell: (row) => (
-        <div>
+        <div className={styles.actionsRow}>
           <form action={acceptOrganizationInvitationAction}>
             <input name="invitationId" type="hidden" value={String(row.id)} />
             <Button kind="ghost" size="sm" type="submit">
@@ -152,6 +157,15 @@ export default function WorkspaceList({
   return (
     <>
       <h1>{t('workspaces.list.title')}</h1>
+      {invitationsFailed ? (
+        <InlineNotification
+          hideCloseButton
+          kind="error"
+          lowContrast
+          role="alert"
+          title={t('workspaces.invitations.loadError')}
+        />
+      ) : null}
       {loadError ? (
         <DataGrid
           columns={columns}
@@ -163,7 +177,8 @@ export default function WorkspaceList({
         />
       ) : workspaces.length === 0 ? (
         <Tile>
-          <h2>{t('workspaces.list.checklistTitle')}</h2>
+          <h2>{t('workspaces.list.emptyTitle')}</h2>
+          <h3>{t('workspaces.list.checklistTitle')}</h3>
           <ol>
             <li>{t('workspaces.list.checklistCreate')}</li>
             <li>{t('workspaces.list.checklistAddEntity')}</li>

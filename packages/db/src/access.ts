@@ -506,6 +506,7 @@ export async function listWorkspaceMemberships(
   const memberships: WorkspaceMembership[] = [];
   for (const row of result.rows) {
     const role = membershipRoleSchema.safeParse(row.role);
+    // Drop rows whose role fails the enum parse, consistent with resolveOrganizationRoute.
     if (!role.success) {
       continue;
     }

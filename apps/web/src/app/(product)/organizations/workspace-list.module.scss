@@ -1,0 +1,6 @@
+@use '@bap/design-system/tokens/spacing.scss' as spacing;
+
+.actionsRow {
+  display: flex;
+  gap: spacing.$spacing-03;
+}
