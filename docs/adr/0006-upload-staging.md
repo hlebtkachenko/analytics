@@ -1,6 +1,6 @@
 # ADR 0006: Upload Staging
 
-- Status: accepted
+- Status: superseded by [ADR 0014](0014-durable-blob-storage.md)
 - Date: 2026-08-30
 
 ## Context
