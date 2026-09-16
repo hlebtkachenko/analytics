@@ -45,7 +45,47 @@ export { createDatabasePool } from './pool.js';
 export type { CreateDatabasePoolOptions, DatabasePool } from './pool.js';
 export { bootstrapDatabaseRoles, getLoginRoles } from './role-bootstrap.js';
 export type { RolePasswords } from './role-bootstrap.js';
-export { schema } from './schema.js';
+export {
+  blobs,
+  blobScanStatuses,
+  documentFiles,
+  inboxChannelKinds,
+  inboxDecidedByKinds,
+  inboxDiscardReasons,
+  inboxEventKinds,
+  inboxEventReasons,
+  inboxEvents,
+  inboxItemExtractions,
+  inboxItemFiles,
+  inboxItems,
+  inboxItemStatuses,
+  inboxPayloadKinds,
+  inboxUnprocessableReasons,
+  schema,
+} from './schema.js';
+export type {
+  Blob,
+  BlobScanStatus,
+  DocumentFile,
+  InboxChannelKind,
+  InboxDecidedByKind,
+  InboxDiscardReason,
+  InboxEvent,
+  InboxEventKind,
+  InboxEventReason,
+  InboxItem,
+  InboxItemExtraction,
+  InboxItemFile,
+  InboxItemStatus,
+  InboxPayloadKind,
+  InboxUnprocessableReason,
+  NewBlob,
+  NewDocumentFile,
+  NewInboxEvent,
+  NewInboxItem,
+  NewInboxItemExtraction,
+  NewInboxItemFile,
+} from './schema.js';
 export {
   readEntityScope,
   runInTenantContext,

@@ -8,6 +8,7 @@ export const moduleLabels: Readonly<Record<string, string>> = {
   datasets: 'Datasets',
   documents: 'Documents',
   entities: 'Entities',
+  inbox: 'Inbox',
   members: 'Members',
   organizations: 'Organizations',
   settings: 'Settings',
@@ -24,6 +25,7 @@ const childLabels: Readonly<Record<string, Readonly<Record<string, string>>>> =
 // The label an unknown child segment takes, so an opaque identifier never reaches the trail.
 const childFallbacks: Readonly<Record<string, string>> = {
   documents: 'Document',
+  inbox: 'Item',
 };
 
 function segmentLabel(segment: string, parent: string | undefined): string {

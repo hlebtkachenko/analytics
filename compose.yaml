@@ -142,6 +142,8 @@ services:
       context: .
       dockerfile: docker/api.Dockerfile
     environment:
+      BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION: ${BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION:-1073741824}
+      BAP_BLOB_STORAGE_DIR: /var/lib/bap/blobs
       BAP_DATABASE_HOST: database
       BAP_DATABASE_NAME: ${POSTGRES_DB:-bap}
       BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
@@ -177,9 +179,10 @@ services:
     secrets:
       - source: bap_api_password
         target: /run/credentials/database-password
-    # The only writable surface shared with the worker; no other service may mount it.
+    # Staging is shared with the worker only; blobs are durable originals, backed up by restic.
     volumes:
       - upload_staging:/var/lib/bap/uploads
+      - blob_storage:/var/lib/bap/blobs
     cap_drop:
       - ALL
     security_opt:
@@ -236,6 +239,8 @@ services:
     command: ['node', 'dist/worker.js']
     environment:
       BAP_AI_PROVIDER_CONFIG_FILE: /run/credentials/ai-provider-config
+      BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION: ${BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION:-1073741824}
+      BAP_BLOB_STORAGE_DIR: /var/lib/bap/blobs
       BAP_DATABASE_HOST: database
       BAP_DATABASE_NAME: ${POSTGRES_DB:-bap}
       BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
@@ -275,9 +280,10 @@ services:
         target: /run/credentials/database-password
       - source: ai_provider_config
         target: /run/credentials/ai-provider-config
-    # The staged file the API wrote; the worker parses it and deletes it.
+    # The staged file the API wrote; the worker parses it and deletes it. Blobs are the durable originals.
     volumes:
       - upload_staging:/var/lib/bap/uploads
+      - blob_storage:/var/lib/bap/blobs
     cap_drop:
       - ALL
     security_opt:
@@ -402,8 +408,10 @@ services:
         target: /run/credentials/restic-password
       - source: restic_repository
         target: /run/credentials/restic-repository
+    # Backup reads every organization's originals and may never write them.
     volumes:
       - restic_repository_data:/repository
+      - blob_storage:/var/lib/bap/blobs:ro
     cap_drop:
       - ALL
     cap_add:
@@ -479,8 +487,10 @@ services:
         target: /run/credentials/restic-password
       - source: restic_repository
         target: /run/credentials/restic-repository
+    # Restore writes the snapshot's blobs back into the live volume.
     volumes:
       - restic_repository_data:/repository
+      - blob_storage:/var/lib/bap/blobs
     cap_drop:
       - ALL
     cap_add:
@@ -592,6 +602,7 @@ secrets:
     file: ${RESTIC_REPOSITORY_FILE:-.secrets/restic_repository}
 
 volumes:
+  blob_storage:
   caddy_config:
   caddy_data:
   postgres_data:

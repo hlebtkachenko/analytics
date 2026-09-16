@@ -156,12 +156,17 @@ jobs:
       - name: Prove backup, check, and restore
         shell: bash
         run: |
+          # The blob proof: a file written by the API user before backup, deleted, and present after restore.
+          docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml exec -T api sh -c 'umask 007 && mkdir -p /var/lib/bap/blobs/org/operational-proof && printf blob-proof > /var/lib/bap/blobs/org/operational-proof/backup-proof'
           docker compose --profile operations -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm backup-init
           docker compose --profile operations -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm backup
           docker compose --profile operations -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm backup-check
+          docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml exec -T api rm -r /var/lib/bap/blobs/org/operational-proof
           docker compose --profile operations -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml up --detach --wait restore-database
           docker compose --profile operations -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm restore-role-bootstrap
           docker compose --profile operations -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm --no-deps restore
+          restored_blob=$(docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml exec -T api cat /var/lib/bap/blobs/org/operational-proof/backup-proof)
+          test "$restored_blob" = blob-proof
           owner_memberships=$(printf '%s\n' "select count(*) from auth.member where organization_id = :'organization_id' and role = 'owner';" | docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml exec -T -u postgres restore-database psql -U postgres -d bap_restore -v ON_ERROR_STOP=1 -v organization_id="$BAP_OPERATIONAL_ORGANIZATION_ID" -tA)
           test "$owner_memberships" = 1
           initial_quota=$(printf '%s\n' "select count(*) from auth.organization_quota where user_id = :'user_id' and granted_total >= 1;" | docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml exec -T -u postgres restore-database psql -U postgres -d bap_restore -v ON_ERROR_STOP=1 -v user_id="$BAP_OPERATIONAL_USER_ID" -tA)

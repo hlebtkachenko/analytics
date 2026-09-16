@@ -28,5 +28,6 @@
   { "slug": "welcome", "valid": false },
   { "slug": "account", "valid": false },
   { "slug": "organizations", "valid": false },
-  { "slug": "documents", "valid": false }
+  { "slug": "documents", "valid": false },
+  { "slug": "inbox", "valid": false }
 ]

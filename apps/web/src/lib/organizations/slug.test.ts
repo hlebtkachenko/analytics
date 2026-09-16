@@ -44,6 +44,7 @@ describe('organization slugs', () => {
       'account',
       'organizations',
       'documents',
+      'inbox',
     ]);
   });
 

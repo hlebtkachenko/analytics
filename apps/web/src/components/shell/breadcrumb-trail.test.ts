@@ -36,6 +36,23 @@ describe('buildTrail', () => {
     ]);
   });
 
+  it('labels an inbox item by kind rather than by identifier', () => {
+    expect(
+      buildTrail([
+        '(product)',
+        'inbox',
+        '00000000-0000-4000-8000-000000000050',
+      ]),
+    ).toEqual([
+      { current: false, href: '/inbox', label: 'Inbox' },
+      {
+        current: true,
+        href: '/inbox/00000000-0000-4000-8000-000000000050',
+        label: 'Item',
+      },
+    ]);
+  });
+
   it('opens a workspace slug route with the organization it belongs to', () => {
     expect(
       buildTrail(['placeholder-holding', 'settings'], {

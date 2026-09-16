@@ -4,6 +4,8 @@ const DEFAULT_HOST = '0.0.0.0';
 const DEFAULT_PORT = 3001;
 const DEFAULT_PUBLIC_ORIGIN = 'http://localhost:3000';
 const DEFAULT_JWKS_URL = 'http://web:3000/api/auth/jwks';
+const DEFAULT_BLOB_STORAGE_DIRECTORY = '/var/lib/bap/blobs';
+const DEFAULT_BLOB_QUOTA_BYTES = 1_073_741_824;
 const httpUrlSchema = z
   .string()
   .url()
@@ -16,6 +18,10 @@ const httpUrlSchema = z
   });
 
 const runtimeConfigurationSchema = z.object({
+  blob: z.object({
+    quotaBytesPerOrganization: z.coerce.number().int().positive(),
+    storageDirectory: z.string().trim().min(1).startsWith('/'),
+  }),
   host: z.string().trim().min(1),
   issuer: httpUrlSchema,
   jwksUrl: httpUrlSchema,
@@ -33,6 +39,13 @@ export function loadRuntimeConfiguration(
   environment: NodeJS.ProcessEnv,
 ): RuntimeConfiguration {
   const result = runtimeConfigurationSchema.safeParse({
+    blob: {
+      quotaBytesPerOrganization:
+        environment.BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION ??
+        DEFAULT_BLOB_QUOTA_BYTES,
+      storageDirectory:
+        environment.BAP_BLOB_STORAGE_DIR ?? DEFAULT_BLOB_STORAGE_DIRECTORY,
+    },
     host: environment.HOST ?? DEFAULT_HOST,
     issuer: environment.BAP_PUBLIC_ORIGIN ?? DEFAULT_PUBLIC_ORIGIN,
     jwksUrl: environment.BAP_JWKS_URL ?? DEFAULT_JWKS_URL,

@@ -5,16 +5,17 @@
 `config/compose.environment.example` is the complete non-secret Compose input
 template. Copy it to an ignored file for local development.
 
-| Variable             | Purpose                                    | Development default      |
-| -------------------- | ------------------------------------------ | ------------------------ |
-| `WEB_PORT`           | Caddy host port                            | `3000`                   |
-| `POSTGRES_PORT`      | Loopback PostgreSQL host port              | `5432`                   |
-| `MAILPIT_HTTP_PORT`  | Unique loopback mail-inspection port       | `8025`                   |
-| `POSTGRES_DB`        | Database name                              | `bap`                    |
-| `BAP_PUBLIC_HOST`    | Caddy site address                         | `http://localhost`       |
-| `BAP_PUBLIC_ORIGIN`  | Exact Better Auth issuer and public origin | `http://localhost:3000`  |
-| `BAP_MAIL_SENDER`    | From address for transactional mail        | `no-reply@bap.localhost` |
-| `BAP_MAIL_TRANSPORT` | Explicit `resend`, `smtp`, or `log` mode   | `smtp` in development    |
+| Variable                                | Purpose                                                    | Development default      |
+| --------------------------------------- | ---------------------------------------------------------- | ------------------------ |
+| `WEB_PORT`                              | Caddy host port                                            | `3000`                   |
+| `POSTGRES_PORT`                         | Loopback PostgreSQL host port                              | `5432`                   |
+| `MAILPIT_HTTP_PORT`                     | Unique loopback mail-inspection port                       | `8025`                   |
+| `POSTGRES_DB`                           | Database name                                              | `bap`                    |
+| `BAP_PUBLIC_HOST`                       | Caddy site address                                         | `http://localhost`       |
+| `BAP_PUBLIC_ORIGIN`                     | Exact Better Auth issuer and public origin                 | `http://localhost:3000`  |
+| `BAP_MAIL_SENDER`                       | From address for transactional mail                        | `no-reply@bap.localhost` |
+| `BAP_MAIL_TRANSPORT`                    | Explicit `resend`, `smtp`, or `log` mode                   | `smtp` in development    |
+| `BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION` | Platform-wide byte quota per organization for stored blobs | `1073741824`             |
 
 `BAP_PUBLIC_ORIGIN` must be an origin without a path. It is never a
 `NEXT_PUBLIC_*` value. Production accepts HTTPS origins, with plain HTTP
@@ -26,6 +27,12 @@ overlay sets the matching local origin from `WEB_PORT`. Select
 `compose.mailpit.yaml` explicitly for local mail delivery and inspection.
 `MAILPIT_HTTP_PORT` may be any integer from 1 through 65535, but it cannot equal
 the web or PostgreSQL host port.
+
+`BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION` is a positive integer of bytes. The
+application API refuses an upload that would take the sum of an organization's
+`app.blob.byte_size` above it, before any byte is committed
+([ADR 0014](adr/0014-durable-blob-storage.md)). There is no per-organization
+override in Phase 0.
 
 ## Runtime configuration
 
@@ -42,7 +49,16 @@ paths. These are internal runtime values, not user configuration.
   runtime input or credential.
 - Application and reporting APIs use `BAP_DATABASE_*`, `BAP_JWKS_URL`, and
   `BAP_PUBLIC_ORIGIN`. The application API also uses `BAP_UPLOAD_STAGING_DIR`,
-  which must name the mounted upload staging volume.
+  which must name the mounted upload staging volume, `BAP_BLOB_STORAGE_DIR`,
+  which must name the mounted `blob_storage` volume (`/var/lib/bap/blobs`), and
+  `BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION`. Blob keys are
+  `org/<organization_id>/<sha256>` under that directory. The volume root is
+  owned by the API user with group `999` and the setgid bit, and the `BlobStore`
+  must create directories with mode `0770` and files with mode `0660` (Node
+  masks a requested mode with the process umask, so set the umask to `0007` or
+  `chmod` after creation): the backup and restore one-shots run as UID `999`
+  with no capabilities, and only group access lets them read every original and
+  lets the API keep writing into a restored prefix.
 - Owner bootstrap runs the same web image and therefore builds the same auth
   instance. Its primary database path remains `bap_auth`, while the profiled
   one-shot also receives `BAP_MIGRATOR_PASSWORD_FILE` at a separate mount only
@@ -52,8 +68,10 @@ paths. These are internal runtime values, not user configuration.
   migrator variable or mount. `BAP_RESEND_API_KEY_FILE` is required only for the
   `resend` transport.
 - The worker uses `BAP_DATABASE_*` as `bap_api` plus
-  `BAP_AI_PROVIDER_CONFIG_FILE` and `BAP_UPLOAD_STAGING_DIR`, and serves health,
-  readiness, and metrics on its own internal port.
+  `BAP_AI_PROVIDER_CONFIG_FILE`, `BAP_UPLOAD_STAGING_DIR`, and the same
+  `BAP_BLOB_STORAGE_DIR` and `BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION` as the
+  application API, and serves health, readiness, and metrics on its own internal
+  port.
 - Web listens on `PORT` with `HOSTNAME`; Nest services validate `PORT` and
   `HOST` at startup.
 - Caddy provides the only public application port and replaces client identity
