@@ -1,12 +1,12 @@
-// Throwaway milestone 2 UI: delete when the Carbon organization screens land.
-
 import { getOrganizationCreationQuota } from '@bap/db/access';
-import Link from 'next/link';
+import { Button, InlineNotification } from '@bap/design-system/react';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
-import { getAuth, getAuthPool } from '../../../../../lib/auth/server';
-import OrganizationForm from './organization-form';
+import PageContainer from '../../../../components/page-container';
+import { translate } from '../../../../i18n/server';
+import { getAuth, getAuthPool } from '../../../../lib/auth/server';
+import WorkspaceForm from './workspace-form';
 
 export default async function NewOrganizationPage({
   searchParams,
@@ -26,23 +26,53 @@ export default async function NewOrganizationPage({
     await getAuthPool(),
     session.user.id,
   ).catch(() => null);
+  const remaining = quota?.remainingTotal ?? 0;
   const { result } = await searchParams;
 
+  const title = await translate('workspaces.create.title');
+  const back = await translate('workspaces.create.back');
+  const quotaRemaining = (
+    await translate('workspaces.create.quotaRemaining')
+  ).replace('{{remaining}}', String(remaining));
+  const quotaExhausted = await translate('workspaces.create.quotaExhausted');
+  const slugTaken = await translate('workspaces.create.slugTaken');
+  const unavailable = await translate('workspaces.create.unavailable');
+
   return (
-    <>
-      <h1>Create organization</h1>
-      <p>
-        <Link href="/organizations">Back to organizations</Link>
-      </p>
-      <p>Remaining creation quota: {quota?.remainingTotal ?? 0}</p>
-      {result === 'error' ? (
-        <p role="alert">The organization could not be created.</p>
+    <PageContainer>
+      <h1>{title}</h1>
+      <Button href="/organizations" kind="ghost">
+        {back}
+      </Button>
+      <p>{quotaRemaining}</p>
+      {result === 'slug-taken' ? (
+        <InlineNotification
+          hideCloseButton
+          kind="error"
+          lowContrast
+          role="alert"
+          title={slugTaken}
+        />
       ) : null}
-      {(quota?.remainingTotal ?? 0) === 0 ? (
-        <p>Organization creation is not available for this account.</p>
+      {result === 'error' ? (
+        <InlineNotification
+          hideCloseButton
+          kind="error"
+          lowContrast
+          role="alert"
+          title={unavailable}
+        />
+      ) : null}
+      {remaining === 0 || result === 'quota-exhausted' ? (
+        <InlineNotification
+          hideCloseButton
+          kind="warning"
+          lowContrast
+          title={quotaExhausted}
+        />
       ) : (
-        <OrganizationForm initialName={session.user.name} />
+        <WorkspaceForm initialName={session.user.name} />
       )}
-    </>
+    </PageContainer>
   );
 }

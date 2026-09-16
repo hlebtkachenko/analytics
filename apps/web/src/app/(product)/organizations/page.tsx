@@ -1,10 +1,24 @@
-// Throwaway milestone 2 UI: delete when the Carbon organization screens land.
-
-import Link from 'next/link';
+import { listWorkspaceMemberships } from '@bap/db/access';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
-import { getAuth } from '../../../../lib/auth/server';
+import PageContainer from '../../../components/page-container';
+import { getAuth, getAuthPool } from '../../../lib/auth/server';
+import WorkspaceList from './workspace-list';
+import type { InvitationRow, WorkspaceRow } from './workspace-list';
+
+// Better Auth stores an invitation with several roles as one comma-joined string.
+function invitationRole(role: string): string {
+  return role
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .join(', ');
+}
+
+function isoDate(value: Date | string): string {
+  return new Date(value).toISOString().slice(0, 10);
+}
 
 export default async function OrganizationsPage() {
   const auth = await getAuth().catch(() => null);
@@ -20,36 +34,46 @@ export default async function OrganizationsPage() {
     redirect('/sign-in');
   }
 
-  let organizations: Awaited<ReturnType<typeof auth.api.listOrganizations>> =
-    [];
-  let failed = false;
+  let workspaces: WorkspaceRow[] = [];
+  let loadError = false;
   try {
-    organizations = await auth.api.listOrganizations({
+    const memberships = await listWorkspaceMemberships(
+      await getAuthPool(),
+      session.user.id,
+    );
+    workspaces = memberships.map((membership) => ({
+      id: membership.id,
+      name: membership.name,
+      slug: membership.slug,
+      role: membership.role,
+      created: isoDate(membership.createdAt),
+    }));
+  } catch {
+    loadError = true;
+  }
+
+  let invitations: InvitationRow[] = [];
+  try {
+    const pending = await auth.api.listUserInvitations({
       headers: requestHeaders,
     });
+    invitations = pending.map((invitation) => ({
+      id: invitation.id,
+      organizationName: invitation.organizationName,
+      role: invitationRole(invitation.role),
+      expires: isoDate(invitation.expiresAt),
+    }));
   } catch {
-    failed = true;
+    invitations = [];
   }
 
   return (
-    <>
-      <h1>Organizations</h1>
-      <p>
-        <Link href="/organizations/new">Create organization</Link>
-      </p>
-      {failed ? <p role="alert">Organizations could not be loaded.</p> : null}
-      {!failed && organizations.length === 0 ? (
-        <p>You are not a member of an organization.</p>
-      ) : null}
-      {organizations.length > 0 ? (
-        <ul aria-label="Organizations">
-          {organizations.map((organization) => (
-            <li key={organization.id}>
-              <Link href={`/${organization.slug}`}>{organization.name}</Link>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </>
+    <PageContainer>
+      <WorkspaceList
+        invitations={invitations}
+        loadError={loadError}
+        workspaces={workspaces}
+      />
+    </PageContainer>
   );
 }

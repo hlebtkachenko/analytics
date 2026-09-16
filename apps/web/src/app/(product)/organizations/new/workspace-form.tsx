@@ -1,22 +1,33 @@
 'use client';
 
+import { Button, Form, Stack, TextInput } from '@bap/design-system/react';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
-import { createOrganizationAction } from '../../../../../lib/organizations/actions';
-import { normalizeOrganizationSlug } from '../../../../../lib/organizations/slug';
+import { createOrganizationAction } from '../../../../lib/organizations/actions';
+import {
+  normalizeOrganizationSlug,
+  organizationSlugSchema,
+} from '../../../../lib/organizations/slug';
 
-export default function OrganizationForm({
+export default function WorkspaceForm({
   initialName,
 }: Readonly<{ initialName: string }>) {
+  const { t } = useTranslation();
   const [name, setName] = useState(initialName);
   const [slug, setSlug] = useState(normalizeOrganizationSlug(initialName));
 
+  const slugValid = organizationSlugSchema.safeParse(slug).success;
+
   return (
-    <form action={createOrganizationAction} aria-label="Create organization">
-      <p>
-        <label htmlFor="organization-name">Name</label>
-        <input
-          id="organization-name"
+    <Form
+      action={createOrganizationAction}
+      aria-label={t('workspaces.create.title')}
+    >
+      <Stack gap={6}>
+        <TextInput
+          id="workspace-name"
+          labelText={t('workspaces.create.nameLabel')}
           name="name"
           onChange={(event) => {
             const nextName = event.target.value;
@@ -26,22 +37,22 @@ export default function OrganizationForm({
           required
           value={name}
         />
-      </p>
-      <p>
-        <label htmlFor="organization-slug">Slug</label>
-        <input
+        <TextInput
           autoComplete="off"
-          id="organization-slug"
-          maxLength={20}
-          minLength={3}
+          helperText={t('workspaces.create.urlPreview', { url: `/${slug}` })}
+          id="workspace-slug"
+          invalid={slug.length > 0 && !slugValid}
+          invalidText={t('workspaces.create.slugInvalid')}
+          labelText={t('workspaces.create.slugLabel')}
           name="slug"
           onChange={(event) => setSlug(event.target.value)}
-          pattern="[a-z0-9]+(?:-[a-z0-9]+)*"
           required
           value={slug}
         />
-      </p>
-      <button type="submit">Create organization</button>
-    </form>
+        <Button disabled={!slugValid} type="submit">
+          {t('workspaces.create.submit')}
+        </Button>
+      </Stack>
+    </Form>
   );
 }
