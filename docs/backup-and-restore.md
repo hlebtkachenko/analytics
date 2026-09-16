@@ -20,8 +20,13 @@ place.
 
 `backup` streams
 `pg_dump --format=custom --no-owner --no-acl --exclude-extension=vector`
-directly into restic stdin as `bap.dump`. It connects only as `bap_backup`.
+directly into restic stdin as `bap.dump`, then takes a second snapshot of the
+`blob_storage` volume mounted read-only at `/var/lib/bap/blobs`, in the same
+run. The database snapshot carries the tag `database` and the blob snapshot the
+tag `blobs`, so `latest` resolves per source. It connects only as `bap_backup`.
 Repository checks and retention pruning receive no database credential.
+`backup-prune` groups snapshots by path, so each source keeps its own daily
+history.
 
 pgvector is excluded from the dump on purpose. It is an untrusted extension, so
 only the superuser can install it and only the superuser owns it. A dumped
@@ -34,7 +39,18 @@ bootstrap is therefore unsupported.
 Restore starts a separate PostgreSQL 18 database and runs isolated role
 bootstrap. It then streams the selected restic snapshot to `pg_restore` while
 connected as `bap_migrator` with `--role=bap_owner`. It never targets the live
-database service.
+database service. In the same run it restores the `blobs` snapshot into the
+`blob_storage` volume, which it mounts read-write at `/var/lib/bap/blobs`: there
+is one blob volume, so restore writes into the live one. Blob keys are content
+hashes, so a file that is already present is identical and left in place, and
+only missing files come back. `RESTIC_SNAPSHOT` selects the database snapshot
+and `RESTIC_BLOB_SNAPSHOT` the blob snapshot; both default to `latest`.
+
+The restore one-shot runs as UID 999 with zero capabilities and cannot change
+ownership, so the blob volume root is owned by the API user with group 999 and
+the setgid bit, and the API writes directories with mode `0770` and files with
+mode `0660`. Backup reads every original through that group and the API keeps
+write access to a restored prefix through the same group.
 
 ## Credential isolation
 
@@ -70,6 +86,22 @@ target, and verifies one restored owner membership plus the current migration
 identifier. Disposable backup and migrator passwords contain both `:` and `\` so
 the proof also exercises PostgreSQL passfile escaping. This proves the commands
 and role boundaries only.
+
+The blob proof in the same workflow writes a file into the volume as the API
+user before `backup`, deletes it after `backup-check`, and reads it back through
+the API container after `restore`. To repeat it by hand against a local stack:
+
+```sh
+docker compose -f compose.yaml -f compose.development.yaml exec -T api sh -c 'umask 007 && mkdir -p /var/lib/bap/blobs/org/proof && printf blob-proof > /var/lib/bap/blobs/org/proof/backup-proof'
+docker compose --profile operations -f compose.yaml -f compose.development.yaml run --rm backup
+docker compose -f compose.yaml -f compose.development.yaml exec -T api rm -r /var/lib/bap/blobs/org/proof
+docker compose --profile operations -f compose.yaml -f compose.development.yaml run --rm --no-deps restore
+docker compose -f compose.yaml -f compose.development.yaml exec -T api cat /var/lib/bap/blobs/org/proof/backup-proof
+docker compose -f compose.yaml -f compose.development.yaml exec -T api rm -r /var/lib/bap/blobs/org/proof
+```
+
+The last `cat` prints `blob-proof`. The `restore` run needs the restore database
+and its role bootstrap from the command list above.
 
 Authenticated off-host storage, TLS or host-key trust, scheduling, retention,
 alerts, off-host durability, Caddy state backup, RPO, RTO, and monthly restore

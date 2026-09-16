@@ -194,6 +194,62 @@ for (const service of ['api', 'worker']) {
   );
 }
 
+// Blobs are every organization's originals, so the member set and each mode is a contract.
+const blobStorageTarget = '/var/lib/bap/blobs';
+const blobStorageModes = {
+  api: 'rw',
+  backup: 'ro',
+  restore: 'rw',
+  worker: 'rw',
+};
+const blobStorageMounts = Object.entries(configuration.services).flatMap(
+  ([name, service]) =>
+    (service.volumes ?? [])
+      .filter((mount) => mount.source === 'blob_storage')
+      .map((mount) => ({ mount, name })),
+);
+const blobStorageMembers = blobStorageMounts.map(({ name }) => name).sort();
+invariant(
+  blobStorageMembers.join() ===
+    (mode === 'operations' ? 'api,backup,restore,worker' : 'api,worker'),
+  `Unexpected blob storage members: ${blobStorageMembers.join(',')}.`,
+);
+for (const { mount, name } of blobStorageMounts) {
+  const expectedMode = blobStorageModes[name];
+  invariant(
+    mount.type === 'volume' &&
+      mount.target === blobStorageTarget &&
+      (mount.read_only === true) === (expectedMode === 'ro'),
+    `${name} must mount the blob storage volume ${expectedMode === 'ro' ? 'read-only' : 'read-write'} at ${blobStorageTarget}.`,
+  );
+}
+invariant(
+  Object.hasOwn(configuration.volumes, 'blob_storage'),
+  'The blob storage volume must be declared.',
+);
+invariant(
+  backupEntrypoint.includes(`blob_storage_directory=${blobStorageTarget}`) &&
+    backupEntrypoint.includes(
+      'restic backup --tag blobs "$blob_storage_directory"',
+    ) &&
+    backupEntrypoint.includes('--target "$blob_storage_directory"'),
+  'The backup entrypoint must snapshot and restore the mounted blob volume.',
+);
+for (const service of ['api', 'worker']) {
+  invariant(
+    configuration.services[service].environment.BAP_BLOB_STORAGE_DIR ===
+      blobStorageTarget,
+    `${service} must store blobs on the mounted volume.`,
+  );
+  invariant(
+    /^[1-9]\d*$/.test(
+      configuration.services[service].environment
+        .BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION ?? '',
+    ),
+    `${service} must carry a positive integer blob quota.`,
+  );
+}
+
 expectSecrets('database', ['postgres_admin_password']);
 expectSecrets('web', [
   'ai_provider_config',
@@ -295,11 +351,13 @@ if (mode === 'production') {
       model.tmpfs.includes('/tmp'),
       `${service} must write only to ephemeral storage.`,
     );
-    // Staging is the one durable exception, and only the pair that parses uploads holds it.
+    // Staging and blobs are the durable exceptions, and only the pair that handles files holds them.
     const durable = (model.volumes ?? []).map((mount) => mount.source).sort();
     invariant(
       durable.join() ===
-        (service === 'api' || service === 'worker' ? 'upload_staging' : ''),
+        (service === 'api' || service === 'worker'
+          ? 'blob_storage,upload_staging'
+          : ''),
       `${service} must keep the production durable mount set.`,
     );
   }
