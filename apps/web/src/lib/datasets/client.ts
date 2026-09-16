@@ -171,7 +171,10 @@ export type MutationResult =
 // One JSON mutation against a fixed BFF route; a 401 is bounced to sign-in like getJson.
 export async function mutateJson(
   path: string,
-  init: Readonly<{ body?: unknown; method: 'DELETE' | 'PATCH' | 'POST' }>,
+  init: Readonly<{
+    body?: unknown;
+    method: 'DELETE' | 'PATCH' | 'POST' | 'PUT';
+  }>,
 ): Promise<MutationResult> {
   const response = await fetch(path, {
     cache: 'no-store',

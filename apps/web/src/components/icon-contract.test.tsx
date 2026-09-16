@@ -200,7 +200,6 @@ const reviewedCallsites = [
 
 const throwawayPages = [
   'app/(product)/[orgSlug]/page.tsx',
-  'app/(product)/[orgSlug]/members/page.tsx',
   'app/(product)/[orgSlug]/settings/page.tsx',
 ] as const;
 
