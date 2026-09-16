@@ -15,7 +15,17 @@ export function organizationPath(slug: string, suffix = ''): string {
   return `/${slug}${suffix}`;
 }
 
-export function resultPath(path: string, result: 'error' | 'success'): string {
+export type ActionResult =
+  | 'accept-error'
+  | 'accept-success'
+  | 'decline-error'
+  | 'decline-success'
+  | 'error'
+  | 'quota-exhausted'
+  | 'slug-taken'
+  | 'success';
+
+export function resultPath(path: string, result: ActionResult): string {
   return `${path}?result=${result}`;
 }
 
