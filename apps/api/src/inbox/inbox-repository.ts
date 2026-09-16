@@ -55,7 +55,7 @@ export interface ReceiveUploadInput extends EntityScopeSelector {
   byteSize: number;
   mediaType: string;
   originalFilename: string | null;
-  // Runs inside the transaction once the blob row exists, so a failed move rolls every row back.
+  // Runs last inside the transaction: a failed move rolls every row back, an earlier failure never moves the bytes.
   persist: () => Promise<void>;
   quotaBytes: number;
   sha256: string;
@@ -227,15 +227,17 @@ function publicFile(file: ItemFileRecord): InboxItemFile {
   };
 }
 
+// Every write path locks the row it is about to change, so two concurrent decisions on one item serialise.
 async function loadItem(
   transaction: PoolClient,
   itemId: string,
   legalEntityIds: readonly string[] | null,
+  forUpdate = false,
 ): Promise<InboxItem | null> {
   const result = await transaction.query<ItemRow>(
     `select ${ITEM_COLUMNS}
        from app.inbox_item as i
-      where i.id = $2 and ${SCOPE_FILTER}`,
+      where i.id = $2 and ${SCOPE_FILTER}${forUpdate ? ' for update' : ''}`,
     [entityFilter(legalEntityIds), itemId],
   );
   const row = result.rows[0];
@@ -402,6 +404,10 @@ export async function receiveUpload(
   input: ReceiveUploadInput,
 ): Promise<ReceiveUploadResult> {
   return runInTenantContext(pool, input, async (transaction) => {
+    // One intake at a time per organization, so the quota sum and the duplicate lookup see every earlier blob.
+    await transaction.query('select pg_advisory_xact_lock(hashtext($1))', [
+      input.organizationId,
+    ]);
     const existing = await transaction.query<{ id: string }>(
       'select id from app.blob where sha256 = $1',
       [input.sha256],
@@ -499,8 +505,6 @@ export async function receiveUpload(
 
     if (duplicate) {
       await appendEvent(transaction, input, itemId, 'discarded', 'duplicate');
-    } else {
-      await input.persist();
     }
 
     // Identifiers and kinds only: the audit log never carries the filename or the hash.
@@ -515,11 +519,14 @@ export async function receiveUpload(
       throw new Error('The received item is not readable in its own scope.');
     }
 
-    return {
-      duplicateOfItemId,
-      files: (await loadItemFiles(transaction, itemId)).map(publicFile),
-      item,
-    };
+    const files = (await loadItemFiles(transaction, itemId)).map(publicFile);
+
+    // The bytes move last: every earlier failure rolls back with the temporary file still in place.
+    if (!duplicate) {
+      await input.persist();
+    }
+
+    return { duplicateOfItemId, files, item };
   });
 }
 
@@ -670,6 +677,7 @@ export async function recordExtraction(
       transaction,
       input.itemId,
       input.legalEntityIds,
+      true,
     );
 
     if (before === null) {
@@ -706,6 +714,7 @@ export async function updateHints(
       transaction,
       input.itemId,
       input.legalEntityIds,
+      true,
     );
 
     if (before === null) {
@@ -757,6 +766,7 @@ export async function routeToDocument(
       transaction,
       input.itemId,
       input.legalEntityIds,
+      true,
     );
 
     if (before === null) {
@@ -830,6 +840,7 @@ export async function undoRoute(
       transaction,
       input.itemId,
       input.legalEntityIds,
+      true,
     );
 
     if (before === null) {
@@ -872,6 +883,7 @@ async function transition(
       transaction,
       input.itemId,
       input.legalEntityIds,
+      true,
     );
 
     if (before === null) {
@@ -932,10 +944,16 @@ export async function assignItem(
       transaction,
       input.itemId,
       input.legalEntityIds,
+      true,
     );
 
     if (before === null) {
       return null;
+    }
+
+    // A decided item is nobody's work item any more.
+    if (before.status === 'routed' || before.status === 'discarded') {
+      throw new ConflictException();
     }
 
     const updated = await transaction.query(
@@ -963,10 +981,15 @@ export async function snoozeItem(
       transaction,
       input.itemId,
       input.legalEntityIds,
+      true,
     );
 
     if (before === null) {
       return null;
+    }
+
+    if (before.status === 'routed' || before.status === 'discarded') {
+      throw new ConflictException();
     }
 
     const updated = await transaction.query(

@@ -32,6 +32,18 @@ describe('sniffBytes', () => {
     ['a GPC statement', fixtures.gpc(), 'gpc_statement', 'text/plain'],
     ['a CSV table', fixtures.csv(), 'tabular', 'text/csv'],
     [
+      'a CSV whose first cell starts with 074',
+      fixtures.csvStartingWith074(),
+      'tabular',
+      'text/csv',
+    ],
+    [
+      'a Czech CSV over 64 KiB',
+      fixtures.czechCsvOver64KiB(),
+      'tabular',
+      'text/csv',
+    ],
+    [
       'an XLSX workbook',
       fixtures.zip('xl/workbook.xml'),
       'tabular',
@@ -76,6 +88,23 @@ describe('sniffBytes', () => {
     const large = fixtures.padded(fixtures.PDF_MAGIC, 2 * 65_536);
 
     expect(sniff(large).issues).toEqual([]);
+  });
+
+  it('requires the fixed 128-character GPC header record', () => {
+    expect(sniff(fixtures.gpc()).detectedType).toBe('gpc_statement');
+    expect(sniff(fixtures.gpcOverlong()).detectedType).not.toBe(
+      'gpc_statement',
+    );
+  });
+
+  it('drops a multi-byte character cut at the window edge instead of reading it as garbage', () => {
+    const bytes = fixtures.czechCsvOver64KiB();
+    const head = fixtures.toSniffInput(bytes).head;
+
+    // The fixture is only meaningful while the edge really splits a character.
+    expect((head[head.length - 1] ?? 0) & 0xc0).toBe(0xc0);
+    expect(Buffer.from(head).toString('utf8')).toContain('\uFFFD');
+    expect(sniff(bytes).issues).toEqual([]);
   });
 
   it('reads the XML root without the byte order mark and the prolog', () => {

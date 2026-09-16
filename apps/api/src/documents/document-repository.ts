@@ -1059,10 +1059,10 @@ export async function deleteDocumentInTransaction(
     return false;
   }
 
+  // The entity stays: a person bound it, and deleting the document does not unbind it.
   const unrouted = await transaction.query<{ id: string }>(
     `update app.inbox_item
         set document_id = null,
-            legal_entity_id = null,
             status = 'needs_review',
             decided_by_kind = null,
             decided_by_user_id = null,

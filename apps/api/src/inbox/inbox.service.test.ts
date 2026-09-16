@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import {
   BadRequestException,
+  ForbiddenException,
   NotFoundException,
   PayloadTooLargeException,
   UnsupportedMediaTypeException,
@@ -252,6 +253,22 @@ describe('InboxService', () => {
     expect(
       await readdir(join(directory, 'org', 'organization_1')),
     ).toHaveLength(1);
+  });
+
+  it('refuses a restricted scope with 403 before hashing and deletes the temporary file', async () => {
+    const path = await stage(fixtures.pdf(), 'upload-restricted');
+
+    await expect(
+      service.upload({
+        ...tenant,
+        file: { originalname: 'placeholder.pdf', path, size: 5 },
+        legalEntityIds: [ENTITY_ID],
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(received).toEqual([]);
+    await expect(stat(path)).rejects.toThrow();
+    expect(await readdir(store.temporaryDirectory())).toEqual([]);
   });
 
   it('refuses a missing or unsafe file part and deletes the temporary file', async () => {

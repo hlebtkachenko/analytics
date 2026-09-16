@@ -88,8 +88,11 @@ media type. The inline route answers only when the sniffed media type is
 `application/pdf`, `image/png`, `image/jpeg` or `image/webp`, with
 `Content-Disposition: inline`, `nosniff` and `Content-Security-Policy: sandbox`,
 and the web app renders it inside an `<iframe sandbox>` with no scripts and no
-same-origin. Anything else gets a download link only, because an any-type upload
-plus inline display would execute an SVG or HTML file under the session cookie.
+same-origin. A PDF is the exception: it is served inline without the sandbox
+header and framed without `sandbox`, because a sandboxed browsing context
+disables plugins, Chromium's PDF viewer is one, and the preview would render
+blank. Anything else gets a download link only, because an any-type upload plus
+inline display would execute an SVG or HTML file under the session cookie.
 
 Blobs join the erasure path of [ADR 0008](0008-account-erasure.md): erasing an
 account tombstones `created_by` on its blobs, and deleting an organization

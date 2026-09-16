@@ -418,6 +418,7 @@ export class InboxController {
   @ApiUnauthorizedResponse(unauthorized)
   @ApiForbiddenResponse(forbidden)
   @ApiNotFoundResponse(notFound)
+  @ApiConflictResponse({ description: 'The item is routed or discarded' })
   async assignItem(
     @Param('organizationId', { schema: organizationIdentifierSchema })
     organizationId: string,
@@ -447,6 +448,7 @@ export class InboxController {
   @ApiUnauthorizedResponse(unauthorized)
   @ApiForbiddenResponse(forbidden)
   @ApiNotFoundResponse(notFound)
+  @ApiConflictResponse({ description: 'The item is routed or discarded' })
   async snoozeItem(
     @Param('organizationId', { schema: organizationIdentifierSchema })
     organizationId: string,
@@ -490,7 +492,7 @@ export class InboxController {
   @Get(':organizationId/inbox/blobs/:blobId/inline')
   @UseGuards(ResourceJwtGuard, SubjectRateLimitGuard)
   @ApiOperation({
-    summary: 'Render a PDF or an image inline inside a sandboxed frame',
+    summary: 'Render a PDF inline, or an image inside a sandboxed frame',
   })
   @ApiOkResponse({
     content: Object.fromEntries(
@@ -538,8 +540,9 @@ export class InboxController {
 
     response.setHeader('X-Content-Type-Options', 'nosniff');
 
-    if (inline) {
-      // The frame is sandboxed twice: here by the header, in the browser by the iframe attribute.
+    // Images are sandboxed twice, by this header and by the iframe attribute; a sandboxed context disables
+    // plugins and Chromium's PDF viewer is one, so a PDF renders inline without the sandbox header.
+    if (inline && blob.mediaType !== 'application/pdf') {
       response.setHeader('Content-Security-Policy', 'sandbox');
     }
 

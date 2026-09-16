@@ -338,7 +338,10 @@ export default function InboxItemPage() {
             ) : (
               <iframe
                 className={styles.preview!}
-                sandbox=""
+                // A sandboxed frame disables plugins, and Chromium's PDF viewer is one, so only images are sandboxed.
+                {...(previewFile.mediaType === 'application/pdf'
+                  ? {}
+                  : { sandbox: '' })}
                 src={inboxBlobInlinePath(organizationId, previewFile.blobId)}
                 title={t('inbox.previewFrame')}
               />

@@ -78,12 +78,9 @@ describe('FilesystemBlobStore', () => {
     );
   });
 
-  it('answers a missing key with null and deletes without complaint', async () => {
+  it('answers a missing key with null', async () => {
     const missing = `org/organization_1/${'b'.repeat(64)}`;
     expect(await store.stat(missing)).toBeNull();
-    await store.delete(missing);
-    await store.delete(KEY);
-    expect(await store.stat(KEY)).toBeNull();
   });
 
   it.each(['../outside', 'tmp/upload-1', '/etc/passwd', 'org', ''])(

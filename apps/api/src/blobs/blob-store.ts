@@ -36,7 +36,6 @@ export interface PutBlobInput {
 }
 
 export abstract class BlobStore {
-  abstract delete(key: string): Promise<void>;
   // Multer names its own temporary file, so the store proves containment instead of trusting the caller.
   abstract deleteTemporary(path: string): Promise<void>;
   abstract open(key: string, range?: ReadRange): Readable;
@@ -49,10 +48,6 @@ export abstract class BlobStore {
 export class FilesystemBlobStore extends BlobStore {
   constructor(private readonly directory: string) {
     super();
-  }
-
-  async delete(key: string): Promise<void> {
-    await unlink(this.resolveKey(key)).catch(() => undefined);
   }
 
   async deleteTemporary(path: string): Promise<void> {

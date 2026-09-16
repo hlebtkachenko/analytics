@@ -177,7 +177,7 @@ afterEach(() => {
 });
 
 describe('InboxItemPage', () => {
-  it('previews a PDF in a sandboxed frame and always offers the download', async () => {
+  it('previews a PDF in an unsandboxed frame and always offers the download', async () => {
     vi.stubGlobal(
       'fetch',
       respondWith({
@@ -195,7 +195,8 @@ describe('InboxItemPage', () => {
       'src',
       `/api/bff/application/organizations/organization_1/inbox/blobs/${BLOB_ID}/inline`,
     );
-    expect(frame).toHaveAttribute('sandbox', '');
+    // A sandboxed frame has no plugins, so the PDF viewer would render blank.
+    expect(frame).not.toHaveAttribute('sandbox');
     expect(
       screen.getByRole('link', { name: 'Download placeholder.bin' }),
     ).toHaveAttribute(
@@ -208,6 +209,23 @@ describe('InboxItemPage', () => {
       'href',
       `/inbox/${EARLIER_ITEM_ID}?organization=organization-1`,
     );
+  });
+
+  it('previews an image in a sandboxed frame', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respondWith({
+        events: [],
+        extraction: null,
+        files: [file('image/png')],
+        item: inboxItem,
+      }),
+    );
+
+    renderItemPage();
+
+    const frame = await screen.findByTitle('File preview');
+    expect(frame).toHaveAttribute('sandbox', '');
   });
 
   it('offers a download only for a media type that never renders inline', async () => {

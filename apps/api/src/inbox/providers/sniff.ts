@@ -65,8 +65,11 @@ function latin1(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('latin1');
 }
 
+// The head is a window cut at a byte offset, so a multi-byte character split at its edge is dropped, not replaced.
 function utf8(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString('utf8');
+  return new TextDecoder('utf-8', { fatal: false }).decode(bytes, {
+    stream: true,
+  });
 }
 
 function result(
@@ -226,10 +229,15 @@ function sniffXml(text: string): SniffResult | null {
   );
 }
 
-// GPC (ABO) statements start with a fixed-width record whose type code is 074.
+// GPC (ABO) statements start with a 128-character 074 header: account number at 3, old balance date at 39,
+// statement date at 108, every one of them digits only, so a CSV whose first cell starts with 074 never matches.
+const GPC_RECORD_LENGTH = 128;
+const GPC_HEADER =
+  /^074\d{16}.{20}\d{6}\d{14}[+-]\d{14}[+-]\d{14}[+-]\d{14}[+-]\d{3}\d{6} {14}$/;
+
 function isGpc(text: string): boolean {
   const firstLine = text.split(/\r?\n/, 1)[0] ?? '';
-  return firstLine.startsWith('074') && firstLine.length >= 100;
+  return firstLine.length === GPC_RECORD_LENGTH && GPC_HEADER.test(firstLine);
 }
 
 function isTabular(text: string): boolean {

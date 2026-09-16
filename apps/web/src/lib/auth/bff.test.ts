@@ -1929,6 +1929,27 @@ describe('inbox blob routes', () => {
     expect(await response.text()).toBe('png');
   });
 
+  it('renders a PDF inline without the sandbox policy, since a sandboxed viewer renders blank', async () => {
+    const response = await getInboxBlobInline(
+      auth,
+      inboxRequest(`blobs/${BLOB_ID}/inline`),
+      'org_1',
+      BLOB_ID,
+      async () =>
+        new Response('%PDF', {
+          headers: { 'content-type': 'application/pdf' },
+        }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/pdf');
+    expect(response.headers.get('content-disposition')).toBe(
+      `inline; filename="blob-${BLOB_ID}"`,
+    );
+    expect(response.headers.get('content-security-policy')).toBeNull();
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
   it('refuses an inline type outside the closed list, a bad id, and passes a 415 through', async () => {
     const fetchImplementation = vi.fn<typeof fetch>();
     const svg = await getInboxBlobInline(

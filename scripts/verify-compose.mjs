@@ -230,7 +230,7 @@ invariant(
 invariant(
   backupEntrypoint.includes(`blob_storage_directory=${blobStorageTarget}`) &&
     backupEntrypoint.includes(
-      'restic backup --tag blobs "$blob_storage_directory"',
+      'restic backup --tag blobs --exclude "$blob_storage_directory/tmp" "$blob_storage_directory"',
     ) &&
     backupEntrypoint.includes('--target "$blob_storage_directory"'),
   'The backup entrypoint must snapshot and restore the mounted blob volume.',

@@ -6,6 +6,7 @@ import { pipeline } from 'node:stream/promises';
 
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -185,6 +186,11 @@ export class InboxService {
     let cleanupTemporaryPath = received?.path ?? null;
 
     try {
+      // A new item has no entity yet, so a restricted scope could never read back what it just uploaded.
+      if (input.legalEntityIds !== null) {
+        throw new ForbiddenException();
+      }
+
       const file = receivedFileSchema.safeParse({
         originalname: received?.originalname,
         size: received?.size,

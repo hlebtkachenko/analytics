@@ -2077,7 +2077,10 @@ async function streamInboxBlob(
       ...privateResponseHeaders,
       'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${filename}"`,
       'content-type': mediaType.data,
-      ...(inline ? { 'content-security-policy': 'sandbox' } : {}),
+      // A sandboxed context disables plugins, and Chromium's PDF viewer is one, so only images carry the sandbox.
+      ...(inline && mediaType.data !== 'application/pdf'
+        ? { 'content-security-policy': 'sandbox' }
+        : {}),
       'x-content-type-options': 'nosniff',
       'x-request-id': prepared.requestId,
     },

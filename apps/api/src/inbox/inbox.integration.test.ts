@@ -1,8 +1,13 @@
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { ConflictException, PayloadTooLargeException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  PayloadTooLargeException,
+} from '@nestjs/common';
 import {
   bootstrapDatabaseRoles,
   createDatabasePool,
@@ -20,6 +25,7 @@ import type { PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
+  blobStorageKey,
   createBlobDirectories,
   FilesystemBlobStore,
 } from '../blobs/blob-store.js';
@@ -29,6 +35,12 @@ import {
 } from '../documents/document-repository.js';
 import { inboxItemListQuerySchema } from './contract.js';
 import { InboxService } from './inbox.service.js';
+import {
+  SNIFF_PROVIDER,
+  SNIFF_PROVIDER_VERSION,
+  sniffBytes,
+  toProviderOutput,
+} from './providers/sniff.js';
 import {
   assignItem,
   discardItem,
@@ -77,6 +89,7 @@ const stranger: TenantContext = {
 const allEntities = { legalEntityIds: null };
 
 let ownedEntityId = '';
+let otherEntityId = '';
 let firstItemId = '';
 let firstBlobId = '';
 let documentId = '';
@@ -188,6 +201,7 @@ beforeAll(async () => {
   await rootPool.end();
   apiPool = createDatabasePool(configurationFor('bap_api'));
   ownedEntityId = await createLegalEntity(creator, 'Placeholder Holding');
+  otherEntityId = await createLegalEntity(creator, 'Placeholder Branch');
 
   directory = await mkdtemp(join(tmpdir(), 'bap-inbox-integration-'));
   await createBlobDirectories(directory);
@@ -306,6 +320,61 @@ describe('inbox intake', () => {
       transaction.query('select 1 from app.blob'),
     );
     expect(blobs.rowCount).toBe(1);
+  });
+
+  it('refuses an upload from a restricted scope with 403 before any row or byte is written', async () => {
+    const bytes = fixtures.text();
+    const path = await stage(bytes, 'restricted.txt');
+
+    await expect(
+      service.upload({
+        ...creator,
+        file: { originalname: 'restricted.txt', path, size: bytes.length },
+        legalEntityIds: [ownedEntityId],
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(await readdir(store.temporaryDirectory())).toEqual([]);
+    const blobs = await asTenant(creator, (transaction) =>
+      transaction.query('select 1 from app.blob'),
+    );
+    expect(blobs.rowCount).toBe(1);
+  });
+
+  it('leaves no stored file when the intake fails after its rows are inserted', async () => {
+    const bytes = fixtures.text();
+    const path = await stage(bytes, 'orphan.txt');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const storageKey = blobStorageKey(creator.organizationId, sha256);
+    const sniffed = sniffBytes(fixtures.toSniffInput(bytes));
+
+    // The repository is called directly with a scope that cannot read the new item back, so it throws last.
+    await expect(
+      receiveUpload(apiPool, {
+        ...creator,
+        byteSize: bytes.length,
+        legalEntityIds: [ownedEntityId],
+        mediaType: sniffed.mediaType,
+        originalFilename: 'orphan.txt',
+        persist: () => store.put({ key: storageKey, temporaryPath: path }),
+        quotaBytes: QUOTA,
+        sha256,
+        sniff: {
+          output: toProviderOutput(sniffed),
+          provider: SNIFF_PROVIDER,
+          providerVersion: SNIFF_PROVIDER_VERSION,
+        },
+        storageKey,
+      }),
+    ).rejects.toThrow('not readable in its own scope');
+
+    expect(await store.stat(storageKey)).toBeNull();
+    expect((await stat(path)).isFile()).toBe(true);
+    const blob = await asTenant(creator, (transaction) =>
+      transaction.query('select 1 from app.blob where sha256 = $1', [sha256]),
+    );
+    expect(blob.rowCount).toBe(0);
+    await store.deleteTemporary(path);
   });
 
   it('lists unrouted items for the unrestricted scope only', async () => {
@@ -460,9 +529,13 @@ describe('inbox intake', () => {
       itemId: firstItemId,
     });
 
+    // The entity a person bound stays; only the decision is reset.
     expect(undone?.item).toMatchObject({
       decidedByKind: null,
+      decidedByUserId: null,
       documentId: null,
+      legalEntityId: ownedEntityId,
+      routedAt: null,
       status: 'needs_review',
     });
     expect(undone?.events.at(-1)?.kind).toBe('unrouted');
@@ -517,9 +590,69 @@ describe('inbox intake', () => {
     });
     expect(detail?.item).toMatchObject({
       documentId: null,
+      legalEntityId: ownedEntityId,
       status: 'needs_review',
     });
     expect(detail?.events.at(-1)?.kind).toBe('unrouted');
+  });
+
+  it('assigns and snoozes an open item only', async () => {
+    const assigned = await assignItem(apiPool, {
+      ...creator,
+      ...allEntities,
+      assigneeId: reader.userId,
+      itemId: firstItemId,
+    });
+    expect(assigned?.item.assigneeId).toBe(reader.userId);
+    expect(assigned?.events.at(-1)?.kind).toBe('assigned');
+
+    const snoozed = await snoozeItem(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: firstItemId,
+      snoozedUntil: '2026-10-01T08:00:00.000Z',
+    });
+    expect(snoozed?.item.snoozedUntil).toBe('2026-10-01T08:00:00.000Z');
+
+    const routed = await service.routeToDocument({
+      ...creator,
+      ...allEntities,
+      body: {
+        document: {
+          currencyCode: 'CZK',
+          documentDate: '2026-09-15',
+          kind: 'agreement',
+          legalEntityId: ownedEntityId,
+          title: 'Placeholder agreement',
+        },
+        fileBlobIds: [firstBlobId],
+      },
+      itemId: firstItemId,
+    });
+    expect(routed?.item.status).toBe('routed');
+
+    await expect(
+      assignItem(apiPool, {
+        ...creator,
+        ...allEntities,
+        assigneeId: null,
+        itemId: firstItemId,
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(
+      snoozeItem(apiPool, {
+        ...creator,
+        ...allEntities,
+        itemId: firstItemId,
+        snoozedUntil: null,
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    await undoRoute(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: firstItemId,
+    });
   });
 
   it('discards with a reason and restores back to review', async () => {
@@ -534,6 +667,22 @@ describe('inbox intake', () => {
       kind: 'discarded',
       reason: 'not_ours',
     });
+    await expect(
+      assignItem(apiPool, {
+        ...creator,
+        ...allEntities,
+        assigneeId: null,
+        itemId: firstItemId,
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(
+      snoozeItem(apiPool, {
+        ...creator,
+        ...allEntities,
+        itemId: firstItemId,
+        snoozedUntil: null,
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
 
     await expect(
       restoreItem(apiPool, {
@@ -566,12 +715,13 @@ describe('inbox intake', () => {
     expect(opened.blob.mediaType).toBe('application/pdf');
     opened.stream.destroy();
 
+    // The item keeps its bound entity after undo, so a member of another entity is the one outside the scope.
     await expect(
       service.openBlob({
         ...reader,
         blobId: firstBlobId,
         inline: false,
-        legalEntityIds: [ownedEntityId],
+        legalEntityIds: [otherEntityId],
       }),
     ).rejects.toThrow();
     await expect(

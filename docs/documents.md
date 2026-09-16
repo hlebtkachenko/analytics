@@ -261,14 +261,20 @@ boundary in front of the register: everything from outside becomes an
 rule or a person. Routing to Documents calls this same documents service inside
 one tenant transaction, sets `app.document.inbox_item_id` and inserts
 `app.document_file` rows for every item file, and marks the item `routed`. Undo
-reverses that: it clears `inbox_item.document_id`, sets the item back to
-`needs_review`, appends an `inbox_event`, then deletes the document through the
-same `DELETE .../documents/:documentId` path below, so a delete started from the
+reverses that: it clears `inbox_item.document_id`, the `decided_by_*` columns
+and `routed_at`, sets the item back to `needs_review` and appends an
+`inbox_event`, then deletes the document through the same
+`DELETE .../documents/:documentId` path below, so a delete started from the
 Documents page also un-routes the item first; `ON DELETE RESTRICT` refuses any
-other delete of a routed document. `app.document.upload_id` and
-`app.document.content_hash` are dropped: a document's originals live in
-`app.document_file`, ordered `blob_id` rows pointing at the durable blob
-register, not a single upload reference or a duplicated content hash.
+other delete of a routed document. The item keeps its `legal_entity_id`: a
+person bound the entity, and deleting the document does not unbind it. A PDF
+served by the inline route is the one media type without the CSP `sandbox`
+header and the frame `sandbox` attribute, because a sandboxed context disables
+plugins and Chromium's PDF viewer would render blank; images keep both.
+`app.document.upload_id` and `app.document.content_hash` are dropped: a
+document's originals live in `app.document_file`, ordered `blob_id` rows
+pointing at the durable blob register, not a single upload reference or a
+duplicated content hash.
 
 Every route below is mounted under `organizations/:organizationId/...`, is
 versioned `v1`, and is guarded the same way as the document routes above; see
@@ -277,7 +283,7 @@ versioned `v1`, and is guarded the same way as the document routes above; see
 
 | Method | Path                                  | Capability        | Success | Failure                                          |
 | ------ | ------------------------------------- | ----------------- | ------- | ------------------------------------------------ |
-| POST   | `/inbox/uploads`                      | `manageDocuments` | 201     | 401, 403, 413 (quota refused, nothing stored)    |
+| POST   | `/inbox/uploads`                      | `manageDocuments` | 201     | 401, 403 (also a restricted scope), 413 (quota)  |
 | GET    | `/inbox/items`                        | `readDocuments`   | 200     | 401, 403                                         |
 | GET    | `/inbox/items/:itemId`                | `readDocuments`   | 200     | 401, 403, 404                                    |
 | PATCH  | `/inbox/items/:itemId/hints`          | `manageDocuments` | 200     | 401, 403, 404                                    |
@@ -286,8 +292,8 @@ versioned `v1`, and is guarded the same way as the document routes above; see
 | POST   | `/inbox/items/:itemId/route/undo`     | `manageDocuments` | 200     | 401, 403, 404, 409 (not routed)                  |
 | POST   | `/inbox/items/:itemId/discard`        | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or already discarded) |
 | POST   | `/inbox/items/:itemId/restore`        | `manageDocuments` | 200     | 401, 403, 404, 409 (not discarded)               |
-| POST   | `/inbox/items/:itemId/assign`         | `manageDocuments` | 200     | 401, 403, 404                                    |
-| POST   | `/inbox/items/:itemId/snooze`         | `manageDocuments` | 200     | 401, 403, 404                                    |
+| POST   | `/inbox/items/:itemId/assign`         | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or discarded)         |
+| POST   | `/inbox/items/:itemId/snooze`         | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or discarded)         |
 | GET    | `/inbox/blobs/:blobId/download`       | `readDocuments`   | 200     | 401, 403, 404                                    |
 | GET    | `/inbox/blobs/:blobId/inline`         | `readDocuments`   | 200     | 401, 403, 404, 415 (media type not inlineable)   |
 

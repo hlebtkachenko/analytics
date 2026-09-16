@@ -59,6 +59,7 @@ export const inboxChannelKindSchema = z.enum([
   'fakturoid',
   'idoklad',
   'isds',
+  'drive',
 ]);
 export const inboxPayloadKindSchema = z.enum([
   'file',
@@ -86,6 +87,7 @@ export const inboxEventKindSchema = z.enum([
   'restored',
   'assigned',
   'hint_added',
+  'failed',
 ]);
 export const inboxDiscardReasonSchema = z.enum([
   'irrelevant',

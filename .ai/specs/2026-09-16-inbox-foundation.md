@@ -31,7 +31,8 @@ and a manual route into Documents.
   limit, exact-hash duplicate handling at arrival.
 - Providers `sniff` and `manual` behind the provider contract; hints on the
   item; the unprocessable reasons enum; routing to Documents through a prefilled
-  create form; undo back to `needs_review`; blob download and inline routes.
+  create form; undo back to `needs_review`; blob download and inline routes;
+  assign and snooze on an open item (409 once it is routed or discarded).
 - `/inbox` product page inside the product shell, a rail destination, the
   reserved organization slug `inbox` and its parity test.
 - The full issue taxonomy is stored, but Phase 0 raises only `duplicate_exact`,
@@ -121,12 +122,15 @@ Two blob routes. Download: `Content-Disposition: attachment`, `nosniff`, any
 media type. Inline: only when the sniffed media type is `application/pdf`,
 `image/png`, `image/jpeg` or `image/webp`, served with
 `Content-Disposition: inline`, `nosniff` and `Content-Security-Policy: sandbox`;
-any other type is refused and the panel shows a download link only. The BFF blob
-routes follow `getDatasetExport` in `apps/web/src/lib/auth/bff.ts`: header-only
-upstream timeout, `response.body` streamed, `Content-Disposition` minted in the
-BFF from validated ids and the sanitised stored filename (the upstream filename
-is never forwarded verbatim), `nosniff` and the private response headers set in
-the BFF.
+any other type is refused and the panel shows a download link only. PDF is the
+one exception to the sandbox header and the `sandbox` frame attribute: a
+sandboxed browsing context disables plugins, Chromium's PDF viewer counts as
+one, and a sandboxed PDF renders blank, so a PDF is served inline with `nosniff`
+only and framed without `sandbox`. The BFF blob routes follow `getDatasetExport`
+in `apps/web/src/lib/auth/bff.ts`: header-only upstream timeout, `response.body`
+streamed, `Content-Disposition` minted in the BFF from validated ids and the
+sanitised stored filename (the upstream filename is never forwarded verbatim),
+`nosniff` and the private response headers set in the BFF.
 
 Backup: `scripts/verify-compose.mjs` asserts the volume member set api (rw),
 worker (rw), backup (ro), restore (rw) with per-service mode, and
@@ -136,20 +140,24 @@ to the same run as `pg_dump`.
 The BFF gains the inbox and blob route shapes with Zod mirrors. The `/inbox`
 page renders `PageContainer` with the item list (`DataGrid` from
 `@bap/design-system/blocks`), the upload drop zone, and an item panel with the
-preview in an `<iframe sandbox>` (no scripts, no same-origin), hints, the
-explanation and the prefilled draft. Rail entry through `railDestinations`;
-`inbox` added to `reservedOrganizationSlugs` and the database parity corpus.
+preview in an `<iframe sandbox>` (no scripts, no same-origin) for images and a
+plain `<iframe>` for a PDF, hints, the explanation and the prefilled draft. Rail
+entry through `railDestinations`; `inbox` added to `reservedOrganizationSlugs`
+and the database parity corpus.
 
 ## Security
 
 Bytes move from the browser through the BFF to the API volume and never to the
-model provider. Only PDF, PNG, JPEG and WebP render inline, sandboxed by the CSP
-header and the frame; everything else is attachment-only with `nosniff`. A quota
+model provider. Only PDF, PNG, JPEG and WebP render inline; images are sandboxed
+by the CSP header and the frame, a PDF is not, because a sandboxed context has
+no plugins and the PDF viewer would render blank, and a PDF carries no script
+the viewer runs; everything else is attachment-only with `nosniff`. A quota
 refusal answers 413 and stores nothing: the temporary file is deleted, no row is
 written. Every write is a browser-session member with `manageDocuments`;
-unrouted items are visible only to unrestricted scope. pg-boss payloads carry
-ids only. Audit entries record ids, kinds and reasons, never filenames, hint
-text or draft values. Blobs join the ADR 0008 erasure path.
+unrouted items are visible only to unrestricted scope, so an upload from a
+restricted scope is refused with 403 before the bytes are hashed. pg-boss
+payloads carry ids only. Audit entries record ids, kinds and reasons, never
+filenames, hint text or draft values. Blobs join the ADR 0008 erasure path.
 
 ## Verification
 
@@ -163,9 +171,9 @@ text or draft values. Blobs join the ADR 0008 erasure path.
   unprocessable reason, exact-hash duplicate handling, quota refusal (413,
   nothing stored), undo (document deleted, item back to `needs_review`, event
   appended), hints round-trip, download and inline headers (attachment vs
-  inline, `nosniff`, CSP sandbox, inline refused for a non-allowed media type),
-  routing target defaults, provider contract validation, controller matrix and
-  OpenAPI.
+  inline, `nosniff`, CSP sandbox for an image and none for a PDF, inline refused
+  for a non-allowed media type), routing target defaults, provider contract
+  validation, controller matrix and OpenAPI.
 - `apps/web` unit tests: `/inbox` page, item panel and prefilled draft, BFF blob
   routes (minted disposition, streamed body), rail from `railDestinations`,
   reserved slug corpus parity.

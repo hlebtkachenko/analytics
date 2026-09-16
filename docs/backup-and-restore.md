@@ -22,11 +22,12 @@ place.
 `pg_dump --format=custom --no-owner --no-acl --exclude-extension=vector`
 directly into restic stdin as `bap.dump`, then takes a second snapshot of the
 `blob_storage` volume mounted read-only at `/var/lib/bap/blobs`, in the same
-run. The database snapshot carries the tag `database` and the blob snapshot the
-tag `blobs`, so `latest` resolves per source. It connects only as `bap_backup`.
-Repository checks and retention pruning receive no database credential.
-`backup-prune` groups snapshots by path, so each source keeps its own daily
-history.
+run, excluding its `tmp` directory, which holds uploads still being hashed and
+never a stored blob. The database snapshot carries the tag `database` and the
+blob snapshot the tag `blobs`, so `latest` resolves per source. It connects only
+as `bap_backup`. Repository checks and retention pruning receive no database
+credential. `backup-prune` groups snapshots by path, so each source keeps its
+own daily history.
 
 pgvector is excluded from the dump on purpose. It is an untrusted extension, so
 only the superuser can install it and only the superuser owns it. A dumped
@@ -44,7 +45,10 @@ database service. In the same run it restores the `blobs` snapshot into the
 is one blob volume, so restore writes into the live one. Blob keys are content
 hashes, so a file that is already present is identical and left in place, and
 only missing files come back. `RESTIC_SNAPSHOT` selects the database snapshot
-and `RESTIC_BLOB_SNAPSHOT` the blob snapshot; both default to `latest`.
+and `RESTIC_BLOB_SNAPSHOT` the blob snapshot; both default to `latest`. The two
+`latest` tags resolve independently, so an operator restoring to a point in time
+should pick both snapshots from the same backup run; a shared run id is a later
+improvement.
 
 The restore one-shot runs as UID 999 with zero capabilities and cannot change
 ownership, so the blob volume root is owned by the API user with group 999 and

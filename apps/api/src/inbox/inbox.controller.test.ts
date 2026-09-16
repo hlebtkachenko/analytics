@@ -58,6 +58,7 @@ const UNKNOWN_ITEM_ID = '8e6f1052-3d9b-4a7e-8f65-a23db19e8073';
 const BLOB_ID = '9f702163-4eac-4b8f-9076-b34ec2af9184';
 const PDF_BLOB_ID = 'a0813274-5fbd-4c90-a187-c45fd3b0a295';
 const UNKNOWN_BLOB_ID = 'b1924385-60ce-4da1-b298-d560e4c1b3a6';
+const PNG_BLOB_ID = 'c2a35496-71df-4eb2-8309-e671f5d2c4b7';
 const SHA256 = 'c'.repeat(64);
 
 const item: InboxItem = {
@@ -196,14 +197,19 @@ describe('application inbox routes', () => {
           throw new NotFoundException();
         }
         const pdf = input.blobId === PDF_BLOB_ID;
-        if (input.inline && !pdf) {
+        const png = input.blobId === PNG_BLOB_ID;
+        if (input.inline && !pdf && !png) {
           throw new UnsupportedMediaTypeException();
         }
         return {
           blob: {
             byteSize: 17,
             id: input.blobId,
-            mediaType: pdf ? 'application/pdf' : 'text/plain',
+            mediaType: pdf
+              ? 'application/pdf'
+              : png
+                ? 'image/png'
+                : 'text/plain',
             originalFilename: pdf ? 'invoice "1"; ../x.pdf' : null,
             sha256: SHA256,
             storageKey: `org/organization_1/${SHA256}`,
@@ -528,7 +534,7 @@ describe('application inbox routes', () => {
     );
   });
 
-  it('renders a PDF inline under a sandbox policy and refuses any other type', async () => {
+  it('renders an image inline under a sandbox policy, a PDF without it, and refuses any other type', async () => {
     const response = await authorized(
       'get',
       `/inbox/blobs/${PDF_BLOB_ID}/inline`,
@@ -542,7 +548,15 @@ describe('application inbox routes', () => {
     );
     expect(response.headers['content-type']).toBe('application/pdf');
     expect(response.headers['x-content-type-options']).toBe('nosniff');
-    expect(response.headers['content-security-policy']).toBe('sandbox');
+    // A sandboxed context has no plugins, so the PDF viewer would render blank; helmet's default policy stays.
+    expect(response.headers['content-security-policy']).not.toBe('sandbox');
+
+    const image = await authorized('get', `/inbox/blobs/${PNG_BLOB_ID}/inline`)
+      .buffer()
+      .expect(200);
+    expect(image.headers['content-type']).toBe('image/png');
+    expect(image.headers['x-content-type-options']).toBe('nosniff');
+    expect(image.headers['content-security-policy']).toBe('sandbox');
 
     await authorized('get', `/inbox/blobs/${BLOB_ID}/inline`).expect(415);
     const download = await authorized(

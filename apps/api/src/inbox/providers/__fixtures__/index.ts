@@ -98,9 +98,30 @@ export function unknownXml(): Buffer {
   return Buffer.from('<?xml version="1.0"?><note><to>placeholder</to></note>');
 }
 
+// The 128-character 074 header: type, account, name, old balance date, four signed amounts, number, date, padding.
 export function gpc(): Buffer {
-  const header = `074${'0'.repeat(16)}${'PLACEHOLDER ACCOUNT'.padEnd(20)}${'0'.repeat(14)}${'0'.repeat(20)}${'0'.repeat(20)}${'0'.repeat(20)}${'0'.repeat(20)}`;
-  return Buffer.from(`${header.padEnd(128, '0')}\r\n075${'0'.repeat(125)}\r\n`);
+  const amount = `${'0'.repeat(14)}+`;
+  const header = `074${'0'.repeat(16)}${'PLACEHOLDER ACCOUNT'.padEnd(20)}010126${amount}${amount}${amount}${amount}001010126${' '.repeat(14)}`;
+  return Buffer.from(`${header}\r\n075${'0'.repeat(125)}\r\n`);
+}
+
+// A CSV whose first cell starts with 074 is a table, not a statement.
+export function csvStartingWith074(): Buffer {
+  return Buffer.from(
+    `074;${'x'.repeat(120)};note\n${'1'.repeat(3)};${'y'.repeat(120)};b\n`,
+  );
+}
+
+// A GPC header padded past 128 characters is no longer the fixed record.
+export function gpcOverlong(): Buffer {
+  const header = gpc().toString('latin1').split('\r\n', 1)[0] ?? '';
+  return Buffer.from(`${header}00\r\n075${'0'.repeat(125)}\r\n`);
+}
+
+// Header plus 37-byte rows: the 64 KiB window edge lands on the second byte of the "ř" in row 1771.
+export function czechCsvOver64KiB(): Buffer {
+  const row = '01.01.2026;1250,00;přijatá záloha\n';
+  return Buffer.from(`datum;částka;poznámka\n${row.repeat(2_000)}`);
 }
 
 export function csv(): Buffer {

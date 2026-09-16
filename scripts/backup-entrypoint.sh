@@ -59,7 +59,8 @@ case "$command_name" in
     # Dumping it would make pg_restore try to comment on an extension bap_owner does not own.
     pg_dump --format=custom --no-owner --no-acl --exclude-extension=vector | env -u PGPASSFILE restic backup --tag database --stdin --stdin-filename bap.dump
     # Blobs are a second snapshot in the same run; the tag lets each restore pick its own latest.
-    env -u PGPASSFILE restic backup --tag blobs "$blob_storage_directory"
+    # tmp holds uploads still being hashed, never a stored blob.
+    env -u PGPASSFILE restic backup --tag blobs --exclude "$blob_storage_directory/tmp" "$blob_storage_directory"
     ;;
   check)
     restic check
