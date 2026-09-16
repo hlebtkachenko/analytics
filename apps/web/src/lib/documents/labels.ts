@@ -10,6 +10,7 @@ import type {
 
 // One translation key per contract value, so no page invents its own wording.
 export const documentKindLabelKeys: Readonly<Record<DocumentKind, string>> = {
+  advance_request: 'documents.kindAdvanceRequest',
   agreement: 'documents.kindAgreement',
   bank_statement: 'documents.kindBankStatement',
   contract: 'documents.kindContract',
@@ -71,6 +72,7 @@ export const vatModeLabelKeys: Readonly<Record<VatMode, string>> = {
 export const documentLinkKindLabelKeys: Readonly<
   Record<DocumentLinkKind, string>
 > = {
+  advance_of: 'documents.linkAdvanceOf',
   corrects: 'documents.linkCorrects',
   fulfills: 'documents.linkFulfills',
   relates: 'documents.linkRelates',

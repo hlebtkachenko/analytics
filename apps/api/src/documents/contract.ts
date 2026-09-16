@@ -17,6 +17,7 @@ export const DOCUMENT_KINDS = [
   'issued_invoice',
   'received_invoice',
   'credit_note',
+  'advance_request',
   'receipt',
   'bank_statement',
   'contract',
@@ -58,6 +59,7 @@ export const VAT_MODES = [
 
 export const DOCUMENT_LINK_KINDS = [
   'settles',
+  'advance_of',
   'fulfills',
   'corrects',
   'supersedes',

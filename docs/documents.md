@@ -93,7 +93,8 @@ RULE_SET_VERSION = 'cz-default-2026-09.1'
 ```
 
 Only `issued_invoice` and `received_invoice` produce an event; every other kind
-derives nothing.
+derives nothing. The `advance_request` kind, an advance request or proforma,
+carries no tax effect and lives on attributes only, so it derives nothing too.
 
 ### Fixed accounts
 
@@ -184,12 +185,14 @@ have a `>= 0` check constraint, and the API contract accepts money without a
 leading minus for those fields. Direction lives in the document kind or the line
 kind, never in the sign: a refund is registered as a `credit_note`, which is its
 own kind and derives no event today, and a deducted advance is an
-`advance_deduction` line. The exception is `app.invoice.rounding_amount`, the
-rounding of the printed total to whole crowns, which the VAT Act keeps outside
-the tax base: it is signed (positive means the issuer rounded up) and
-`abs(rounding_amount) < 1` is enforced. Derivation therefore drops only a leg
-whose amount is exactly zero, for example the VAT leg of an exempt line; a
-non-zero leg is never silently discarded.
+`advance_deduction` line. A `document_link` of kind `advance_of` points the
+advance request, or the advance tax document, at the final invoice that later
+deducts it. The exception is `app.invoice.rounding_amount`, the rounding of the
+printed total to whole crowns, which the VAT Act keeps outside the tax base: it
+is signed (positive means the issuer rounded up) and `abs(rounding_amount) < 1`
+is enforced. Derivation therefore drops only a leg whose amount is exactly zero,
+for example the VAT leg of an exempt line; a non-zero leg is never silently
+discarded.
 
 ## Data issues
 
