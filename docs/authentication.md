@@ -159,9 +159,9 @@ into, the entities named there.
 Subordinate routes expose semantic breadcrumbs. Permanent Carbon content uses
 Carbon breadcrumbs, including `Datasets > {dataset name}` for an inline dataset
 view. The four temporary `[orgSlug]` page modules keep plain native breadcrumbs,
-their exact throwaway markers, and zero CSS, design-system, or icon imports.
-The `/organizations` list and create pages are Carbon; permanent Carbon
-`[orgSlug]` and account content remains future work.
+their exact throwaway markers, and zero CSS, design-system, or icon imports. The
+`/organizations` list and create pages are Carbon; permanent Carbon `[orgSlug]`
+and account content remains future work.
 
 ## Admin HTTP inventory
 
@@ -560,10 +560,10 @@ the shared root shell surrounds authenticated routes.
 
 The `/organizations` list and `/organizations/new` create pages are now Carbon
 pages inside `PageContainer`. The list reads the caller's workspaces with their
-role through a narrow SELECT-only `@bap/db` membership accessor and lists pending
-invitations with accept and decline server actions. `/organizations/new` reads
-creator-attributed quota through a narrow SELECT-only `@bap/db` accessor. A
-missing row, malformed state, or read failure renders remaining quota as zero
+role through a narrow SELECT-only `@bap/db` membership accessor and lists
+pending invitations with accept and decline server actions. `/organizations/new`
+reads creator-attributed quota through a narrow SELECT-only `@bap/db` accessor.
+A missing row, malformed state, or read failure renders remaining quota as zero
 and replaces the form with one message. When capacity exists, the account name
 prefills the workspace name and the shared normalizer keeps the slug field in
 step with name edits.

@@ -30,31 +30,33 @@ that later PRs publish, so a workspace could claim one of those slugs.
   migration, in `slug.ts`, `slug.test.ts`, and the shared corpus.
 - Drop the throwaway markers from the two converted pages; update the DESIGN.md
   and ARCHITECTURE.md throwaway-page counts (they disagreed, five vs six; four
-  `[orgSlug]` pages plus `/account` remain temporary after this PR) and the route
-  docs.
+  `[orgSlug]` pages plus `/account` remain temporary after this PR) and the
+  route docs.
 - Out of scope: `[orgSlug]` landing, members, entities, settings, account, the
   header panels' own conversion, the audit page, and any new `apps/api` route.
 
 ## Design
 
-Files created: `apps/web/src/app/(product)/organizations/page.tsx` (server; moved
-out of `(throwaway)`), `workspace-list.tsx` (client child that owns the grids,
-forms, and toasts), `page.test.tsx`; `.../organizations/new/page.tsx` (server),
-`workspace-form.tsx` (client, replaces `organization-form.tsx`), `page.test.tsx`;
+Files created: `apps/web/src/app/(product)/organizations/page.tsx` (server;
+moved out of `(throwaway)`), `workspace-list.tsx` (client child that owns the
+grids, forms, and toasts), `page.test.tsx`; `.../organizations/new/page.tsx`
+(server), `workspace-form.tsx` (client, replaces `organization-form.tsx`),
+`page.test.tsx`;
 `packages/db/drizzle/20260916.0001_reserve_workspace_slugs.sql`.
 
 Files modified: `lib/organizations/actions.ts` and `actions.test.ts`;
-`lib/organizations/slug.ts`, `slug.test.ts`, `tests/fixtures/organization-slugs.json`;
+`lib/organizations/slug.ts`, `slug.test.ts`,
+`tests/fixtures/organization-slugs.json`;
 `components/shell/product-navigation.ts`, `breadcrumb-trail.ts` and its test,
 `header-panels.tsx` (SwitcherPanel texts), `product-shell.test.tsx`;
 `i18n/resources.ts`; `packages/db/src/access.ts` and `access.test.ts`;
 `DESIGN.md`; `docs/application-routes.md`.
 
-- i18n: one new `workspaces` namespace, keys sorted, with groups `list`
-  (title, createAction, empty checklist, column headers, role labels, loadError),
+- i18n: one new `workspaces` namespace, keys sorted, with groups `list` (title,
+  createAction, empty checklist, column headers, role labels, loadError),
   `invitations` (heading, accept, decline, empty, accept/decline success and
-  failure), and `create` (title, nameLabel, slugLabel, urlPreview, quotaRemaining,
-  submit, slugTaken, quotaExhausted, back).
+  failure), and `create` (title, nameLabel, slugLabel, urlPreview,
+  quotaRemaining, submit, slugTaken, quotaExhausted, back).
 - DataGrid props: `columns` (name, slug, role, created; `sortable`,
   `initialSort` on name), `rows`, `onRowClick` (push `/${slug}`),
   `toolbarActions` (primary "Create workspace" -> `/organizations/new`), `size`
@@ -62,28 +64,31 @@ Files modified: `lib/organizations/actions.ts` and `actions.test.ts`;
   of the grid, not as a grid empty state. Invitations use a second `DataGrid`
   (organization name, role, expires) with a `renderCell` action column holding
   two server-action `<form>` buttons.
-- Your role: a new narrow `@bap/db` read accessor `listWorkspaceMemberships(pool,
-  subjectId)` returns `{ id, name, slug, role, createdAt }` in one query over
-  `auth.member` join `auth.organization`, matching the read-accessor pattern
-  locked for the account sessions list. Better Auth `listOrganizations` omits the
-  caller's role, so a per-organization `listMembers` loop is rejected as N+1.
+- Your role: a new narrow `@bap/db` read accessor
+  `listWorkspaceMemberships(pool, subjectId)` returns
+  `{ id, name, slug, role, createdAt }` in one query over `auth.member` join
+  `auth.organization`, matching the read-accessor pattern locked for the account
+  sessions list. Better Auth `listOrganizations` omits the caller's role, so a
+  per-organization `listMembers` loop is rejected as N+1.
 - Server actions: `createOrganizationAction` already exists and is reused. New:
-  `acceptOrganizationInvitationAction` and `declineOrganizationInvitationAction`,
-  each reading `invitationId` from `FormData`, re-checking the session, and
-  calling `auth.api.acceptInvitation` / `auth.api.rejectInvitation` with the
-  request headers; they redirect back to `/organizations` with a `?result=`
-  marker the client turns into a toast (existing `resultPath` pattern).
+  `acceptOrganizationInvitationAction` and
+  `declineOrganizationInvitationAction`, each reading `invitationId` from
+  `FormData`, re-checking the session, and calling `auth.api.acceptInvitation` /
+  `auth.api.rejectInvitation` with the request headers; they redirect back to
+  `/organizations` with a `?result=` marker the client turns into a toast
+  (existing `resultPath` pattern).
 - Validation: invitation id is validated as `z.string().min(1)` in the action
   before any auth call; slug is validated live in the client with
   `organizationSlugSchema` plus the reserved set and again server-side in
   `createOrganizationAction`. No organization id from the browser selects a
   tenant.
-- Migration sketch: a `DO $$ ... $$` pre-check that `RAISE EXCEPTION ... USING
-  ERRCODE = 'check_violation', CONSTRAINT = 'organization_slug_reserved_check'`
+- Migration sketch: a `DO $$ ... $$` pre-check that
+  `RAISE EXCEPTION ... USING ERRCODE = 'check_violation', CONSTRAINT = 'organization_slug_reserved_check'`
   if any of the five slugs already exist in `auth.organization`, then
-  `DROP CONSTRAINT` and `ADD CONSTRAINT organization_slug_reserved_check CHECK
-  (slug NOT IN (...))` with the current list plus the five appended in that
-  order. It touches the constraint, so `DATABASE_MIGRATION_COMPATIBILITY` in
+  `DROP CONSTRAINT` and
+  `ADD CONSTRAINT organization_slug_reserved_check CHECK (slug NOT IN (...))`
+  with the current list plus the five appended in that order. It touches the
+  constraint, so `DATABASE_MIGRATION_COMPATIBILITY` in
   `packages/db/src/access.ts` is bumped to `20260916.0001` in the same PR.
 
 ## Security
@@ -114,8 +119,8 @@ migration adds no table, role, or grant.
 2. Does the workbench/DataGrid expose a first-class empty-state slot rich enough
    for the four-item checklist, or is a plain `PageContainer` block the right
    place for it.
-3. Should the invitations section hide entirely when empty, or show a short empty
-   message. Assumed a short empty message.
+3. Should the invitations section hide entirely when empty, or show a short
+   empty message. Assumed a short empty message.
 
 ## Corrections (2026-09-16)
 
@@ -127,13 +132,14 @@ implementation.
    `current_migration_version()`; the same id is pinned in
    `packages/db/src/documents.integration.test.ts`.
 2. `packages/db/src/postgres.integration.test.ts` hardcodes the constraint
-   literal: the five slugs are appended there, a collision proof is added for the
-   new migration, and `docs/database-isolation.md` moves from 17 to 22 literals.
+   literal: the five slugs are appended there, a collision proof is added for
+   the new migration, and `docs/database-isolation.md` moves from 17 to 22
+   literals.
 3. The migration copies the `20260914.0002_documents.sql` guard-then-replace
    style (a `DO` pre-check raising `check_violation` with
-   `CONSTRAINT organization_slug_reserved_check`, then `DROP` + `ADD`). Migrations
-   run in one transaction under an advisory lock; an applied migration file is
-   never edited.
+   `CONSTRAINT organization_slug_reserved_check`, then `DROP` + `ADD`).
+   Migrations run in one transaction under an advisory lock; an applied
+   migration file is never edited.
 4. The `?result=` to toast bridge is new code: a small client component using
    `useSearchParams` and `useToast`, then `router.replace` to strip the query.
    Existing consumers render inline notifications; this PR introduces the toast
@@ -143,12 +149,12 @@ implementation.
    `packages/db/src/index.ts`. `getOrganizationCreationQuota` already exists.
 6. Better Auth 1.7.4 `acceptInvitation` and `rejectInvitation` take
    `{ invitationId }`, both enforce the recipient email match and a verified
-   email. The pending list is `auth.api.listUserInvitations`. Acceptance sets the
-   active organization internally, which no BAP operation reads.
-7. `createOrganizationAction` widens the `resultPath` union with `slug-taken` and
-   `quota-exhausted` markers, mapped to inline errors on the create page; the
-   `ORGANIZATION_ALREADY_EXISTS` Better Auth error becomes `slug-taken` and an
-   exhausted quota becomes `quota-exhausted`.
+   email. The pending list is `auth.api.listUserInvitations`. Acceptance sets
+   the active organization internally, which no BAP operation reads.
+7. `createOrganizationAction` widens the `resultPath` union with `slug-taken`
+   and `quota-exhausted` markers, mapped to inline errors on the create page;
+   the `ORGANIZATION_ALREADY_EXISTS` Better Auth error becomes `slug-taken` and
+   an exhausted quota becomes `quota-exhausted`.
 8. Moving out of `(throwaway)`: the icon-contract test paths and the
    `organization-form.tsx` assertions are updated, the empty `(throwaway)` group
    folder is removed (the `[orgSlug]` pages are not in it), the dead
