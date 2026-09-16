@@ -524,7 +524,7 @@ describe('PostgreSQL 18 isolation', () => {
         conname: 'organization_slug_reserved_check',
         convalidated: true,
         definition:
-          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text, 'organizations'::text, 'documents'::text])))",
+          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text, 'organizations'::text, 'documents'::text, 'members'::text, 'entities'::text, 'settings'::text, 'assistant'::text, 'audit'::text])))",
         table_name: 'organization',
       },
     ]);
@@ -737,6 +737,50 @@ describe('PostgreSQL 18 isolation', () => {
         owner.query(
           `insert into auth.organization (id, name, slug)
            values ('reserved-route-still-blocked', 'Reserved route blocked', 'organizations')`,
+        ),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('fails the workspace-route reservation migration before replacing the constraint when a slug is occupied', async () => {
+    const migration = await readFile(
+      new URL(
+        '../drizzle/20260916.0001_reserve_workspace_slugs.sql',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    const client = await migratorPool.connect();
+    let transactionOpen = false;
+
+    try {
+      await client.query('begin');
+      transactionOpen = true;
+      await client.query('set local role bap_owner');
+      await client.query(
+        'alter table auth.organization drop constraint organization_slug_reserved_check',
+      );
+      await client.query(
+        `insert into auth.organization (id, name, slug)
+         values ('workspace-route-collision', 'Workspace route collision', 'members')`,
+      );
+
+      await expect(client.query(migration)).rejects.toMatchObject({
+        code: '23514',
+        constraint: 'organization_slug_reserved_check',
+      });
+    } finally {
+      if (transactionOpen) {
+        await client.query('rollback').catch(() => undefined);
+      }
+      client.release();
+    }
+
+    await expect(
+      asOwner((owner) =>
+        owner.query(
+          `insert into auth.organization (id, name, slug)
+           values ('workspace-route-still-blocked', 'Workspace route blocked', 'members')`,
         ),
       ),
     ).rejects.toThrow();

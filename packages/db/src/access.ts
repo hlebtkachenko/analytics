@@ -35,8 +35,16 @@ export interface ResolveOrganizationRouteInput {
   subjectId: string;
 }
 
+export interface WorkspaceMembership {
+  id: string;
+  name: string;
+  slug: string;
+  role: MembershipRole;
+  createdAt: Date;
+}
+
 // Exact match against the version recorded by the migration runner. Bump it to the newest migration id in the same pull request as that migration. Rollback consequence: application code rolled back after the migration is applied makes /ready return 503 on every service until this is bumped again.
-export const DATABASE_MIGRATION_COMPATIBILITY = '20260915.0001';
+export const DATABASE_MIGRATION_COMPATIBILITY = '20260916.0001';
 
 export const PUBLIC_SIGNUP_EDGE_RATE_LIMIT = {
   max: 3,
@@ -471,6 +479,46 @@ export async function resolveOrganizationRoute(
   }
 
   return { id: row.id, name: row.name, role: role.data, slug: row.slug };
+}
+
+// Lists the caller's workspaces with their own role in one query, never per-organization.
+export async function listWorkspaceMemberships(
+  pool: DatabasePool,
+  subjectId: string,
+): Promise<WorkspaceMembership[]> {
+  const result = await pool.query<{
+    id: string;
+    name: string;
+    slug: string;
+    role: string;
+    created_at: Date;
+  }>(
+    `select organization.id, organization.name, organization.slug,
+            membership.role, organization.created_at
+     from auth.organization as organization
+     inner join auth.member as membership
+       on membership.organization_id = organization.id
+     where membership.user_id = $1
+     order by organization.name`,
+    [subjectId],
+  );
+
+  const memberships: WorkspaceMembership[] = [];
+  for (const row of result.rows) {
+    const role = membershipRoleSchema.safeParse(row.role);
+    if (!role.success) {
+      continue;
+    }
+    memberships.push({
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      role: role.data,
+      createdAt: row.created_at,
+    });
+  }
+
+  return memberships;
 }
 
 export interface MigrationCompatibility {

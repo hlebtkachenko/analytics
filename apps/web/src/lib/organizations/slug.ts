@@ -18,6 +18,11 @@ export const reservedOrganizationSlugs = [
   'account',
   'organizations',
   'documents',
+  'members',
+  'entities',
+  'settings',
+  'assistant',
+  'audit',
 ] as const;
 
 const reservedOrganizationSlugSet = new Set<string>(reservedOrganizationSlugs);
