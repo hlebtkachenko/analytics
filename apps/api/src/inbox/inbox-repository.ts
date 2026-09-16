@@ -24,6 +24,7 @@ import type {
   InboxItem,
   InboxItemDetail,
   InboxItemFile,
+  InboxItemListEntry,
   InboxItemListQuery,
   InboxItemListResponse,
   ProviderInput,
@@ -139,6 +140,11 @@ interface ItemRow {
   updated_at: Date;
 }
 
+interface ListRow extends ItemRow {
+  file_count: number;
+  primary_filename: string | null;
+}
+
 interface FileRow {
   blob_id: string;
   byte_size: string;
@@ -186,6 +192,14 @@ function toItem(row: ItemRow): InboxItem {
       row.snoozed_until === null ? null : row.snoozed_until.toISOString(),
     status: row.status as InboxItem['status'],
     updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+function toListEntry(row: ListRow): InboxItemListEntry {
+  return {
+    ...toItem(row),
+    fileCount: row.file_count,
+    primaryFilename: row.primary_filename,
   };
 }
 
@@ -534,17 +548,28 @@ export async function listItems(
       `select count(*)::int as total from app.inbox_item as i where ${filter}`,
       values,
     );
-    const items = await transaction.query<ItemRow>(
-      `select ${ITEM_COLUMNS}
-         from app.inbox_item as i
-        where ${filter}
-        order by i.received_at desc, i.id desc
-        limit $4 offset $5`,
+    // The page is cut first so the file summary only runs for the rows it returns.
+    const items = await transaction.query<ListRow>(
+      `select p.*, files.file_count, files.primary_filename
+         from (select ${ITEM_COLUMNS}, i.organization_id
+                 from app.inbox_item as i
+                where ${filter}
+                order by i.received_at desc, i.id desc
+                limit $4 offset $5) as p
+        cross join lateral (
+          select count(*)::int as file_count,
+                 max(b.original_filename) filter (where f.position = 1) as primary_filename
+            from app.inbox_item_file as f
+            join app.blob as b
+              on b.id = f.blob_id and b.organization_id = f.organization_id
+           where f.item_id = p.id and f.organization_id = p.organization_id
+        ) as files
+        order by p.received_at desc, p.id desc`,
       [...values, query.pageSize, (query.page - 1) * query.pageSize],
     );
 
     return {
-      items: items.rows.map(toItem),
+      items: items.rows.map(toListEntry),
       page: query.page,
       pageSize: query.pageSize,
       total: total.rows[0]?.total ?? 0,

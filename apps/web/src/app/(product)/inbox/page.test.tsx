@@ -39,6 +39,7 @@ const inboxItem = {
   detectedType: 'pdf',
   documentId: null,
   duplicateOfItemId: null,
+  fileCount: 3,
   hintKind: null,
   hintLegalEntityId: null,
   hintLinkDocumentId: null,
@@ -48,6 +49,7 @@ const inboxItem = {
   legalEntityId: LEGAL_ENTITY_ID,
   partnerId: null,
   payloadKind: 'file',
+  primaryFilename: 'invoice.pdf',
   receivedAt: '2026-09-16T08:00:00.000Z',
   routedAt: null,
   snoozedUntil: null,
@@ -134,6 +136,7 @@ describe('InboxPage', () => {
     const table = screen.getByRole('table');
     expect(within(table).getByText('Needs review')).toBeVisible();
     expect(within(table).getByText('pdf')).toBeVisible();
+    expect(within(table).getByText('invoice.pdf +2')).toBeVisible();
     expect(within(table).getByText('80 %')).toBeVisible();
     expect(within(table).getByText('Unassigned')).toBeVisible();
     expect(

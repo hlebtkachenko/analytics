@@ -144,8 +144,15 @@ export default function InboxPage() {
     legalEntities.map((entity) => [entity.id, entity.name]),
   );
 
+  // The first file names the item; the rest are counted, e.g. "invoice.pdf +2".
+  function fileLabel(primaryFilename: string | null, fileCount: number) {
+    const name = primaryFilename ?? t('inbox.notAvailable');
+    return fileCount > 1 ? `${name} +${String(fileCount - 1)}` : name;
+  }
+
   const columns: readonly GridColumn[] = [
     { header: t('inbox.columnReceivedAt'), key: 'receivedAt' },
+    { header: t('inbox.columnFile'), key: 'file' },
     { header: t('inbox.columnDetectedType'), key: 'detectedType' },
     { align: 'end', header: t('inbox.columnConfidence'), key: 'confidence' },
     {
@@ -181,6 +188,7 @@ export default function InboxPage() {
         ? t('inbox.notAvailable')
         : `${String(Math.round(item.confidence * 100))} %`,
     detectedType: item.detectedType ?? t('inbox.notAvailable'),
+    file: fileLabel(item.primaryFilename, item.fileCount),
     id: item.id,
     legalEntity:
       item.legalEntityId === null

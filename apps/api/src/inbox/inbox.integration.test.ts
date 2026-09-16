@@ -315,6 +315,10 @@ describe('inbox intake', () => {
       query: inboxItemListQuerySchema.parse({ status: 'needs_review' }),
     });
     expect(unrestricted.items.map((entry) => entry.id)).toEqual([firstItemId]);
+    expect(unrestricted.items[0]).toMatchObject({
+      fileCount: 1,
+      primaryFilename: 'placeholder.pdf',
+    });
 
     const restricted = await listItems(apiPool, {
       ...reader,

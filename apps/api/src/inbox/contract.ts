@@ -297,9 +297,19 @@ export const inboxItemListQuerySchema = z
 
 export type InboxItemListQuery = z.infer<typeof inboxItemListQuerySchema>;
 
+// The list carries the first file name and the file count so the browser needs no second request.
+export const inboxItemListEntrySchema = inboxItemSchema
+  .extend({
+    fileCount: z.number().int().min(0),
+    primaryFilename: z.string().min(1).max(255).nullable(),
+  })
+  .strict();
+
+export type InboxItemListEntry = z.infer<typeof inboxItemListEntrySchema>;
+
 export const inboxItemListResponseSchema = z
   .object({
-    items: z.array(inboxItemSchema),
+    items: z.array(inboxItemListEntrySchema),
     page: z.number().int().min(1),
     pageSize: z.number().int().min(1).max(MAX_INBOX_PAGE_SIZE),
     total: z.number().int().min(0),
@@ -568,10 +578,30 @@ export const inboxItemDetailOpenApiSchema = {
   type: 'object',
 };
 
+export const inboxItemListEntryOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    ...inboxItemOpenApiSchema.properties,
+    fileCount: { minimum: 0, type: 'integer' },
+    primaryFilename: {
+      maxLength: 255,
+      minLength: 1,
+      nullable: true,
+      type: 'string',
+    },
+  },
+  required: [
+    ...inboxItemOpenApiSchema.required,
+    'fileCount',
+    'primaryFilename',
+  ],
+  type: 'object',
+};
+
 export const inboxItemListOpenApiSchema = {
   additionalProperties: false,
   properties: {
-    items: { items: inboxItemOpenApiSchema, type: 'array' },
+    items: { items: inboxItemListEntryOpenApiSchema, type: 'array' },
     page: { minimum: 1, type: 'integer' },
     pageSize: { maximum: MAX_INBOX_PAGE_SIZE, minimum: 1, type: 'integer' },
     total: { minimum: 0, type: 'integer' },

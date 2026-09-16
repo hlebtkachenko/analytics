@@ -42,7 +42,12 @@ import {
   SUBJECT_RATE_LIMITER,
   SubjectRateLimitGuard,
 } from '../subject-rate-limit.guard.js';
-import type { InboxItem, InboxItemDetail, InboxItemFile } from './contract.js';
+import type {
+  InboxItem,
+  InboxItemDetail,
+  InboxItemFile,
+  InboxItemListEntry,
+} from './contract.js';
 import { InboxController } from './inbox.controller.js';
 import { InboxService } from './inbox.service.js';
 import type { OpenedBlob, UploadInput } from './inbox.service.js';
@@ -89,6 +94,12 @@ const file: InboxItemFile = {
   originalFilename: 'placeholder.txt',
   position: 1,
   sha256: SHA256,
+};
+
+const listEntry: InboxItemListEntry = {
+  ...item,
+  fileCount: 2,
+  primaryFilename: file.originalFilename,
 };
 
 const detail: InboxItemDetail = {
@@ -173,7 +184,7 @@ describe('application inbox routes', () => {
     assignItem: record('assignItem', byItem),
     discardItem: record('discardItem', byItem),
     listItems: record('listItems', () => ({
-      items: [item],
+      items: [listEntry],
       page: 1,
       pageSize: 25,
       total: 1,
@@ -312,7 +323,7 @@ describe('application inbox routes', () => {
       .expect(200);
 
     expect(response.body).toEqual({
-      items: [item],
+      items: [listEntry],
       page: 1,
       pageSize: 25,
       total: 1,

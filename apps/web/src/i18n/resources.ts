@@ -341,6 +341,7 @@ export const resources = {
         columnConfidence: 'Confidence',
         columnDetectedType: 'Detected type',
         columnEntity: 'Legal entity',
+        columnFile: 'File',
         columnFileName: 'File name',
         columnReceivedAt: 'Received',
         columnStatus: 'Status',

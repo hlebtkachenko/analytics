@@ -237,9 +237,17 @@ export const inboxItemDetailSchema = z
   })
   .strict();
 
+// The list carries the first file name and the file count so the browser needs no second request.
+export const inboxItemListEntrySchema = inboxItemSchema
+  .extend({
+    fileCount: z.number().int().min(0),
+    primaryFilename: z.string().min(1).max(255).nullable(),
+  })
+  .strict();
+
 export const inboxItemListResponseSchema = z
   .object({
-    items: z.array(inboxItemSchema),
+    items: z.array(inboxItemListEntrySchema),
     page: z.number().int().min(1),
     pageSize: z.number().int().min(1).max(MAX_INBOX_PAGE_SIZE),
     total: z.number().int().min(0),
@@ -305,6 +313,7 @@ export type InboxHints = z.infer<typeof inboxHintsSchema>;
 export type InboxItem = z.infer<typeof inboxItemSchema>;
 export type InboxItemDetail = z.infer<typeof inboxItemDetailSchema>;
 export type InboxItemFile = z.infer<typeof inboxItemFileSchema>;
+export type InboxItemListEntry = z.infer<typeof inboxItemListEntrySchema>;
 export type InboxItemListResponse = z.infer<typeof inboxItemListResponseSchema>;
 export type InboxItemStatus = z.infer<typeof inboxItemStatusSchema>;
 export type InboxIssueCode = z.infer<typeof inboxIssueCodeSchema>;

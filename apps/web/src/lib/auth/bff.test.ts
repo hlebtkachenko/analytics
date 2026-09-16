@@ -1701,7 +1701,7 @@ describe('getInboxItems', () => {
         'http://api:3001/v1/organizations/org_1/inbox/items?status=received%2Cfailed&page=1&pageSize=25',
       );
       return Response.json({
-        items: [inboxItem],
+        items: [{ ...inboxItem, fileCount: 1, primaryFilename: 'a.pdf' }],
         page: 1,
         pageSize: 25,
         total: 1,
