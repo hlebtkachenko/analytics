@@ -251,21 +251,25 @@ session user id through `bap_auth`. React `cache` deduplicates that whole
 resolution within 1 request only. Every negative or failed lookup becomes the
 same 404, and no slug-to-id mapping is cached across requests. The BFF,
 application API, reporting API, RLS context, and service membership resolver
-remain id-only. The root route redirects to `/organizations`; that index and the
-first descendant `[orgSlug]` page are now the deliberately plain Phase 10
-organization loop. The index lists current memberships and links quota-gated
-creation. Descendant pages expose navigation, members, pending invitations,
-name/slug settings, and, since ADR 0011, legal entities at
-`/[orgSlug]/entities`. Every mutation is a server action which resolves the slug
-through the same member gate and supplies the resulting organization id to
-Better Auth; no browser-supplied id or ambient active organization selects a
-tenant.
+remain id-only. The root route redirects to `/organizations`. The `/organizations`
+index and `/organizations/new` are Carbon pages inside `PageContainer`: the index
+lists the caller's workspaces with their role through a narrow `@bap/db`
+membership accessor, shows a get-started checklist when empty, and lists pending
+invitations with accept and decline server actions; the create page renders a
+Carbon form with live slug validation and quota-gated creation. The first
+descendant `[orgSlug]` page and its descendants remain the deliberately plain
+Phase 10 organization loop, exposing navigation, members, pending invitations,
+name/slug settings, and, since ADR 0011, legal entities at `/[orgSlug]/entities`.
+Every mutation is a server action which resolves the slug through the same member
+gate and supplies the resulting organization id to Better Auth; no
+browser-supplied id or ambient active organization selects a tenant.
 
-These six pages are explicitly throwaway milestone UI. They use semantic HTML,
-native forms, no page CSS, and no design-system import. The layout and shared
-slug resolver remain durable. Publishing the literal `/organizations` route also
-advances the reserved database and TypeScript slug contract through migration
-`20260831.0004`.
+These four `[orgSlug]` pages remain explicitly throwaway milestone UI. They use
+semantic HTML, native forms, no page CSS, and no design-system import. The layout
+and shared slug resolver remain durable. Publishing the literal `/organizations`
+route advanced the reserved database and TypeScript slug contract through
+migration `20260831.0004`, and migration `20260916.0001` reserves the flat
+workspace routes.
 
 Authenticated `app/(product)` routes share a server layout that renders the
 client `ProductShell`, a Carbon UI Shell header branded "Afframe Analytics" over

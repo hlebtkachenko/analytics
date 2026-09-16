@@ -38,16 +38,17 @@ utility CSS framework, raw palette values, or copied Carbon source.
 Authenticated `app/(product)` routes share a Carbon UI Shell product shell: a
 header branded "Afframe Analytics" with single-purpose panels for search,
 notifications, help, settings, workspace switching, and account, over a
-pinned-persistable left icon rail for Access, Organizations, Datasets,
+pinned-persistable left icon rail for Access, Workspaces, Datasets,
 Documents, Account, and a workspace section, rendered from the shell's
 `railDestinations` array. Identity and invitation routes remain outside that
 shell. The layout owns the single `main-content` landmark and renders small
 Carbon breadcrumbs for subordinate views, including the inline dataset view. The
-five temporary organization pages and the temporary account page remain a
+four temporary `[orgSlug]` pages and the temporary account page remain a
 deliberate source-level exception: their page modules keep the exact throwaway
 markers, plain semantic HTML, and zero CSS, design-system, or icon imports, and
 no longer render their own `<main>` or native breadcrumbs now that the layout
-owns both. Converting their page content to Carbon is future work.
+owns both. The `/organizations` list and create pages are now Carbon; converting
+the remaining page content to Carbon is future work.
 
 Every other product page renders its content inside the shared `PageContainer`
 scaffold; the `bap/product-page-container` ESLint rule enforces it and bans

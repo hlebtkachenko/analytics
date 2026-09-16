@@ -420,9 +420,9 @@ membership and, above that boundary, entity scope.
 
 ## Temporary organization action boundary
 
-The 6 organization pages, now including `/[orgSlug]/entities`, are deliberately
-plain and temporary, but their server actions are untrusted public POST
-boundaries. They rederive the verified session and member-gated organization
+The organization pages, the four plain `[orgSlug]` pages including
+`/[orgSlug]/entities` and the Carbon `/organizations` list and create pages,
+expose server actions that are untrusted public POST boundaries. They rederive the verified session and member-gated organization
 resolution, validate `FormData`, ignore any browser-supplied organization id,
 and call only installed Better Auth APIs with the exact resolved id. Creation
 keeps the stored active organization unchanged. Each scoped action validates its
@@ -432,11 +432,11 @@ Malformed, protocol-relative-looking, and encoded-looking values reach only
 only the parsed or durable resolved slug; provider and database failures become
 generic messages and are not logged.
 
-Their page modules retain the exact throwaway markers, plain native breadcrumbs,
-and zero CSS, design-system, or icon imports. A shared Carbon shell may surround
-these authenticated routes, but it does not change their server-action trust
-boundary or make the temporary page content permanent. Carbon organization and
-account page content remains future work.
+The four `[orgSlug]` page modules retain the exact throwaway markers, plain
+native breadcrumbs, and zero CSS, design-system, or icon imports. A shared Carbon
+shell surrounds these authenticated routes without changing their server-action
+trust boundary. The `/organizations` list and create pages are now Carbon;
+Carbon `[orgSlug]` and account page content remains future work.
 
 The UI mirrors the access control ADR 0011 added to the Better Auth organization
 plugin: only owners may update settings, invite, assign any of the three roles,
