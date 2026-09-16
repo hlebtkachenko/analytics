@@ -1,0 +1,21 @@
+@use '@bap/design-system/tokens/spacing.scss' as spacing;
+
+.summary {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-05;
+}
+
+.preview {
+  block-size: 32rem;
+  border: 1px solid var(--cds-border-subtle);
+  inline-size: 100%;
+}
+
+.actions {
+  align-items: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-03;
+}

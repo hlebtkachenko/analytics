@@ -18,6 +18,18 @@ import {
   updateDocumentRequestSchema,
   updatePartnerRequestSchema,
 } from '../documents/contract.ts';
+import {
+  assignInboxItemRequestSchema,
+  discardInboxItemRequestSchema,
+  inboxItemDetailSchema,
+  inboxItemListQuerySchema,
+  inboxItemListResponseSchema,
+  inboxUploadResponseSchema,
+  isInlineMediaType,
+  routeInboxItemToDocumentRequestSchema,
+  snoozeInboxItemRequestSchema,
+  updateInboxHintsRequestSchema,
+} from '../inbox/contract.ts';
 import { webLogger } from '../logger.ts';
 
 // The API lists at most 200 entities, and the browser never asks for more than it can show.
@@ -1569,6 +1581,540 @@ export async function getDirectiveAccounts(
       schema: directiveAccountListSchema,
       successStatus: 200,
     },
+    fetchImplementation,
+  );
+}
+
+// Rebuilt from validated values only, so no client query string is forwarded verbatim.
+function inboxItemListQuery(
+  query: z.infer<typeof inboxItemListQuerySchema>,
+): string {
+  const outbound = new URLSearchParams();
+
+  if (query.status !== undefined) {
+    outbound.set('status', query.status.join(','));
+  }
+  if (query.detectedType !== undefined) {
+    outbound.set('detectedType', query.detectedType);
+  }
+  outbound.set('page', String(query.page));
+  outbound.set('pageSize', String(query.pageSize));
+
+  return outbound.toString();
+}
+
+export async function postInboxUpload(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const contentType = request.headers.get('content-type') ?? '';
+  if (!contentType.startsWith('multipart/form-data') || request.body === null) {
+    return jsonResponse({ error: 'invalid_upload' }, 400);
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  let response: Response;
+  try {
+    response = await fetchImplementation(
+      applicationPath(prepared.selector, 'inbox/uploads'),
+      {
+        // The body is forwarded as a stream, so the web service never holds the whole file.
+        body: request.body,
+        cache: 'no-store',
+        duplex: 'half',
+        headers: {
+          authorization: `Bearer ${prepared.token}`,
+          'content-type': contentType,
+          'x-bap-request-id': prepared.requestId,
+        },
+        method: 'POST',
+        signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+      } as RequestInit & { duplex: 'half' },
+    );
+  } catch {
+    return upstreamFailure('postInboxUpload', 'unreachable');
+  }
+
+  if (!response.ok) {
+    if (response.status >= 500) {
+      return upstreamFailure('postInboxUpload', 'unreachable');
+    }
+
+    return jsonResponse({ error: 'upload_rejected' }, response.status);
+  }
+
+  let responseBody: unknown;
+  try {
+    responseBody = await response.json();
+  } catch {
+    return upstreamFailure('postInboxUpload', 'unreadable');
+  }
+  const payload = inboxUploadResponseSchema.safeParse(responseBody);
+  if (!payload.success) {
+    return upstreamFailure('postInboxUpload', 'unexpected_shape');
+  }
+
+  return jsonResponse(payload.data, 201, {
+    'x-request-id': prepared.requestId,
+  });
+}
+
+export async function getInboxItems(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const query = inboxItemListQuerySchema.safeParse(
+    Object.fromEntries(new URL(request.url).searchParams),
+  );
+
+  // An unsupported filter, an oversized page, or a window beyond the bound is refused, never clamped.
+  if (!query.success) {
+    return jsonResponse({ error: 'invalid_query' }, 400);
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'inbox_unavailable',
+      method: 'GET',
+      operation: 'getInboxItems',
+      path: `inbox/items?${inboxItemListQuery(query.data)}`,
+      schema: inboxItemListResponseSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function getInboxItem(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  itemId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const selected = parsedIdentifier(itemId, 'inbox_item_not_found');
+
+  if ('failure' in selected) {
+    return selected.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'inbox_item_unavailable',
+      method: 'GET',
+      operation: 'getInboxItem',
+      path: `inbox/items/${encodeURIComponent(selected.value)}`,
+      schema: inboxItemDetailSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+type InboxItemWrite = Readonly<{
+  action:
+    | 'assign'
+    | 'discard'
+    | 'hints'
+    | 'process'
+    | 'restore'
+    | 'route/document'
+    | 'route/undo'
+    | 'snooze';
+  bodySchema: z.ZodType | null;
+  method: 'PATCH' | 'POST';
+  operation: string;
+}>;
+
+// Every item write answers with the refreshed detail, so one helper covers the whole set.
+async function writeInboxItem(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  itemId: string,
+  write: InboxItemWrite,
+  fetchImplementation: typeof fetch,
+): Promise<Response> {
+  const selected = parsedIdentifier(itemId, 'inbox_item_not_found');
+
+  if ('failure' in selected) {
+    return selected.failure;
+  }
+
+  let body: unknown;
+  if (write.bodySchema !== null) {
+    const parsed = await readJsonBody(request, write.bodySchema);
+
+    if ('failure' in parsed) {
+      return parsed.failure;
+    }
+
+    body = parsed.data;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      ...(body === undefined ? {} : { body }),
+      errorCode: 'inbox_item_rejected',
+      method: write.method,
+      operation: write.operation,
+      path: `inbox/items/${encodeURIComponent(selected.value)}/${write.action}`,
+      schema: inboxItemDetailSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function patchInboxItemHints(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  itemId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  return await writeInboxItem(
+    auth,
+    request,
+    organizationId,
+    itemId,
+    {
+      action: 'hints',
+      bodySchema: updateInboxHintsRequestSchema,
+      method: 'PATCH',
+      operation: 'patchInboxItemHints',
+    },
+    fetchImplementation,
+  );
+}
+
+export async function postInboxItemProcess(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  itemId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  return await writeInboxItem(
+    auth,
+    request,
+    organizationId,
+    itemId,
+    {
+      action: 'process',
+      bodySchema: null,
+      method: 'POST',
+      operation: 'postInboxItemProcess',
+    },
+    fetchImplementation,
+  );
+}
+
+export async function postInboxItemRouteDocument(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  itemId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  return await writeInboxItem(
+    auth,
+    request,
+    organizationId,
+    itemId,
+    {
+      action: 'route/document',
+      bodySchema: routeInboxItemToDocumentRequestSchema,
+      method: 'POST',
+      operation: 'postInboxItemRouteDocument',
+    },
+    fetchImplementation,
+  );
+}
+
+export async function postInboxItemRouteUndo(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  itemId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  return await writeInboxItem(
+    auth,
+    request,
+    organizationId,
+    itemId,
+    {
+      action: 'route/undo',
+      bodySchema: null,
+      method: 'POST',
+      operation: 'postInboxItemRouteUndo',
+    },
+    fetchImplementation,
+  );
+}
+
+export async function postInboxItemDiscard(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  itemId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  return await writeInboxItem(
+    auth,
+    request,
+    organizationId,
+    itemId,
+    {
+      action: 'discard',
+      bodySchema: discardInboxItemRequestSchema,
+      method: 'POST',
+      operation: 'postInboxItemDiscard',
+    },
+    fetchImplementation,
+  );
+}
+
+export async function postInboxItemRestore(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  itemId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  return await writeInboxItem(
+    auth,
+    request,
+    organizationId,
+    itemId,
+    {
+      action: 'restore',
+      bodySchema: null,
+      method: 'POST',
+      operation: 'postInboxItemRestore',
+    },
+    fetchImplementation,
+  );
+}
+
+export async function postInboxItemAssign(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  itemId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  return await writeInboxItem(
+    auth,
+    request,
+    organizationId,
+    itemId,
+    {
+      action: 'assign',
+      bodySchema: assignInboxItemRequestSchema,
+      method: 'POST',
+      operation: 'postInboxItemAssign',
+    },
+    fetchImplementation,
+  );
+}
+
+export async function postInboxItemSnooze(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  itemId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  return await writeInboxItem(
+    auth,
+    request,
+    organizationId,
+    itemId,
+    {
+      action: 'snooze',
+      bodySchema: snoozeInboxItemRequestSchema,
+      method: 'POST',
+      operation: 'postInboxItemSnooze',
+    },
+    fetchImplementation,
+  );
+}
+
+// The media type the API sniffed: a bare type and subtype, nothing a browser could be steered by.
+const blobMediaTypeSchema = z
+  .string()
+  .regex(
+    /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/,
+  );
+
+// The upstream filename is re-sanitised here and never forwarded verbatim: ASCII only, no quote, no separator.
+function blobDispositionFilename(
+  upstreamDisposition: string | null,
+  blobId: string,
+): string {
+  const match = /filename="([^"]*)"/.exec(upstreamDisposition ?? '');
+  const sanitised = (match?.[1] ?? '')
+    .replaceAll(/[^\x20-\x7e]/g, '')
+    .replaceAll(/["\\/;]/g, '')
+    .trim()
+    .slice(0, 255);
+
+  return sanitised.length > 0 ? sanitised : `blob-${blobId}`;
+}
+
+async function streamInboxBlob(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  blobId: string,
+  inline: boolean,
+  fetchImplementation: typeof fetch,
+): Promise<Response> {
+  const selected = parsedIdentifier(blobId, 'blob_not_found');
+
+  if ('failure' in selected) {
+    return selected.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  const operation = inline ? 'getInboxBlobInline' : 'getInboxBlobDownload';
+  // Bounds the wait for the response head only, so a long download is never cut off mid stream.
+  const controller = new AbortController();
+  const headerTimeout = setTimeout(() => {
+    controller.abort();
+  }, DATASET_EXPORT_HEADER_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetchImplementation(
+      applicationPath(
+        prepared.selector,
+        `inbox/blobs/${encodeURIComponent(selected.value)}/${inline ? 'inline' : 'download'}`,
+      ),
+      {
+        cache: 'no-store',
+        headers: {
+          authorization: `Bearer ${prepared.token}`,
+          'x-bap-request-id': prepared.requestId,
+        },
+        signal: controller.signal,
+      },
+    );
+  } catch {
+    return upstreamFailure(operation, 'unreachable');
+  } finally {
+    clearTimeout(headerTimeout);
+  }
+
+  if (!response.ok) {
+    if (response.status >= 500) {
+      return upstreamFailure(operation, 'unreachable');
+    }
+
+    return jsonResponse({ error: 'blob_rejected' }, response.status);
+  }
+
+  const mediaType = blobMediaTypeSchema.safeParse(
+    (response.headers.get('content-type') ?? '')
+      .split(';')[0]
+      ?.trim()
+      .toLowerCase(),
+  );
+
+  // Inline is a closed list even if the API were to widen it: anything else must never render in a frame.
+  if (
+    !mediaType.success ||
+    response.body === null ||
+    (inline && !isInlineMediaType(mediaType.data))
+  ) {
+    return upstreamFailure(operation, 'unexpected_media_type');
+  }
+
+  const filename = blobDispositionFilename(
+    response.headers.get('content-disposition'),
+    selected.value,
+  );
+
+  // Every header is minted here, so no upstream header reaches the browser.
+  return new Response(response.body, {
+    headers: {
+      ...privateResponseHeaders,
+      'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${filename}"`,
+      'content-type': mediaType.data,
+      ...(inline ? { 'content-security-policy': 'sandbox' } : {}),
+      'x-content-type-options': 'nosniff',
+      'x-request-id': prepared.requestId,
+    },
+    status: 200,
+  });
+}
+
+export async function getInboxBlobDownload(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  blobId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  return await streamInboxBlob(
+    auth,
+    request,
+    organizationId,
+    blobId,
+    false,
+    fetchImplementation,
+  );
+}
+
+export async function getInboxBlobInline(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  blobId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  return await streamInboxBlob(
+    auth,
+    request,
+    organizationId,
+    blobId,
+    true,
     fetchImplementation,
   );
 }
