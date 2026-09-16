@@ -395,7 +395,7 @@ export const documentListResponseSchema = z
 export type DocumentListResponse = z.infer<typeof documentListResponseSchema>;
 
 // A filter arrives either repeated or comma separated; both collapse to the same list of enum members.
-function repeatedOrCsv<Values extends readonly [string, ...string[]]>(
+export function repeatedOrCsv<Values extends readonly [string, ...string[]]>(
   values: Values,
 ): z.ZodType<Values[number][]> {
   return z
@@ -883,6 +883,7 @@ export type AccountNature = z.infer<typeof accountNatureSchema>;
 export type DataIssueCode = z.infer<typeof dataIssueCodeSchema>;
 export type DocumentKind = z.infer<typeof documentKindSchema>;
 export type DocumentLinkKind = z.infer<typeof documentLinkKindSchema>;
+export type DocumentSource = z.infer<typeof documentSourceSchema>;
 export type DocumentStatus = z.infer<typeof documentStatusSchema>;
 export type EventSide = z.infer<typeof eventSideSchema>;
 export type InvoiceLineCategory = z.infer<typeof invoiceLineCategorySchema>;

@@ -31,6 +31,8 @@ const SERVICE_NAME = 'worker';
 const SHUTDOWN_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
 
 async function bootstrap(): Promise<void> {
+  // The worker shares the blob volume with the API and must leave the same group-readable modes behind.
+  process.umask(0o007);
   const logger = new ApplicationLogger(undefined, SERVICE_NAME);
   const configuration = await loadDatabaseConfiguration(process.env, {
     role: 'bap_api',
