@@ -524,7 +524,7 @@ describe('PostgreSQL 18 isolation', () => {
         conname: 'organization_slug_reserved_check',
         convalidated: true,
         definition:
-          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text, 'organizations'::text, 'documents'::text])))",
+          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text, 'organizations'::text, 'documents'::text, 'inbox'::text])))",
         table_name: 'organization',
       },
     ]);
@@ -1568,6 +1568,16 @@ describe('PostgreSQL 18 isolation', () => {
       {
         column_name: 'created_by',
         privilege_type: 'SELECT',
+        table_name: 'blob',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'blob',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
         table_name: 'dataset',
       },
       {
@@ -1588,12 +1598,72 @@ describe('PostgreSQL 18 isolation', () => {
       {
         column_name: 'created_by',
         privilege_type: 'SELECT',
+        table_name: 'document_file',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'document_file',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
         table_name: 'document_link',
       },
       {
         column_name: 'created_by',
         privilege_type: 'UPDATE',
         table_name: 'document_link',
+      },
+      {
+        column_name: 'actor_user_id',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_event',
+      },
+      {
+        column_name: 'actor_user_id',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_event',
+      },
+      {
+        column_name: 'assignee_id',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_item',
+      },
+      {
+        column_name: 'assignee_id',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_item',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_item',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_item',
+      },
+      {
+        column_name: 'decided_by_user_id',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_item',
+      },
+      {
+        column_name: 'decided_by_user_id',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_item',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_item_extraction',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_item_extraction',
       },
       {
         column_name: 'created_by',

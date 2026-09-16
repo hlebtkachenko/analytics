@@ -271,8 +271,31 @@ replaces `economic_event_line_account_idx` with
 `(organization_id, account_code, effective_date)`, because the account
 drill-down now reads one account over a period. Row level security, policies,
 and grants are otherwise table level and unchanged.
-`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
-`20260915.0001`; rolling application code back after this migration leaves
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
+`20260915.0001` after this migration.
+
+Migration `20260916.0001` adds the Inbox intake tables of ADR 0014 and ADR 0015:
+`app.blob` (content addressed per organization, unique on
+`(organization_id, sha256)`), `app.inbox_item` (the intake envelope, with a
+nullable `legal_entity_id`, typed destination columns `document_id`,
+`dataset_id` and `partner_id` each pinned by a composite foreign key with
+`ON DELETE RESTRICT`, `inbox_item_one_destination_check` and
+`inbox_item_routed_check`), `app.inbox_item_file`, `app.inbox_item_extraction`,
+`app.inbox_event` and `app.document_file`. `app.document` gains `inbox_item_id`
+and loses `upload_id`, `content_hash`, `document_upload_fkey`,
+`document_content_hash_check` and `document_upload_idx`; `document_kind_check`
+accepts `advance_request` and `document_link_kind_check` accepts `advance_of`.
+All 6 tables carry the same per command policies as the documents tables, with
+`created_by = current_setting('bap.user_id', true)` on the 4 that record
+authorship; `bap_api` gets full DML, `bap_reporting` and `bap_backup` get
+SELECT. The eraser gains column grants on `blob.created_by`,
+`inbox_item.created_by`, `inbox_item.assignee_id`,
+`inbox_item.decided_by_user_id`, `inbox_item_extraction.created_by`,
+`inbox_event.actor_user_id` and `document_file.created_by`, and `app.erase_user`
+tombstones all 7. The migration reserves the `inbox` organization slug with the
+guard-then-replace pattern, bringing `organization_slug_reserved_check` to 18
+literals. `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is
+now `20260916.0001`; rolling application code back after this migration leaves
 readiness at 503 until code expecting that exact version is deployed or the
 expected version is deliberately advanced.
 
