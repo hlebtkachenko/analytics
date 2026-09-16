@@ -1,26 +1,23 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import OrganizationEntitiesPage from './page';
-
 const mocks = vi.hoisted(() => ({
-  createLegalEntityAction: vi.fn(),
-  deleteLegalEntityAction: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error('NEXT_NOT_FOUND');
   }),
   readLegalEntities: vi.fn(),
   readOrganizationAccess: vi.fn(),
   resolveOrganizationRouteForRequest: vi.fn(),
-  updateLegalEntityAction: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({ notFound: mocks.notFound }));
-vi.mock('../../../../lib/organizations/entity-actions', () => ({
-  createLegalEntityAction: mocks.createLegalEntityAction,
-  deleteLegalEntityAction: mocks.deleteLegalEntityAction,
-  updateLegalEntityAction: mocks.updateLegalEntityAction,
-}));
 vi.mock('../../../../lib/organizations/entities', () => ({
   readLegalEntities: mocks.readLegalEntities,
   readOrganizationAccess: mocks.readOrganizationAccess,
@@ -29,45 +26,63 @@ vi.mock('../../../../lib/organizations/resolver', () => ({
   resolveOrganizationRouteForRequest: mocks.resolveOrganizationRouteForRequest,
 }));
 
+import { ToastProvider } from '../../../../components/shell/toast';
+import { I18nProvider } from '../../../../i18n/client-provider';
+import OrganizationEntitiesPage from './page';
+
 const LEGAL_ENTITY_ID = '9b7d1c30-6a4b-4d1f-9c2e-7a5f0e3b8d21';
 
-const capabilities = {
-  createEntities: false,
-  deleteEntities: false,
-  manageDocuments: false,
-  manageEntityAccess: false,
-  manageMembers: false,
-  manageOrganization: false,
-  readDocuments: true,
-  updateEntities: false,
-  uploadData: false,
-  useAi: true,
+const entity = {
+  createdAt: '2026-09-10T06:00:00.000Z',
+  id: LEGAL_ENTITY_ID,
+  kind: 'company',
+  name: 'Placeholder Entity',
+  registrationNumber: 'HRB-1',
+  updatedAt: '2026-09-10T06:05:00.000Z',
 };
 
-function accessFor(
-  role: 'admin' | 'member' | 'owner',
-  entityScope: unknown = { mode: 'all' },
-) {
+function accessFor(role: 'admin' | 'member' | 'owner') {
   return {
     capabilities: {
-      ...capabilities,
       createEntities: role !== 'member',
       deleteEntities: role === 'owner',
       manageDocuments: role !== 'member',
       manageEntityAccess: role === 'owner',
       manageMembers: role === 'owner',
       manageOrganization: role === 'owner',
+      readDocuments: true,
       updateEntities: role !== 'member',
       uploadData: role !== 'member',
+      useAi: true,
     },
-    entityScope,
     organizationId: 'organization-1',
-    role,
-    service: 'application-api',
   };
 }
 
-afterEach(cleanup);
+async function renderPage() {
+  const ui = await OrganizationEntitiesPage({
+    params: Promise.resolve({ orgSlug: 'organization-one' }),
+  });
+  return render(
+    <I18nProvider>
+      <ToastProvider>{ui}</ToastProvider>
+    </I18nProvider>,
+  );
+}
+
+function rowFor(name: string): HTMLElement {
+  const cell = screen.getByText(name);
+  const row = cell.closest('tr');
+  if (row === null) {
+    throw new Error('row not found');
+  }
+  return row;
+}
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('OrganizationEntitiesPage', () => {
   beforeEach(() => {
@@ -79,121 +94,168 @@ describe('OrganizationEntitiesPage', () => {
       slug: 'organization-one',
     });
     mocks.readOrganizationAccess.mockResolvedValue(accessFor('owner'));
-    mocks.readLegalEntities.mockResolvedValue([
-      {
-        createdAt: '2026-09-10T06:00:00.000Z',
-        id: LEGAL_ENTITY_ID,
-        kind: 'company',
-        name: 'Placeholder Holding',
-        registrationNumber: 'HRB-1',
-        updatedAt: '2026-09-10T06:05:00.000Z',
-      },
-    ]);
+    mocks.readLegalEntities.mockResolvedValue([entity]);
   });
 
-  async function renderPage(result?: string): Promise<void> {
-    render(
-      await OrganizationEntitiesPage({
-        params: Promise.resolve({ orgSlug: 'organization-one' }),
-        searchParams: Promise.resolve(result === undefined ? {} : { result }),
-      }),
-    );
-  }
-
-  it('offers an owner the full entity lifecycle', async () => {
+  it('renders the list of legal entities for an owner', async () => {
     await renderPage();
 
-    expect(mocks.readLegalEntities).toHaveBeenCalledWith('organization-1');
-    expect(screen.getByText(/Placeholder Holding/)).toBeVisible();
-    expect(screen.getByText(/HRB-1/)).toBeVisible();
-    expect(screen.getByText('Your entity scope: All entities')).toBeVisible();
+    const row = rowFor('Placeholder Entity');
+    expect(within(row).getByText('Company')).toBeVisible();
+    expect(within(row).getByText('HRB-1')).toBeVisible();
+    expect(within(row).getByText('2026-09-10')).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Add legal entity' }),
+    ).toBeVisible();
+  });
 
-    const editForm = screen.getByRole('form', {
-      name: 'Edit Placeholder Holding',
+  it('creates a legal entity and re-reads the list', async () => {
+    const calls: { body: unknown; method: string | undefined; path: string }[] =
+      [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (path: string, init?: RequestInit) => {
+        calls.push({
+          body:
+            init?.body === undefined
+              ? undefined
+              : JSON.parse(String(init.body)),
+          method: init?.method,
+          path,
+        });
+        if (init?.method === 'POST') {
+          return Response.json(entity, { status: 201 });
+        }
+        return Response.json({ legalEntities: [entity] });
+      }),
+    );
+
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add legal entity' }));
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Placeholder Entity' },
     });
-    expect(within(editForm).getByLabelText('Name')).toHaveValue(
-      'Placeholder Holding',
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await screen.findByText('The legal entity was created.');
+    const post = calls.find((call) => call.method === 'POST');
+    expect(post?.path).toBe(
+      '/api/bff/application/organizations/organization-1/legal-entities',
     );
-    expect(within(editForm).getByLabelText('Kind')).toHaveValue('company');
-    expect(within(editForm).getByLabelText('Registration number')).toHaveValue(
-      'HRB-1',
-    );
-    expect(
-      screen.getByRole('form', { name: 'Delete Placeholder Holding' }),
-    ).toBeVisible();
-    expect(
-      screen.getByRole('form', { name: 'Add legal entity' }),
-    ).toBeVisible();
+    expect(post?.body).toEqual({ kind: 'company', name: 'Placeholder Entity' });
+    expect(calls.some((call) => call.method === undefined)).toBe(true);
   });
 
-  it('offers an admin creation and editing but never deletion', async () => {
-    mocks.readOrganizationAccess.mockResolvedValue(accessFor('admin'));
+  it('keeps the modal open with an inline name error on a 409', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_path: string, init?: RequestInit) =>
+        init?.method === 'POST'
+          ? Response.json({ error: 'legal_entity_rejected' }, { status: 409 })
+          : Response.json({ legalEntities: [entity] }),
+      ),
+    );
 
     await renderPage();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Add legal entity' }));
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Placeholder Entity' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await screen.findByText('A legal entity with this name already exists.');
     expect(
-      screen.getByRole('form', { name: 'Add legal entity' }),
-    ).toBeVisible();
-    expect(
-      screen.getByRole('form', { name: 'Edit Placeholder Holding' }),
-    ).toBeVisible();
-    expect(
-      screen.queryByRole('button', { name: 'Delete entity' }),
+      screen.queryByText('The legal entity was created.'),
     ).not.toBeInTheDocument();
   });
 
-  it('shows a restricted member the list without any form', async () => {
-    mocks.readOrganizationAccess.mockResolvedValue(
-      accessFor('member', {
-        legalEntityIds: [LEGAL_ENTITY_ID],
-        mode: 'restricted',
+  it('deletes the selected entity and re-reads the list', async () => {
+    const calls: { method: string | undefined; path: string }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (path: string, init?: RequestInit) => {
+        calls.push({ method: init?.method, path });
+        if (init?.method === 'DELETE') {
+          return new Response(null, { status: 204 });
+        }
+        return Response.json({ legalEntities: [] });
       }),
     );
 
     await renderPage();
 
-    expect(screen.getByText(/Placeholder Holding/)).toBeVisible();
-    expect(
-      screen.getByText('Your entity scope: Selected entities'),
-    ).toBeVisible();
-    expect(
-      screen.queryByRole('form', { name: 'Add legal entity' }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Save entity' }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Delete entity' }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(within(rowFor('Placeholder Entity')).getByRole('button'));
+    fireEvent.click(screen.getByText('Delete'));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Delete legal entity' }),
+    );
+
+    await screen.findByText('The legal entity was deleted.');
+    const del = calls.find((call) => call.method === 'DELETE');
+    expect(del?.path).toBe(
+      `/api/bff/application/organizations/organization-1/legal-entities/${LEGAL_ENTITY_ID}`,
+    );
+    await waitFor(() => {
+      expect(calls.some((call) => call.method === undefined)).toBe(true);
+    });
   });
 
-  it('reports an unavailable list and a failed action generically', async () => {
+  it('hides every action from a member', async () => {
+    mocks.readOrganizationAccess.mockResolvedValue(accessFor('member'));
+
+    await renderPage();
+
+    expect(
+      screen.queryByRole('button', { name: 'Add legal entity' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(rowFor('Placeholder Entity')).queryByRole('button'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('reports a failed list load with a notification', async () => {
     mocks.readLegalEntities.mockResolvedValue(null);
 
     await renderPage();
 
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'The legal entity list could not be updated.',
-    );
-
-    cleanup();
-    mocks.readLegalEntities.mockResolvedValue([]);
-    await renderPage('success');
-
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'The legal entity list was updated.',
-    );
-    expect(screen.getByText('No legal entities are available.')).toBeVisible();
+    expect(
+      screen.getByText('Legal entities could not be loaded.'),
+    ).toBeVisible();
+    expect(screen.queryByText('Placeholder Entity')).not.toBeInTheDocument();
   });
 
-  it('returns not found when the member-gated resolver fails', async () => {
+  it('offers creation from the empty state to a capable user only', async () => {
+    mocks.readLegalEntities.mockResolvedValue([]);
+
+    await renderPage();
+
+    expect(
+      screen.getByText('Add the first legal entity to this workspace.'),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Add legal entity' }),
+    ).toBeVisible();
+
+    cleanup();
+    mocks.readOrganizationAccess.mockResolvedValue(accessFor('member'));
+    await renderPage();
+
+    expect(
+      screen.getByText('No legal entities are available in this workspace.'),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Add legal entity' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('returns not found when the resolver denies the slug', async () => {
     mocks.resolveOrganizationRouteForRequest.mockResolvedValue(null);
 
     await expect(
       OrganizationEntitiesPage({
         params: Promise.resolve({ orgSlug: 'unknown-organization' }),
-        searchParams: Promise.resolve({}),
       }),
     ).rejects.toThrow('NEXT_NOT_FOUND');
     expect(mocks.readLegalEntities).not.toHaveBeenCalled();
