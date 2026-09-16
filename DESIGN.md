@@ -42,7 +42,7 @@ pinned-persistable left icon rail for Access, Workspaces, Datasets, Documents,
 Account, and a workspace section, rendered from the shell's `railDestinations`
 array. Identity and invitation routes remain outside that shell. The layout owns
 the single `main-content` landmark and renders small Carbon breadcrumbs for
-subordinate views, including the inline dataset view. The four temporary
+subordinate views, including the inline dataset view. The three temporary
 `[orgSlug]` pages and the temporary account page remain a deliberate
 source-level exception: their page modules keep the exact throwaway markers,
 plain semantic HTML, and zero CSS, design-system, or icon imports, and no longer

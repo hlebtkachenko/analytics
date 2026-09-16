@@ -433,11 +433,12 @@ protocol-relative-looking, and encoded-looking values reach only
 only the parsed or durable resolved slug; provider and database failures become
 generic messages and are not logged.
 
-The four `[orgSlug]` page modules retain the exact throwaway markers, plain
+The three `[orgSlug]` page modules retain the exact throwaway markers, plain
 native breadcrumbs, and zero CSS, design-system, or icon imports. A shared
 Carbon shell surrounds these authenticated routes without changing their
-server-action trust boundary. The `/organizations` list and create pages are now
-Carbon; Carbon `[orgSlug]` and account page content remains future work.
+server-action trust boundary. The `/organizations` list and create pages and the
+`/[orgSlug]/entities` page are now Carbon; the remaining Carbon `[orgSlug]` and
+account page content is future work.
 
 The UI mirrors the access control ADR 0011 added to the Better Auth organization
 plugin: only owners may update settings, invite, assign any of the three roles,
