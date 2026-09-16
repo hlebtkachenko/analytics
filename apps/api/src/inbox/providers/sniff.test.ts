@@ -116,6 +116,25 @@ describe('sniffBytes', () => {
     expect(sniff(withBom).detectedType).toBe('isdoc_invoice');
   });
 
+  it('skips a processing instruction, a multi-line comment and a DOCTYPE to find the XML root', () => {
+    const bytes = Buffer.from(
+      '<?xml version="1.0" encoding="utf-8"?>\n<!-- a\nmulti-line\ncomment -->\n<!DOCTYPE Invoice SYSTEM "invoice.dtd">\n<Invoice xmlns="http://isdoc.cz/namespace/2013" version="6.0.1"><DocumentType>1</DocumentType></Invoice>',
+    );
+
+    expect(sniff(bytes).detectedType).toBe('isdoc_invoice');
+  });
+
+  it('sniffs a comment with no following element as text, not XML', () => {
+    const bytes = Buffer.from(
+      '<!-- just a comment, no element follows -->\nplain text after the comment\n',
+    );
+
+    const sniffed = sniff(bytes);
+
+    expect(sniffed.detectedType).toBe('text');
+    expect(sniffed.mediaType).toBe('text/plain');
+  });
+
   it('produces a valid provider output with an empty draft', () => {
     const output = toProviderOutput(sniff(fixtures.pdf()));
 

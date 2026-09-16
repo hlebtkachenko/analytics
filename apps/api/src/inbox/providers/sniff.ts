@@ -187,11 +187,20 @@ function sniffZip(input: SniffInput): SniffResult {
   );
 }
 
+// Matches, in order of appearance, a processing instruction, a comment, a DOCTYPE, or an element start tag.
+const XML_TOKEN =
+  /<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!DOCTYPE[^>]*>|<(?:[A-Za-z_][\w.-]*:)?([A-Za-z_][\w.-]*)([^>]*)>/g;
+
 function sniffXml(text: string): SniffResult | null {
-  // The first element after the prolog and any comment; namespaces are read from its own attributes.
-  const rootMatch = /<(?:[A-Za-z_][\w.-]*:)?([A-Za-z_][\w.-]*)([^>]*)>/.exec(
-    text.replace(/<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!DOCTYPE[^>]*>/g, ''),
-  );
+  // Scan tokens in order and skip the prolog, comments and DOCTYPE to find the first element start tag.
+  let rootMatch: RegExpMatchArray | null = null;
+
+  for (const token of text.matchAll(XML_TOKEN)) {
+    if (token[1] !== undefined) {
+      rootMatch = token;
+      break;
+    }
+  }
 
   if (rootMatch === null) {
     return null;
