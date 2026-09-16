@@ -153,7 +153,14 @@ const preview: Preview = {
     docs: { toc: true },
     options: {
       storySort: {
-        order: ['Foundations', 'Components', 'Patterns', 'Explorers', 'Charts'],
+        order: [
+          'Foundations',
+          'Components',
+          'Patterns',
+          'BAP Extensions',
+          'Explorers',
+          'Charts',
+        ],
       },
     },
     viewport: {

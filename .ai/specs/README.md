@@ -5,6 +5,8 @@
 - [Document analytics page and documents demo](2026-09-15-document-analytics-page.md)
 - [Invoice line periods, advance deductions and rounding](2026-09-15-invoice-periods-advances.md)
 - [Documents register and derived economic events](2026-09-14-documents-register.md)
+- [Pivot row groups (tree pivot)](2026-09-15-pivot-row-groups.md)
+- [Table component blocks](2026-09-15-table-component-blocks.md)
 - [Product application layout](2026-09-14-product-application-layout.md)
 - [Account issuer column removal](2026-09-14-account-issuer-removal.md)
 - [Workspace legal entities](2026-09-10-workspace-legal-entities.md)

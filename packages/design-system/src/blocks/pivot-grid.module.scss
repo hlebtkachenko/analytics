@@ -1,0 +1,40 @@
+// Right-align numeric measures with aligned digits.
+.num {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+// Row-1 group header: centered and emphasized over its measures.
+.groupHeader {
+  text-align: center;
+  font-weight: 600;
+}
+
+// First column of each column group: strong vertical divider.
+.groupStart {
+  border-inline-start: 1px solid var(--cds-border-strong);
+}
+
+// Row-dimension column (corner + row labels): divide it from the value grid.
+.rowHeader {
+  border-inline-end: 1px solid var(--cds-border-strong);
+  font-weight: 600;
+}
+
+// Corner cell ties into the header band and sits on the sub-header baseline.
+.corner {
+  background-color: var(--cds-layer-accent);
+  vertical-align: bottom;
+}
+
+// Totals band.
+.totalRow {
+  background-color: var(--cds-layer-accent);
+  font-weight: 600;
+  border-block-start: 1px solid var(--cds-border-strong);
+}
+
+.totalCell {
+  background-color: var(--cds-layer-accent);
+  font-weight: 600;
+}
