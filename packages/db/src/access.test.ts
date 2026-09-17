@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   ensureInitialOrganizationQuota,
   findOrganizationIdBySlug,
+  findUserSessionToken,
   getOrganizationCreationQuota,
+  listUserSessions,
   listWorkspaceMemberships,
   organizationCreationLimitReached,
   resolveMembership,
@@ -409,6 +411,80 @@ describe('organization accessors', () => {
       ['user-1'],
     );
   });
+
+  it('lists the caller own sessions without exposing the token', async () => {
+    const createdAt = new Date('2026-09-01T00:00:00.000Z');
+    const updatedAt = new Date('2026-09-02T00:00:00.000Z');
+    const expiresAt = new Date('2026-09-10T00:00:00.000Z');
+    const query = vi.fn(async () => ({
+      rows: [
+        {
+          id: 'session-1',
+          created_at: createdAt,
+          updated_at: updatedAt,
+          expires_at: expiresAt,
+          ip_address: '203.0.113.7',
+          user_agent: 'Mozilla/5.0',
+        },
+        {
+          id: 'session-2',
+          created_at: createdAt,
+          updated_at: createdAt,
+          expires_at: expiresAt,
+          ip_address: null,
+          user_agent: null,
+        },
+      ],
+    }));
+    const pool = { query } as unknown as DatabasePool;
+
+    const sessions = await listUserSessions(pool, 'user-1');
+
+    expect(sessions).toEqual([
+      {
+        id: 'session-1',
+        createdAt,
+        updatedAt,
+        expiresAt,
+        ipAddress: '203.0.113.7',
+        userAgent: 'Mozilla/5.0',
+      },
+      {
+        id: 'session-2',
+        createdAt,
+        updatedAt: createdAt,
+        expiresAt,
+        ipAddress: null,
+        userAgent: null,
+      },
+    ]);
+    for (const session of sessions) {
+      expect(session).not.toHaveProperty('token');
+    }
+    expect(query).toHaveBeenCalledWith(
+      expect.stringMatching(/from auth\.session\s+where user_id = \$1/),
+      ['user-1'],
+    );
+  });
+
+  it.each([
+    { expected: 'token-1', rows: [{ token: 'token-1' }] },
+    { expected: null, rows: [] },
+  ])(
+    'resolves a session token scoped to the caller',
+    async ({ expected, rows }) => {
+      const query = vi.fn(async () => ({ rows }));
+      const pool = { query } as unknown as DatabasePool;
+
+      await expect(
+        findUserSessionToken(pool, 'user-1', 'session-1'),
+      ).resolves.toBe(expected);
+      expect(query).toHaveBeenCalledWith(
+        'select token from auth.session where id = $1 and user_id = $2',
+        ['session-1', 'user-1'],
+      );
+    },
+  );
 
   it.each([
     { expected: 'organization-1', rows: [{ id: 'organization-1' }] },

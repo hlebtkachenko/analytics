@@ -5,7 +5,9 @@ export {
   DATABASE_MIGRATION_COMPATIBILITY,
   ensureInitialOrganizationQuota,
   findOrganizationIdBySlug,
+  findUserSessionToken,
   getOrganizationCreationQuota,
+  listUserSessions,
   listWorkspaceMemberships,
   organizationCreationLimitReached,
   PUBLIC_SIGNUP_EDGE_RATE_LIMIT,
@@ -28,6 +30,7 @@ export type {
   ResolveMembershipInput,
   ResolveOrganizationRouteInput,
   SetOrganizationQuotaInput,
+  UserSession,
   WorkspaceMembership,
 } from './access.js';
 export {

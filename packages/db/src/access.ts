@@ -522,6 +522,60 @@ export async function listWorkspaceMemberships(
   return memberships;
 }
 
+// A caller session row for the account security page; the token is never returned.
+export interface UserSession {
+  id: string;
+  createdAt: Date;
+  updatedAt: Date;
+  expiresAt: Date;
+  ipAddress: string | null;
+  userAgent: string | null;
+}
+
+// Lists the caller's own sessions for display; the token column is deliberately omitted.
+export async function listUserSessions(
+  pool: DatabasePool,
+  userId: string,
+): Promise<UserSession[]> {
+  const result = await pool.query<{
+    id: string;
+    created_at: Date;
+    updated_at: Date;
+    expires_at: Date;
+    ip_address: string | null;
+    user_agent: string | null;
+  }>(
+    `select id, created_at, updated_at, expires_at, ip_address, user_agent
+     from auth.session
+     where user_id = $1
+     order by updated_at desc`,
+    [userId],
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    expiresAt: row.expires_at,
+    ipAddress: row.ip_address,
+    userAgent: row.user_agent,
+  }));
+}
+
+// Resolves a session token scoped to the caller, so a revoke only ever targets the caller's row.
+export async function findUserSessionToken(
+  pool: DatabasePool,
+  userId: string,
+  sessionId: string,
+): Promise<string | null> {
+  const result = await pool.query<{ token: string }>(
+    'select token from auth.session where id = $1 and user_id = $2',
+    [sessionId, userId],
+  );
+
+  return result.rows[0]?.token ?? null;
+}
+
 export interface MigrationCompatibility {
   compatible: boolean;
   expectedVersion: string;
