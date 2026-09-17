@@ -820,6 +820,56 @@ describe('splitEmailItem', () => {
     expect((await children(withinId)).length).toBe(1);
   });
 
+  it('refuses a child blob that would exceed a tightened organization quota, though the platform quota alone would admit it', async () => {
+    const attachmentBytes = 5000;
+    const marker = 'quota-guard-content';
+    const content = Buffer.concat([
+      Buffer.from(marker),
+      Buffer.alloc(attachmentBytes - marker.length, 7),
+    ]);
+
+    // Intake first, at the wide platform quota, so the parent .eml blob is already committed and counted.
+    const itemId = await intake(
+      buildMime({
+        attachments: [
+          {
+            content,
+            contentType: 'application/octet-stream',
+            filename: 'quota-check.bin',
+          },
+        ],
+      }),
+      'token-quota',
+    );
+
+    const before = await readInboxSettings(apiPool, {
+      ...owner,
+      platformQuotaBytes: QUOTA,
+    });
+    // Tightened just below what the child attachment needs; QUOTA (the platform env value) is far above it.
+    const tightQuota = before.usedBytes + attachmentBytes - 1;
+    await updateInboxSettings(apiPool, {
+      ...owner,
+      blobQuotaBytes: tightQuota,
+      platformQuotaBytes: QUOTA,
+    });
+
+    try {
+      // The last attempt, the same as the too_large and oversize cases: the refusal is what gets recorded.
+      await expect(
+        run(itemId, new FakeScanner(), { count: 3, limit: 3 }),
+      ).rejects.toMatchObject({ code: 'store_failed' });
+      expect(await children(itemId)).toEqual([]);
+      expect((await parentState(itemId)).status).toBe('failed');
+    } finally {
+      await updateInboxSettings(apiPool, {
+        ...owner,
+        blobQuotaBytes: null,
+        platformQuotaBytes: QUOTA,
+      });
+    }
+  });
+
   it('fails with parse_failed when a nested message/rfc822 part does not parse', async () => {
     const itemId = await intake(
       buildMime({

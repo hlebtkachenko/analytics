@@ -148,8 +148,17 @@ export async function runInboxMaintenance(
       await work();
     } catch (error) {
       report.failedTasks.push(task);
+      // Never the error message: a Node fs error carries the absolute path, a storage key.
+      const code =
+        typeof error === 'object' &&
+        error !== null &&
+        typeof (error as { code?: unknown }).code === 'string'
+          ? (error as { code: string }).code
+          : undefined;
       options.logger.error(
-        error instanceof Error ? error.message : `Task ${task} failed`,
+        code === undefined
+          ? `Inbox maintenance task ${task} failed`
+          : `Inbox maintenance task ${task} failed: ${code}`,
         error instanceof Error ? error.stack : undefined,
         CONTEXT,
       );

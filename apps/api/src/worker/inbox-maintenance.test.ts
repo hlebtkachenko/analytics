@@ -29,7 +29,11 @@ interface Fixture {
   unlinked: string[];
 }
 
-function fixture(options: { reaperFails?: boolean } = {}): Fixture {
+const REAPER_ERROR_PATH = '/var/lib/bap/org/organization_1/6c4d9e30.bin';
+
+function fixture(
+  options: { reaperFails?: boolean; sweepFails?: boolean } = {},
+): Fixture {
   const queries: { text: string; values: unknown[] }[] = [];
   const unlinked: string[] = [];
   const enqueued: SplitEmailItemJob[] = [];
@@ -42,7 +46,11 @@ function fixture(options: { reaperFails?: boolean } = {}): Fixture {
       }
       if (text.includes('app.reap_stalled_inbox_items')) {
         if (options.reaperFails === true) {
-          throw new Error('reaper exploded');
+          const error = new Error(
+            `ENOENT: no such file or directory, unlink '${REAPER_ERROR_PATH}'`,
+          ) as NodeJS.ErrnoException;
+          error.code = 'ENOENT';
+          throw error;
         }
         return { rows: [{ id: ITEM_ID }] };
       }
@@ -65,7 +73,14 @@ function fixture(options: { reaperFails?: boolean } = {}): Fixture {
     { key: `org/${ORGANIZATION}/${ORPHAN}`, sha256: ORPHAN },
   ];
   const blobs = {
-    listOrganizations: vi.fn(async () => [ORGANIZATION]),
+    listOrganizations: vi.fn(async () => {
+      if (options.sweepFails === true) {
+        throw new Error(
+          `EACCES: permission denied, scandir 'org/${ORGANIZATION}'`,
+        );
+      }
+      return [ORGANIZATION];
+    }),
     listStale: vi.fn(async () => stale),
     unlink: vi.fn(async (key: string) => {
       unlinked.push(key);
@@ -148,6 +163,34 @@ describe('runInboxMaintenance', () => {
 
     expect(report.failedTasks).toEqual(['reap_stalled_items']);
     expect(report.orphansRemoved).toBe(1);
+    expect(report.requeuedItemIds).toEqual([ITEM_ID]);
+    const errors = f.lines.filter((line) => line.level === 'error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.message).toContain('reap_stalled_items');
+    expect(errors[0]?.message).toContain('ENOENT');
+    expect(errors[0]?.message).not.toContain('no such file or directory');
+    expect(errors[0]?.message).not.toContain(REAPER_ERROR_PATH);
+    expect(await f.metrics.render()).toContain(
+      'bap_worker_jobs_total{outcome="failed",queue="inbox_maintenance"} 1',
+    );
+  });
+
+  it('runs the reaper and the requeue when the sweep throws and records the tick as failed', async () => {
+    const f = fixture({ sweepFails: true });
+
+    const report = await runInboxMaintenance({
+      blobs: f.blobs,
+      data: {},
+      enqueueSplitEmailItem: async (job) => {
+        f.enqueued.push(job);
+      },
+      logger: loggerOf(f.lines),
+      metrics: f.metrics,
+      pool: f.pool,
+    });
+
+    expect(report.failedTasks).toEqual(['sweep_orphans']);
+    expect(report.reapedItemIds).toEqual([ITEM_ID]);
     expect(report.requeuedItemIds).toEqual([ITEM_ID]);
     expect(f.lines.filter((line) => line.level === 'error')).toHaveLength(1);
     expect(await f.metrics.render()).toContain(
