@@ -418,7 +418,7 @@ Per-dataset grants no longer exist. `app.data_grants` is dropped, `member` is
 read-only, and dataset and upload visibility depends only on organization
 membership and, above that boundary, entity scope.
 
-## Temporary organization action boundary
+## Organization and account action boundary
 
 The Carbon `/organizations` list and create pages expose the remaining
 organization server actions, which are untrusted public POST boundaries. They
@@ -439,10 +439,17 @@ invitation, entity, and dataset counts server-side from the caller's session and
 the server-resolved organization id; no browser-supplied id reaches a query
 string or a log, and only aggregate counts reach the browser. A shared Carbon
 shell surrounds these authenticated routes without changing their trust
-boundary. The `/organizations` list and create pages and the `/[orgSlug]`
-landing, `/[orgSlug]/entities`, `/[orgSlug]/members`, and `/[orgSlug]/settings`
-pages are now Carbon; the one temporary page left is `/account`, whose Carbon
-content is future work.
+boundary. The `/organizations` list and create pages, the account pages, and the
+`/[orgSlug]` landing, `/[orgSlug]/entities`, `/[orgSlug]/members`, and
+`/[orgSlug]/settings` pages are all Carbon.
+
+The account security page keeps its one server action,
+`revokeAccountSessionAction`, as an untrusted POST boundary: it rederives the
+verified session, validates the supplied session id, resolves the token with a
+`SELECT` scoped to the caller's own `user_id`, and only then calls Better Auth's
+`revokeSession`. A session token never reaches the browser; `listUserSessions`
+omits the token column, and a miss returns `{ ok: false }`. The current session
+is not revocable from the list.
 
 The UI mirrors the access control ADR 0011 added to the Better Auth organization
 plugin: only owners may update settings, invite, assign any of the three roles,

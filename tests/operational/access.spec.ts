@@ -92,7 +92,12 @@ test('protects the authenticated BAP access contract without browser token leaka
     });
   });
 
+  // The former /access route only forwards; the diagnostic lives under the account area.
+  const forwarded = await page.request.get('/access', { maxRedirects: 0 });
+  authenticatedExpect(forwarded.status()).toBe(307);
+  authenticatedExpect(forwarded.headers()['location']).toBe('/account/access');
   await page.goto('/access');
+  await authenticatedExpect(page).toHaveURL(/\/account\/access$/);
   await authenticatedExpect(
     page.getByRole('heading', { name: 'Organization access' }),
   ).toBeVisible();
@@ -176,11 +181,16 @@ test('protects the authenticated BAP access contract without browser token leaka
   await authenticatedExpect(
     page.getByRole('heading', { exact: true, name: 'Account' }),
   ).toBeVisible();
+  // The password form lives on the security page, reached through the header account panel.
+  await page.getByRole('button', { exact: true, name: 'Account' }).click();
+  await page.getByRole('link', { name: 'Security and sessions' }).click();
+  await authenticatedExpect(page).toHaveURL(/\/account\/security$/);
   await authenticatedExpect(
     page.getByRole('form', { name: 'Change password' }),
   ).toBeVisible();
 
-  await primaryNavigation.getByRole('link', { name: 'Access' }).click();
+  // Access left the rail; the account area holds the diagnostic.
+  await page.goto('/account/access');
   await authenticatedExpect(
     page.getByText('Application API role: owner'),
   ).toBeVisible();

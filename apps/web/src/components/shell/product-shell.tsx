@@ -91,6 +91,7 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openPanel, setOpenPanel] = useState<PanelId | null>(null);
   const [trackedPathname, setTrackedPathname] = useState(pathname);
+  const [trackedRailPinned, setTrackedRailPinned] = useState(railPinned);
 
   // Close transient navigation and panels when the route changes, adjusting
   // state during render rather than in an effect.
@@ -98,6 +99,13 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
     setTrackedPathname(pathname);
     setMobileOpen(false);
     setOpenPanel(null);
+  }
+
+  // The preferences page writes the rail cookie then refreshes; sync the seeded
+  // state during render so a changed server preference applies live.
+  if (railPinned !== trackedRailPinned) {
+    setTrackedRailPinned(railPinned);
+    setPinned(railPinned);
   }
 
   const expanded = (pinned && isLarge) || mobileOpen;

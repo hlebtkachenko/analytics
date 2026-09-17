@@ -15,7 +15,7 @@ const reviewedImports = {
   'app/(identity)/sign-in/sign-in-form.tsx': ['Login'],
   'app/(identity)/sign-in/two-factor/page.tsx': ['Checkmark'],
   'app/(identity)/sign-up/sign-up-form.tsx': ['UserFollow'],
-  'app/(product)/access/page.tsx': [
+  'app/(product)/account/access/page.tsx': [
     'AiGenerate',
     'DataSet',
     'Logout',
@@ -40,7 +40,6 @@ const reviewedImports = {
     'DataSet',
     'Document',
     'Enterprise',
-    'Security',
     'UserAvatar',
   ],
   'components/shell/product-shell.tsx': [
@@ -87,37 +86,37 @@ const reviewedCallsites = [
     "{t('signUp.submit')}",
   ],
   [
-    'app/(product)/access/page.tsx',
+    'app/(product)/account/access/page.tsx',
     'Button',
     'Logout',
     "{t('common.signOut')}",
   ],
   [
-    'app/(product)/access/page.tsx',
+    'app/(product)/account/access/page.tsx',
     'Button',
     'DataSet',
     "{t('access.datasets')}",
   ],
   [
-    'app/(product)/access/page.tsx',
+    'app/(product)/account/access/page.tsx',
     'Button',
     'UserMultiple',
     "{t('access.manageMembers')}",
   ],
   [
-    'app/(product)/access/page.tsx',
+    'app/(product)/account/access/page.tsx',
     'Button',
     'Security',
     "{t('access.manageEntityAccess')}",
   ],
   [
-    'app/(product)/access/page.tsx',
+    'app/(product)/account/access/page.tsx',
     'Button',
     'DataSet',
     "{t('access.manageEntities')}",
   ],
   [
-    'app/(product)/access/page.tsx',
+    'app/(product)/account/access/page.tsx',
     'Button',
     'Upload',
     "{t('access.uploadData')}",
@@ -199,11 +198,6 @@ const reviewedCallsites = [
 ] as const;
 
 const throwawayPages = [] as const;
-
-const intentionalPlainAccountSources = [
-  'app/(product)/account/account-actions.tsx',
-  'app/(product)/account/page.tsx',
-] as const;
 
 type IconImport = Readonly<{
   imported: string;
@@ -516,7 +510,7 @@ describe('Carbon application icon AST contract', () => {
           focusable: 'false',
           size: '{20}',
         },
-        file: 'app/(product)/access/page.tsx',
+        file: 'app/(product)/account/access/page.tsx',
         icon: 'AiGenerate',
         selfClosing: true,
       },
@@ -630,32 +624,5 @@ describe('Carbon application icon AST contract', () => {
         relativeFile,
       ).toEqual([]);
     }
-  });
-
-  it('keeps the temporary account implementation intentionally plain', () => {
-    for (const relativeFile of intentionalPlainAccountSources) {
-      const source = parsedSources.find(
-        (candidate) => candidate.file === relativeFile,
-      );
-
-      expect(source, relativeFile).toBeDefined();
-      expect(
-        source!.importModules.filter(
-          (module) =>
-            module.startsWith('@bap/design-system') ||
-            module.startsWith('@carbon/') ||
-            module.endsWith('.css') ||
-            module.endsWith('.scss'),
-        ),
-        relativeFile,
-      ).toEqual([]);
-    }
-
-    const page = parsedSources.find(
-      (source) => source.file === 'app/(product)/account/page.tsx',
-    );
-    expect(leadingComments(page!.sourceFile)).toContain(
-      '// Temporary account UI: delete when the Carbon account screen lands.',
-    );
   });
 });

@@ -2,7 +2,7 @@ import { DesignSystemProvider } from '@bap/design-system/theme';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const navigation = { pathname: '/access', segments: ['access'] as string[] };
+const navigation = { pathname: '/account', segments: ['account'] as string[] };
 
 vi.mock('next/navigation', () => ({
   usePathname: () => navigation.pathname,
@@ -34,8 +34,8 @@ class ResizeObserverStub {
 }
 
 beforeEach(() => {
-  navigation.pathname = '/access';
-  navigation.segments = ['access'];
+  navigation.pathname = '/account';
+  navigation.segments = ['account'];
   stubMatchMedia(true);
   globalThis.ResizeObserver =
     ResizeObserverStub as unknown as typeof ResizeObserver;

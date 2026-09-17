@@ -38,20 +38,18 @@ utility CSS framework, raw palette values, or copied Carbon source.
 Authenticated `app/(product)` routes share a Carbon UI Shell product shell: a
 header branded "Afframe Analytics" with single-purpose panels for search,
 notifications, help, settings, workspace switching, and account, over a
-pinned-persistable left icon rail for Access, Workspaces, Datasets, Documents,
+pinned-persistable left icon rail for Workspaces, Datasets, Documents, and
 Account, and a workspace section, rendered from the shell's `railDestinations`
 array. Identity and invitation routes remain outside that shell. The layout owns
 the single `main-content` landmark and renders small Carbon breadcrumbs for
-subordinate views, including the inline dataset view. The temporary account page
-remains a deliberate source-level exception: its page module keeps the exact
-throwaway marker, plain semantic HTML, and zero CSS, design-system, or icon
-imports, and no longer renders its own `<main>` or native breadcrumbs now that
-the layout owns both. The `/organizations` list and create pages and the
-`/[orgSlug]` landing, `/[orgSlug]/entities`, `/[orgSlug]/members`, and
-`/[orgSlug]/settings` pages are now Carbon; converting the remaining page
-content to Carbon is future work.
+subordinate views, including the inline dataset view. The `/account` area is now
+Carbon: profile, security, and preferences pages plus the access diagnostic at
+`/account/access`, each rendered inside `PageContainer`. The `/organizations`
+list and create pages and the `/[orgSlug]` landing, `/[orgSlug]/entities`,
+`/[orgSlug]/members`, and `/[orgSlug]/settings` pages are now Carbon; converting
+the remaining page content to Carbon is future work.
 
-Every other product page renders its content inside the shared `PageContainer`
+Every product page renders its content inside the shared `PageContainer`
 scaffold; the `bap/product-page-container` ESLint rule enforces it and bans
 inline layout styles, so pages compose inside the shell and never hand-roll
 layout. See [Building a product page](docs/development.md).

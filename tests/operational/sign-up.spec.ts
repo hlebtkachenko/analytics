@@ -676,7 +676,7 @@ test('proves invitation-only registration, acceptance, and membership management
     await verificationRedirect.completed;
     verificationRedirect = undefined;
 
-    await recipientPage.goto('/access');
+    await recipientPage.goto('/account/access');
     const signedOutPromise = recipientPage.waitForResponse(
       (response) =>
         response.request().method() === 'POST' &&
@@ -686,7 +686,7 @@ test('proves invitation-only registration, acceptance, and membership management
     expect((await signedOutPromise).ok()).toBe(true);
     await expect(recipientPage).toHaveURL(/\/sign-in$/);
     await signInThroughForm(recipientPage, email, password);
-    await expect(recipientPage).toHaveURL(/\/access$/);
+    await expect(recipientPage).toHaveURL(/\/account\/access$/);
 
     await navigateToSensitivePath(recipientPage, `/invitation/${invitationId}`);
     await expect(
@@ -712,7 +712,7 @@ test('proves invitation-only registration, acceptance, and membership management
       .poll(() => new URL(recipientPage.url()).pathname, {
         message: 'Invitation acceptance did not reach access.',
       })
-      .toBe('/access');
+      .toBe('/account/access');
     await expect(
       recipientPage.getByText('Application API role: member'),
     ).toBeVisible();

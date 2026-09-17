@@ -23,7 +23,8 @@ The group layout also enforces the browser session and redirects an
 unauthenticated or unverified request to `/sign-in?next=<encoded path>`. A page
 does not need its own session check: the layout gates every hard load, and
 `getJson` sends a 401 on a soft navigation back to sign in with the current
-path. `/account` keeps its own check as defence in depth.
+path. The account pages keep their own session check as defence in depth and
+read the session directly to derive the profile, sessions, and preferences.
 
 ## 2. Render the body inside PageContainer
 

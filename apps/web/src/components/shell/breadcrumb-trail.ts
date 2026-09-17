@@ -2,7 +2,6 @@ export type Crumb = Readonly<{ current: boolean; href: string; label: string }>;
 
 // The module label for a top-level segment, and the label a shared descendant reuses.
 export const moduleLabels: Readonly<Record<string, string>> = {
-  access: 'Access',
   account: 'Account',
   assistant: 'AI Assistant',
   datasets: 'Datasets',
@@ -17,6 +16,11 @@ export const moduleLabels: Readonly<Record<string, string>> = {
 // under two modules. Add the parent, then the child segment, to name one.
 const childLabels: Readonly<Record<string, Readonly<Record<string, string>>>> =
   {
+    account: {
+      access: 'Access',
+      preferences: 'Preferences',
+      security: 'Security',
+    },
     documents: { analytics: 'Analytics', new: 'New document' },
     organizations: { new: 'Create workspace' },
   };
