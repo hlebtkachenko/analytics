@@ -4,6 +4,7 @@ import {
   ensureInitialOrganizationQuota,
   findOrganizationIdBySlug,
   getOrganizationCreationQuota,
+  listWorkspaceMemberships,
   organizationCreationLimitReached,
   resolveMembership,
   resolveOrganizationRoute,
@@ -368,6 +369,45 @@ describe('organization accessors', () => {
         subjectId: 'user-1',
       }),
     ).resolves.toBeNull();
+  });
+
+  it('lists the caller workspaces with their own role in one query', async () => {
+    const createdAt = new Date('2026-09-01T00:00:00.000Z');
+    const query = vi.fn(async () => ({
+      rows: [
+        {
+          id: 'organization-1',
+          name: 'Organization One',
+          slug: 'organization-one',
+          role: 'owner',
+          created_at: createdAt,
+        },
+        {
+          id: 'organization-2',
+          name: 'Organization Two',
+          slug: 'organization-two',
+          role: 'legacy-role',
+          created_at: createdAt,
+        },
+      ],
+    }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(listWorkspaceMemberships(pool, 'user-1')).resolves.toEqual([
+      {
+        id: 'organization-1',
+        name: 'Organization One',
+        slug: 'organization-one',
+        role: 'owner',
+        createdAt,
+      },
+    ]);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /from auth\.organization as organization\s+inner join auth\.member as membership/,
+      ),
+      ['user-1'],
+    );
   });
 
   it.each([

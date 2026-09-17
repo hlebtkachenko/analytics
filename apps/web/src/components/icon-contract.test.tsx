@@ -199,8 +199,6 @@ const reviewedCallsites = [
 ] as const;
 
 const throwawayPages = [
-  'app/(product)/(throwaway)/organizations/page.tsx',
-  'app/(product)/(throwaway)/organizations/new/page.tsx',
   'app/(product)/[orgSlug]/page.tsx',
   'app/(product)/[orgSlug]/entities/page.tsx',
   'app/(product)/[orgSlug]/members/page.tsx',
@@ -637,22 +635,6 @@ describe('Carbon application icon AST contract', () => {
         relativeFile,
       ).toEqual([]);
     }
-
-    const form = parsedSources.find(
-      (source) =>
-        source.file ===
-        'app/(product)/(throwaway)/organizations/new/organization-form.tsx',
-    );
-    expect(form).toBeDefined();
-    expect(
-      form!.importModules.filter(
-        (module) =>
-          module.startsWith('@bap/design-system') ||
-          module.startsWith('@carbon/') ||
-          module.endsWith('.css') ||
-          module.endsWith('.scss'),
-      ),
-    ).toEqual([]);
   });
 
   it('keeps the temporary account implementation intentionally plain', () => {

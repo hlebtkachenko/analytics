@@ -6,6 +6,7 @@ export {
   ensureInitialOrganizationQuota,
   findOrganizationIdBySlug,
   getOrganizationCreationQuota,
+  listWorkspaceMemberships,
   organizationCreationLimitReached,
   PUBLIC_SIGNUP_EDGE_RATE_LIMIT,
   publicSignupInvitationExists,
@@ -27,6 +28,7 @@ export type {
   ResolveMembershipInput,
   ResolveOrganizationRouteInput,
   SetOrganizationQuotaInput,
+  WorkspaceMembership,
 } from './access.js';
 export {
   loadDatabaseConfiguration,

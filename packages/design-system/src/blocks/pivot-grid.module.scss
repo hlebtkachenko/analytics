@@ -1,3 +1,9 @@
+// Let the block root shrink inside a grid or flex parent so a wide crosstab
+// scrolls inside its own overflow region instead of stretching the page.
+.root {
+  min-inline-size: 0;
+}
+
 // Right-align numeric measures with aligned digits.
 .num {
   text-align: end;

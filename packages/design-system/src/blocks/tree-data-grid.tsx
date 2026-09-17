@@ -272,7 +272,11 @@ export function TreeDataGrid({
   const showToolbar = search || expandAllControl;
 
   return (
-    <TableContainer description={description} title={title}>
+    <TableContainer
+      className={styles.root}
+      description={description}
+      title={title}
+    >
       {showToolbar && (
         <TableToolbar>
           <TableToolbarContent>

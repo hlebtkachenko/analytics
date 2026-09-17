@@ -31,7 +31,7 @@ export const railDestinations: readonly RailDestination[] = [
   {
     href: '/organizations',
     icon: Enterprise,
-    label: 'Organizations',
+    label: 'Workspaces',
     route: 'organizations',
   },
   { href: '/datasets', icon: DataSet, label: 'Datasets', route: 'datasets' },

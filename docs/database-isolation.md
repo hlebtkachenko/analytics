@@ -231,7 +231,9 @@ get SELECT. The eraser gains `created_by` column grants on `app.document`,
 `app.partner`, and `app.document_link`, and `app.erase_user` tombstones those 3
 columns alongside the existing ones. The migration also reserves the `documents`
 organization slug with the `20260831.0004` guard-then-replace pattern, bringing
-`organization_slug_reserved_check` to 17 literals.
+`organization_slug_reserved_check` to 17 literals; migration `20260916.0001`
+later appends the five flat workspace routes with the same pattern, for 22
+literals.
 
 Three constraints exist because the application boundary is not the only writer.
 `document_current_reference_key` is unique on

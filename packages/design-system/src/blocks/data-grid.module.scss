@@ -1,3 +1,10 @@
+// Carbon Stack and other layouts are grids, whose items default to a
+// max-content minimum. Zero the block root's minimum so a wide table shrinks
+// with the parent and scrolls inside .scroll instead of stretching the page.
+.root {
+  min-inline-size: 0;
+}
+
 // Non-scrolling positioning context so the loading veil covers the visible box.
 .viewport {
   position: relative;
@@ -145,8 +152,10 @@ tbody tr:global(.cds--data-table--selected) td.pinned {
   background: color-mix(in srgb, var(--cds-layer-accent) 60%, transparent);
 }
 
-// Clip the loading skeleton to its column so wide grids do not overflow.
+// Clip the loading skeleton to its column so wide grids do not overflow, and
+// let the wrapper shrink inside a grid or flex parent like the ready root.
 .skeletonWrap {
+  min-inline-size: 0;
   overflow: hidden;
 }
 

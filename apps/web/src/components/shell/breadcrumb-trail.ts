@@ -9,7 +9,7 @@ export const moduleLabels: Readonly<Record<string, string>> = {
   documents: 'Documents',
   entities: 'Entities',
   members: 'Members',
-  organizations: 'Organizations',
+  organizations: 'Workspaces',
   settings: 'Settings',
 };
 
@@ -18,7 +18,7 @@ export const moduleLabels: Readonly<Record<string, string>> = {
 const childLabels: Readonly<Record<string, Readonly<Record<string, string>>>> =
   {
     documents: { analytics: 'Analytics', new: 'New document' },
-    organizations: { new: 'Create organization' },
+    organizations: { new: 'Create workspace' },
   };
 
 // The label an unknown child segment takes, so an opaque identifier never reaches the trail.

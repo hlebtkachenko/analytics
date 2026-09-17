@@ -37,7 +37,7 @@ async function focusWithKeyboard(
   throw new Error('Keyboard navigation did not reach the requested control.');
 }
 
-test('walks the temporary organization loop through explicit member-scoped actions', async ({
+test('walks the Carbon workspace loop through explicit member-scoped actions', async ({
   page,
 }) => {
   test.skip(password.length === 0, 'BAP_OPERATIONAL_PASSWORD is required.');
@@ -51,28 +51,27 @@ test('walks the temporary organization loop through explicit member-scoped actio
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
   await page.goto('/organizations');
+  await expect(page.getByRole('heading', { name: 'Workspaces' })).toBeVisible();
+  // The seeded workspace is a Carbon DataGrid row, not a link.
   await expect(
-    page.getByRole('heading', { name: 'Organizations' }),
+    page.getByRole('cell', { name: 'BAP Operational' }),
   ).toBeVisible();
-  await expect(
-    page.getByRole('link', { name: 'BAP Operational' }),
-  ).toBeVisible();
-  await page.getByRole('link', { name: 'Create organization' }).click();
+  await page.getByRole('button', { name: 'Create workspace' }).click();
   await expect(page).toHaveURL(/\/organizations\/new$/);
-  await expect(page.getByText('Remaining creation quota: 1')).toBeVisible();
+  await expect(page.getByText('Remaining of granted quota: 1')).toBeVisible();
 
-  let breadcrumbOrganizations = page
+  let breadcrumbWorkspaces = page
     .getByRole('navigation', { name: 'Breadcrumb' })
-    .getByRole('link', { name: 'Organizations' });
-  await focusWithKeyboard(page, breadcrumbOrganizations);
-  await expect(breadcrumbOrganizations).toBeFocused();
+    .getByRole('link', { name: 'Workspaces' });
+  await focusWithKeyboard(page, breadcrumbWorkspaces);
+  await expect(breadcrumbWorkspaces).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/organizations$/);
-  await page.getByRole('link', { name: 'Create organization' }).click();
-  breadcrumbOrganizations = page
+  await page.getByRole('button', { name: 'Create workspace' }).click();
+  breadcrumbWorkspaces = page
     .getByRole('navigation', { name: 'Breadcrumb' })
-    .getByRole('link', { name: 'Organizations' });
-  await focusWithKeyboard(page, breadcrumbOrganizations);
+    .getByRole('link', { name: 'Workspaces' });
+  await focusWithKeyboard(page, breadcrumbWorkspaces);
   const nameInput = page.getByLabel('Name');
   await focusWithKeyboard(page, nameInput);
   await expect(nameInput).toBeFocused();
@@ -85,7 +84,7 @@ test('walks the temporary organization loop through explicit member-scoped actio
   await expect(page.getByLabel('Slug')).toHaveValue(createdSlug);
   await page.keyboard.press('Tab');
   await expect(
-    page.getByRole('button', { name: 'Create organization' }),
+    page.getByRole('button', { name: 'Create workspace' }),
   ).toBeFocused();
   await page.keyboard.press('Enter');
 
@@ -128,20 +127,30 @@ test('walks the temporary organization loop through explicit member-scoped actio
   await page.setViewportSize({ height: 640, width: 320 });
   await expectNoHorizontalOverflow(page);
 
+  // The Carbon workspace list and create pages are driven at the shell's normal width.
+  await page.setViewportSize({ height: 900, width: 1280 });
   await page.getByRole('link', { name: 'Back to organization' }).click();
   await page.getByRole('link', { name: 'All organizations' }).click();
-  await expect(page.getByRole('link', { name: renamedName })).toHaveAttribute(
-    'href',
-    `/${renamedSlug}`,
-  );
-  await page.getByRole('link', { name: 'Create organization' }).click();
-  await expect(page.getByText('Remaining creation quota: 0')).toBeVisible();
+  await expect(page).toHaveURL(/\/organizations$/);
+  // The renamed workspace is a DataGrid row; clicking it navigates to the workspace.
+  const renamedRow = page.getByRole('row').filter({ hasText: renamedName });
+  await expect(renamedRow).toBeVisible();
+  await renamedRow.getByRole('cell', { name: renamedName }).click();
+  await expect(page).toHaveURL(new RegExp(`/${renamedSlug}$`));
+  await expect(page.getByRole('heading', { name: renamedName })).toBeVisible();
+
+  await page.goto('/organizations');
+  await page.getByRole('button', { name: 'Create workspace' }).click();
+  await expect(page).toHaveURL(/\/organizations\/new$/);
+  await expect(page.getByText('Remaining of granted quota: 0')).toBeVisible();
   await expect(
-    page.getByText('Organization creation is not available for this account.'),
+    page.getByText('Workspace creation is not available for this account.'),
   ).toBeVisible();
   await expect(
-    page.getByRole('form', { name: 'Create organization' }),
+    page.getByRole('form', { name: 'Create workspace' }),
   ).toHaveCount(0);
+  // The quota-exhausted notification must stay within a 320px viewport.
+  await page.setViewportSize({ height: 640, width: 320 });
   await expectNoHorizontalOverflow(page);
 
   expect(consoleErrors).toEqual([]);

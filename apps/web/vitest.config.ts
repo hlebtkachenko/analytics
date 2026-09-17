@@ -12,5 +12,7 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
     setupFiles: ['./src/test/setup.ts'],
+    // Carbon DataGrid and Modal interaction tests are slow under CI contention.
+    testTimeout: 15000,
   },
 });

@@ -21,6 +21,8 @@ export async function expectNoAccessibilityViolations(
   page: Page,
   label?: string,
 ): Promise<void> {
+  // Next streams the document title after a soft navigation, so wait for it before axe scans.
+  await expect(page).toHaveTitle(/.+/);
   await page.evaluate(axe.source);
   const violations = await page.evaluate(async () => {
     const results = await (window as AxeWindow).axe.run(document);

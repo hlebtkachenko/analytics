@@ -3,7 +3,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  acceptOrganizationInvitationAction,
   createOrganizationAction,
+  declineOrganizationInvitationAction,
   inviteOrganizationMemberAction,
   removeOrganizationMemberAction,
   updateOrganizationAction,
@@ -11,12 +13,16 @@ import {
 } from './actions';
 
 const mocks = vi.hoisted(() => ({
+  acceptInvitation: vi.fn(),
   createInvitation: vi.fn(),
   createOrganization: vi.fn(),
   getAuth: vi.fn(),
+  getAuthPool: vi.fn(),
+  getOrganizationCreationQuota: vi.fn(),
   getSession: vi.fn(),
   listMembers: vi.fn(),
   redirect: vi.fn(),
+  rejectInvitation: vi.fn(),
   removeMember: vi.fn(),
   resolveOrganizationRouteForRequest: vi.fn(),
   revalidatePath: vi.fn(),
@@ -24,8 +30,12 @@ const mocks = vi.hoisted(() => ({
   updateOrganization: vi.fn(),
 }));
 
+vi.mock('@bap/db/access', () => ({
+  getOrganizationCreationQuota: mocks.getOrganizationCreationQuota,
+}));
 vi.mock('../auth/server', () => ({
   getAuth: mocks.getAuth,
+  getAuthPool: mocks.getAuthPool,
 }));
 vi.mock('./resolver', () => ({
   resolveOrganizationRouteForRequest: mocks.resolveOrganizationRouteForRequest,
@@ -54,14 +64,22 @@ describe('organization server actions', () => {
     vi.clearAllMocks();
     mocks.getAuth.mockResolvedValue({
       api: {
+        acceptInvitation: mocks.acceptInvitation,
         createInvitation: mocks.createInvitation,
         createOrganization: mocks.createOrganization,
         getSession: mocks.getSession,
         listMembers: mocks.listMembers,
+        rejectInvitation: mocks.rejectInvitation,
         removeMember: mocks.removeMember,
         updateMemberRole: mocks.updateMemberRole,
         updateOrganization: mocks.updateOrganization,
       },
+    });
+    mocks.getAuthPool.mockResolvedValue({});
+    mocks.getOrganizationCreationQuota.mockResolvedValue({
+      attributedTotal: 0,
+      grantedTotal: 3,
+      remainingTotal: 3,
     });
     mocks.resolveOrganizationRouteForRequest.mockResolvedValue(organization);
     mocks.createOrganization.mockResolvedValue(organization);
@@ -112,6 +130,113 @@ describe('organization server actions', () => {
     expect(mocks.createOrganization).not.toHaveBeenCalled();
     expect(mocks.redirect).toHaveBeenCalledWith(
       '/organizations/new?result=error',
+    );
+  });
+
+  it('marks an exhausted quota so the create page shows it inline', async () => {
+    mocks.getOrganizationCreationQuota.mockResolvedValue({
+      attributedTotal: 1,
+      grantedTotal: 1,
+      remainingTotal: 0,
+    });
+
+    await createOrganizationAction(
+      form({ name: 'Organization Two', slug: 'organization-two' }),
+    );
+
+    expect(mocks.createOrganization).not.toHaveBeenCalled();
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      '/organizations/new?result=quota-exhausted',
+    );
+  });
+
+  it('marks a taken address so the create page shows it inline', async () => {
+    mocks.createOrganization.mockRejectedValue({
+      body: { code: 'ORGANIZATION_ALREADY_EXISTS' },
+    });
+
+    await createOrganizationAction(
+      form({ name: 'Organization Two', slug: 'organization-two' }),
+    );
+
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      '/organizations/new?result=slug-taken',
+    );
+  });
+
+  it('accepts an invitation from the form body and returns a success marker', async () => {
+    await acceptOrganizationInvitationAction(
+      form({ invitationId: 'invitation-1' }),
+    );
+
+    expect(mocks.acceptInvitation).toHaveBeenCalledWith({
+      body: { invitationId: 'invitation-1' },
+      headers: expect.any(Headers),
+    });
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      '/organizations?result=accept-success',
+    );
+  });
+
+  it('declines an invitation from the form body and returns a decline marker', async () => {
+    await declineOrganizationInvitationAction(
+      form({ invitationId: 'invitation-1' }),
+    );
+
+    expect(mocks.rejectInvitation).toHaveBeenCalledWith({
+      body: { invitationId: 'invitation-1' },
+      headers: expect.any(Headers),
+    });
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      '/organizations?result=decline-success',
+    );
+  });
+
+  it('redacts an invitation response failure behind a fixed marker', async () => {
+    mocks.acceptInvitation.mockRejectedValue(
+      new Error('private invitation detail'),
+    );
+
+    await acceptOrganizationInvitationAction(
+      form({ invitationId: 'invitation-1' }),
+    );
+
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      '/organizations?result=accept-error',
+    );
+    expect(JSON.stringify(mocks.redirect.mock.calls)).not.toContain('private');
+  });
+
+  it('redacts a decline invitation response failure behind a fixed marker', async () => {
+    mocks.rejectInvitation.mockRejectedValue(
+      new Error('private invitation detail'),
+    );
+
+    await declineOrganizationInvitationAction(
+      form({ invitationId: 'invitation-1' }),
+    );
+
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      '/organizations?result=decline-error',
+    );
+    expect(JSON.stringify(mocks.redirect.mock.calls)).not.toContain(
+      'invitation-1',
+    );
+    expect(JSON.stringify(mocks.redirect.mock.calls)).not.toContain('private');
+  });
+
+  it('rejects an unverified invitation response before any auth write', async () => {
+    mocks.getSession.mockResolvedValue({
+      user: { emailVerified: false, id: 'user-1' },
+    });
+
+    await acceptOrganizationInvitationAction(
+      form({ invitationId: 'invitation-1' }),
+    );
+
+    expect(mocks.acceptInvitation).not.toHaveBeenCalled();
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      '/organizations?result=accept-error',
     );
   });
 

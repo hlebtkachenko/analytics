@@ -158,10 +158,10 @@ into, the entities named there.
 
 Subordinate routes expose semantic breadcrumbs. Permanent Carbon content uses
 Carbon breadcrumbs, including `Datasets > {dataset name}` for an inline dataset
-view. The six temporary organization page modules keep plain native breadcrumbs,
-their exact throwaway markers, and zero CSS, design-system, or icon imports.
-Only the shared root shell is Carbon; permanent Carbon organization and account
-content remains future work.
+view. The four temporary `[orgSlug]` page modules keep plain native breadcrumbs,
+their exact throwaway markers, and zero CSS, design-system, or icon imports. The
+`/organizations` list and create pages are Carbon; permanent Carbon `[orgSlug]`
+and account content remains future work.
 
 ## Admin HTTP inventory
 
@@ -550,18 +550,23 @@ segment in the same pull request.
 
 ## Temporary organization pages
 
-The 6 temporary organization pages, now including `/[orgSlug]/entities`, are an
+The 4 temporary `[orgSlug]` pages, now including `/[orgSlug]/entities`, are an
 intentionally throwaway, unstyled browser loop. They use semantic headings,
 navigation, labels, native controls, lists, and progressive-enhancement
 server-action forms, with no page CSS, design-system, or icon imports. Each
 subordinate page uses a plain native breadcrumb. Their exact throwaway markers
 remain enforced, and permanent Carbon page content is future work even though
-the shared root shell surrounds authenticated routes. `/organizations/new` reads
-creator-attributed quota through a narrow SELECT-only `@bap/db` accessor. A
-missing row, malformed state, or read failure renders remaining quota as zero
-and replaces the complete form with one sentence. When capacity exists, the
-account name prefills the organization name and the shared normalizer keeps the
-slug field in step with name edits.
+the shared root shell surrounds authenticated routes.
+
+The `/organizations` list and `/organizations/new` create pages are now Carbon
+pages inside `PageContainer`. The list reads the caller's workspaces with their
+role through a narrow SELECT-only `@bap/db` membership accessor and lists
+pending invitations with accept and decline server actions. `/organizations/new`
+reads creator-attributed quota through a narrow SELECT-only `@bap/db` accessor.
+A missing row, malformed state, or read failure renders remaining quota as zero
+and replaces the form with one message. When capacity exists, the account name
+prefills the workspace name and the shared normalizer keeps the slug field in
+step with name edits.
 
 Creation validates and normalizes again on the server, calls Better Auth with
 `keepCurrentActiveOrganization: true`, and redirects only to the validated

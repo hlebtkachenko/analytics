@@ -88,14 +88,11 @@ export function SwitcherPanel({
             </SwitcherItem>
           ))}
           <SwitcherDivider />
-          <SwitcherItem
-            aria-label="Create organization"
-            href="/organizations/new"
-          >
-            Create organization
+          <SwitcherItem aria-label="Create workspace" href="/organizations/new">
+            Create workspace
           </SwitcherItem>
-          <SwitcherItem aria-label="Manage organizations" href="/organizations">
-            Manage organizations
+          <SwitcherItem aria-label="Manage workspaces" href="/organizations">
+            Manage workspaces
           </SwitcherItem>
         </Switcher>
       ) : null}
