@@ -42,10 +42,12 @@ C4Container
     Container(web, "Web application", "Next.js, Better Auth, Carbon", "Owns browser sessions, identity and organization pages, fixed BFF routes, and streaming chat")
     Container(api, "Application API", "NestJS, JOSE", "Authorizes application access, stages uploads, serves dataset lists, rows, and exports, registers documents, partners, and derived economic events, and intakes, routes, and serves inbox items and their durable blobs")
     Container(reporting, "Reporting API", "NestJS, JOSE", "Authorizes reporting access")
-    Container(worker, "Background worker", "Node.js, pg-boss, @bap/ai", "Ingests datasets, summarizes metadata, and writes embeddings")
+    Container(worker, "Background worker", "Node.js, pg-boss, @bap/ai", "Ingests datasets, summarizes metadata, writes embeddings, and splits scanned inbound email into inbox items")
     ContainerDb(database, "Database", "PostgreSQL 18 with pgvector and pg-boss", "Stores identity, organization, dataset, vector, queue, audit, and migration state behind role and RLS boundaries")
     ContainerDb(staging, "Upload staging", "Private named volume", "Carries bounded raw uploads from the API to the worker until processing ends")
     ContainerDb(blobs, "Blob storage", "Private named volume", "Durable, content-addressed per-organization blobs behind the Inbox and app.document_file")
+    Container(clamd, "ClamAV daemon", "clamd", "Scans inbound email blobs for the worker over the internal scan network")
+    Container(freshclam, "ClamAV signature updater", "freshclam", "Fetches ClamAV signature updates over internet-egress")
   }
 
   Rel(user, caddy, "Uses", "HTTPS")
@@ -62,6 +64,8 @@ C4Container
   Rel(worker, database, "Dequeues jobs and uses short tenant transactions as bap_api", "PostgreSQL protocol")
   Rel(api, web, "Refreshes public signing keys", "JWKS")
   Rel(reporting, web, "Refreshes public signing keys", "JWKS")
+  Rel(worker, clamd, "Streams a blob over INSTREAM", "TCP on the internal scan network")
+  Rel(freshclam, clamd, "Shares the signature volume", "Private volume")
 ```
 
 The browser receives only opaque Better Auth cookies. Resource JWTs exist only
@@ -80,6 +84,18 @@ public `POST /api/intake/v1/items` route
 ([ADR 0016](docs/adr/0016-channel-principal.md)) resolves a hashed channel
 credential and mints its JWT server-side, with no browser session, in front of
 `InboxChannelController` in `apps/api`.
+
+A second public, session-less route joins it: `POST /api/inbound/mailgun/mime`
+in the web service receives inbound email, verifies the Mailgun signature,
+resolves the recipient token to a channel, and forwards the raw MIME to
+`POST /v1/organizations/:organizationId/inbox/channels/:channelId/email` in
+front of the same controller, which stores the `.eml` and enqueues the
+`split_email_item` pg-boss job with an ids-only payload
+(`{ organizationId, channelId, itemId }`). The worker runs that job as the
+channel principal, scans the blob through `clamd` using
+`apps/api/src/scanning/clamd-client.ts`, and splits attachments into child inbox
+items; see [ADR 0016](docs/adr/0016-channel-principal.md) (Webhook and Worker)
+and [the inbox email channel spec](.ai/specs/2026-09-17-inbox-email-channel.md).
 
 The web-local chat route requires a verified session, resolves application
 access through the same fixed BFF boundary, and can optionally resolve one
@@ -172,7 +188,10 @@ Migrations `20260917.0001` and `20260917.0002` add the channel principal of
 `resolveChannelAccess` in `apps/api/src/channel-access.ts` and served by
 `InboxChannelController`, give a non-human caller a role,
 `bap.role = 'channel'`, that is denied by construction everywhere except the
-inbox tables.
+inbox tables. Migration `20260917.0003` adds the email channel of ADR 0016's
+Webhook and Worker sections: `app.record_blob_scan`, the platform-unique
+`inbox_channel.email_address`, the recreated `auth.issue_channel_credential`
+with its `email_address` kind, and `app.inbox_item.sender`.
 
 ## Workspace dependency rules
 
@@ -244,21 +263,26 @@ C4Deployment
     ContainerDb(blobs, "Blob storage", "Private named volume", "Mounted into API rw, worker rw, backup ro, restore rw")
     Container(bootstrap, "Bootstrap and migrator", "Image-local one-shot commands", "Creates roles, then applies reviewed SQL")
     Container(backup, "Backup operations", "Pinned PostgreSQL client and restic", "Encrypted backup, check, prune, and isolated restore")
+    Container(clamd, "ClamAV daemon", "Digest-pinned clamav/clamav image", "read_only, cap_drop: ALL, on the internal scan network with worker only")
+    Container(freshclam, "ClamAV signature updater", "Digest-pinned clamav/clamav image", "On internet-egress only, writes the shared signature volume")
   }
 ```
 
 The production model has non-internal `edge`, internal `app`, internal `data`,
-and non-internal `internet-egress` and `operations-egress` networks. Caddy is
-the only published service. Only the web application and the background worker
-join `internet-egress`, where they reach mail and AI providers; the application
-API and the reporting API deliberately keep no outbound path. Only one-shot
-restic clients join `operations-egress`; backup and restore also join `data`.
-Each runtime mounts only its own credential files. Caddy certificate state and
-PostgreSQL data use named volumes. A third named volume stages uploaded files
-between the application API and the worker; it is mounted into that pair and
-into no other service, which `scripts/verify-compose.mjs` asserts. Backup
-scheduling, backend-specific credentials, and off-host durability require owner
-configuration.
+internal `scan`, and non-internal `internet-egress` and `operations-egress`
+networks. Caddy is the only published service. Only the web application and the
+background worker join `internet-egress`, where they reach mail and AI
+providers, and, for `freshclam` only, the ClamAV signature mirror; the
+application API and the reporting API deliberately keep no outbound path. The
+`scan` network carries only `clamd` and `worker`, so the ClamAV daemon that
+parses hostile email attachments has no route to the internet or to the
+database. Only one-shot restic clients join `operations-egress`; backup and
+restore also join `data`. Each runtime mounts only its own credential files.
+Caddy certificate state and PostgreSQL data use named volumes. A third named
+volume stages uploaded files between the application API and the worker; it is
+mounted into that pair and into no other service, which
+`scripts/verify-compose.mjs` asserts. Backup scheduling, backend-specific
+credentials, and off-host durability require owner configuration.
 
 A fourth named volume, `blob_storage`, holds durable, content-addressed
 per-organization blobs behind the Inbox (`apps/api/src/inbox`) and the

@@ -281,21 +281,21 @@ versioned `v1`, and is guarded the same way as the document routes above; see
 [the inbox foundation spec](../.ai/specs/2026-09-16-inbox-foundation.md) and
 [the inbox plan](planning/inbox.md) for the full design.
 
-| Method | Path                                  | Capability        | Success | Failure                                          |
-| ------ | ------------------------------------- | ----------------- | ------- | ------------------------------------------------ |
-| POST   | `/inbox/uploads`                      | `manageDocuments` | 201     | 401, 403 (also a restricted scope), 413 (quota)  |
-| GET    | `/inbox/items`                        | `readDocuments`   | 200     | 401, 403                                         |
-| GET    | `/inbox/items/:itemId`                | `readDocuments`   | 200     | 401, 403, 404                                    |
-| PATCH  | `/inbox/items/:itemId/hints`          | `manageDocuments` | 200     | 401, 403, 404                                    |
-| POST   | `/inbox/items/:itemId/process`        | `manageDocuments` | 200     | 401, 403, 404, 409 (already routed)              |
-| POST   | `/inbox/items/:itemId/route/document` | `manageDocuments` | 200     | 401, 403, 404, 409 (already routed)              |
-| POST   | `/inbox/items/:itemId/route/undo`     | `manageDocuments` | 200     | 401, 403, 404, 409 (not routed)                  |
-| POST   | `/inbox/items/:itemId/discard`        | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or already discarded) |
-| POST   | `/inbox/items/:itemId/restore`        | `manageDocuments` | 200     | 401, 403, 404, 409 (not discarded)               |
-| POST   | `/inbox/items/:itemId/assign`         | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or discarded)         |
-| POST   | `/inbox/items/:itemId/snooze`         | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or discarded)         |
-| GET    | `/inbox/blobs/:blobId/download`       | `readDocuments`   | 200     | 401, 403, 404                                    |
-| GET    | `/inbox/blobs/:blobId/inline`         | `readDocuments`   | 200     | 401, 403, 404, 415 (media type not inlineable)   |
+| Method | Path                                  | Capability        | Success | Failure                                                                  |
+| ------ | ------------------------------------- | ----------------- | ------- | ------------------------------------------------------------------------ |
+| POST   | `/inbox/uploads`                      | `manageDocuments` | 201     | 401, 403 (also a restricted scope), 413 (quota)                          |
+| GET    | `/inbox/items`                        | `readDocuments`   | 200     | 401, 403                                                                 |
+| GET    | `/inbox/items/:itemId`                | `readDocuments`   | 200     | 401, 403, 404                                                            |
+| PATCH  | `/inbox/items/:itemId/hints`          | `manageDocuments` | 200     | 401, 403, 404                                                            |
+| POST   | `/inbox/items/:itemId/process`        | `manageDocuments` | 200     | 401, 403, 404, 409 (already routed)                                      |
+| POST   | `/inbox/items/:itemId/route/document` | `manageDocuments` | 200     | 401, 403, 404, 409 (already routed)                                      |
+| POST   | `/inbox/items/:itemId/route/undo`     | `manageDocuments` | 200     | 401, 403, 404, 409 (not routed)                                          |
+| POST   | `/inbox/items/:itemId/discard`        | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or already discarded)                         |
+| POST   | `/inbox/items/:itemId/restore`        | `manageDocuments` | 200     | 401, 403, 404, 409 (not discarded)                                       |
+| POST   | `/inbox/items/:itemId/assign`         | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or discarded)                                 |
+| POST   | `/inbox/items/:itemId/snooze`         | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or discarded)                                 |
+| GET    | `/inbox/blobs/:blobId/download`       | `readDocuments`   | 200     | 401, 403, 404, 409 (`blob_quarantined`)                                  |
+| GET    | `/inbox/blobs/:blobId/inline`         | `readDocuments`   | 200     | 401, 403, 404, 409 (`blob_quarantined`), 415 (media type not inlineable) |
 
 [ADR 0016](adr/0016-channel-principal.md) adds the channel principal and its
 routes, also mounted under `organizations/:organizationId/...` and versioned
@@ -305,15 +305,31 @@ the acting user id for a person posting through the same items route), so every
 list and read response now carries provenance regardless of who created the
 item.
 
-| Method | Path                                                   | Capability                         | Success | Failure                                             |
-| ------ | ------------------------------------------------------ | ---------------------------------- | ------- | --------------------------------------------------- |
-| POST   | `/inbox/channels/:channelId/items`                     | channel token or `manageDocuments` | 202     | 401, 403, 404 (channel not visible), 413 (quota)    |
-| GET    | `/inbox/channels`                                      | `manageOrganization`               | 200     | 401, 403                                            |
-| POST   | `/inbox/channels`                                      | `manageOrganization`               | 201     | 401, 403, 404 (legal entity not visible)            |
-| GET    | `/inbox/channels/:channelId`                           | `manageOrganization`               | 200     | 401, 403, 404                                       |
-| PATCH  | `/inbox/channels/:channelId`                           | `manageOrganization`               | 200     | 401, 403, 404                                       |
-| POST   | `/inbox/channels/:channelId/credentials`               | `manageOrganization`               | 201     | 401, 403, 404, 409 (two active credentials already) |
-| DELETE | `/inbox/channels/:channelId/credentials/:credentialId` | `manageOrganization`               | 204     | 401, 403, 404                                       |
+| Method | Path                                                   | Capability                         | Success | Failure                                                                                        |
+| ------ | ------------------------------------------------------ | ---------------------------------- | ------- | ---------------------------------------------------------------------------------------------- |
+| POST   | `/inbox/channels/:channelId/items`                     | channel token or `manageDocuments` | 202     | 401, 403, 404 (channel not visible), 413 (quota)                                               |
+| POST   | `/inbox/channels/:channelId/email`                     | channel token only                 | 202     | 400, 401, 403, 404 (channel not visible), 413 (email cap or quota), 415 (not `message/rfc822`) |
+| GET    | `/inbox/channels`                                      | `manageOrganization`               | 200     | 401, 403                                                                                       |
+| POST   | `/inbox/channels`                                      | `manageOrganization`               | 201     | 401, 403, 404 (legal entity not visible)                                                       |
+| GET    | `/inbox/channels/:channelId`                           | `manageOrganization`               | 200     | 401, 403, 404                                                                                  |
+| PATCH  | `/inbox/channels/:channelId`                           | `manageOrganization`               | 200     | 401, 403, 404                                                                                  |
+| POST   | `/inbox/channels/:channelId/credentials`               | `manageOrganization`               | 201     | 401, 403, 404, 409 (two active credentials already)                                            |
+| DELETE | `/inbox/channels/:channelId/credentials/:credentialId` | `manageOrganization`               | 204     | 401, 403, 404                                                                                  |
+
+[ADR 0016](adr/0016-channel-principal.md) (Webhook and Worker) also adds
+`POST /api/inbound/mailgun/mime`, the public, organization-less Mailgun webhook
+in the web service, which forwards a signature-verified message as raw MIME to
+the email route above with a `ChannelAccess` only; a `TenantAccess` answers 403
+there, unlike the items route. The stored `.eml` enqueues `split_email_item`,
+which parses the MIME, scans every new blob through `clamd`, and splits
+attachments into child items. `inboxItemSchema` gains `sender`, the envelope
+`MAIL FROM` as the worker parsed it from the MIME, null for a manual upload or
+before the split runs; it is display-only and never used for routing. An email
+channel's credential issue response carries
+`secret: intakeToken | intakeEmailAddress`: an API channel's `secret` is the
+bearer token shown once, an email channel's is the issued address itself
+(`in-<32 hex>@<intake domain>`), stored plain on `inbox_channel.email_address`
+because the owner must read it back to hand it out.
 
 The channel items route accepts a channel's own resource JWT, minted only by the
 public intake route below, or a person's `TenantAccess` with `manageDocuments`
