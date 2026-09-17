@@ -364,12 +364,9 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   await expectNoAccessibilityViolations(page);
   await expectNoDocumentOverflow(page);
 
-  // The workspace list and create pages are now Carbon; only the remaining
-  // throwaway pages must stay free of design-system markup on this branch.
-  for (const route of [
-    `/${organizationSlug}`,
-    `/${organizationSlug}/settings`,
-  ]) {
+  // The workspace list, create, members, and settings pages are now Carbon;
+  // only the remaining throwaway page must stay free of design-system markup.
+  for (const route of [`/${organizationSlug}`]) {
     await page.goto(route);
     await authenticatedExpect(page.locator('main')).toHaveCount(1);
     // The layout owns the Carbon breadcrumb band; assert only the temporary
