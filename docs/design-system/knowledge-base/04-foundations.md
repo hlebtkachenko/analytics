@@ -189,9 +189,9 @@ export function DownloadAction() {
 }
 ```
 
-Use named imports from the exact 29-export curated BAP facade. Add an export
+Use named imports from the exact 27-export curated BAP facade. Add an export
 only with a real application call site and never import the upstream package
-directly. The virtualized workbench explorer shows those 29 executable glyphs;
+directly. The virtualized workbench explorer shows those 27 executable glyphs;
 the generated catalog remains the exhaustive installed upstream icon inventory.
 
 ## Pictograms
