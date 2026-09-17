@@ -364,9 +364,9 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   await expectNoAccessibilityViolations(page);
   await expectNoDocumentOverflow(page);
 
+  // The workspace list and create pages are now Carbon; only the remaining
+  // throwaway pages must stay free of design-system markup on this branch.
   for (const route of [
-    '/organizations',
-    '/organizations/new',
     `/${organizationSlug}`,
     `/${organizationSlug}/members`,
     `/${organizationSlug}/settings`,
