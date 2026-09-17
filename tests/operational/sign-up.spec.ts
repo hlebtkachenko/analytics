@@ -17,11 +17,6 @@ const operationalOrganizationId =
 const operationalOrganizationSlug =
   process.env.BAP_OPERATIONAL_ORGANIZATION_SLUG ?? 'bap-operational';
 const operationalPassword = process.env.BAP_OPERATIONAL_PASSWORD ?? '';
-// The workflow also seeds synthetic admin and member accounts, which this proof must not address.
-const seededMemberEmails = [
-  process.env.BAP_OPERATIONAL_ADMIN_EMAIL ?? 'admin@bap.invalid',
-  process.env.BAP_OPERATIONAL_MEMBER_EMAIL ?? 'member@bap.invalid',
-];
 
 publicTest.describe.configure({ mode: 'serial' });
 
@@ -498,10 +493,14 @@ test('proves invitation-only registration, acceptance, and membership management
     assertPasswordAbsent(await readJson(closedResponse), password);
 
     await page.goto(`/${operationalOrganizationSlug}/members`);
-    await page.getByLabel('Email').fill(email);
-    await page.getByLabel('Role').first().selectOption('member');
-    await page.getByRole('button', { name: 'Send invitation' }).click();
-    await expect(page).toHaveURL(/\/members\?result=success$/);
+    await page.getByRole('button', { name: 'Invite member' }).click();
+    const inviteDialog = page.getByRole('dialog', { name: 'Invite member' });
+    await expect(inviteDialog).toBeVisible();
+    await inviteDialog.getByLabel('Email').fill(email);
+    await inviteDialog.getByLabel('Role').selectOption('member');
+    await inviteDialog.getByRole('button', { name: 'Send invitation' }).click();
+    await expect(page.getByText('The invitation was sent.')).toBeVisible();
+    await expect(inviteDialog).toBeHidden();
 
     const invitationId = await page.evaluate(
       async ({ email: recipient, organizationId }) => {
@@ -719,31 +718,35 @@ test('proves invitation-only registration, acceptance, and membership management
     ).toBeVisible();
 
     await page.goto(`/${operationalOrganizationSlug}/members`);
-    // The invitee address stays out of every locator, so only the seeded addresses are excluded.
-    const memberEntry = (role: RegExp) => {
-      let entries = page
-        .locator('section[aria-labelledby="members-heading"] p')
-        .filter({ hasText: role });
-      for (const seeded of seededMemberEmails) {
-        entries = entries.filter({ hasNotText: seeded });
-      }
-      return entries.locator('..');
-    };
-    let member = memberEntry(/, member$/);
-    await expect(member).toHaveCount(1);
-    const roleForm = member.getByRole('form', { name: /^Change role for / });
-    await roleForm.getByLabel('Role').selectOption('admin');
-    await roleForm.getByRole('button', { name: 'Change role' }).click();
-    await expect(page).toHaveURL(/\/members\?result=success$/);
-    member = memberEntry(/, admin$/);
-    await expect(member).toHaveCount(1);
+    // The invitee is the accepted member row, promoted then removed by the owner.
+    const memberRow = () => page.getByRole('row').filter({ hasText: email });
+    await expect(memberRow()).toHaveCount(1);
+    await expect(
+      memberRow().getByRole('cell', { exact: true, name: 'Member' }),
+    ).toBeVisible();
 
-    await member
-      .getByRole('form', { name: /^Remove / })
-      .getByRole('button', { name: 'Remove member' })
-      .click();
-    await expect(page).toHaveURL(/\/members\?result=success$/);
-    await expect(memberEntry(/, admin$/)).toHaveCount(0);
+    await memberRow().getByRole('button', { name: 'Options' }).click();
+    await page.getByRole('menuitem', { name: 'Change role' }).click();
+    const roleDialog = page.getByRole('dialog', {
+      name: /^Change role for /,
+    });
+    await expect(roleDialog).toBeVisible();
+    await roleDialog.getByLabel('Role').selectOption('admin');
+    await roleDialog.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByText('The member role was updated.')).toBeVisible();
+    await expect(roleDialog).toBeHidden();
+    await expect(
+      memberRow().getByRole('cell', { exact: true, name: 'Admin' }),
+    ).toBeVisible();
+
+    await memberRow().getByRole('button', { name: 'Options' }).click();
+    await page.getByRole('menuitem', { exact: true, name: 'Remove' }).click();
+    const removeDialog = page.getByRole('dialog', { name: /^Remove / });
+    await expect(removeDialog).toBeVisible();
+    await removeDialog.getByRole('button', { name: 'Remove member' }).click();
+    await expect(page.getByText('The member was removed.')).toBeVisible();
+    await expect(removeDialog).toBeHidden();
+    await expect(memberRow()).toHaveCount(0);
   } finally {
     await verificationRedirect?.stop();
     await recipientContext.close();

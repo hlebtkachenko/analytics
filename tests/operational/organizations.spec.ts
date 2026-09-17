@@ -97,16 +97,18 @@ test('walks the Carbon workspace loop through explicit member-scoped actions', a
   await expect(
     page.getByRole('heading', { name: `${uniqueName} members` }),
   ).toBeVisible();
-  await expect(page.getByRole('form', { name: 'Invite member' })).toBeVisible();
-  await page.getByLabel('Email').fill(`phase10-${Date.now()}@example.test`);
-  await page.getByRole('button', { name: 'Send invitation' }).click();
-  await expect(page).toHaveURL(/\/members\?result=success$/);
-  await expect(
-    page.getByText('The organization membership was updated.'),
-  ).toBeVisible();
+  await page.getByRole('button', { name: 'Invite member' }).click();
+  const inviteDialog = page.getByRole('dialog', { name: 'Invite member' });
+  await expect(inviteDialog).toBeVisible();
+  await inviteDialog
+    .getByLabel('Email')
+    .fill(`phase10-${Date.now()}@example.test`);
+  await inviteDialog.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(page.getByText('The invitation was sent.')).toBeVisible();
+  await expect(inviteDialog).toBeHidden();
   await expectNoAccessibilityViolations(page);
 
-  await page.getByRole('link', { name: 'Back to organization' }).click();
+  await page.goto(`/${createdSlug}`);
   await page.getByRole('link', { name: 'Settings' }).click();
   const renamedName = `${uniqueName} renamed`;
   const renamedSlug = normalizeOrganizationSlug(`${createdSlug}-new`);

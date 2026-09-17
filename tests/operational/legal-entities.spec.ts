@@ -206,25 +206,33 @@ test.describe.serial('workspace legal entities and entity scope', () => {
     test.skip(password.length === 0, 'BAP_OPERATIONAL_PASSWORD is required.');
 
     await page.goto(`/${organizationSlug}/members`);
-    const scopeEditor = page.getByRole('form', {
-      name: `Entity access for ${memberEmail}`,
-    });
-    await expect(scopeEditor).toBeVisible();
-    await scopeEditor.getByLabel('Selected entities').check();
-    await scopeEditor.getByLabel(companyName, { exact: true }).check();
-    await scopeEditor
-      .getByRole('button', { name: 'Save entity access' })
-      .click();
-    await expect(page).toHaveURL(/\/members\?result=success$/);
+    const memberRow = page.getByRole('row').filter({ hasText: memberEmail });
+    await expect(memberRow).toHaveCount(1);
+    await memberRow.getByRole('button', { name: 'Options' }).click();
+    await page.getByRole('menuitem', { name: 'Edit entity scope' }).click();
 
-    const stored = page.getByRole('form', {
+    const scopeDialog = page.getByRole('dialog', {
       name: `Entity access for ${memberEmail}`,
     });
-    await expect(stored.getByLabel('Selected entities')).toBeChecked();
-    await expect(stored.getByLabel(companyName, { exact: true })).toBeChecked();
+    await expect(scopeDialog).toBeVisible();
+    await scopeDialog.getByLabel('Entity access').selectOption('restricted');
+    const entityField = scopeDialog.getByRole('combobox', {
+      name: 'Legal entities',
+    });
+    await entityField.click();
+    await page.getByRole('option', { exact: true, name: companyName }).click();
+    await entityField.click();
+    await scopeDialog.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByText('Entity access was updated.')).toBeVisible();
+    await expect(scopeDialog).toBeHidden();
+
+    // The restricted scope round-trips into the member row summary.
     await expect(
-      stored.getByLabel(soleTraderName, { exact: true }),
-    ).not.toBeChecked();
+      page
+        .getByRole('row')
+        .filter({ hasText: memberEmail })
+        .getByRole('cell', { exact: true, name: 'Selected entities: 1' }),
+    ).toBeVisible();
     await expectNoAccessibilityViolations(page);
   });
 
