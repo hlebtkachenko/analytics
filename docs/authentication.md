@@ -443,6 +443,13 @@ access-control configuration where only `owner` holds the `organization`,
 attempt to update organization settings, invite, remove, or reassign a member,
 independently of the BFF and API capability checks above.
 
+[ADR 0016](adr/0016-channel-principal.md) adds a channel as a second principal
+kind beside a person: it holds no membership and no capability, so it is
+resolved by a sibling `resolveChannelAccess`, not `resolveTenantAccess`, and its
+resource JWT is minted server-side by the web's public intake route from a
+hashed credential lookup, never by the browser session flow above. Every route
+other than the two intake routes refuses a `channel_` subject outright.
+
 ## Organization creation
 
 `auth.organization.created_by` attributes a created organization independently

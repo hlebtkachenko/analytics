@@ -75,6 +75,12 @@ blob download/inline, and reporting access. They contain `iss`, `aud`, `sub`,
 `iat`, and `exp`. The web route validates and allow-lists each upstream response
 or stream. No catch-all service proxy or browser Bearer-token flow exists.
 
+One further resource JWT exists outside that browser-facing matrix: the web's
+public `POST /api/intake/v1/items` route
+([ADR 0016](docs/adr/0016-channel-principal.md)) resolves a hashed channel
+credential and mints its JWT server-side, with no browser session, in front of
+`InboxChannelController` in `apps/api`.
+
 The web-local chat route requires a verified session, resolves application
 access through the same fixed BFF boundary, and can optionally resolve one
 visible dataset. Its provider prompt contains bounded dataset metadata and
@@ -159,6 +165,14 @@ nullable `legal_entity_id` until the item is routed or pre-bound by its channel.
 `app.document` gains `inbox_item_id`. See
 [ADR 0015](docs/adr/0015-inbox-intake-model.md) and
 [the inbox plan](docs/planning/inbox.md) for the full model.
+
+Migrations `20260917.0001` and `20260917.0002` add the channel principal of
+[ADR 0016](docs/adr/0016-channel-principal.md): `app.inbox_channel` and the
+`auth`-schema credential table `auth.inbox_channel_credential`, resolved by
+`resolveChannelAccess` in `apps/api/src/channel-access.ts` and served by
+`InboxChannelController`, give a non-human caller a role,
+`bap.role = 'channel'`, that is denied by construction everywhere except the
+inbox tables.
 
 ## Workspace dependency rules
 

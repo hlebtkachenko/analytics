@@ -418,6 +418,66 @@ Per-dataset grants no longer exist. `app.data_grants` is dropped, `member` is
 read-only, and dataset and upload visibility depends only on organization
 membership and, above that boundary, entity scope.
 
+## Channel principal
+
+[ADR 0016](adr/0016-channel-principal.md) adds a second, non-human principal
+kind beside the membership roles: a channel runs with subject `channel_<uuid>`,
+where the uuid is `app.inbox_channel.id`, and `bap.role = 'channel'` in the
+tenant transaction. There is no `auth."user"` row and no new database role;
+`app.role_is_channel()` is the only predicate that names the role value, and
+`app.role_can_write()` is untouched, so a channel is denied on every table by
+construction unless a policy opts it in by name.
+
+A channel context can write only through 6 policies: the 5 inbox INSERT policies
+(`blob_insert`, `inbox_item_insert`, `inbox_item_file_insert`,
+`inbox_item_extraction_insert`, `inbox_event_insert`), each
+`... AND (app.role_can_write() OR app.role_is_channel())` with the
+`created_by = current_setting('bap.user_id', true)` check outside the
+parentheses, and the narrow `inbox_item_channel_update`, which lets a channel
+move its own unrouted item through `received`, `processing`, `needs_review` and
+`failed` but never route it, un-route it, or overwrite a person's decision
+(`status <> 'routed'`, `decided_by_kind IS DISTINCT FROM 'user'`, and no
+destination column). `blob_update` does not opt in.
+
+A channel context cannot read anything outside the inbox tables and `app.blob`:
+every non-inbox tenant SELECT policy gains `AND NOT app.role_is_channel()`, and
+`audit_log_isolation` is split so `audit_log_select` excludes the channel while
+`app.record_audit` inserts keep working through the separate write policy.
+
+The credential model lives entirely in `auth`, never in a tenant table.
+`auth.inbox_channel_credential` stores `secret_sha256` and an 8-character
+`display_prefix`, never the plain secret; tables in `auth` inherit DML for
+`bap_auth`, so that default grant is revoked right after the `CREATE`, and
+`bap_api` holds nothing direct either. A credential's plain value is
+`bap_intake_` followed by 32 random bytes in base64url, returned exactly once by
+the issue response; a channel may hold at most 2 active credentials at a time,
+so a rotation can overlap. 4 `SECURITY DEFINER` functions owned by `bap_owner`
+are the whole surface: `auth.issue_channel_credential(channel_id, kind)` and
+`auth.revoke_channel_credential(credential_id)` take the organization and the
+acting subject from the transaction settings, assert `bap.role = 'owner'`, and
+are granted to `bap_api`; `auth.resolve_channel_credential(secret_sha256)`
+returns the binding for one unrevoked credential and is granted to `bap_auth`,
+the role the web service already holds;
+`auth.list_channel_credentials(channel_id)` lists a channel's active credentials
+by prefix only and is granted to `bap_api`.
+
+The public intake path is `POST /api/intake/v1/items` in the web service,
+organization-less by design. It checks the edge IP bucket (the sign-up bucket's
+shape) before the credential lookup and consumes it on a miss, so an unknown
+token cannot be guessed at line rate; it then hashes the bearer and resolves it
+on the `bap_auth` pool, and mints the channel's resource JWT server-side from
+the resolved channel id. `/api/auth/token` stays in `disabledAuthPaths`: a
+browser session is still never exchanged for a bearer token, and a channel
+credential is the only way to mint one from outside a verified session.
+
+Ranked by what a stolen credential could do: first, binding the wrong
+organization is closed by resolving the channel from the credential row and
+re-checking it by RLS inside the API, never from the JWT or the request path;
+second, a compromised credential can only write intake, because
+`app.role_can_write()` is never granted to a channel and only 6 policies name
+`app.role_is_channel()`; third, a compromised credential cannot read tenant data
+at all, because every other SELECT policy and `audit_log_select` exclude it.
+
 ## Temporary organization action boundary
 
 The 6 organization pages, now including `/[orgSlug]/entities`, are deliberately

@@ -345,6 +345,16 @@ in `packages/db/src/access.ts` is now `20260917.0001`; rolling application code
 back after this migration leaves readiness at 503 until code expecting that
 exact version is deployed or the expected version is deliberately advanced.
 
+Migration `20260917.0002` adds the fourth definer function of ADR 0016,
+`auth.list_channel_credentials(channel_id)`: `bap_api` holds no SELECT on
+`auth.inbox_channel_credential`, so the settings page lists a channel's active,
+unrevoked credentials by `display_prefix` only, in creation order, through this
+function instead. It asserts `bap.role = 'owner'` and reads the organization
+from the transaction settings, the same checks as `issue_channel_credential` and
+`revoke_channel_credential`, and never returns the hash.
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
+`20260917.0002`.
+
 ## Tenant policy contract
 
 Every future tenant table must include:

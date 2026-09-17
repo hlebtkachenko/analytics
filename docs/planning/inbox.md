@@ -406,13 +406,13 @@ in PostgreSQL.
   `/inbox` page, rail entry, reserved slug. No channels table, no rules, no
   ClamAV. Spec:
   [inbox foundation](../../.ai/specs/2026-09-16-inbox-foundation.md).
-- Phase 1a, channels: ADR 0016; the channel principal, `inbox_channel` and the
-  intake API credential table with its definer functions; `resolveChannelAccess`
-  and `receiveIntake`; the channel items route under a channel token; channel
-  CRUD and credential issue and revoke for owners; the public intake route with
-  the edge IP bucket; channel settings page for API channels; the sniff stays
-  synchronous as in Phase 0. Spec:
-  [inbox channels](../../.ai/specs/2026-09-17-inbox-channels.md).
+- Phase 1a, channels, in delivery (branch `inbox-phase-1a`): ADR 0016; the
+  channel principal, `inbox_channel` and the intake API credential table with
+  its definer functions; `resolveChannelAccess` and `receiveIntake`; the channel
+  items route under a channel token; channel CRUD and credential issue and
+  revoke for owners; the public intake route with the edge IP bucket; channel
+  settings page for API channels; the sniff stays synchronous as in Phase 0.
+  Spec: [inbox channels](../../.ai/specs/2026-09-17-inbox-channels.md).
 - Phase 1a-email, stacked on 1a with its own spec: Mailgun EU webhook, the API
   email route, the email split job, ClamAV service, email channels in the
   settings page, the Caddy cap for the inbound path.
