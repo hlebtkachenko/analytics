@@ -188,11 +188,11 @@ export function AccountPanel({ expanded }: PanelProperties) {
             <Link className={styles.link!} href="/account">
               My profile
             </Link>
-            <Link className={styles.link!} href="/account">
-              Account settings
-            </Link>
-            <Link className={styles.link!} href="/account">
+            <Link className={styles.link!} href="/account/security">
               Security and sessions
+            </Link>
+            <Link className={styles.link!} href="/account/preferences">
+              Preferences
             </Link>
           </div>
           <div className={styles.section!}>

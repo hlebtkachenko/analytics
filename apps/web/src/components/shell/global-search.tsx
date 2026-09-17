@@ -8,7 +8,11 @@ import styles from './global-search.module.scss';
 
 // Stub global index: real search lands with the product modules.
 const stubResults = [
-  { href: '/access', module: 'Access', title: 'Application access overview' },
+  {
+    href: '/account/access',
+    module: 'Account',
+    title: 'Application access overview',
+  },
   { href: '/organizations', module: 'Workspaces', title: 'Your workspaces' },
   { href: '/datasets', module: 'Datasets', title: 'Recent datasets' },
   { href: '/datasets', module: 'Datasets', title: 'Ingest a CSV or XLSX file' },

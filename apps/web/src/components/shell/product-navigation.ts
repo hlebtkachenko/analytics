@@ -2,7 +2,6 @@ import {
   DataSet,
   Document,
   Enterprise,
-  Security,
   UserAvatar,
 } from '@bap/design-system/icons';
 import type { ComponentType } from 'react';
@@ -27,7 +26,6 @@ export type WorkspaceSectionItem = Readonly<{
 
 // The rail's whole-app destinations, all real routes, rendered straight from this array.
 export const railDestinations: readonly RailDestination[] = [
-  { href: '/access', icon: Security, label: 'Access', route: 'access' },
   {
     href: '/organizations',
     icon: Enterprise,
