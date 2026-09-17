@@ -44,11 +44,12 @@ database service. In the same run it restores the `blobs` snapshot into the
 `blob_storage` volume, which it mounts read-write at `/var/lib/bap/blobs`: there
 is one blob volume, so restore writes into the live one. Blob keys are content
 hashes, so a file that is already present is identical and left in place, and
-only missing files come back. `RESTIC_SNAPSHOT` selects the database snapshot
-and `RESTIC_BLOB_SNAPSHOT` the blob snapshot; both default to `latest`. The two
-`latest` tags resolve independently, so an operator restoring to a point in time
-should pick both snapshots from the same backup run; a shared run id is a later
-improvement.
+only missing files come back. The `clamav_signatures` volume is never backed up:
+`freshclam` rebuilds it from the public mirror. `RESTIC_SNAPSHOT` selects the
+database snapshot and `RESTIC_BLOB_SNAPSHOT` the blob snapshot; both default to
+`latest`. The two `latest` tags resolve independently, so an operator restoring
+to a point in time should pick both snapshots from the same backup run; a shared
+run id is a later improvement.
 
 The restore one-shot runs as UID 999 with zero capabilities and cannot change
 ownership, so the blob volume root is owned by the API user with group 999 and
