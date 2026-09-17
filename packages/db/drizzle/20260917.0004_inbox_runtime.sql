@@ -77,6 +77,7 @@ CREATE POLICY inbox_routing_target_insert ON app.inbox_routing_target FOR INSERT
   WITH CHECK (
     organization_id = current_setting('bap.organization_id', true)
     AND created_by = current_setting('bap.user_id', true)
+    AND updated_by = current_setting('bap.user_id', true)
     AND app.role_can_write()
   );
 
@@ -87,6 +88,7 @@ CREATE POLICY inbox_routing_target_update ON app.inbox_routing_target FOR UPDATE
   )
   WITH CHECK (
     organization_id = current_setting('bap.organization_id', true)
+    AND updated_by = current_setting('bap.user_id', true)
     AND app.role_can_write()
   );
 
@@ -225,6 +227,7 @@ BEGIN
       WHERE item.status = 'processing'
         AND item.updated_at < now() - floored_stale
       ORDER BY item.updated_at
+      -- A null max_rows means zero rows, not all.
       LIMIT greatest(reap_stalled_inbox_items.max_rows, 0)
       FOR UPDATE SKIP LOCKED
     ),
@@ -279,6 +282,7 @@ BEGIN
       AND channel.enabled
       AND channel.deleted_at IS NULL
     ORDER BY item.received_at
+    -- A null max_rows means zero rows, not all.
     LIMIT greatest(list_stuck_email_items.max_rows, 0);
 END;
 $$;

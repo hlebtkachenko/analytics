@@ -63,12 +63,13 @@ that saved the row, so the row must say who that was;
 `unique (organization_id, detected_type)`; no `jsonb`. FORCE RLS with the
 per-command pattern of `inbox_channel`
 (`packages/db/drizzle/20260917.0001_inbox_channels.sql:272-307`): SELECT by
-organization `AND NOT app.role_is_channel()`, INSERT with the `created_by`
-check, UPDATE and DELETE all `app.role_can_write()`; the owner-only rule is the
-API permission. The effective target for a type is the organization row when
-present, else `ROUTING_TARGET_DEFAULTS` (lazy override, no seeding migration:
-seeding every organization would copy a constant into thousands of rows and pin
-future default changes). `RoutingTarget` in `routing-targets.ts` gains
+organization `AND NOT app.role_is_channel()`; INSERT and UPDATE pin both
+`created_by` and `updated_by` to `bap.user_id`; DELETE, like INSERT and UPDATE,
+requires `app.role_can_write()`; the owner-only rule is the API permission. The
+effective target for a type is the organization row when present, else
+`ROUTING_TARGET_DEFAULTS` (lazy override, no seeding migration: seeding every
+organization would copy a constant into thousands of rows and pin future default
+changes). `RoutingTarget` in `routing-targets.ts` gains
 `destination: 'discard'`, `partnerPolicy`, `threshold`, `defaultLegalEntityId`,
 `defaultAssigneeId` and `requiredFields`;
 `routingTargetFor(detectedType, overrides)` merges the loaded rows over the
@@ -110,7 +111,7 @@ database role. Each raises `insufficient_privilege` when
 tenant transaction, so none of them can reach these functions; only the
 organization-less worker tick can. `reap_stalled_inbox_items` and
 `list_stuck_email_items` take `(stale interval, max_rows int)` and return ids
-only; `list_blob_keys` takes `(organization_id uuid, sha256s text[])` and
+only; `list_blob_keys` takes `(organization_id text, sha256s text[])` and
 returns the subset of hashes that already have a `blob` row, so the worker never
 deletes a row and only ever asks about hashes it already suspects. FORCE RLS
 applies to `bap_owner`, so the migration adds `TO bap_owner USING (true)`
@@ -120,7 +121,7 @@ UPDATE on `inbox_item`, INSERT on `inbox_event`. No policy touches
 `inbox_item_file` or `document_file`, and there is no DELETE policy on `blob`:
 both existed only for the row sweep this spec replaces.
 
-- `app.list_blob_keys(organization_id uuid, sha256s text[])`: the same guard as
+- `app.list_blob_keys(organization_id text, sha256s text[])`: the same guard as
   the other two functions (raises when `bap.organization_id` is set). The orphan
   this spec targets is not a blob row: a blob row and its `inbox_item_file` row
   commit in one transaction (`inbox-repository.ts:572-637`), both blob foreign
@@ -252,8 +253,12 @@ and is not touched.
 Erasure and grants. `inbox_routing_target.default_assignee_id`,
 `inbox_routing_target.created_by`, `inbox_routing_target.updated_by` and
 `organization_inbox_setting.created_by` join `app.erase_user` and the
-`bap_eraser` column grants (ADR 0008). Both tables:
-`SELECT, INSERT, UPDATE, DELETE` to `bap_api`, `SELECT` to `bap_reporting` and
+`bap_eraser` column grants (ADR 0008). `default_assignee_id` is set to null
+rather than tombstoned, because a tombstoned default would assign future items
+to an erased subject. `inbox_routing_target` gets
+`SELECT, INSERT, UPDATE, DELETE` to `bap_api`; `organization_inbox_setting` gets
+`SELECT, INSERT, UPDATE` to `bap_api` and no `DELETE` (the row is reset by
+nulling the column, not by a policy); both get `SELECT` to `bap_reporting` and
 `bap_backup`. `DATABASE_MIGRATION_COMPATIBILITY`
 (`packages/db/src/access.ts:39`) becomes `20260917.0004`.
 

@@ -554,6 +554,13 @@ describe('inbox runtime', () => {
       ),
     ).resolves.toMatchObject({ rowCount: 1 });
     await expect(
+      asTenant(apiPool, orgOneAdmin, (transaction) =>
+        transaction.query(
+          "update app.inbox_routing_target set auto = 'always', updated_by = 'user-1' where detected_type = 'isdoc_invoice'",
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '42501' });
+    await expect(
       asTenant(apiPool, orgOneMember, (transaction) =>
         transaction.query(
           "delete from app.inbox_routing_target where detected_type = 'newsletter'",
@@ -956,6 +963,19 @@ describe('inbox runtime', () => {
     ).rejects.toMatchObject({
       code: '23514',
       constraint: 'inbox_event_reason_check',
+    });
+
+    // A reaped item is a terminal failure: the channel that owns it cannot revive it into review.
+    await expect(
+      asTenant(apiPool, orgOneChannel, (transaction) =>
+        transaction.query(
+          "update app.inbox_item set status = 'needs_review' where id = $1 and status = 'processing'",
+          [oldProcessingItemId],
+        ),
+      ),
+    ).resolves.toMatchObject({ rowCount: 0 });
+    await expect(readItemStatuses([oldProcessingItemId])).resolves.toEqual({
+      [oldProcessingItemId]: 'failed',
     });
   });
 
