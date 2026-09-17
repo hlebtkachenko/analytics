@@ -92,6 +92,7 @@ export const resources = {
           columnExpires: 'Expires',
           columnIp: 'IP address',
           columnLastActive: 'Last active',
+          columnStatus: 'Status',
           current: 'This session',
           deviceUnknown: 'Unknown device',
           empty: 'No active sessions.',

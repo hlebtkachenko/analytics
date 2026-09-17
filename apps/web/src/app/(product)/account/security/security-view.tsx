@@ -129,7 +129,7 @@ export default function SecurityView({
     { header: t('account.sessions.columnIp'), key: 'ip' },
     { header: t('account.sessions.columnDevice'), key: 'device' },
     {
-      header: '',
+      header: t('account.sessions.columnStatus'),
       key: 'current',
       renderCell: (row: GridRow) =>
         row.id === currentSessionId ? (
