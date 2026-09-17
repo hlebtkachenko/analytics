@@ -368,7 +368,6 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   // throwaway pages must stay free of design-system markup on this branch.
   for (const route of [
     `/${organizationSlug}`,
-    `/${organizationSlug}/members`,
     `/${organizationSlug}/settings`,
   ]) {
     await page.goto(route);

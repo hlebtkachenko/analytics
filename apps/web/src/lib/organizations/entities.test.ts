@@ -4,10 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   readLegalEntities,
-  readMemberEntityScope,
   readMemberEntityScopes,
   readOrganizationAccess,
-  writeMemberEntityScope,
 } from './entities';
 
 const mocks = vi.hoisted(() => ({
@@ -76,45 +74,40 @@ describe('server-side legal entity reads and writes', () => {
     );
   });
 
-  it('reads the access contract and one member entity scope', async () => {
-    const fetchMock = vi.fn(async (input: string) =>
-      input.endsWith('/access')
-        ? Response.json({
-            capabilities: {
-              createEntities: true,
-              deleteEntities: true,
-              manageDocuments: true,
-              manageEntityAccess: true,
-              manageMembers: true,
-              manageOrganization: true,
-              readDocuments: true,
-              updateEntities: true,
-              uploadData: true,
-              useAi: true,
-            },
-            entityScope: { mode: 'all' },
-            organizationId: 'organization-1',
-            role: 'owner',
-            service: 'application-api',
-          })
-        : Response.json({
-            legalEntityIds: [LEGAL_ENTITY_ID],
-            mode: 'restricted',
-          }),
+  it('reads the access contract', async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        capabilities: {
+          createEntities: true,
+          deleteEntities: true,
+          manageDocuments: true,
+          manageEntityAccess: true,
+          manageMembers: true,
+          manageOrganization: true,
+          readDocuments: true,
+          updateEntities: true,
+          uploadData: true,
+          useAi: true,
+        },
+        entityScope: { mode: 'all' },
+        organizationId: 'organization-1',
+        role: 'owner',
+        service: 'application-api',
+      }),
     );
     vi.stubGlobal('fetch', fetchMock);
 
     const access = await readOrganizationAccess('organization-1');
-    const scope = await readMemberEntityScope('organization-1', 'user-2');
 
     expect(access?.role).toBe('owner');
     expect(access?.entityScope).toEqual({ mode: 'all' });
-    expect(scope).toEqual({
-      legalEntityIds: [LEGAL_ENTITY_ID],
-      mode: 'restricted',
-    });
-    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
-      'http://api:3001/v1/organizations/organization-1/members/user-2/entity-scope',
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      'http://api:3001/v1/organizations/organization-1/access',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer resource-token',
+        }),
+      }),
     );
   });
 
@@ -161,39 +154,6 @@ describe('server-side legal entity reads and writes', () => {
     );
 
     await expect(readMemberEntityScopes('organization-1')).resolves.toBeNull();
-  });
-
-  it('sends a member scope write as JSON and reports a refusal as false', async () => {
-    const fetchMock = vi.fn(async (_input: string, init: RequestInit) =>
-      init.method === 'PUT'
-        ? Response.json(
-            { legalEntityIds: [LEGAL_ENTITY_ID], mode: 'restricted' },
-            { status: 200 },
-          )
-        : new Response(null, { status: 400 }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
-    const written = await writeMemberEntityScope('organization-1', 'user-2', {
-      legalEntityIds: [LEGAL_ENTITY_ID],
-      mode: 'restricted',
-    });
-
-    expect(written).toBe(true);
-    expect(fetchMock.mock.calls[0]?.[1].method).toBe('PUT');
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1].body))).toEqual({
-      legalEntityIds: [LEGAL_ENTITY_ID],
-      mode: 'restricted',
-    });
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => Response.json({ detail: 'private' }, { status: 409 })),
-    );
-
-    await expect(
-      writeMemberEntityScope('organization-1', 'user-2', { mode: 'all' }),
-    ).resolves.toBe(false);
   });
 
   it('returns null when the session is unverified', async () => {

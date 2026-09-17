@@ -158,10 +158,10 @@ into, the entities named there.
 
 Subordinate routes expose semantic breadcrumbs. Permanent Carbon content uses
 Carbon breadcrumbs, including `Datasets > {dataset name}` for an inline dataset
-view. The three temporary `[orgSlug]` page modules keep plain native
-breadcrumbs, their exact throwaway markers, and zero CSS, design-system, or icon
-imports. The `/organizations` list and create pages and the
-`/[orgSlug]/entities` page are Carbon; the remaining Carbon `[orgSlug]` and
+view. The two temporary `[orgSlug]` page modules keep plain native breadcrumbs,
+their exact throwaway markers, and zero CSS, design-system, or icon imports. The
+`/organizations` list and create pages and the `/[orgSlug]/entities` and
+`/[orgSlug]/members` pages are Carbon; the remaining Carbon `[orgSlug]` and
 account content is future work.
 
 ## Admin HTTP inventory
@@ -551,14 +551,14 @@ segment in the same pull request.
 
 ## Temporary organization pages
 
-The 3 temporary `[orgSlug]` pages are an intentionally throwaway, unstyled
+The 2 temporary `[orgSlug]` pages are an intentionally throwaway, unstyled
 browser loop. They use semantic headings, navigation, labels, native controls,
 lists, and progressive-enhancement server-action forms, with no page CSS,
 design-system, or icon imports. Each subordinate page uses a plain native
 breadcrumb. Their exact throwaway markers remain enforced, and permanent Carbon
 page content is future work even though the shared root shell surrounds
-authenticated routes. The `/[orgSlug]/entities` page has left this loop and is
-now a Carbon page that mutates by client fetch.
+authenticated routes. The `/[orgSlug]/entities` and `/[orgSlug]/members` pages
+have left this loop and are now Carbon pages that mutate by client call.
 
 The `/organizations` list and `/organizations/new` create pages are now Carbon
 pages inside `PageContainer`. The list reads the caller's workspaces with their
@@ -583,19 +583,20 @@ returned by the resolver. All failures use fixed local redirects and generic
 messages.
 
 Only owners can update settings, invite, assign `owner`, `admin`, or `member`,
-remove a member, and edit an admin's or a member's entity scope, subject to the
-temporary final-owner safeguard. Admins and ordinary members both receive
-read-only settings, membership, and invitation views; ADR 0011 moved member and
-organization management to `owner` alone, and Better Auth's explicit access
-control now enforces the same restriction independently of this UI.
-`/[orgSlug]/members` adds an owner-only entity scope editor next to each
-restricted admin or member, setting `all` or an explicit set of legal entity
-ids; the editor rejects an owner target. Before this temporary UI demotes or
-removes an owner, its action rereads the full 100-member-bounded list and
-refuses to remove the final observed owner. This is a non-atomic UI safeguard,
-not a global invariant. Installed Better Auth 1.7.3 checks only self-demotion
-and uses its configured member limit when counting owners for removal, so
-concurrent or direct endpoint gaps remain the approved follow-up. Organization
+remove a member, and edit an admin's or a member's entity scope. Admins and
+ordinary members both receive read-only settings, membership, and invitation
+views; ADR 0011 moved member and organization management to `owner` alone, and
+Better Auth's explicit access control enforces the same restriction
+independently of this UI. The Carbon `/[orgSlug]/members` page runs its invite,
+role, removal, and cancel mutations through client `authClient.organization.*`
+calls, each carrying an explicit `organizationId` that the auth before-hook
+requires and from which Better Auth re-derives membership and permission; the
+browser id never selects a tenant. It also offers an owner-only entity scope
+editor next to each admin or member, setting `all` or an explicit set of legal
+entity ids through the BFF; the editor is hidden for an owner target, which the
+API also rejects with a 409. Better Auth 1.7.4 owns the sole-owner invariant: it
+blocks removing the only owner and blocks a sole owner's self-demotion, so the
+page no longer rereads the member list to guard that case. Organization
 deletion, active selection, custom roles, and teams remain unavailable.
 
 The new `/[orgSlug]/entities` page lists the legal entities in the viewer's
