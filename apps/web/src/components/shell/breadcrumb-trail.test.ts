@@ -16,6 +16,17 @@ describe('buildTrail', () => {
     );
   });
 
+  it('scopes the account children by the account module', () => {
+    expect(buildTrail(['(product)', 'account', 'security'])).toEqual([
+      { current: false, href: '/account', label: 'Account' },
+      { current: true, href: '/account/security', label: 'Security' },
+    ]);
+    expect(buildTrail(['account', 'preferences']).at(-1)?.label).toBe(
+      'Preferences',
+    );
+    expect(buildTrail(['account', 'access']).at(-1)?.label).toBe('Access');
+  });
+
   it('names the documents analytics child rather than falling back to Document', () => {
     expect(buildTrail(['(product)', 'documents', 'analytics'])).toEqual([
       { current: false, href: '/documents', label: 'Documents' },
