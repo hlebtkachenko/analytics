@@ -416,6 +416,7 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
 
   await page.goto('/account/security');
   await expectNoDocumentOverflow(page);
+  await expectNoAccessibilityViolations(page);
 
   expect(errors.consoleErrors).toEqual([]);
   expect(errors.pageErrors).toEqual([]);
