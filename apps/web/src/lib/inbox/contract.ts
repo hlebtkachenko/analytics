@@ -135,6 +135,7 @@ export const inboxHintsSchema = z
 export const inboxItemSchema = inboxHintsSchema
   .extend({
     assigneeId: subjectIdentifierSchema.nullable(),
+    channelId: identifierSchema.nullable(),
     channelKind: inboxChannelKindSchema,
     confidence: confidenceSchema.nullable(),
     createdAt: z.iso.datetime(),
@@ -146,6 +147,8 @@ export const inboxItemSchema = inboxHintsSchema
     duplicateOfItemId: identifierSchema.nullable(),
     id: identifierSchema,
     legalEntityId: identifierSchema.nullable(),
+    // The credential display prefix that pushed the item; never what was pushed.
+    origin: z.string().min(1).max(255).nullable(),
     partnerId: identifierSchema.nullable(),
     payloadKind: inboxPayloadKindSchema,
     receivedAt: z.iso.datetime(),
@@ -308,6 +311,96 @@ export const snoozeInboxItemRequestSchema = z
   .object({ snoozedUntil: z.iso.datetime().nullable() })
   .strict();
 
+// An intake secret: the fixed prefix, then 32 random bytes in base64url. The 8 characters after the prefix are shown.
+export const INTAKE_SECRET_PREFIX = 'bap_intake_';
+export const INTAKE_DISPLAY_PREFIX_LENGTH = 8;
+export const intakeSecretSchema = z
+  .string()
+  .regex(/^bap_intake_[A-Za-z0-9_-]{43}$/);
+const displayPrefixSchema = z.string().length(INTAKE_DISPLAY_PREFIX_LENGTH);
+// Only email and api channels exist as rows; the wider vocabulary above names an item's source.
+export const inboxChannelKindForChannelsSchema = z.enum(['email', 'api']);
+export const inboxChannelNameSchema = z.string().trim().min(1).max(200);
+
+export const inboxChannelCredentialSchema = z
+  .object({
+    createdAt: z.iso.datetime(),
+    credentialId: identifierSchema,
+    displayPrefix: displayPrefixSchema,
+    lastUsedAt: z.iso.datetime().nullable(),
+  })
+  .strict();
+
+export const inboxChannelSchema = z
+  .object({
+    createdAt: z.iso.datetime(),
+    credentials: z.array(inboxChannelCredentialSchema),
+    enabled: z.boolean(),
+    hintKind: tokenSchema.nullable(),
+    id: identifierSchema,
+    itemCount: z.number().int().min(0),
+    kind: inboxChannelKindForChannelsSchema,
+    legalEntityId: identifierSchema.nullable(),
+    name: inboxChannelNameSchema,
+    updatedAt: z.iso.datetime(),
+  })
+  .strict();
+
+export const inboxChannelListResponseSchema = z
+  .object({ channels: z.array(inboxChannelSchema) })
+  .strict();
+
+// Only an API channel can be created in Phase 1a.
+export const createInboxChannelRequestSchema = z
+  .object({
+    hintKind: tokenSchema.optional(),
+    kind: z.literal('api'),
+    legalEntityId: identifierSchema.optional(),
+    name: inboxChannelNameSchema,
+  })
+  .strict();
+
+// Absence leaves a column alone; null clears it. A soft delete is `enabled: false, deleted: true`.
+export const updateInboxChannelRequestSchema = z
+  .object({
+    deleted: z.literal(true).optional(),
+    enabled: z.boolean().optional(),
+    hintKind: tokenSchema.nullable().optional(),
+    legalEntityId: identifierSchema.nullable().optional(),
+    name: inboxChannelNameSchema.optional(),
+  })
+  .strict()
+  .refine((body) => Object.keys(body).length > 0)
+  .refine((body) => body.deleted !== true || body.enabled === false);
+
+// The plain secret crosses this boundary exactly once.
+export const issueInboxChannelCredentialResponseSchema = z
+  .object({
+    credentialId: identifierSchema,
+    displayPrefix: displayPrefixSchema,
+    secret: intakeSecretSchema,
+  })
+  .strict();
+
+// Accepted, never the content: a pushing client learns the item id and whether the bytes were known.
+export const inboxIntakeResponseSchema = z
+  .object({
+    duplicateOfItemId: identifierSchema.nullable(),
+    itemId: identifierSchema,
+    status: inboxItemStatusSchema,
+  })
+  .strict();
+
+export type CreateInboxChannelRequest = z.infer<
+  typeof createInboxChannelRequestSchema
+>;
+export type InboxChannel = z.infer<typeof inboxChannelSchema>;
+export type InboxChannelCredential = z.infer<
+  typeof inboxChannelCredentialSchema
+>;
+export type InboxChannelListResponse = z.infer<
+  typeof inboxChannelListResponseSchema
+>;
 export type InboxDiscardReason = z.infer<typeof inboxDiscardReasonSchema>;
 export type InboxEvent = z.infer<typeof inboxEventSchema>;
 export type InboxExtraction = z.infer<typeof inboxExtractionSchema>;
@@ -318,10 +411,17 @@ export type InboxItemFile = z.infer<typeof inboxItemFileSchema>;
 export type InboxItemListEntry = z.infer<typeof inboxItemListEntrySchema>;
 export type InboxItemListResponse = z.infer<typeof inboxItemListResponseSchema>;
 export type InboxItemStatus = z.infer<typeof inboxItemStatusSchema>;
+export type InboxIntakeResponse = z.infer<typeof inboxIntakeResponseSchema>;
 export type InboxIssueCode = z.infer<typeof inboxIssueCodeSchema>;
+export type IssueInboxChannelCredentialResponse = z.infer<
+  typeof issueInboxChannelCredentialResponseSchema
+>;
 export type InboxUploadResponse = z.infer<typeof inboxUploadResponseSchema>;
 export type ProviderIssue = z.infer<typeof providerIssueSchema>;
 export type ProviderReason = z.infer<typeof providerReasonSchema>;
+export type UpdateInboxChannelRequest = z.infer<
+  typeof updateInboxChannelRequestSchema
+>;
 export type UpdateInboxHintsRequest = z.input<
   typeof updateInboxHintsRequestSchema
 >;

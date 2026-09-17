@@ -2,6 +2,7 @@
 
 ## Delivered and historical records
 
+- [Inbox channels (Phase 1a)](2026-09-17-inbox-channels.md)
 - [Inbox foundation (Phase 0)](2026-09-16-inbox-foundation.md)
 - [Document analytics page and documents demo](2026-09-15-document-analytics-page.md)
 - [Invoice line periods, advance deductions and rounding](2026-09-15-invoice-periods-advances.md)

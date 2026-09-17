@@ -297,6 +297,36 @@ versioned `v1`, and is guarded the same way as the document routes above; see
 | GET    | `/inbox/blobs/:blobId/download`       | `readDocuments`   | 200     | 401, 403, 404                                    |
 | GET    | `/inbox/blobs/:blobId/inline`         | `readDocuments`   | 200     | 401, 403, 404, 415 (media type not inlineable)   |
 
+[ADR 0016](adr/0016-channel-principal.md) adds the channel principal and its
+routes, also mounted under `organizations/:organizationId/...` and versioned
+`v1`. `inboxItemSchema` gains `channelId` (the originating `app.inbox_channel`
+id, null for a manual upload) and `origin` (the credential display prefix, or
+the acting user id for a person posting through the same items route), so every
+list and read response now carries provenance regardless of who created the
+item.
+
+| Method | Path                                                   | Capability                         | Success | Failure                                             |
+| ------ | ------------------------------------------------------ | ---------------------------------- | ------- | --------------------------------------------------- |
+| POST   | `/inbox/channels/:channelId/items`                     | channel token or `manageDocuments` | 202     | 401, 403, 404 (channel not visible), 413 (quota)    |
+| GET    | `/inbox/channels`                                      | `manageOrganization`               | 200     | 401, 403                                            |
+| POST   | `/inbox/channels`                                      | `manageOrganization`               | 201     | 401, 403, 404 (legal entity not visible)            |
+| GET    | `/inbox/channels/:channelId`                           | `manageOrganization`               | 200     | 401, 403, 404                                       |
+| PATCH  | `/inbox/channels/:channelId`                           | `manageOrganization`               | 200     | 401, 403, 404                                       |
+| POST   | `/inbox/channels/:channelId/credentials`               | `manageOrganization`               | 201     | 401, 403, 404, 409 (two active credentials already) |
+| DELETE | `/inbox/channels/:channelId/credentials/:credentialId` | `manageOrganization`               | 204     | 401, 403, 404                                       |
+
+The channel items route accepts a channel's own resource JWT, minted only by the
+public intake route below, or a person's `TenantAccess` with `manageDocuments`
+and unrestricted entity scope; every other channel route requires a person and
+refuses a `channel_` subject with 403. `POST /api/intake/v1/items` is the one
+organization-less, session-less route in the whole platform: it runs in the web
+service behind Caddy, checks an edge IP bucket before it resolves the bearer
+against `auth.resolve_channel_credential`, and mints the channel's JWT
+server-side before forwarding to the channel items route above. Its error
+vocabulary is `unauthorized`, `rate_limited`, `too_large`,
+`unsupported_media_type`, `channel_not_found`, `conflict`, `intake_rejected`,
+`service_unavailable`, and `intake_unavailable`.
+
 ## BFF and page routes
 
 The browser never calls `apps/api` directly. Every documents route above has a

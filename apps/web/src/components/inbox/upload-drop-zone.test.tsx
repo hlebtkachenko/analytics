@@ -9,6 +9,7 @@ const EARLIER_ITEM_ID = '00000000-0000-4000-8000-000000000051';
 
 const inboxItem = {
   assigneeId: null,
+  channelId: null,
   channelKind: 'upload',
   confidence: null,
   createdAt: '2026-09-16T08:00:00.000Z',
@@ -25,6 +26,7 @@ const inboxItem = {
   hintText: null,
   id: ITEM_ID,
   legalEntityId: null,
+  origin: null,
   partnerId: null,
   payloadKind: 'file',
   receivedAt: '2026-09-16T08:00:00.000Z',

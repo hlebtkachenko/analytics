@@ -20,14 +20,19 @@ import {
 } from '../documents/contract.ts';
 import {
   assignInboxItemRequestSchema,
+  createInboxChannelRequestSchema,
   discardInboxItemRequestSchema,
+  inboxChannelListResponseSchema,
+  inboxChannelSchema,
   inboxItemDetailSchema,
   inboxItemListQuerySchema,
   inboxItemListResponseSchema,
   inboxUploadResponseSchema,
   isInlineMediaType,
+  issueInboxChannelCredentialResponseSchema,
   routeInboxItemToDocumentRequestSchema,
   snoozeInboxItemRequestSchema,
+  updateInboxChannelRequestSchema,
   updateInboxHintsRequestSchema,
 } from '../inbox/contract.ts';
 import { webLogger } from '../logger.ts';
@@ -174,7 +179,8 @@ const uploadAcceptedSchema = z
   .strict();
 // An upload streams up to 25 MB from a browser, so the 3 second access budget would abort a healthy one.
 const UPLOAD_TIMEOUT_MS = 120_000;
-const privateResponseHeaders = { 'cache-control': 'private, no-store' };
+// Shared with the public intake route, which answers with the same private headers.
+export const privateResponseHeaders = { 'cache-control': 'private, no-store' };
 
 const datasetIdSchema = z.string().uuid();
 // Mirrors the dataset contract in @bap/api, which apps/web must not import.
@@ -2118,6 +2124,218 @@ export async function getInboxBlobInline(
     organizationId,
     blobId,
     true,
+    fetchImplementation,
+  );
+}
+
+export async function getInboxChannels(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'inbox_channels_unavailable',
+      method: 'GET',
+      operation: 'getInboxChannels',
+      path: 'inbox/channels',
+      schema: inboxChannelListResponseSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function postInboxChannel(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const parsed = await readJsonBody(request, createInboxChannelRequestSchema);
+
+  if ('failure' in parsed) {
+    return parsed.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      body: parsed.data,
+      errorCode: 'inbox_channel_rejected',
+      method: 'POST',
+      operation: 'postInboxChannel',
+      path: 'inbox/channels',
+      schema: inboxChannelSchema,
+      successStatus: 201,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function getInboxChannel(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  channelId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const selected = parsedIdentifier(channelId, 'inbox_channel_not_found');
+
+  if ('failure' in selected) {
+    return selected.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'inbox_channel_unavailable',
+      method: 'GET',
+      operation: 'getInboxChannel',
+      path: `inbox/channels/${encodeURIComponent(selected.value)}`,
+      schema: inboxChannelSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function patchInboxChannel(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  channelId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const selected = parsedIdentifier(channelId, 'inbox_channel_not_found');
+
+  if ('failure' in selected) {
+    return selected.failure;
+  }
+
+  const parsed = await readJsonBody(request, updateInboxChannelRequestSchema);
+
+  if ('failure' in parsed) {
+    return parsed.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      body: parsed.data,
+      errorCode: 'inbox_channel_rejected',
+      method: 'PATCH',
+      operation: 'patchInboxChannel',
+      path: `inbox/channels/${encodeURIComponent(selected.value)}`,
+      schema: inboxChannelSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+// The plain secret passes through this response once and is never logged or stored here.
+export async function postInboxChannelCredential(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  channelId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const selected = parsedIdentifier(channelId, 'inbox_channel_not_found');
+
+  if ('failure' in selected) {
+    return selected.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'inbox_credential_rejected',
+      method: 'POST',
+      operation: 'postInboxChannelCredential',
+      path: `inbox/channels/${encodeURIComponent(selected.value)}/credentials`,
+      schema: issueInboxChannelCredentialResponseSchema,
+      successStatus: 201,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function deleteInboxChannelCredential(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  channelId: string,
+  credentialId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const selectedChannel = parsedIdentifier(
+    channelId,
+    'inbox_channel_not_found',
+  );
+
+  if ('failure' in selectedChannel) {
+    return selectedChannel.failure;
+  }
+
+  const selectedCredential = parsedIdentifier(
+    credentialId,
+    'inbox_credential_not_found',
+  );
+
+  if ('failure' in selectedCredential) {
+    return selectedCredential.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'inbox_credential_rejected',
+      method: 'DELETE',
+      operation: 'deleteInboxChannelCredential',
+      path: `inbox/channels/${encodeURIComponent(selectedChannel.value)}/credentials/${encodeURIComponent(selectedCredential.value)}`,
+      schema: null,
+      successStatus: 204,
+    },
     fetchImplementation,
   );
 }

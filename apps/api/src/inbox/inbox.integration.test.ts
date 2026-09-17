@@ -43,17 +43,24 @@ import {
 } from './providers/sniff.js';
 import {
   assignItem,
+  createChannel,
   discardItem,
+  issueCredential,
+  listChannels,
   listItems,
   readBlob,
+  readChannel,
+  readChannelPrincipal,
   readItem,
   readProviderInput,
-  receiveUpload,
+  receiveIntake,
   recordExtraction,
   restoreItem,
+  revokeCredential,
   routeToDocument,
   snoozeItem,
   undoRoute,
+  updateChannel,
   updateHints,
   type InboxRepository,
 } from './inbox-repository.js';
@@ -209,17 +216,24 @@ beforeAll(async () => {
   // The service is exercised against the container pool through the same functions the Nest repository wraps.
   const repository: InboxRepository = {
     assignItem: (input) => assignItem(apiPool, input),
+    createChannel: (input) => createChannel(apiPool, input),
     discardItem: (input) => discardItem(apiPool, input),
+    issueCredential: (input) => issueCredential(apiPool, input),
+    listChannels: (input) => listChannels(apiPool, input),
     listItems: (input) => listItems(apiPool, input),
     readBlob: (input) => readBlob(apiPool, input),
+    readChannel: (input) => readChannel(apiPool, input),
+    readChannelPrincipal: (input) => readChannelPrincipal(apiPool, input),
     readItem: (input) => readItem(apiPool, input),
     readProviderInput: (input) => readProviderInput(apiPool, input),
-    receiveUpload: (input) => receiveUpload(apiPool, input),
+    receiveIntake: (input) => receiveIntake(apiPool, input),
     recordExtraction: (input) => recordExtraction(apiPool, input),
     restoreItem: (input) => restoreItem(apiPool, input),
+    revokeCredential: (input) => revokeCredential(apiPool, input),
     routeToDocument: (input) => routeToDocument(apiPool, input),
     snoozeItem: (input) => snoozeItem(apiPool, input),
     undoRoute: (input) => undoRoute(apiPool, input),
+    updateChannel: (input) => updateChannel(apiPool, input),
     updateHints: (input) => updateHints(apiPool, input),
   };
   service = new InboxService(repository, store, QUOTA);
@@ -350,12 +364,17 @@ describe('inbox intake', () => {
 
     // The repository is called directly with a scope that cannot read the new item back, so it throws last.
     await expect(
-      receiveUpload(apiPool, {
+      receiveIntake(apiPool, {
         ...creator,
         byteSize: bytes.length,
+        channelId: null,
+        channelKind: 'upload',
+        externalId: null,
         legalEntityIds: [ownedEntityId],
         mediaType: sniffed.mediaType,
+        origin: null,
         originalFilename: 'orphan.txt',
+        payloadKind: 'file',
         persist: () => store.put({ key: storageKey, temporaryPath: path }),
         quotaBytes: QUOTA,
         sha256,

@@ -1,5 +1,6 @@
 import {
   inboxChannelKinds,
+  inboxChannelKindsForChannels,
   inboxDecidedByKinds,
   inboxDiscardReasons,
   inboxEventKinds,
@@ -75,6 +76,18 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 export const inboxItemIdentifierSchema = z.string().trim().toLowerCase().uuid();
 export const blobIdentifierSchema = z.string().trim().toLowerCase().uuid();
+export const inboxChannelIdentifierSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .uuid();
+export const credentialIdentifierSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .uuid();
+// The caller's own idempotency key: one item per (organization, channel, external id).
+export const externalIdSchema = z.string().trim().min(1).max(255);
 export const tokenSchema = z.string().regex(TOKEN_PATTERN);
 export const inboxItemStatusSchema = z.enum(INBOX_ITEM_STATUSES);
 export const inboxEventKindSchema = z.enum(INBOX_EVENT_KINDS);
@@ -100,6 +113,7 @@ export type InboxHints = z.infer<typeof inboxHintsSchema>;
 export const inboxItemSchema = inboxHintsSchema
   .extend({
     assigneeId: subjectIdentifierSchema.nullable(),
+    channelId: inboxChannelIdentifierSchema.nullable(),
     channelKind: z.enum(INBOX_CHANNEL_KINDS),
     confidence: confidenceSchema.nullable(),
     createdAt: z.iso.datetime(),
@@ -111,6 +125,8 @@ export const inboxItemSchema = inboxHintsSchema
     duplicateOfItemId: inboxItemIdentifierSchema.nullable(),
     id: inboxItemIdentifierSchema,
     legalEntityId: legalEntityIdentifierSchema.nullable(),
+    // The credential display prefix that pushed the item; never what was pushed.
+    origin: z.string().min(1).max(255).nullable(),
     partnerId: partnerIdentifierSchema.nullable(),
     payloadKind: z.enum(INBOX_PAYLOAD_KINDS),
     receivedAt: z.iso.datetime(),
@@ -373,6 +389,124 @@ export type SnoozeInboxItemRequest = z.infer<
   typeof snoozeInboxItemRequestSchema
 >;
 
+// A structured push: the body itself becomes the item's single file, so the envelope stays the one of a file.
+// The JSON body parser caps the whole request at 1 MiB, so the payload needs no second size check here.
+export const structuredIntakeRequestSchema = z
+  .object({
+    externalId: externalIdSchema,
+    payload: z.record(z.string(), jsonValueSchema),
+  })
+  .strict();
+
+export type StructuredIntakeRequest = z.infer<
+  typeof structuredIntakeRequestSchema
+>;
+
+// Multipart text fields beside the file part; the external id is optional for a file.
+export const fileIntakeFieldsSchema = z
+  .object({ externalId: externalIdSchema.optional() })
+  .strict();
+
+// Accepted, never the content: a channel learns the item id and whether the bytes were already known.
+export const inboxIntakeResponseSchema = z
+  .object({
+    duplicateOfItemId: inboxItemIdentifierSchema.nullable(),
+    itemId: inboxItemIdentifierSchema,
+    status: inboxItemStatusSchema,
+  })
+  .strict();
+
+export type InboxIntakeResponse = z.infer<typeof inboxIntakeResponseSchema>;
+
+export const inboxChannelCredentialSchema = z
+  .object({
+    createdAt: z.iso.datetime(),
+    credentialId: credentialIdentifierSchema,
+    displayPrefix: z.string().length(8),
+    lastUsedAt: z.iso.datetime().nullable(),
+  })
+  .strict();
+
+export type InboxChannelCredential = z.infer<
+  typeof inboxChannelCredentialSchema
+>;
+
+export const inboxChannelNameSchema = z.string().trim().min(1).max(200);
+
+export const inboxChannelSchema = z
+  .object({
+    createdAt: z.iso.datetime(),
+    credentials: z.array(inboxChannelCredentialSchema),
+    enabled: z.boolean(),
+    hintKind: tokenSchema.nullable(),
+    id: inboxChannelIdentifierSchema,
+    itemCount: z.number().int().min(0),
+    kind: z.enum(inboxChannelKindsForChannels),
+    legalEntityId: legalEntityIdentifierSchema.nullable(),
+    name: inboxChannelNameSchema,
+    updatedAt: z.iso.datetime(),
+  })
+  .strict();
+
+export type InboxChannel = z.infer<typeof inboxChannelSchema>;
+
+export const inboxChannelListResponseSchema = z
+  .object({ channels: z.array(inboxChannelSchema) })
+  .strict();
+
+export type InboxChannelListResponse = z.infer<
+  typeof inboxChannelListResponseSchema
+>;
+
+// Only an API channel can be created in Phase 1a; email channels arrive with the Mailgun webhook.
+export const createInboxChannelRequestSchema = z
+  .object({
+    hintKind: tokenSchema.optional(),
+    kind: z.literal('api'),
+    legalEntityId: legalEntityIdentifierSchema.optional(),
+    name: inboxChannelNameSchema,
+  })
+  .strict();
+
+export type CreateInboxChannelRequest = z.infer<
+  typeof createInboxChannelRequestSchema
+>;
+
+// Absence leaves a column alone; null clears it. A soft delete is `enabled: false, deleted: true`.
+export const updateInboxChannelRequestSchema = z
+  .object({
+    deleted: z.literal(true).optional(),
+    enabled: z.boolean().optional(),
+    hintKind: tokenSchema.nullable().optional(),
+    legalEntityId: legalEntityIdentifierSchema.nullable().optional(),
+    name: inboxChannelNameSchema.optional(),
+  })
+  .strict()
+  .refine((body) => Object.keys(body).length > 0, {
+    message: 'At least one field must be given.',
+  })
+  .refine((body) => body.deleted !== true || body.enabled === false, {
+    message: 'A deleted channel must be disabled in the same request.',
+    path: ['deleted'],
+  });
+
+export type UpdateInboxChannelRequest = z.infer<
+  typeof updateInboxChannelRequestSchema
+>;
+
+// The plain secret crosses this boundary exactly once.
+export const issueInboxChannelCredentialResponseSchema = z
+  .object({
+    credentialId: credentialIdentifierSchema,
+    displayPrefix: z.string().length(8),
+    secret: z.string().regex(/^bap_intake_[A-Za-z0-9_-]{43}$/),
+  })
+  .strict();
+
+export type IssueInboxChannelCredentialResponse = z.infer<
+  typeof issueInboxChannelCredentialResponseSchema
+>;
+
 // A display filename for Content-Disposition: ASCII only, no quote, no separator, no control character.
 export function contentDispositionFilename(
   originalFilename: string | null,
@@ -408,6 +542,7 @@ export const inboxItemOpenApiSchema = {
   properties: {
     ...hintProperties,
     assigneeId: { nullable: true, type: 'string' },
+    channelId: nullable(uuidProperty),
     channelKind: { enum: [...INBOX_CHANNEL_KINDS], type: 'string' },
     confidence: nullable(confidenceProperty),
     createdAt: dateTimeProperty,
@@ -423,6 +558,7 @@ export const inboxItemOpenApiSchema = {
     duplicateOfItemId: nullable(uuidProperty),
     id: uuidProperty,
     legalEntityId: nullable(uuidProperty),
+    origin: { maxLength: 255, minLength: 1, nullable: true, type: 'string' },
     partnerId: nullable(uuidProperty),
     payloadKind: { enum: [...INBOX_PAYLOAD_KINDS], type: 'string' },
     receivedAt: dateTimeProperty,
@@ -433,6 +569,7 @@ export const inboxItemOpenApiSchema = {
   },
   required: [
     'assigneeId',
+    'channelId',
     'channelKind',
     'confidence',
     'createdAt',
@@ -449,6 +586,7 @@ export const inboxItemOpenApiSchema = {
     'hintText',
     'id',
     'legalEntityId',
+    'origin',
     'partnerId',
     'payloadKind',
     'receivedAt',
@@ -652,5 +790,123 @@ export const snoozeInboxItemBodyOpenApiSchema = {
   additionalProperties: false,
   properties: { snoozedUntil: nullable(dateTimeProperty) },
   required: ['snoozedUntil'],
+  type: 'object',
+};
+
+export const structuredIntakeBodyOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    externalId: { maxLength: 255, minLength: 1, type: 'string' },
+    payload: { additionalProperties: true, type: 'object' },
+  },
+  required: ['externalId', 'payload'],
+  type: 'object',
+};
+
+export const fileIntakeBodyOpenApiSchema = {
+  properties: {
+    externalId: { maxLength: 255, minLength: 1, type: 'string' },
+    file: { format: 'binary', type: 'string' },
+  },
+  required: ['file'],
+  type: 'object',
+};
+
+export const inboxIntakeResponseOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    duplicateOfItemId: nullable(uuidProperty),
+    itemId: uuidProperty,
+    status: { enum: [...INBOX_ITEM_STATUSES], type: 'string' },
+  },
+  required: ['duplicateOfItemId', 'itemId', 'status'],
+  type: 'object',
+};
+
+const inboxChannelCredentialOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    createdAt: dateTimeProperty,
+    credentialId: uuidProperty,
+    displayPrefix: { maxLength: 8, minLength: 8, type: 'string' },
+    lastUsedAt: nullable(dateTimeProperty),
+  },
+  required: ['createdAt', 'credentialId', 'displayPrefix', 'lastUsedAt'],
+  type: 'object',
+};
+
+const channelNameProperty = { maxLength: 200, minLength: 1, type: 'string' };
+
+export const inboxChannelOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    createdAt: dateTimeProperty,
+    credentials: { items: inboxChannelCredentialOpenApiSchema, type: 'array' },
+    enabled: { type: 'boolean' },
+    hintKind: nullable(tokenProperty),
+    id: uuidProperty,
+    itemCount: { minimum: 0, type: 'integer' },
+    kind: { enum: [...inboxChannelKindsForChannels], type: 'string' },
+    legalEntityId: nullable(uuidProperty),
+    name: channelNameProperty,
+    updatedAt: dateTimeProperty,
+  },
+  required: [
+    'createdAt',
+    'credentials',
+    'enabled',
+    'hintKind',
+    'id',
+    'itemCount',
+    'kind',
+    'legalEntityId',
+    'name',
+    'updatedAt',
+  ],
+  type: 'object',
+};
+
+export const inboxChannelListOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    channels: { items: inboxChannelOpenApiSchema, type: 'array' },
+  },
+  required: ['channels'],
+  type: 'object',
+};
+
+export const createInboxChannelBodyOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    hintKind: tokenProperty,
+    kind: { enum: ['api'], type: 'string' },
+    legalEntityId: uuidProperty,
+    name: channelNameProperty,
+  },
+  required: ['kind', 'name'],
+  type: 'object',
+};
+
+export const updateInboxChannelBodyOpenApiSchema = {
+  additionalProperties: false,
+  minProperties: 1,
+  properties: {
+    deleted: { enum: [true], type: 'boolean' },
+    enabled: { type: 'boolean' },
+    hintKind: nullable(tokenProperty),
+    legalEntityId: nullable(uuidProperty),
+    name: channelNameProperty,
+  },
+  type: 'object',
+};
+
+export const issueInboxChannelCredentialResponseOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    credentialId: uuidProperty,
+    displayPrefix: { maxLength: 8, minLength: 8, type: 'string' },
+    secret: { pattern: '^bap_intake_[A-Za-z0-9_-]{43}$', type: 'string' },
+  },
+  required: ['credentialId', 'displayPrefix', 'secret'],
   type: 'object',
 };

@@ -294,10 +294,71 @@ SELECT. The eraser gains column grants on `blob.created_by`,
 `inbox_event.actor_user_id` and `document_file.created_by`, and `app.erase_user`
 tombstones all 7. The migration reserves the `inbox` organization slug with the
 guard-then-replace pattern, bringing `organization_slug_reserved_check` to 18
-literals. `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is
-now `20260916.0001`; rolling application code back after this migration leaves
-readiness at 503 until code expecting that exact version is deployed or the
-expected version is deliberately advanced.
+literals. `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
+`20260916.0001` after this migration.
+
+Migration `20260917.0001` adds the channel principal of ADR 0016. `bap.role`
+gains the value `channel`, which is not a membership role: a channel runs as
+`bap.user_id = 'channel_<uuid>'` with no `auth."user"` row and no new database
+role, and `app.role_is_channel()` (STABLE, SECURITY INVOKER, EXECUTE to
+`bap_api` and `bap_reporting`) is the only predicate that names it.
+`app.inbox_channel` is the channel register (`kind` `email` or `api`, `enabled`,
+`deleted_at`, a composite `legal_entity_id` pin, `config` for non-secret
+settings only); reads are organization wide for people and limited to the
+channel's own row for a channel, INSERT and DELETE need `app.role_is_owner()`,
+UPDATE needs `app.role_can_write()`, and `inbox_channel_maintenance_select`
+admits `bap_owner` so the credential resolver can run outside a tenant
+transaction. `app.inbox_item` gains `channel_id` (composite foreign key,
+`ON DELETE RESTRICT`) and `origin`, with `inbox_item_channel_check` requiring a
+channel for every kind except `upload`. `auth.inbox_channel_credential` keeps
+`secret_sha256` (unique) and an 8 character `display_prefix`, never the plain
+secret; the inherited `bap_auth` DML is revoked after the CREATE, `bap_api`
+holds nothing, and three `SECURITY DEFINER` functions owned by `bap_owner` are
+the whole surface: `auth.issue_channel_credential(channel_id, kind)` and
+`auth.revoke_channel_credential(credential_id)` (EXECUTE to `bap_api`, tenant
+and subject from the transaction settings, `bap.role = 'owner'` asserted, at
+most two unrevoked credentials per channel) and
+`auth.resolve_channel_credential(sha256)` (EXECUTE to `bap_auth`, returns the
+binding for one unrevoked credential of an enabled, undeleted channel and stamps
+`last_used_at`). The five inbox INSERT policies (`blob_insert`,
+`inbox_item_insert`, `inbox_item_file_insert`, `inbox_item_extraction_insert`,
+`inbox_event_insert`) become
+`... AND (app.role_can_write() OR app.role_is_channel())` with the `created_by`
+check outside the parentheses; `inbox_item_channel_update` lets a channel move
+an unrouted item that no person decided and never set a destination column;
+`blob_update` is unchanged. Every non-inbox tenant SELECT policy gains
+`AND NOT app.role_is_channel()` (`legal_entity`, `member_entity_scope`,
+`legal_entity_access`, `dataset`, `dataset_column`, `dataset_row`,
+`dataset_embedding`, `upload`, `partner`, `document`, `document_attribute`,
+`invoice`, `invoice_line`, `economic_event`, `economic_event_line`,
+`document_link`, `data_issue`), while `blob`, `document_file` and the inbox
+tables stay readable by a channel. `audit_log_isolation` is split into
+`audit_log_select` (excludes the channel), `audit_log_insert`,
+`audit_log_update` and `audit_log_delete`; because `INSERT ... RETURNING` reads
+the new row through the SELECT policy, `app.record_audit` now generates the id
+before the insert instead of reading it back. `auth."user"` gains
+`user_id_not_channel_check` (`id NOT LIKE 'channel\_%'`), `app.erase_user`
+raises on a `channel_` subject and tombstones `inbox_channel.created_by`, for
+which the eraser gains column grants. The migration installs the trusted
+`pgcrypto` extension for `gen_random_bytes`. `DATABASE_MIGRATION_COMPATIBILITY`
+in `packages/db/src/access.ts` is now `20260917.0001`; rolling application code
+back after this migration leaves readiness at 503 until code expecting that
+exact version is deployed or the expected version is deliberately advanced.
+
+Migration `20260917.0002` adds the fourth definer function of ADR 0016,
+`auth.list_channel_credentials(channel_id)`: `bap_api` holds no SELECT on
+`auth.inbox_channel_credential`, so the settings page lists a channel's active,
+unrevoked credentials by `display_prefix` only, in creation order, through this
+function instead. It asserts `bap.role = 'owner'` and reads the organization
+from the transaction settings, the same checks as `issue_channel_credential` and
+`revoke_channel_credential`, and never returns the hash. The same migration adds
+`rate_limit_intake_edge_last_request_idx`, the intake namespace's counterpart to
+`rate_limit_public_signup_edge_last_request_idx`, a partial index on
+`auth.rate_limit(last_request)` where `"key" LIKE 'bap-edge:intake:%'`. The web
+tier's public intake route calls `auth.resolve_channel_credential` and reads or
+upserts `auth.rate_limit` in that namespace, both on the `bap_auth` pool.
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
+`20260917.0002`.
 
 ## Tenant policy contract
 

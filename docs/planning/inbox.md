@@ -6,9 +6,10 @@ code, migration, or Compose change is part of it; the dated specs under
 `.ai/specs/` deliver it phase by phase, starting with
 [the inbox foundation spec](../../.ai/specs/2026-09-16-inbox-foundation.md). It
 inherits [ADR 0011](../adr/0011-two-level-tenancy.md),
-[ADR 0012](../adr/0012-documents-register-and-derived-events.md), and the two
-decisions written for it, [ADR 0014](../adr/0014-durable-blob-storage.md) and
-[ADR 0015](../adr/0015-inbox-intake-model.md), and it continues
+[ADR 0012](../adr/0012-documents-register-and-derived-events.md), and the three
+decisions written for it, [ADR 0014](../adr/0014-durable-blob-storage.md),
+[ADR 0015](../adr/0015-inbox-intake-model.md) and
+[ADR 0016](../adr/0016-channel-principal.md), and it continues
 [the documents runtime document](../documents.md).
 
 ## Goal
@@ -96,8 +97,8 @@ Around the envelope:
   oracle ("does another tenant hold this PDF"), blocks per-organization erasure
   and retention, and saves nothing because invoices are unique per recipient.
 - `app.inbox_item_file`: item to blob, many-to-many, with `position` and
-  optional `page_from` and `page_to`. For email items the raw `.eml` is file
-  zero.
+  optional `page_from` and `page_to`. For email items the raw `.eml` is position
+  1 (`position >= 1` is a schema check) and the attachments become child items.
 - `app.inbox_item_extraction`: one row per Understand pass: the
   destination-shaped draft (for example the exact `createDocumentRequestSchema`
   payload), per-field confidences, `reasons[]`, `issues[]`, provider name and
@@ -239,7 +240,7 @@ run in the worker, the only runtime with egress besides web (ADR 0004, ADR
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------ | ----------------------------------------------------------------------------------------------------------- |
 | Manual upload         | drag and drop, multi-file, any type                                                                                                  | web to api         | today `files: 1` and CSV or XLSX only (`upload.controller.ts:114`); one request per file, Caddy limits kept |
 | Email-in              | per-organization address keyed on a token only (`in-<token>@in.<domain>`, never on the slug, because slugs rename), provider webhook | web webhook to api | Mailgun EU; Resend inbound unverified; self-hosted SMTP adds a public port                                  |
-| Public API or webhook | `POST /v1/organizations/:id/inbox/items` with a channel token                                                                        | web to api         | `external_id` required; the path n8n or any pusher uses                                                     |
+| Public API or webhook | `POST /api/intake/v1/items` with a channel token; the web binds the organization from the token                                      | web to api         | `external_id` required; the path n8n or any pusher uses                                                     |
 | MCP                   | `inbox.submit` in the planned MCP server                                                                                             | same as API        | see [the MCP server plan](mcp-server.md)                                                                    |
 | ISDOC and ISDOCX      | file via any channel                                                                                                                 | worker parser      | highest return: every Czech accounting product emits it                                                     |
 | Money S3 XML          | file export, manual or client-scheduled                                                                                              | worker parser      | no push exists                                                                                              |
@@ -259,13 +260,14 @@ non-human actor can write: every resource JWT is minted from a browser session
 not a live write-role member (`apps/api/src/worker/job-context.ts`), and RLS
 inserts require `created_by = bap.user_id`
 (`packages/db/drizzle/20260914.0002_documents.sql:625`). An email webhook, an
-API token or a bank poll has no user. A separate ADR, a Phase 1 prerequisite,
-must define a channel principal: subject `channel:<id>`, a capability set
-limited to inbox writes, how RLS `created_by` and the worker membership check
-treat it, and how the organization binding is derived server-side from the token
-(hashed at rest, shown once, per-token rate limit through the existing
-`SubjectRateLimitGuard`). Provider signatures prove the sender, never the
-tenant.
+API token or a bank poll has no user.
+[ADR 0016](../adr/0016-channel-principal.md), the Phase 1 prerequisite, defines
+the channel principal: subject `channel_<uuid>` with `bap.role = 'channel'`, a
+capability set limited to inbox writes, how RLS `created_by` and the worker
+membership check treat it, and how the organization binding is derived
+server-side from the token (hashed at rest, shown once, per-token rate limit
+through the existing `SubjectRateLimitGuard`). Provider signatures prove the
+sender, never the tenant.
 
 The email channel replies to the sender with a summary: items created, files
 skipped and why (Phase 1).
@@ -355,7 +357,7 @@ Ranked risks, with the mitigation each needs.
 
 1. Organization binding of unauthenticated intake. Bind from a server-side
    lookup of the address token or API token, never from payload content or
-   provider identity. Needs the channel principal ADR.
+   provider identity. Decided in ADR 0016.
 2. Parser blast radius. The worker runs as `bap_api` over every tenant and, by
    Phase 3, holds bank and ISDS credentials. XXE in ISDOC and Pohoda XML, zip
    bombs in XLSX and ISDOCX, PDF parser bugs. ClamAV does not cover this. Needs
@@ -404,20 +406,30 @@ in PostgreSQL.
   `/inbox` page, rail entry, reserved slug. No channels table, no rules, no
   ClamAV. Spec:
   [inbox foundation](../../.ai/specs/2026-09-16-inbox-foundation.md).
-- Phase 1, smart: channel principal ADR; `inbox_channel`, `inbox_rule`,
-  `inbox_routing_target`, `inbox_correction`; orphan sweep worker job;
-  per-organization quota setting; email-in (Mailgun EU) with reply summaries;
-  ClamAV service; AI extraction with per-organization opt-in; ARES enrichment;
-  fingerprint duplicates; Split action; document versioning route.
+- Phase 1a, channels, in delivery (branch `inbox-phase-1a`): ADR 0016; the
+  channel principal, `inbox_channel` and the intake API credential table with
+  its definer functions; `resolveChannelAccess` and `receiveIntake`; the channel
+  items route under a channel token; channel CRUD and credential issue and
+  revoke for owners; the public intake route with the edge IP bucket; channel
+  settings page for API channels; the sniff stays synchronous as in Phase 0.
+  Spec: [inbox channels](../../.ai/specs/2026-09-17-inbox-channels.md).
+- Phase 1a-email, stacked on 1a with its own spec: Mailgun EU webhook, the API
+  email route, the email split job, ClamAV service, email channels in the
+  settings page, the Caddy cap for the inbound path.
+- Phase 1b, smart: the pull cron skeleton, `list_due_channels` and the orphan
+  sweep job; `inbox_rule` with auto-route running as the rule's author,
+  `inbox_routing_target`, `inbox_correction`; reply summaries through
+  `@bap/mail`; per-organization quota setting; AI extraction with
+  per-organization opt-in; ARES enrichment; fingerprint duplicates; Split
+  action; document versioning route.
 - Phase 2, structured Czech: ISDOC and ISDOCX, Money S3 XML, Pohoda XML file,
   hardened XML parsing; legal entity resolution by IČO.
 - Phase 3, live: credential vault; Fio API poll; Fakturoid webhooks; Pohoda
   mServer pull; channel health page (last poll, failure streak, credential
   expiry, throughput).
-- Phase 4, wide: public intake tokens; MCP `inbox.submit`; ISDS; cloud folder
-  watch; bank premium APIs; bank statements with a `bank_transaction` table
-  keyed `(bank_account, external_id)` and an optional statement document; Peppol
-  slot.
+- Phase 4, wide: MCP `inbox.submit`; ISDS; cloud folder watch; bank premium
+  APIs; bank statements with a `bank_transaction` table keyed
+  `(bank_account, external_id)` and an optional statement document; Peppol slot.
 
 What the phases unlock: reconciliation (arrived in the Inbox but absent from the
 Money S3 export means an unbooked invoice, possible only when arrivals are

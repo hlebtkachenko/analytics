@@ -26,6 +26,7 @@ import {
 } from './ingestion/ingestion-queue.js';
 import { UploadController } from './ingestion/upload.controller.js';
 import { InboxController } from './inbox/inbox.controller.js';
+import { InboxChannelController } from './inbox/inbox-channel.controller.js';
 import {
   DatabaseInboxRepository,
   InboxRepository,
@@ -61,6 +62,7 @@ import {
     DocumentController,
     EntityScopeController,
     HealthController,
+    InboxChannelController,
     InboxController,
     LegalEntityController,
     MetricsController,
