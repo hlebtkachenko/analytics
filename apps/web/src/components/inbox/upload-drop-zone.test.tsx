@@ -15,6 +15,7 @@ const inboxItem = {
   createdAt: '2026-09-16T08:00:00.000Z',
   datasetId: null,
   decidedByKind: null,
+  decidedByRuleId: null,
   decidedByUserId: null,
   detectedType: null,
   documentId: null,

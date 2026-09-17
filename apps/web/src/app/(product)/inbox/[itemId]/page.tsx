@@ -46,11 +46,14 @@ import {
   isInlineMediaType,
 } from '../../../../lib/inbox/contract.ts';
 import type {
+  InboxCorrectionField,
   InboxDiscardReason,
   InboxItemDetail,
   UpdateInboxHintsRequest,
 } from '../../../../lib/inbox/contract.ts';
 import {
+  inboxCorrectionFieldLabelKeys,
+  inboxCorrectionSourceLabelKeys,
   inboxDecidedByLabelKeys,
   inboxDiscardReasonLabelKeys,
   inboxRoutingDestinationLabelKeys,
@@ -76,6 +79,20 @@ type DraftFields = Readonly<{
   reference: string;
   title: string;
 }>;
+
+// The draft field each correction column records; the API compares the same seven.
+const correctionFields: Readonly<
+  Record<keyof DraftFields, InboxCorrectionField>
+> = {
+  currencyCode: 'currency_code',
+  documentDate: 'document_date',
+  kind: 'kind',
+  legalEntityId: 'legal_entity_id',
+  partnerId: 'partner_id',
+  reference: 'reference',
+  title: 'title',
+};
+const draftFieldKeys = Object.keys(correctionFields) as (keyof DraftFields)[];
 
 function draftString(draft: Record<string, unknown>, key: string): string {
   const value = draft[key];
@@ -159,6 +176,9 @@ export default function InboxItemPage() {
   const [hintPartnerId, setHintPartnerId] = useState('');
   const [hintLinkDocumentId, setHintLinkDocumentId] = useState('');
   const [draft, setDraft] = useState<DraftFields>();
+  const [reasons, setReasons] = useState<
+    Partial<Record<InboxCorrectionField, string>>
+  >({});
   const [discardReason, setDiscardReason] =
     useState<InboxDiscardReason>('irrelevant');
   const [assigneeId, setAssigneeId] = useState('');
@@ -192,6 +212,7 @@ export default function InboxItemPage() {
         setAssigneeId(payload.item.assigneeId ?? '');
         setSnoozedUntil(payload.item.snoozedUntil?.slice(0, 16) ?? '');
         setDraft(undefined);
+        setReasons({});
       })
       .catch((error: unknown) => {
         if (!isAbortError(error)) {
@@ -203,11 +224,16 @@ export default function InboxItemPage() {
     };
   }, [detailKey, itemId, organizationId]);
 
-  const fields =
-    draft ??
-    (detail === undefined
+  const suggested =
+    detail === undefined
       ? undefined
-      : draftFields(detail, legalEntities[0]?.id ?? ''));
+      : draftFields(detail, legalEntities[0]?.id ?? '');
+  const fields = draft ?? suggested;
+  // A field the person changed away from the suggestion gets an optional one-line reason.
+  const changedFields =
+    fields === undefined || suggested === undefined
+      ? []
+      : draftFieldKeys.filter((key) => fields[key] !== suggested[key]);
 
   function updateDraft(patch: Partial<DraftFields>): void {
     if (fields !== undefined) {
@@ -275,10 +301,55 @@ export default function InboxItemPage() {
       return;
     }
     setDraftInvalid(false);
+    const correctionReasons: Partial<Record<InboxCorrectionField, string>> = {};
+    for (const key of changedFields) {
+      const reason = reasons[correctionFields[key]]?.trim() ?? '';
+      if (reason.length > 0) {
+        correctionReasons[correctionFields[key]] = reason;
+      }
+    }
     await write('route/document', {
+      ...(Object.keys(correctionReasons).length === 0
+        ? {}
+        : { correctionReasons }),
       document: parsed.data,
       fileBlobIds: detail.files.map((file) => file.blobId),
     });
+  }
+
+  // The rule page reads these to prefill its create modal from what the person just decided.
+  function createRuleHref(): string {
+    if (detail === undefined) {
+      return '/inbox/rules';
+    }
+    const decided = detail.item;
+    const query = new URLSearchParams();
+    const set = (key: string, value: string | null | undefined) => {
+      if (value !== null && value !== undefined && value.length > 0) {
+        query.set(key, value);
+      }
+    };
+    set('channelId', decided.channelId);
+    set('detectedType', decided.detectedType);
+    if (decided.status === 'discarded') {
+      const discardedEvent = [...detail.events]
+        .reverse()
+        .find((event) => event.kind === 'discarded');
+      const parsedReason = inboxDiscardReasonSchema.safeParse(
+        discardedEvent?.reason,
+      );
+      set('discardReason', parsedReason.success ? parsedReason.data : null);
+    } else {
+      set('legalEntityId', decided.legalEntityId);
+      set('kind', draftKind(detail));
+      set('partnerId', decided.partnerId);
+      set('assigneeId', decided.assigneeId);
+    }
+    const slug = organization.slug;
+    if (slug.length > 0) {
+      query.set('organization', slug);
+    }
+    return `/inbox/rules?${query.toString()}`;
   }
 
   function itemHref(id: string): string {
@@ -473,6 +544,33 @@ export default function InboxItemPage() {
                 ))}
               </Stack>
             )}
+            {detail.corrections.length === 0 ? null : (
+              <Stack gap={3}>
+                <h3>{t('inbox.corrections')}</h3>
+                <ul aria-label={t('inbox.corrections')}>
+                  {detail.corrections.map((correction, index) => (
+                    <li key={`${correction.field}-${String(index)}`}>
+                      {t('inbox.correctionLine', {
+                        field: t(
+                          inboxCorrectionFieldLabelKeys[correction.field],
+                        ),
+                        final:
+                          correction.finalValue ?? t('inbox.correctionNone'),
+                        source: t(
+                          inboxCorrectionSourceLabelKeys[correction.source],
+                        ),
+                        suggested:
+                          correction.suggestedValue ??
+                          t('inbox.correctionNone'),
+                      })}
+                      {correction.reason === null
+                        ? ''
+                        : ` ${correction.reason}`}
+                    </li>
+                  ))}
+                </ul>
+              </Stack>
+            )}
           </section>
 
           {canManage ? (
@@ -643,6 +741,23 @@ export default function InboxItemPage() {
                   }}
                   value={fields.partnerId}
                 />
+                {changedFields.map((key) => {
+                  const field = correctionFields[key];
+                  const label = t(inboxCorrectionFieldLabelKeys[field]);
+                  return (
+                    <TextInput
+                      helperText={t('inbox.correctionReasonHelp')}
+                      id={`inbox-draft-reason-${field}`}
+                      key={field}
+                      labelText={t('inbox.correctionReason', { field: label })}
+                      maxLength={500}
+                      onChange={(event) => {
+                        setReasons({ ...reasons, [field]: event.target.value });
+                      }}
+                      value={reasons[field] ?? ''}
+                    />
+                  );
+                })}
                 <div className={styles.actions!}>
                   <Button disabled={busy} type="submit">
                     {t('inbox.routeToDocument')}
@@ -680,6 +795,15 @@ export default function InboxItemPage() {
                       {t('inbox.restore')}
                     </Button>
                   ) : null}
+                  {open ? null : (
+                    <Button
+                      href={createRuleHref()}
+                      kind="tertiary"
+                      title={t('inbox.createRuleHelp')}
+                    >
+                      {t('inbox.createRule')}
+                    </Button>
+                  )}
                 </div>
                 {open ? (
                   <div className={styles.actions!}>

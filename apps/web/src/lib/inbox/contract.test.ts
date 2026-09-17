@@ -2,6 +2,8 @@
 
 import {
   inboxChannelKinds,
+  inboxCorrectionFields,
+  inboxCorrectionSources,
   inboxDecidedByKinds,
   inboxEventKinds,
   inboxEventReasons,
@@ -14,9 +16,13 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import {
+  correctionReasonsSchema,
   createInboxChannelRequestSchema,
+  createInboxRuleRequestSchema,
   inboxChannelKindSchema,
   inboxChannelSchema,
+  inboxCorrectionFieldSchema,
+  inboxCorrectionSourceSchema,
   inboxDecidedByKindSchema,
   inboxEventKindSchema,
   inboxEventReasonSchema,
@@ -26,9 +32,14 @@ import {
   inboxRoutingDestinationSchema,
   inboxRoutingPartnerPolicySchema,
   inboxRoutingTargetSchema,
+  inboxRuleSchema,
   inboxSettingsSchema,
   issueInboxChannelCredentialResponseSchema,
+  providerStepSchema,
   putInboxRoutingTargetRequestSchema,
+  putInboxRuleOrderRequestSchema,
+  routeInboxItemToDocumentRequestSchema,
+  updateInboxRuleRequestSchema,
   updateInboxSettingsRequestSchema,
 } from './contract.ts';
 
@@ -52,8 +63,15 @@ describe('inbox contract enums', () => {
       inboxRoutingPartnerPolicies,
     ],
     ['auto policies', inboxRoutingAutoPolicySchema, inboxRoutingAutoPolicies],
+    ['correction fields', inboxCorrectionFieldSchema, inboxCorrectionFields],
+    ['correction sources', inboxCorrectionSourceSchema, inboxCorrectionSources],
   ])('mirrors the database %s', (_name, schema, expected) => {
     expect(schema.options).toEqual([...expected]);
+  });
+
+  it('names the automation reason and the rule provider step', () => {
+    expect(inboxEventReasonSchema.options).toContain('rule_author_unavailable');
+    expect(providerStepSchema.options).toContain('rule');
   });
 });
 
@@ -254,6 +272,164 @@ describe('inbox settings contract', () => {
     expect(
       updateInboxSettingsRequestSchema.safeParse({ blobQuotaBytes: 1.5 })
         .success,
+    ).toBe(false);
+  });
+});
+
+const RULE_ID = '00000000-0000-4000-8000-000000000080';
+const ENTITY_ID = '00000000-0000-4000-8000-000000000081';
+const BLOB_ID = '00000000-0000-4000-8000-000000000082';
+
+const rule = {
+  autoRoute: false,
+  channelId: null,
+  createdAt: '2026-09-17T08:00:00.000Z',
+  createdBy: 'user_1',
+  detectedType: null,
+  discardReason: null,
+  enabled: true,
+  id: RULE_ID,
+  keyword: null,
+  name: 'Supplier mail',
+  paused: false,
+  priority: 1,
+  senderPattern: '@dodavatel.cz',
+  setAssigneeId: null,
+  setDocumentKind: 'received_invoice',
+  setLegalEntityId: ENTITY_ID,
+  setPartnerId: null,
+  updatedAt: '2026-09-17T08:00:00.000Z',
+};
+const ruleBody = {
+  autoRoute: rule.autoRoute,
+  channelId: rule.channelId,
+  detectedType: rule.detectedType,
+  discardReason: rule.discardReason,
+  keyword: rule.keyword,
+  name: rule.name,
+  rerunOnReview: false,
+  senderPattern: rule.senderPattern,
+  setAssigneeId: rule.setAssigneeId,
+  setDocumentKind: rule.setDocumentKind,
+  setLegalEntityId: rule.setLegalEntityId,
+  setPartnerId: rule.setPartnerId,
+};
+
+// The row checks are mirrored so the browser refuses what the database would.
+describe('inbox rule contract', () => {
+  it('accepts a rule and a create body, lowercasing the sender pattern', () => {
+    expect(inboxRuleSchema.safeParse(rule).success).toBe(true);
+    const parsed = createInboxRuleRequestSchema.safeParse({
+      ...ruleBody,
+      senderPattern: 'Billing@Dodavatel.CZ',
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.senderPattern).toBe('billing@dodavatel.cz');
+  });
+
+  it('requires one condition, one action, and keeps a discard rule alone', () => {
+    expect(
+      createInboxRuleRequestSchema.safeParse({
+        ...ruleBody,
+        senderPattern: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      createInboxRuleRequestSchema.safeParse({
+        ...ruleBody,
+        setDocumentKind: null,
+        setLegalEntityId: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      createInboxRuleRequestSchema.safeParse({
+        ...ruleBody,
+        discardReason: 'spam',
+      }).success,
+    ).toBe(false);
+    expect(
+      createInboxRuleRequestSchema.safeParse({
+        ...ruleBody,
+        discardReason: 'spam',
+        setDocumentKind: null,
+        setLegalEntityId: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      createInboxRuleRequestSchema.safeParse({
+        ...ruleBody,
+        senderPattern: 'not a pattern',
+      }).success,
+    ).toBe(false);
+    expect(
+      createInboxRuleRequestSchema.safeParse({
+        ...ruleBody,
+        senderPattern: null,
+        keyword: 'Faktura',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('patches any subset but never nothing, and orders distinct ids only', () => {
+    expect(
+      updateInboxRuleRequestSchema.safeParse({ enabled: false }).success,
+    ).toBe(true);
+    expect(updateInboxRuleRequestSchema.safeParse({}).success).toBe(false);
+    expect(
+      updateInboxRuleRequestSchema.safeParse({ rerunOnReview: true }).success,
+    ).toBe(false);
+    expect(
+      putInboxRuleOrderRequestSchema.safeParse({ ruleIds: [RULE_ID] }).success,
+    ).toBe(true);
+    expect(
+      putInboxRuleOrderRequestSchema.safeParse({ ruleIds: [RULE_ID, RULE_ID] })
+        .success,
+    ).toBe(false);
+    expect(
+      putInboxRuleOrderRequestSchema.safeParse({ ruleIds: [] }).success,
+    ).toBe(false);
+  });
+});
+
+describe('inbox correction contract', () => {
+  it('bounds the reasons to the correction fields and one line each', () => {
+    expect(
+      correctionReasonsSchema.safeParse({ kind: 'It is a contract.' }).success,
+    ).toBe(true);
+    expect(correctionReasonsSchema.safeParse({}).success).toBe(false);
+    expect(correctionReasonsSchema.safeParse({ notes: 'x' }).success).toBe(
+      false,
+    );
+    expect(
+      correctionReasonsSchema.safeParse({ title: 'x'.repeat(501) }).success,
+    ).toBe(false);
+  });
+
+  it('routes with optional reasons beside the draft', () => {
+    const body = {
+      document: {
+        currencyCode: 'CZK',
+        documentDate: '2026-09-01',
+        kind: 'contract',
+        legalEntityId: ENTITY_ID,
+        title: 'Placeholder contract',
+      },
+      fileBlobIds: [BLOB_ID],
+    };
+    expect(routeInboxItemToDocumentRequestSchema.safeParse(body).success).toBe(
+      true,
+    );
+    expect(
+      routeInboxItemToDocumentRequestSchema.safeParse({
+        ...body,
+        correctionReasons: { legal_entity_id: 'Wrong entity.' },
+      }).success,
+    ).toBe(true);
+    expect(
+      routeInboxItemToDocumentRequestSchema.safeParse({
+        ...body,
+        correctionReasons: { legalEntityId: 'Wrong entity.' },
+      }).success,
     ).toBe(false);
   });
 });

@@ -36,6 +36,7 @@ const inboxItem = {
   createdAt: '2026-09-16T08:00:00.000Z',
   datasetId: null,
   decidedByKind: null,
+  decidedByRuleId: null,
   decidedByUserId: null,
   detectedType: 'pdf',
   documentId: null,
@@ -181,6 +182,10 @@ describe('InboxPage', () => {
       'href',
       '/inbox/settings?organization=organization-1',
     );
+    expect(screen.getByRole('link', { name: 'Rules' })).toHaveAttribute(
+      'href',
+      '/inbox/rules?organization=organization-1',
+    );
 
     cleanup();
     vi.stubGlobal('fetch', respondWith([inboxItem]));
@@ -190,6 +195,11 @@ describe('InboxPage', () => {
 
     expect(screen.queryByRole('link', { name: 'Channels' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Settings' })).toBeNull();
+    // Rules are readable by anyone who manages documents, not only an owner.
+    expect(screen.getByRole('link', { name: 'Rules' })).toHaveAttribute(
+      'href',
+      '/inbox/rules?organization=organization-1',
+    );
   });
 
   it('shows the empty state and hides the drop zone without the manage capability', async () => {

@@ -30,6 +30,13 @@ describe('buildTrail', () => {
     ]);
   });
 
+  it('names the inbox rules child rather than falling back to Item', () => {
+    expect(buildTrail(['(product)', 'inbox', 'rules'])).toEqual([
+      { current: false, href: '/inbox', label: 'Inbox' },
+      { current: true, href: '/inbox/rules', label: 'Rules' },
+    ]);
+  });
+
   it('names the documents analytics child rather than falling back to Document', () => {
     expect(buildTrail(['(product)', 'documents', 'analytics'])).toEqual([
       { current: false, href: '/documents', label: 'Documents' },

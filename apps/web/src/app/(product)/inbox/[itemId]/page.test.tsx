@@ -45,6 +45,7 @@ const inboxItem = {
   createdAt: '2026-09-16T08:00:00.000Z',
   datasetId: null,
   decidedByKind: 'provider',
+  decidedByRuleId: null,
   decidedByUserId: null,
   detectedType: 'pdf',
   documentId: null,
@@ -135,8 +136,12 @@ function capabilities(manageDocuments: boolean) {
 
 // One router per test, so every request is answered by the shape its route promises.
 function respondWith(given: Record<string, unknown>, manageDocuments = true) {
-  // Every detail carries the effective target unless a test says otherwise.
-  const detail: Record<string, unknown> = { routingTarget, ...given };
+  // Every detail carries the effective target and no corrections unless a test says otherwise.
+  const detail: Record<string, unknown> = {
+    corrections: [],
+    routingTarget,
+    ...given,
+  };
   return vi.fn(async (input: string, init?: RequestInit) => {
     if (input === '/api/auth/organization/list') {
       return Response.json([
@@ -422,6 +427,145 @@ describe('InboxItemPage', () => {
       await screen.findByText('Routing target: Discard (organization setting)'),
     ).toBeVisible();
     expect(screen.getByLabelText('Kind')).toHaveValue('contract');
+  });
+
+  it('asks why a changed field differs and sends the reasons with the route', async () => {
+    const fetchMock = respondWith({
+      events: [],
+      extraction,
+      files: [file('application/pdf')],
+      item: inboxItem,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderItemPage();
+
+    expect(await screen.findByLabelText('Kind')).toHaveValue('contract');
+    expect(screen.queryByLabelText(/^Why did/)).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Kind'), {
+      target: { value: 'agreement' },
+    });
+    fireEvent.change(screen.getByLabelText('Title'), {
+      target: { value: 'Placeholder agreement' },
+    });
+    expect(screen.getByLabelText('Why did Title change?')).toBeVisible();
+    fireEvent.change(screen.getByLabelText('Why did Kind change?'), {
+      target: { value: 'It is signed by both sides.' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Route to document' }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some((call) =>
+          String(call[0]).endsWith('/route/document'),
+        ),
+      ).toBe(true);
+    });
+    const routeCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).endsWith('/route/document'),
+    )!;
+    const body = JSON.parse(String((routeCall[1] as RequestInit).body));
+    // Only a filled reason is sent; the unexplained title change is still a correction upstream.
+    expect(body.correctionReasons).toEqual({
+      kind: 'It is signed by both sides.',
+    });
+    expect(body.document.kind).toBe('agreement');
+  });
+
+  it('lists the corrections under the explanation and offers a rule from a routed item', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respondWith({
+        corrections: [
+          {
+            createdAt: '2026-09-16T09:00:00.000Z',
+            field: 'kind',
+            finalValue: 'agreement',
+            reason: 'It is signed by both sides.',
+            source: 'provider',
+            suggestedValue: 'contract',
+          },
+          {
+            createdAt: '2026-09-16T09:00:00.000Z',
+            field: 'partner_id',
+            finalValue: null,
+            reason: null,
+            source: 'hint',
+            suggestedValue: '00000000-0000-4000-8000-000000000090',
+          },
+        ],
+        events: [],
+        extraction,
+        files: [file('application/pdf')],
+        item: {
+          ...inboxItem,
+          assigneeId: 'user_2',
+          decidedByKind: 'user',
+          documentId: DOCUMENT_ID,
+          legalEntityId: LEGAL_ENTITY_ID,
+          status: 'routed',
+        },
+      }),
+    );
+
+    renderItemPage();
+
+    const list = await screen.findByRole('list', { name: 'Corrections' });
+    expect(list).toHaveTextContent(
+      'Kind: contract (Provider) changed to agreement It is signed by both sides.',
+    );
+    expect(list).toHaveTextContent(
+      'Partner id: 00000000-0000-4000-8000-000000000090 (Hint) changed to none',
+    );
+    const link = screen.getByRole('link', { name: 'Create a rule' });
+    const href = new URL(link.getAttribute('href')!, 'https://bap.invalid');
+    expect(href.pathname).toBe('/inbox/rules');
+    expect(Object.fromEntries(href.searchParams)).toEqual({
+      assigneeId: 'user_2',
+      detectedType: 'pdf',
+      kind: 'contract',
+      legalEntityId: LEGAL_ENTITY_ID,
+      organization: 'organization-1',
+    });
+  });
+
+  it('offers a discard rule with the reason of the discard event', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respondWith({
+        events: [
+          {
+            actorUserId: 'user_1',
+            createdAt: '2026-09-16T09:00:00.000Z',
+            id: '00000000-0000-4000-8000-000000000071',
+            kind: 'discarded',
+            reason: 'spam',
+          },
+        ],
+        extraction: null,
+        files: [file('application/pdf')],
+        item: {
+          ...inboxItem,
+          channelId: '00000000-0000-4000-8000-000000000060',
+          decidedByKind: 'user',
+          status: 'discarded',
+        },
+      }),
+    );
+
+    renderItemPage();
+
+    const link = await screen.findByRole('link', { name: 'Create a rule' });
+    const href = new URL(link.getAttribute('href')!, 'https://bap.invalid');
+    expect(Object.fromEntries(href.searchParams)).toEqual({
+      channelId: '00000000-0000-4000-8000-000000000060',
+      detectedType: 'pdf',
+      discardReason: 'spam',
+      organization: 'organization-1',
+    });
+    expect(screen.queryByRole('list', { name: 'Corrections' })).toBeNull();
   });
 
   it('offers undo and the document link once the item is routed', async () => {

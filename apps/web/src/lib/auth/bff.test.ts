@@ -4,6 +4,7 @@ import {
   deleteDocumentLink,
   deleteInboxChannelCredential,
   deleteInboxRoutingTarget,
+  deleteInboxRule,
   deleteLegalEntity,
   getDocument,
   getDocumentAnalytics,
@@ -18,12 +19,14 @@ import {
   getInboxItem,
   getInboxItems,
   getInboxRoutingTargets,
+  getInboxRules,
   getInboxSettings,
   getLegalEntities,
   getMemberEntityScope,
   getMemberEntityScopes,
   getOrganizationAccess,
   patchInboxChannel,
+  patchInboxRule,
   patchInboxSettings,
   patchLegalEntity,
   patchPartner,
@@ -33,9 +36,12 @@ import {
   postInboxChannelCredential,
   postInboxItemDiscard,
   postInboxItemRouteDocument,
+  postInboxRule,
+  postInboxRuleAdopt,
   postInboxUpload,
   postLegalEntity,
   putInboxRoutingTarget,
+  putInboxRuleOrder,
   putMemberEntityScope,
 } from './bff.js';
 import type { BffAuth } from './bff.js';
@@ -1592,6 +1598,7 @@ const inboxItem = {
   createdAt: '2026-09-16T08:00:00.000Z',
   datasetId: null,
   decidedByKind: null,
+  decidedByRuleId: null,
   decidedByUserId: null,
   detectedType: 'pdf',
   documentId: null,
@@ -1624,6 +1631,7 @@ const inboxFile = {
 };
 
 const inboxDetail = {
+  corrections: [],
   events: [],
   extraction: null,
   files: [inboxFile],
@@ -1803,6 +1811,7 @@ describe('inbox item reads and writes', () => {
       );
       expect(init?.method).toBe('POST');
       expect(JSON.parse(String(init?.body))).toEqual({
+        correctionReasons: { kind: 'It is a contract.' },
         document: {
           currencyCode: 'CZK',
           documentDate: '2026-09-01',
@@ -1822,6 +1831,7 @@ describe('inbox item reads and writes', () => {
       auth,
       inboxRequest(`items/${INBOX_ITEM_ID}/route/document`, {
         body: JSON.stringify({
+          correctionReasons: { kind: 'It is a contract.' },
           document: {
             documentDate: '2026-09-01',
             kind: 'contract',
@@ -2494,5 +2504,252 @@ describe('inbox settings', () => {
     expect(negative.status).toBe(400);
     expect(unknownField.status).toBe(400);
     expect(fetchImplementation).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('inbox rules', () => {
+  const RULE_ID = '00000000-0000-4000-8000-000000000080';
+  const OTHER_RULE_ID = '00000000-0000-4000-8000-000000000081';
+  const rule = {
+    autoRoute: false,
+    channelId: null,
+    createdAt: '2026-09-17T08:00:00.000Z',
+    createdBy: 'user_1',
+    detectedType: null,
+    discardReason: null,
+    enabled: true,
+    id: RULE_ID,
+    keyword: null,
+    name: 'Supplier mail',
+    paused: false,
+    priority: 1,
+    senderPattern: '@dodavatel.cz',
+    setAssigneeId: null,
+    setDocumentKind: 'contract',
+    setLegalEntityId: LEGAL_ENTITY_ID,
+    setPartnerId: null,
+    updatedAt: '2026-09-17T08:00:00.000Z',
+  };
+  const ruleBody = {
+    autoRoute: false,
+    channelId: null,
+    detectedType: null,
+    discardReason: null,
+    keyword: null,
+    name: 'Supplier mail',
+    rerunOnReview: true,
+    senderPattern: '@dodavatel.cz',
+    setAssigneeId: null,
+    setDocumentKind: 'contract',
+    setLegalEntityId: LEGAL_ENTITY_ID,
+    setPartnerId: null,
+  };
+  const problem = (code: string) =>
+    Response.json(
+      { code, detail: 'Refused', status: 422, title: 'Unprocessable' },
+      { status: 422 },
+    );
+
+  it('lists the rules in the order the API answers', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/rules',
+      );
+      expect(init?.method).toBe('GET');
+      return Response.json({ rules: [rule] });
+    });
+
+    const response = await getInboxRules(
+      auth,
+      inboxRequest('rules'),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).rules).toEqual([rule]);
+  });
+
+  it('creates a rule, passes the two 422 codes through, and refuses a bad body', async () => {
+    let posts = 0;
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/rules',
+      );
+      expect(init?.method).toBe('POST');
+      expect(JSON.parse(String(init?.body))).toEqual(ruleBody);
+      posts += 1;
+      return posts === 1
+        ? Response.json(rule, { status: 201 })
+        : posts === 2
+          ? problem('rule_limit')
+          : posts === 3
+            ? problem('not_available')
+            : problem('something_else');
+    });
+    const post = (body: unknown) =>
+      postInboxRule(
+        auth,
+        inboxRequest('rules', { body: JSON.stringify(body), method: 'POST' }),
+        'org_1',
+        fetchImplementation,
+      );
+
+    const created = await post(ruleBody);
+    const limit = await post(ruleBody);
+    const invoice = await post(ruleBody);
+    const unknownCode = await post(ruleBody);
+    const noCondition = await post({ ...ruleBody, senderPattern: null });
+    const noAction = await post({
+      ...ruleBody,
+      setDocumentKind: null,
+      setLegalEntityId: null,
+    });
+    const discardPlus = await post({ ...ruleBody, discardReason: 'spam' });
+
+    expect(created.status).toBe(201);
+    expect(await created.json()).toEqual(rule);
+    expect(limit.status).toBe(422);
+    expect(await limit.json()).toEqual({
+      code: 'rule_limit',
+      error: 'inbox_rule_rejected',
+    });
+    expect(invoice.status).toBe(422);
+    expect(await invoice.json()).toEqual({
+      code: 'not_available',
+      error: 'inbox_rule_rejected',
+    });
+    expect(await unknownCode.json()).toEqual({ error: 'inbox_rule_rejected' });
+    expect(noCondition.status).toBe(400);
+    expect(noAction.status).toBe(400);
+    expect(discardPlus.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledTimes(4);
+  });
+
+  it('patches a subset, maps a 404, and answers 404 for a malformed id', async () => {
+    let patches = 0;
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        `http://api:3001/v1/organizations/org_1/inbox/rules/${RULE_ID}`,
+      );
+      expect(init?.method).toBe('PATCH');
+      expect(JSON.parse(String(init?.body))).toEqual({ enabled: false });
+      patches += 1;
+      return patches === 1
+        ? Response.json({ ...rule, enabled: false })
+        : new Response(null, { status: 404 });
+    });
+    const patch = (body: unknown, ruleId = RULE_ID) =>
+      patchInboxRule(
+        auth,
+        inboxRequest(`rules/${ruleId}`, {
+          body: JSON.stringify(body),
+          method: 'PATCH',
+        }),
+        'org_1',
+        ruleId,
+        fetchImplementation,
+      );
+
+    const disabled = await patch({ enabled: false });
+    const missing = await patch({ enabled: false });
+    const empty = await patch({});
+    const rerun = await patch({ rerunOnReview: true });
+    const malformed = await patch({ enabled: false }, 'not-an-id');
+
+    expect(disabled.status).toBe(200);
+    expect((await disabled.json()).enabled).toBe(false);
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: 'inbox_rule_rejected' });
+    expect(empty.status).toBe(400);
+    expect(rerun.status).toBe(400);
+    expect(malformed.status).toBe(404);
+    expect(await malformed.json()).toEqual({ error: 'inbox_rule_not_found' });
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it('deletes with no content and adopts from the fixed path', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      if (init?.method === 'DELETE') {
+        expect(String(input)).toBe(
+          `http://api:3001/v1/organizations/org_1/inbox/rules/${RULE_ID}`,
+        );
+        return new Response(null, { status: 204 });
+      }
+      expect(String(input)).toBe(
+        `http://api:3001/v1/organizations/org_1/inbox/rules/${RULE_ID}/adopt`,
+      );
+      expect(init?.method).toBe('POST');
+      expect(init?.body).toBeUndefined();
+      return Response.json({ ...rule, createdBy: 'user_1', paused: false });
+    });
+
+    const deleted = await deleteInboxRule(
+      auth,
+      inboxRequest(`rules/${RULE_ID}`, { method: 'DELETE' }),
+      'org_1',
+      RULE_ID,
+      fetchImplementation,
+    );
+    const adopted = await postInboxRuleAdopt(
+      auth,
+      inboxRequest(`rules/${RULE_ID}/adopt`, { method: 'POST' }),
+      'org_1',
+      RULE_ID,
+      fetchImplementation,
+    );
+    const malformed = await postInboxRuleAdopt(
+      auth,
+      inboxRequest('rules/not-an-id/adopt', { method: 'POST' }),
+      'org_1',
+      'not-an-id',
+      fetchImplementation,
+    );
+
+    expect(deleted.status).toBe(204);
+    expect(adopted.status).toBe(200);
+    expect((await adopted.json()).paused).toBe(false);
+    expect(malformed.status).toBe(404);
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it('puts the whole order and refuses a repeated or empty list', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/rules/order',
+      );
+      expect(init?.method).toBe('PUT');
+      expect(JSON.parse(String(init?.body))).toEqual({
+        ruleIds: [OTHER_RULE_ID, RULE_ID],
+      });
+      return Response.json({
+        rules: [
+          { ...rule, id: OTHER_RULE_ID, priority: 1 },
+          { ...rule, priority: 2 },
+        ],
+      });
+    });
+    const put = (body: unknown) =>
+      putInboxRuleOrder(
+        auth,
+        inboxRequest('rules/order', {
+          body: JSON.stringify(body),
+          method: 'PUT',
+        }),
+        'org_1',
+        fetchImplementation,
+      );
+
+    const ordered = await put({ ruleIds: [OTHER_RULE_ID, RULE_ID] });
+    const repeated = await put({ ruleIds: [RULE_ID, RULE_ID] });
+    const empty = await put({ ruleIds: [] });
+
+    expect(ordered.status).toBe(200);
+    expect(
+      (await ordered.json()).rules.map((entry: { id: string }) => entry.id),
+    ).toEqual([OTHER_RULE_ID, RULE_ID]);
+    expect(repeated.status).toBe(400);
+    expect(empty.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
   });
 });

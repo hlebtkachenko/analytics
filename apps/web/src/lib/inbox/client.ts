@@ -1,13 +1,21 @@
 import { organizationPath } from '../datasets/client';
 import {
   inboxRoutingTargetSchema,
+  inboxRuleListResponseSchema,
+  inboxRuleRefusalCodeSchema,
+  inboxRuleSchema,
   inboxSettingsSchema,
   inboxUploadResponseSchema,
 } from './contract.ts';
 import type {
+  CreateInboxRuleRequest,
   InboxRoutingTarget,
+  InboxRule,
+  InboxRuleRefusalCode,
   InboxSettings,
   PutInboxRoutingTargetRequest,
+  PutInboxRuleOrderRequest,
+  UpdateInboxRuleRequest,
   UpdateInboxSettingsRequest,
 } from './contract.ts';
 
@@ -89,6 +97,108 @@ export function inboxRoutingTargetPath(
 
 export function inboxSettingsPath(organizationId: string): string {
   return `${inboxPath(organizationId)}/settings`;
+}
+
+export function inboxRulesPath(organizationId: string): string {
+  return `${inboxPath(organizationId)}/rules`;
+}
+
+export function inboxRulePath(organizationId: string, ruleId: string): string {
+  return `${inboxRulesPath(organizationId)}/${encodeURIComponent(ruleId)}`;
+}
+
+export function inboxRuleAdoptPath(
+  organizationId: string,
+  ruleId: string,
+): string {
+  return `${inboxRulePath(organizationId, ruleId)}/adopt`;
+}
+
+export function inboxRuleOrderPath(organizationId: string): string {
+  return `${inboxRulesPath(organizationId)}/order`;
+}
+
+export type RuleWriteOutcome =
+  | Readonly<{ kind: 'saved'; rule: InboxRule }>
+  | Readonly<{ kind: 'refused'; code: InboxRuleRefusalCode }>
+  | Readonly<{ kind: 'failed' }>;
+
+// A create or edit may be refused with a named 422 code, which the page names rather than folding into a failure.
+async function writeInboxRule(
+  path: string,
+  method: 'PATCH' | 'POST',
+  body: CreateInboxRuleRequest | UpdateInboxRuleRequest,
+): Promise<RuleWriteOutcome> {
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      body: JSON.stringify(body),
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json' },
+      method,
+    });
+  } catch {
+    return { kind: 'failed' };
+  }
+  if (response.status === 422) {
+    let code: unknown;
+    try {
+      code = ((await response.json()) as { code?: unknown }).code;
+    } catch {
+      return { kind: 'failed' };
+    }
+    const parsed = inboxRuleRefusalCodeSchema.safeParse(code);
+    return parsed.success
+      ? { code: parsed.data, kind: 'refused' }
+      : { kind: 'failed' };
+  }
+  if (!response.ok) {
+    return { kind: 'failed' };
+  }
+  try {
+    return {
+      kind: 'saved',
+      rule: inboxRuleSchema.parse(await response.json()),
+    };
+  } catch {
+    return { kind: 'failed' };
+  }
+}
+
+export async function createInboxRule(
+  organizationId: string,
+  body: CreateInboxRuleRequest,
+): Promise<RuleWriteOutcome> {
+  return await writeInboxRule(inboxRulesPath(organizationId), 'POST', body);
+}
+
+export async function updateInboxRule(
+  organizationId: string,
+  ruleId: string,
+  body: UpdateInboxRuleRequest,
+): Promise<RuleWriteOutcome> {
+  return await writeInboxRule(
+    inboxRulePath(organizationId, ruleId),
+    'PATCH',
+    body,
+  );
+}
+
+// The order is the whole list, so the shared mutation helper's verbs do not fit; the answer is the reordered list.
+export async function saveInboxRuleOrder(
+  organizationId: string,
+  body: PutInboxRuleOrderRequest,
+): Promise<InboxRule[]> {
+  const response = await fetch(inboxRuleOrderPath(organizationId), {
+    body: JSON.stringify(body),
+    cache: 'no-store',
+    headers: { 'content-type': 'application/json' },
+    method: 'PUT',
+  });
+  if (!response.ok) {
+    throw new Error('Request failed.');
+  }
+  return inboxRuleListResponseSchema.parse(await response.json()).rules;
 }
 
 // A PUT carries the whole target, so the shared mutation helper's verbs do not fit; this is the one PUT the inbox makes.

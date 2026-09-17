@@ -205,22 +205,33 @@ export default function InboxPage() {
     <PageContainer>
       <div className={styles.headingRow!}>
         <h1>{t('inbox.title')}</h1>
-        {canManageChannels ? (
+        {canManage || canManageChannels ? (
           <div className={styles.headingActions!}>
+            {canManageChannels ? (
+              <Button
+                href={withOrganization('/inbox/channels', organization.slug)}
+                kind="tertiary"
+                size="md"
+              >
+                {t('inbox.channels')}
+              </Button>
+            ) : null}
             <Button
-              href={withOrganization('/inbox/channels', organization.slug)}
+              href={withOrganization('/inbox/rules', organization.slug)}
               kind="tertiary"
               size="md"
             >
-              {t('inbox.channels')}
+              {t('inbox.rules')}
             </Button>
-            <Button
-              href={withOrganization('/inbox/settings', organization.slug)}
-              kind="tertiary"
-              size="md"
-            >
-              {t('inbox.settings')}
-            </Button>
+            {canManageChannels ? (
+              <Button
+                href={withOrganization('/inbox/settings', organization.slug)}
+                kind="tertiary"
+                size="md"
+              >
+                {t('inbox.settings')}
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </div>
