@@ -481,16 +481,20 @@ describe('InboxItemPage', () => {
         corrections: [
           {
             createdAt: '2026-09-16T09:00:00.000Z',
+            createdBy: 'user_2',
             field: 'kind',
             finalValue: 'agreement',
+            id: '00000000-0000-4000-8000-000000000091',
             reason: 'It is signed by both sides.',
             source: 'provider',
             suggestedValue: 'contract',
           },
           {
             createdAt: '2026-09-16T09:00:00.000Z',
+            createdBy: 'user_2',
             field: 'partner_id',
             finalValue: null,
+            id: '00000000-0000-4000-8000-000000000092',
             reason: null,
             source: 'hint',
             suggestedValue: '00000000-0000-4000-8000-000000000090',

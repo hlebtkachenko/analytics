@@ -373,8 +373,10 @@ const correctionReasonSchema = z
 export const inboxCorrectionSchema = z
   .object({
     createdAt: z.iso.datetime(),
+    createdBy: subjectIdentifierSchema,
     field: inboxCorrectionFieldSchema,
     finalValue: z.string().nullable(),
+    id: identifierSchema,
     reason: z.string().max(MAX_CORRECTION_REASON_LENGTH).nullable(),
     source: inboxCorrectionSourceSchema,
     suggestedValue: z.string().nullable(),
@@ -548,8 +550,7 @@ export const inboxRuleSchema = inboxRuleConditionsSchema
     name: inboxRuleNameSchema,
     // The author is no longer a verified owner or admin, so the rule does not run until adopted.
     paused: z.boolean(),
-    // Null only on a deleted rule, which the list never returns.
-    priority: z.number().int().min(1).nullable(),
+    priority: z.number().int().min(1),
     updatedAt: z.iso.datetime(),
   })
   .strict()
@@ -562,11 +563,37 @@ export const inboxRuleListResponseSchema = z
 export const createInboxRuleRequestSchema = inboxRuleConditionsSchema
   .extend(inboxRuleActionsSchema.shape)
   .extend({
-    name: inboxRuleNameSchema,
     // Also apply the new rule to the untouched needs_review items, not only future arrivals.
-    rerunOnReview: z.boolean(),
+    applyToExisting: z.boolean().default(false),
+    enabled: z.boolean().default(true),
+    name: inboxRuleNameSchema,
+  })
+  .partial({
+    autoRoute: true,
+    channelId: true,
+    detectedType: true,
+    discardReason: true,
+    keyword: true,
+    senderPattern: true,
+    setAssigneeId: true,
+    setDocumentKind: true,
+    setLegalEntityId: true,
+    setPartnerId: true,
   })
   .strict()
+  .transform((body) => ({
+    ...body,
+    autoRoute: body.autoRoute ?? false,
+    channelId: body.channelId ?? null,
+    detectedType: body.detectedType ?? null,
+    discardReason: body.discardReason ?? null,
+    keyword: body.keyword ?? null,
+    senderPattern: body.senderPattern ?? null,
+    setAssigneeId: body.setAssigneeId ?? null,
+    setDocumentKind: body.setDocumentKind ?? null,
+    setLegalEntityId: body.setLegalEntityId ?? null,
+    setPartnerId: body.setPartnerId ?? null,
+  }))
   .superRefine(inboxRuleInvariants);
 
 // Any subset of the editable columns; the API re-checks the row invariants against the stored rule.
@@ -578,7 +605,12 @@ export const updateInboxRuleRequestSchema = inboxRuleConditionsSchema
   .refine((body) => Object.keys(body).length > 0);
 
 export const putInboxRuleOrderRequestSchema = z
-  .object({ ruleIds: z.array(identifierSchema).min(1) })
+  .object({
+    ruleIds: z
+      .array(identifierSchema)
+      .min(1)
+      .max(MAX_ENABLED_INBOX_RULES * 2),
+  })
   .strict()
   .refine((body) => new Set(body.ruleIds).size === body.ruleIds.length);
 

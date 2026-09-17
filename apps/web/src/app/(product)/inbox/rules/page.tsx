@@ -71,7 +71,7 @@ type RuleForm = Readonly<{
   legalEntityId: string;
   name: string;
   partnerId: string;
-  rerunOnReview: boolean;
+  applyToExisting: boolean;
   // Undefined on a create; the edited rule's id otherwise.
   ruleId?: string;
   senderPattern: string;
@@ -88,7 +88,7 @@ const emptyForm: RuleForm = {
   legalEntityId: '',
   name: '',
   partnerId: '',
-  rerunOnReview: false,
+  applyToExisting: false,
   senderPattern: '',
 };
 
@@ -134,7 +134,7 @@ function formFromRule(rule: InboxRule): RuleForm {
     legalEntityId: rule.setLegalEntityId ?? '',
     name: rule.name,
     partnerId: rule.setPartnerId ?? '',
-    rerunOnReview: false,
+    applyToExisting: false,
     ruleId: rule.id,
     senderPattern: rule.senderPattern ?? '',
   };
@@ -259,7 +259,7 @@ export default function InboxRulesPage() {
       form.ruleId === undefined
         ? createInboxRuleRequestSchema.safeParse({
             ...body,
-            rerunOnReview: form.rerunOnReview,
+            applyToExisting: form.applyToExisting,
           })
         : updateInboxRuleRequestSchema.safeParse(body);
     setFormInvalid(!parsed.success);
@@ -538,7 +538,7 @@ export default function InboxRulesPage() {
     enabled: t(rule.enabled ? 'inboxRules.enabledYes' : 'inboxRules.enabledNo'),
     id: rule.id,
     name: rule.name,
-    priority: rule.priority ?? 0,
+    priority: rule.priority,
   }));
 
   const invoiceKind =
@@ -833,10 +833,10 @@ export default function InboxRulesPage() {
                 legendText={t('inboxRules.scope')}
                 name="inbox-rule-scope"
                 onChange={(value: string | number | undefined) => {
-                  setForm({ ...form, rerunOnReview: value === 'rerun' });
+                  setForm({ ...form, applyToExisting: value === 'rerun' });
                 }}
                 orientation="vertical"
-                valueSelected={form.rerunOnReview ? 'rerun' : 'future'}
+                valueSelected={form.applyToExisting ? 'rerun' : 'future'}
               >
                 <RadioButton
                   id="inbox-rule-scope-future"

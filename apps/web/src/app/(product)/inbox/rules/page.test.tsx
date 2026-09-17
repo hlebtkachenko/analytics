@@ -393,13 +393,14 @@ describe('InboxRulesPage', () => {
         [
           '/api/bff/application/organizations/organization_1/inbox/rules',
           {
+            applyToExisting: true,
             autoRoute: false,
             channelId: CHANNEL_ID,
             detectedType: 'pdf',
             discardReason: null,
+            enabled: true,
             keyword: null,
             name: 'Supplier contracts',
-            rerunOnReview: true,
             senderPattern: '@dodavatel.cz',
             setAssigneeId: 'user_2',
             setDocumentKind: 'contract',

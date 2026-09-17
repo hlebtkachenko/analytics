@@ -2531,13 +2531,14 @@ describe('inbox rules', () => {
     updatedAt: '2026-09-17T08:00:00.000Z',
   };
   const ruleBody = {
+    applyToExisting: true,
     autoRoute: false,
     channelId: null,
     detectedType: null,
     discardReason: null,
+    enabled: true,
     keyword: null,
     name: 'Supplier mail',
-    rerunOnReview: true,
     senderPattern: '@dodavatel.cz',
     setAssigneeId: null,
     setDocumentKind: 'contract',
@@ -2654,7 +2655,7 @@ describe('inbox rules', () => {
     const disabled = await patch({ enabled: false });
     const missing = await patch({ enabled: false });
     const empty = await patch({});
-    const rerun = await patch({ rerunOnReview: true });
+    const rerun = await patch({ applyToExisting: true });
     const malformed = await patch({ enabled: false }, 'not-an-id');
 
     expect(disabled.status).toBe(200);

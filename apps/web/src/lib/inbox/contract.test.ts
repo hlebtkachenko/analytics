@@ -301,13 +301,14 @@ const rule = {
   updatedAt: '2026-09-17T08:00:00.000Z',
 };
 const ruleBody = {
+  applyToExisting: false,
   autoRoute: rule.autoRoute,
   channelId: rule.channelId,
   detectedType: rule.detectedType,
   discardReason: rule.discardReason,
+  enabled: true,
   keyword: rule.keyword,
   name: rule.name,
-  rerunOnReview: false,
   senderPattern: rule.senderPattern,
   setAssigneeId: rule.setAssigneeId,
   setDocumentKind: rule.setDocumentKind,
@@ -376,7 +377,7 @@ describe('inbox rule contract', () => {
     ).toBe(true);
     expect(updateInboxRuleRequestSchema.safeParse({}).success).toBe(false);
     expect(
-      updateInboxRuleRequestSchema.safeParse({ rerunOnReview: true }).success,
+      updateInboxRuleRequestSchema.safeParse({ applyToExisting: true }).success,
     ).toBe(false);
     expect(
       putInboxRuleOrderRequestSchema.safeParse({ ruleIds: [RULE_ID] }).success,
