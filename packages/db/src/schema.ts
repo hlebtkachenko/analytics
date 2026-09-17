@@ -232,6 +232,18 @@ export const inboxChannelKinds = [
 ] as const;
 export type InboxChannelKind = (typeof inboxChannelKinds)[number];
 
+// The kinds that have a principal of their own (ADR 0016); a manual upload has no channel row.
+export const inboxChannelKindsForChannels = ['email', 'api'] as const;
+export type InboxChannelKindForChannels =
+  (typeof inboxChannelKindsForChannels)[number];
+
+export const inboxChannelCredentialKinds = [
+  'api_token',
+  'email_address',
+] as const;
+export type InboxChannelCredentialKind =
+  (typeof inboxChannelCredentialKinds)[number];
+
 export const inboxPayloadKinds = [
   'file',
   'email',
@@ -346,12 +358,57 @@ export const blobs = appSchema.table(
   ],
 );
 
+// One row per push or pull source of an organization; soft deleted, never removed while items point at it.
+export const inboxChannels = appSchema.table(
+  'inbox_channel',
+  {
+    ...organizationSlot,
+    config: jsonb('config').notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdBy: text('created_by').notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    emailAddress: text('email_address'),
+    enabled: boolean('enabled').notNull().default(true),
+    hintKind: text('hint_kind'),
+    id: uuid('id').primaryKey().defaultRandom(),
+    kind: text('kind', { enum: inboxChannelKindsForChannels }).notNull(),
+    lastError: text('last_error'),
+    lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+    legalEntityId: uuid('legal_entity_id'),
+    name: text('name').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      'inbox_channel_kind_check',
+      sql`${table.kind} in (${sqlList(inboxChannelKindsForChannels)})`,
+    ),
+    check(
+      'inbox_channel_deleted_disabled_check',
+      sql`${table.deletedAt} is null or not ${table.enabled}`,
+    ),
+    unique('inbox_channel_id_organization_key').on(
+      table.id,
+      table.organizationId,
+    ),
+    index('inbox_channel_organization_idx').on(
+      table.organizationId,
+      table.kind,
+    ),
+  ],
+);
+
 // One envelope per arrival: what came in, how sure the platform is about it, and where it went.
 export const inboxItems = appSchema.table(
   'inbox_item',
   {
     ...organizationSlot,
     assigneeId: text('assignee_id'),
+    channelId: uuid('channel_id'),
     channelKind: text('channel_kind', { enum: inboxChannelKinds }).notNull(),
     confidence: numeric('confidence', { precision: 4, scale: 3 }),
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -373,6 +430,7 @@ export const inboxItems = appSchema.table(
     hintText: text('hint_text'),
     id: uuid('id').primaryKey().defaultRandom(),
     legalEntityId: uuid('legal_entity_id'),
+    origin: text('origin'),
     parentItemId: uuid('parent_item_id'),
     partnerId: uuid('partner_id'),
     payloadKind: text('payload_kind', { enum: inboxPayloadKinds }).notNull(),
@@ -417,7 +475,16 @@ export const inboxItems = appSchema.table(
       'inbox_item_routed_check',
       sql`${table.status} <> 'routed' or (${table.documentId} is not null or ${table.datasetId} is not null or ${table.partnerId} is not null)`,
     ),
+    check(
+      'inbox_item_channel_check',
+      sql`(${table.channelKind} = 'upload') = (${table.channelId} is null)`,
+    ),
     unique('inbox_item_id_organization_key').on(table.id, table.organizationId),
+    foreignKey({
+      columns: [table.channelId, table.organizationId],
+      foreignColumns: [inboxChannels.id, inboxChannels.organizationId],
+      name: 'inbox_item_channel_fkey',
+    }).onDelete('restrict'),
     foreignKey({
       columns: [table.parentItemId, table.organizationId],
       foreignColumns: [table.id, table.organizationId],
@@ -584,6 +651,8 @@ export const documentFiles = appSchema.table(
 
 export type Blob = typeof blobs.$inferSelect;
 export type NewBlob = typeof blobs.$inferInsert;
+export type InboxChannel = typeof inboxChannels.$inferSelect;
+export type NewInboxChannel = typeof inboxChannels.$inferInsert;
 export type InboxItem = typeof inboxItems.$inferSelect;
 export type NewInboxItem = typeof inboxItems.$inferInsert;
 export type InboxItemFile = typeof inboxItemFiles.$inferSelect;
@@ -599,6 +668,7 @@ export const schema = {
   accounts,
   blobs,
   documentFiles,
+  inboxChannels,
   inboxEvents,
   inboxItemExtractions,
   inboxItemFiles,

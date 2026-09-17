@@ -43,6 +43,7 @@ const duplicateItemId = '00000000-0000-4000-8000-000000001002';
 const foreignItemId = '00000000-0000-4000-8000-000000001003';
 const routedItemId = '00000000-0000-4000-8000-000000001004';
 const routedDocumentId = '00000000-0000-4000-8000-0000000000a4';
+const channelId = '00000000-0000-4000-8000-0000000000c1';
 const sha256 = 'a'.repeat(64);
 const foreignSha256 = 'b'.repeat(64);
 
@@ -219,12 +220,12 @@ describe('inbox intake isolation', () => {
     const compatibility = await checkMigrationCompatibility(apiPool);
 
     expect(result.applied).toEqual([]);
-    expect(result.currentVersion).toBe('20260916.0001');
-    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260916.0001');
+    expect(result.currentVersion).toBe('20260917.0001');
+    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260917.0001');
     expect(compatibility).toEqual({
       compatible: true,
-      expectedVersion: '20260916.0001',
-      version: '20260916.0001',
+      expectedVersion: '20260917.0001',
+      version: '20260917.0001',
     });
   });
 
@@ -495,17 +496,25 @@ describe('inbox intake isolation', () => {
   });
 
   it('keeps one item per organization, channel, and external id', async () => {
+    // Since 20260917.0001 an api item must name its channel; the channel register itself is covered in inbox-channels.
+    await rootPool.query(
+      `insert into app.inbox_channel (id, organization_id, kind, name, created_by)
+       values ($1, 'org-1', 'api', 'Placeholder push', 'user-1')`,
+      [channelId],
+    );
     await asTenant(apiPool, orgOneOwner, (transaction) =>
       transaction.query(
-        `insert into app.inbox_item (organization_id, channel_kind, payload_kind, external_id, created_by)
-         values ('org-1', 'api', 'structured', 'external-1', 'user-1')`,
+        `insert into app.inbox_item (organization_id, channel_kind, channel_id, payload_kind, external_id, created_by)
+         values ('org-1', 'api', $1, 'structured', 'external-1', 'user-1')`,
+        [channelId],
       ),
     );
     await expect(
       asTenant(apiPool, orgOneOwner, (transaction) =>
         transaction.query(
-          `insert into app.inbox_item (organization_id, channel_kind, payload_kind, external_id, created_by)
-           values ('org-1', 'api', 'structured', 'external-1', 'user-1')`,
+          `insert into app.inbox_item (organization_id, channel_kind, channel_id, payload_kind, external_id, created_by)
+           values ('org-1', 'api', $1, 'structured', 'external-1', 'user-1')`,
+          [channelId],
         ),
       ),
     ).rejects.toMatchObject({
@@ -515,6 +524,9 @@ describe('inbox intake isolation', () => {
     await rootPool.query(
       "delete from app.inbox_item where external_id = 'external-1'",
     );
+    await rootPool.query('delete from app.inbox_channel where id = $1', [
+      channelId,
+    ]);
   });
 
   it('refuses a routed item with no destination and an item with two', async () => {

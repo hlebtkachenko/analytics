@@ -1616,6 +1616,16 @@ describe('PostgreSQL 18 isolation', () => {
         table_name: 'document_link',
       },
       {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_channel',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_channel',
+      },
+      {
         column_name: 'actor_user_id',
         privilege_type: 'SELECT',
         table_name: 'inbox_event',
