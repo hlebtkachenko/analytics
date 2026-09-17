@@ -25,7 +25,6 @@ import { useTranslation } from 'react-i18next';
 import { useToast } from '../../../../components/shell/toast';
 import { authClient } from '../../../../lib/auth/client';
 import { revokeAccountSessionAction } from './actions';
-import styles from './security-view.module.scss';
 
 export type AccountSession = Readonly<{
   createdAt: string;
@@ -481,17 +480,15 @@ export default function SecurityView({
           {sessionRows.length === 0 ? (
             <p>{t('account.sessions.empty')}</p>
           ) : (
-            <div className={styles.tableContainer!}>
-              <DataGrid
-                columns={sessionColumns}
-                initialSort={[{ direction: 'DESC', key: 'lastActive' }]}
-                rowActions={sessionRowActions}
-                rows={sessionRows}
-                size="sm"
-                sortable
-                toolbarActions={sessionToolbar}
-              />
-            </div>
+            <DataGrid
+              columns={sessionColumns}
+              initialSort={[{ direction: 'DESC', key: 'lastActive' }]}
+              rowActions={sessionRowActions}
+              rows={sessionRows}
+              size="sm"
+              sortable
+              toolbarActions={sessionToolbar}
+            />
           )}
         </Stack>
       </section>
