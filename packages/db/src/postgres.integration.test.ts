@@ -1689,6 +1689,36 @@ describe('PostgreSQL 18 isolation', () => {
       {
         column_name: 'created_by',
         privilege_type: 'SELECT',
+        table_name: 'inbox_routing_target',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_routing_target',
+      },
+      {
+        column_name: 'default_assignee_id',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_routing_target',
+      },
+      {
+        column_name: 'default_assignee_id',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_routing_target',
+      },
+      {
+        column_name: 'updated_by',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_routing_target',
+      },
+      {
+        column_name: 'updated_by',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_routing_target',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
         table_name: 'legal_entity',
       },
       {
@@ -1725,6 +1755,16 @@ describe('PostgreSQL 18 isolation', () => {
         column_name: 'user_id',
         privilege_type: 'SELECT',
         table_name: 'member_entity_scope',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'organization_inbox_setting',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'organization_inbox_setting',
       },
       {
         column_name: 'created_by',

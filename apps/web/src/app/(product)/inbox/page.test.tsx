@@ -169,7 +169,7 @@ describe('InboxPage', () => {
     );
   });
 
-  it('offers the channels page to an owner only', async () => {
+  it('offers the channels and settings pages to an owner only', async () => {
     vi.stubGlobal('fetch', respondWith([inboxItem], true, true));
 
     renderInboxPage();
@@ -177,6 +177,10 @@ describe('InboxPage', () => {
     expect(
       await screen.findByRole('link', { name: 'Channels' }),
     ).toHaveAttribute('href', '/inbox/channels?organization=organization-1');
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/inbox/settings?organization=organization-1',
+    );
 
     cleanup();
     vi.stubGlobal('fetch', respondWith([inboxItem]));
@@ -185,6 +189,7 @@ describe('InboxPage', () => {
     await screen.findByText('Placeholder Holding');
 
     expect(screen.queryByRole('link', { name: 'Channels' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Settings' })).toBeNull();
   });
 
   it('shows the empty state and hides the drop zone without the manage capability', async () => {

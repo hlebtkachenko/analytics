@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs';
-import { chmod, mkdir, rename, stat, unlink } from 'node:fs/promises';
+import { chmod, mkdir, readdir, rename, stat, unlink } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 
@@ -35,14 +35,30 @@ export interface PutBlobInput {
   temporaryPath: string;
 }
 
+// A stored file the orphan sweep may ask about: its key and the hash the key was derived from.
+export interface StaleBlob {
+  key: string;
+  sha256: string;
+}
+
 export abstract class BlobStore {
   // Multer names its own temporary file, so the store proves containment instead of trusting the caller.
   abstract deleteTemporary(path: string): Promise<void>;
+  // The organizations with a directory on the volume; the sweep walks these, never the database.
+  abstract listOrganizations(): Promise<string[]>;
+  // Files of one organization last modified before olderThan, at most limit of them.
+  abstract listStale(
+    organizationId: string,
+    olderThan: Date,
+    limit: number,
+  ): Promise<StaleBlob[]>;
   abstract open(key: string, range?: ReadRange): Readable;
   abstract put(input: PutBlobInput): Promise<void>;
   abstract stat(key: string): Promise<BlobStat | null>;
   // The temporary directory lives on the same volume so the final rename is atomic.
   abstract temporaryDirectory(): string;
+  // Removes a stored file; the sweep calls it only for a hash the database says has no row.
+  abstract unlink(key: string): Promise<void>;
 }
 
 export class FilesystemBlobStore extends BlobStore {
@@ -63,6 +79,59 @@ export class FilesystemBlobStore extends BlobStore {
     }
 
     await unlink(join(temporary, contained)).catch(() => undefined);
+  }
+
+  async listOrganizations(): Promise<string[]> {
+    const entries = await readdir(join(this.directory, 'org'), {
+      withFileTypes: true,
+    });
+
+    return entries
+      .filter(
+        (entry) =>
+          entry.isDirectory() &&
+          organizationIdentifierSchema.safeParse(entry.name).success,
+      )
+      .map((entry) => entry.name)
+      .sort();
+  }
+
+  async listStale(
+    organizationId: string,
+    olderThan: Date,
+    limit: number,
+  ): Promise<StaleBlob[]> {
+    const organization = join(
+      this.directory,
+      'org',
+      organizationIdentifierSchema.parse(organizationId),
+    );
+    const stale: StaleBlob[] = [];
+
+    for (const name of (await readdir(organization)).sort()) {
+      if (stale.length >= limit) {
+        break;
+      }
+
+      // Only a content-addressed name is a blob; anything else on the volume is not the store's to touch.
+      if (!SHA256_PATTERN.test(name)) {
+        continue;
+      }
+
+      const information = await stat(join(organization, name)).catch(
+        () => null,
+      );
+
+      if (
+        information !== null &&
+        information.isFile() &&
+        information.mtimeMs < olderThan.getTime()
+      ) {
+        stale.push({ key: blobStorageKey(organizationId, name), sha256: name });
+      }
+    }
+
+    return stale;
   }
 
   open(key: string, range?: ReadRange): Readable {
@@ -91,6 +160,10 @@ export class FilesystemBlobStore extends BlobStore {
 
   temporaryDirectory(): string {
     return join(this.directory, 'tmp');
+  }
+
+  async unlink(key: string): Promise<void> {
+    await unlink(this.resolveKey(key));
   }
 
   // Belt and braces: the key derivation already cannot escape, and the sink refuses anything that did.

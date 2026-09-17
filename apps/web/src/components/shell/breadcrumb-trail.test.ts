@@ -23,6 +23,13 @@ describe('buildTrail', () => {
     ]);
   });
 
+  it('names the inbox settings child under Inbox, not the top-level Settings module', () => {
+    expect(buildTrail(['(product)', 'inbox', 'settings'])).toEqual([
+      { current: false, href: '/inbox', label: 'Inbox' },
+      { current: true, href: '/inbox/settings', label: 'Settings' },
+    ]);
+  });
+
   it('names the documents analytics child rather than falling back to Document', () => {
     expect(buildTrail(['(product)', 'documents', 'analytics'])).toEqual([
       { current: false, href: '/documents', label: 'Documents' },

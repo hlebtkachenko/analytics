@@ -62,6 +62,15 @@ Uploaded bytes are durable, content-addressed and owned per organization.
   `document_file` row after a grace period) is a Phase 1 worker job, because it
   needs a non-human principal: `apps/api/src/worker/job-context.ts` fails any
   job without a live write-role `userId`.
+- Amended 2026-09-17 (1b-runtime): the row orphan cannot occur, because a `blob`
+  row and its `inbox_item_file` row commit in one transaction and both blob
+  foreign keys are `ON DELETE RESTRICT`. The untracked file left on the volume
+  after a failed commit is the only orphan kind, and the 1b-runtime tick removes
+  it after a 60 minute grace period. Retention of a discarded item's bytes stays
+  with the retention PR on the connections and setup track. The blob quota is
+  now `least(organization setting, BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION)`: the
+  environment value stays the platform default and the cap, and an owner can
+  only tighten it per organization.
 - Every organization has a byte quota. An upload that would exceed it is refused
   at the API with the reason, before the blob is committed; temporary bytes are
   deleted.

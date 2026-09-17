@@ -19,7 +19,7 @@ export const moduleLabels: Readonly<Record<string, string>> = {
 const childLabels: Readonly<Record<string, Readonly<Record<string, string>>>> =
   {
     documents: { analytics: 'Analytics', new: 'New document' },
-    inbox: { channels: 'Channels' },
+    inbox: { channels: 'Channels', settings: 'Settings' },
     organizations: { new: 'Create organization' },
   };
 

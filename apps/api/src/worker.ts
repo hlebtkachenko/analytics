@@ -11,7 +11,11 @@ import {
   SUMMARIZE_DATASET_QUEUE,
 } from './agents/contract.js';
 import { FilesystemBlobStore } from './blobs/blob-store.js';
-import { SPLIT_EMAIL_ITEM_QUEUE } from './inbox/contract.js';
+import {
+  INBOX_MAINTENANCE_QUEUE,
+  SPLIT_EMAIL_ITEM_QUEUE,
+} from './inbox/contract.js';
+import { sendSplitEmailItem } from './inbox/inbox-queue.js';
 import { INGEST_DATASET_QUEUE } from './ingestion/contract.js';
 import {
   createStagingDirectory,
@@ -21,6 +25,10 @@ import { ApplicationLogger } from './logger.js';
 import { loadRuntimeConfiguration } from './runtime-configuration.js';
 import { ClamdClient } from './scanning/clamd-client.js';
 import { backfillDatasetEmbeddings } from './worker/backfill-embeddings.js';
+import {
+  runInboxMaintenance,
+  scheduleInboxMaintenance,
+} from './worker/inbox-maintenance.js';
 import { ingestDataset } from './worker/ingest-dataset.js';
 import { curateJobFailure } from './worker/job-failure.js';
 import { splitEmailItem } from './worker/split-email-item.js';
@@ -85,7 +93,21 @@ async function bootstrap(): Promise<void> {
   await createQueue(queue, INGEST_DATASET_QUEUE);
   await createQueue(queue, BACKFILL_EMBEDDINGS_QUEUE);
   await createQueue(queue, SUMMARIZE_DATASET_QUEUE);
-  await createQueue(queue, SPLIT_EMAIL_ITEM_QUEUE);
+  // Keyed queues: the item id and the tick name are singleton keys, which pg-boss honours only under exclusive.
+  const warnQueue = (message: string): void =>
+    logger.warn(message, SERVICE_NAME);
+  await createQueue(
+    queue,
+    SPLIT_EMAIL_ITEM_QUEUE,
+    { policy: 'exclusive' },
+    warnQueue,
+  );
+  await createQueue(
+    queue,
+    INBOX_MAINTENANCE_QUEUE,
+    { policy: 'exclusive' },
+    warnQueue,
+  );
   // The real error is logged here; only the curated one reaches pgboss.job.output.
   const runJob = async (work: () => Promise<void>): Promise<void> => {
     try {
@@ -175,6 +197,27 @@ async function bootstrap(): Promise<void> {
             scanner,
           }),
         );
+      }
+    },
+  );
+
+  // The platform's first cron: one organization-less tick every quarter hour, never through runTenantJob.
+  await scheduleInboxMaintenance(queue);
+  await queue.work<unknown, void, { localConcurrency: 1 }>(
+    INBOX_MAINTENANCE_QUEUE,
+    { localConcurrency: 1 },
+    async (jobs) => {
+      for (const job of jobs) {
+        await runJob(async () => {
+          await runInboxMaintenance({
+            blobs,
+            data: job.data,
+            enqueueSplitEmailItem: (split) => sendSplitEmailItem(queue, split),
+            logger,
+            metrics,
+            pool,
+          });
+        });
       }
     },
   );

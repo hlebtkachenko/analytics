@@ -8,6 +8,9 @@ import {
   inboxEventReasons,
   inboxItemStatuses,
   inboxPayloadKinds,
+  inboxRoutingAutoPolicies,
+  inboxRoutingDestinations,
+  inboxRoutingPartnerPolicies,
   inboxUnprocessableReasons,
 } from '@bap/db';
 import { legalEntityIdentifierSchema } from '@bap/security';
@@ -16,7 +19,9 @@ import { z } from 'zod';
 import {
   createDocumentBodyOpenApiSchema,
   createDocumentRequestSchema,
+  DOCUMENT_KINDS,
   documentIdentifierSchema,
+  documentKindSchema,
   partnerIdentifierSchema,
   repeatedOrCsv,
 } from '../documents/contract.js';
@@ -32,6 +37,15 @@ export const INBOX_EVENT_REASONS = inboxEventReasons;
 export const BLOB_SCAN_STATUSES = blobScanStatuses;
 export const INBOX_DISCARD_REASONS = inboxDiscardReasons;
 export const INBOX_UNPROCESSABLE_REASONS = inboxUnprocessableReasons;
+export const INBOX_ROUTING_DESTINATIONS = inboxRoutingDestinations;
+export const INBOX_ROUTING_PARTNER_POLICIES = inboxRoutingPartnerPolicies;
+export const INBOX_ROUTING_AUTO_POLICIES = inboxRoutingAutoPolicies;
+// Where the effective target came from: the platform constant or the organization's own row.
+export const INBOX_ROUTING_TARGET_SOURCES = [
+  'platform',
+  'organization',
+] as const;
+export const MAX_REQUIRED_FIELDS = 32;
 
 // What the sniff provider can name in Phase 0; a hint may name any lowercase token beyond this list.
 export const DETECTED_TYPES = [
@@ -296,6 +310,97 @@ export const inboxEventSchema = z
 
 export type InboxEvent = z.infer<typeof inboxEventSchema>;
 
+// The scheduled tick that sweeps orphaned files, reaps stalled items and requeues lost splits; empty payload.
+export const INBOX_MAINTENANCE_QUEUE = 'inbox_maintenance';
+
+// A draft field name a person must fill before routing: the destination contract names it, so any identifier.
+export const requiredFieldSchema = z
+  .string()
+  .regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/);
+
+// The routing target fields shared by the platform constant, a stored row and the PUT body.
+export const inboxRoutingTargetFieldsSchema = z
+  .object({
+    auto: z.enum(INBOX_ROUTING_AUTO_POLICIES),
+    autoThreshold: confidenceSchema.nullable(),
+    defaultAssigneeId: subjectIdentifierSchema.nullable(),
+    defaultLegalEntityId: legalEntityIdentifierSchema.nullable(),
+    // Null only on a platform default that names no destination yet; a saved row always names one.
+    destination: z.enum(INBOX_ROUTING_DESTINATIONS).nullable(),
+    documentKind: documentKindSchema.nullable(),
+    partnerPolicy: z.enum(INBOX_ROUTING_PARTNER_POLICIES),
+    requiredFields: z.array(requiredFieldSchema).max(MAX_REQUIRED_FIELDS),
+  })
+  .strict();
+
+export type InboxRoutingTargetFields = z.infer<
+  typeof inboxRoutingTargetFieldsSchema
+>;
+
+// The effective target of one detected type, with where it came from.
+export const inboxRoutingTargetSchema = inboxRoutingTargetFieldsSchema
+  .extend({
+    detectedType: detectedTypeSchema,
+    source: z.enum(INBOX_ROUTING_TARGET_SOURCES),
+  })
+  .strict();
+
+export type InboxRoutingTarget = z.infer<typeof inboxRoutingTargetSchema>;
+
+export const inboxRoutingTargetListResponseSchema = z
+  .object({ targets: z.array(inboxRoutingTargetSchema) })
+  .strict();
+
+export type InboxRoutingTargetListResponse = z.infer<
+  typeof inboxRoutingTargetListResponseSchema
+>;
+
+// The full target, never a partial patch: the form is prefilled from the effective target.
+export const putInboxRoutingTargetRequestSchema = inboxRoutingTargetFieldsSchema
+  .extend({ destination: z.enum(INBOX_ROUTING_DESTINATIONS) })
+  .strict()
+  .refine(
+    (body) =>
+      (body.destination === 'documents') === (body.documentKind !== null),
+    {
+      message: 'documentKind is set exactly when the destination is documents.',
+      path: ['documentKind'],
+    },
+  )
+  .refine(
+    (body) => body.auto !== 'above_threshold' || body.autoThreshold !== null,
+    {
+      message: 'autoThreshold is required when auto is above_threshold.',
+      path: ['autoThreshold'],
+    },
+  );
+
+export type PutInboxRoutingTargetRequest = z.infer<
+  typeof putInboxRoutingTargetRequestSchema
+>;
+
+export const blobQuotaBytesSchema = z.number().int().positive();
+
+// The organization's own quota, the platform cap it can only tighten, and the bytes already stored.
+export const inboxSettingsSchema = z
+  .object({
+    blobQuotaBytes: blobQuotaBytesSchema.nullable(),
+    platformQuotaBytes: blobQuotaBytesSchema,
+    usedBytes: z.number().int().min(0),
+  })
+  .strict();
+
+export type InboxSettings = z.infer<typeof inboxSettingsSchema>;
+
+// Null resets the organization to the platform value.
+export const updateInboxSettingsRequestSchema = z
+  .object({ blobQuotaBytes: blobQuotaBytesSchema.nullable() })
+  .strict();
+
+export type UpdateInboxSettingsRequest = z.infer<
+  typeof updateInboxSettingsRequestSchema
+>;
+
 export const inboxUploadResponseSchema = z
   .object({
     // Set when the same bytes already existed in the organization; the new item is then discarded.
@@ -313,6 +418,8 @@ export const inboxItemDetailSchema = z
     extraction: inboxExtractionSchema.nullable(),
     files: z.array(inboxItemFileSchema),
     item: inboxItemSchema,
+    // The effective target of the item's detected type, so the setting is visible on the item the day it lands.
+    routingTarget: inboxRoutingTargetSchema,
   })
   .strict();
 
@@ -750,6 +857,86 @@ export const inboxUploadResponseOpenApiSchema = {
   type: 'object',
 };
 
+const routingTargetFieldProperties = {
+  auto: { enum: [...INBOX_ROUTING_AUTO_POLICIES], type: 'string' },
+  autoThreshold: nullable(confidenceProperty),
+  defaultAssigneeId: { nullable: true, type: 'string' },
+  defaultLegalEntityId: nullable(uuidProperty),
+  documentKind: { enum: [...DOCUMENT_KINDS], nullable: true, type: 'string' },
+  partnerPolicy: { enum: [...INBOX_ROUTING_PARTNER_POLICIES], type: 'string' },
+  requiredFields: {
+    items: { pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$', type: 'string' },
+    maxItems: MAX_REQUIRED_FIELDS,
+    type: 'array',
+  },
+};
+
+const routingTargetFieldsRequired = [
+  'auto',
+  'autoThreshold',
+  'defaultAssigneeId',
+  'defaultLegalEntityId',
+  'destination',
+  'documentKind',
+  'partnerPolicy',
+  'requiredFields',
+];
+
+export const inboxRoutingTargetOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    ...routingTargetFieldProperties,
+    destination: {
+      enum: [...INBOX_ROUTING_DESTINATIONS],
+      nullable: true,
+      type: 'string',
+    },
+    detectedType: { enum: [...DETECTED_TYPES], type: 'string' },
+    source: { enum: [...INBOX_ROUTING_TARGET_SOURCES], type: 'string' },
+  },
+  required: [...routingTargetFieldsRequired, 'detectedType', 'source'],
+  type: 'object',
+};
+
+export const inboxRoutingTargetListOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    targets: { items: inboxRoutingTargetOpenApiSchema, type: 'array' },
+  },
+  required: ['targets'],
+  type: 'object',
+};
+
+export const putInboxRoutingTargetBodyOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    ...routingTargetFieldProperties,
+    destination: { enum: [...INBOX_ROUTING_DESTINATIONS], type: 'string' },
+  },
+  required: routingTargetFieldsRequired,
+  type: 'object',
+};
+
+const quotaBytesProperty = { minimum: 1, type: 'integer' };
+
+export const inboxSettingsOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    blobQuotaBytes: nullable(quotaBytesProperty),
+    platformQuotaBytes: quotaBytesProperty,
+    usedBytes: { minimum: 0, type: 'integer' },
+  },
+  required: ['blobQuotaBytes', 'platformQuotaBytes', 'usedBytes'],
+  type: 'object',
+};
+
+export const updateInboxSettingsBodyOpenApiSchema = {
+  additionalProperties: false,
+  properties: { blobQuotaBytes: nullable(quotaBytesProperty) },
+  required: ['blobQuotaBytes'],
+  type: 'object',
+};
+
 export const inboxItemDetailOpenApiSchema = {
   additionalProperties: false,
   properties: {
@@ -757,8 +944,9 @@ export const inboxItemDetailOpenApiSchema = {
     extraction: { ...inboxExtractionOpenApiSchema, nullable: true },
     files: { items: inboxItemFileOpenApiSchema, type: 'array' },
     item: inboxItemOpenApiSchema,
+    routingTarget: inboxRoutingTargetOpenApiSchema,
   },
-  required: ['events', 'extraction', 'files', 'item'],
+  required: ['events', 'extraction', 'files', 'item', 'routingTarget'],
   type: 'object',
 };
 
