@@ -75,13 +75,16 @@ let reportingPool: Pool;
 let rootPool: Pool;
 
 function poolFor(user: string, password: string): Pool {
-  return new Pool({
+  const pool = new Pool({
     database: container.getDatabase(),
     host: container.getHost(),
     password,
     port: container.getPort(),
     user,
   });
+  // pg emits 'error' on idle clients when the backend dies at teardown; swallow it so the container shutdown race is not an unhandled error.
+  pool.on('error', () => undefined);
+  return pool;
 }
 
 async function asOwner<T>(
@@ -1067,14 +1070,18 @@ describe('documents register isolation', () => {
     const source = new URL('../drizzle/', import.meta.url);
     const directory = await mkdtemp(join(tmpdir(), 'bap-migrations-'));
     await rootPool.query(`create database ${backfillDatabase}`);
-    const poolOn = (user: string): Pool =>
-      new Pool({
+    const poolOn = (user: string): Pool => {
+      const pool = new Pool({
         database: backfillDatabase,
         host: container.getHost(),
         password: testPassword,
         port: container.getPort(),
         user,
       });
+      // Same idle-client shutdown guard as poolFor, for the disposable backfill database.
+      pool.on('error', () => undefined);
+      return pool;
+    };
     const backfillRootPool = poolOn('postgres');
     const backfillMigratorPool = poolOn('bap_migrator');
     const backfillApiPool = poolOn('bap_api');

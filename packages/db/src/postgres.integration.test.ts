@@ -121,13 +121,16 @@ function vectorLiteral(leading: readonly number[]): string {
 }
 
 function poolFor(user: string, password: string): Pool {
-  return new Pool({
+  const pool = new Pool({
     database: container.getDatabase(),
     host: container.getHost(),
     password,
     port: container.getPort(),
     user,
   });
+  // pg emits 'error' on idle clients when the backend dies at teardown; swallow it so the container shutdown race is not an unhandled error.
+  pool.on('error', () => undefined);
+  return pool;
 }
 
 async function asOwner<T>(
