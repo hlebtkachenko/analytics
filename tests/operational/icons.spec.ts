@@ -364,25 +364,35 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   await expectNoAccessibilityViolations(page);
   await expectNoDocumentOverflow(page);
 
-  // The workspace list, create, members, and settings pages are now Carbon;
-  // only the remaining throwaway page must stay free of design-system markup.
-  for (const route of [`/${organizationSlug}`]) {
-    await page.goto(route);
-    await authenticatedExpect(page.locator('main')).toHaveCount(1);
-    // The layout owns the Carbon breadcrumb band; assert only the temporary
-    // page's own content stays free of design-system markup.
-    const temporaryContent = page.locator(
-      'main > :not([data-breadcrumb-band])',
-    );
-    await authenticatedExpect(
-      temporaryContent.locator('svg.cds--btn__icon'),
-    ).toHaveCount(0);
-    await authenticatedExpect(
-      temporaryContent.locator('[class*="cds--"]'),
-    ).toHaveCount(0);
-    await expectNoAccessibilityViolations(page);
-    await expectNoDocumentOverflow(page);
+  // The workspace landing page is Carbon: the heading is the workspace name
+  // and every tile is a real link; locators stay inside main so the rail's
+  // module links never collide with the tiles.
+  await page.goto(`/${organizationSlug}`);
+  const landing = page.getByRole('main');
+  await authenticatedExpect(landing).toHaveCount(1);
+  await authenticatedExpect(
+    landing.getByRole('heading', { exact: true, name: 'BAP Operational' }),
+  ).toBeVisible();
+  await authenticatedExpect(
+    landing.getByText('Some workspace details could not be loaded.'),
+  ).toHaveCount(0);
+  for (const [name, href] of [
+    [/^Members [1-9]\d* of 100$/, `/${organizationSlug}/members`],
+    [
+      /^Pending invitations \d+$/,
+      `/${organizationSlug}/members?tab=invitations`,
+    ],
+    [/^Legal entities [1-9]\d*$/, `/${organizationSlug}/entities`],
+    ['Documents', '/documents'],
+    ['Datasets', '/datasets'],
+    ['Settings', `/${organizationSlug}/settings`],
+  ] as const) {
+    const tile = landing.getByRole('link', { exact: true, name });
+    await authenticatedExpect(tile).toBeVisible();
+    await authenticatedExpect(tile).toHaveAttribute('href', href);
   }
+  await expectNoAccessibilityViolations(page);
+  await expectNoDocumentOverflow(page);
 
   await page.setViewportSize({ height: 640, width: 320 });
   await page.goto('/access');

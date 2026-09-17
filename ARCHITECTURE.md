@@ -257,21 +257,21 @@ remain id-only. The root route redirects to `/organizations`. The
 a narrow `@bap/db` membership accessor, shows a get-started checklist when
 empty, and lists pending invitations with accept and decline server actions; the
 create page renders a Carbon form with live slug validation and quota-gated
-creation. The `[orgSlug]` landing page remains the deliberately plain Phase 10
-organization loop, exposing navigation only. Since ADR 0011 the legal entities
+creation. Since ADR 0011 the landing page at `/[orgSlug]`, the legal entities
 page at `/[orgSlug]/entities`, the members page at `/[orgSlug]/members`, and the
 settings page at `/[orgSlug]/settings` are Carbon pages that read from the BFF
-and Better Auth and mutate by client call, so they are no longer part of that
-plain loop. The shared slug resolver maps the route server-side and each client
-mutation carries the resolved organization id; no browser-supplied id or ambient
-active organization selects a tenant.
+and Better Auth, so the temporary `[orgSlug]` loop is gone. The landing page
+reads members, invitations, entities, and datasets counts server-side and
+exposes navigation only; the others mutate by client call. The shared slug
+resolver maps the route server-side and each read and client mutation carries
+the resolved organization id; no browser-supplied id or ambient active
+organization selects a tenant.
 
-This `[orgSlug]` landing page remains explicitly throwaway milestone UI. It uses
-semantic HTML, native links, no page CSS, and no design-system import. The
-layout and shared slug resolver remain durable. Publishing the literal
-`/organizations` route advanced the reserved database and TypeScript slug
-contract through migration `20260831.0004`, and migration `20260916.0001`
-reserves the flat workspace routes.
+The landing page renders inside the shared Carbon product shell like the other
+organization pages. The layout and shared slug resolver remain durable.
+Publishing the literal `/organizations` route advanced the reserved database and
+TypeScript slug contract through migration `20260831.0004`, and migration
+`20260916.0001` reserves the flat workspace routes.
 
 Authenticated `app/(product)` routes share a server layout that renders the
 client `ProductShell`, a Carbon UI Shell header branded "Afframe Analytics" over

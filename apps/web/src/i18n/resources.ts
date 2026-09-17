@@ -384,6 +384,24 @@ export const resources = {
         summary: 'You were invited to join an organization on BAP.',
         title: 'Organization invitation',
       },
+      landing: {
+        loadError: 'Some workspace details could not be loaded.',
+        nextSteps: {
+          createEntity: 'Add your first legal entity',
+          inviteMembers: 'Invite people to the workspace',
+          title: 'Next steps',
+          uploadData: 'Upload your first dataset',
+        },
+        tiles: {
+          datasets: 'Datasets',
+          documents: 'Documents',
+          entities: 'Legal entities',
+          invitations: 'Pending invitations',
+          members: 'Members',
+          membersValue: '{{count}} of {{limit}}',
+          settings: 'Settings',
+        },
+      },
       members: {
         actions: {
           cancel: 'Cancel invitation',

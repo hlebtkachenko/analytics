@@ -89,10 +89,40 @@ test('walks the Carbon workspace loop through explicit member-scoped actions', a
   await page.keyboard.press('Enter');
 
   await expect(page).toHaveURL(new RegExp(`/${createdSlug}$`));
-  await expect(page.getByRole('heading', { name: uniqueName })).toBeVisible();
+  // The landing page is Carbon: tiles are links scoped to main so the rail's
+  // module links never collide, and a fresh workspace shows every next step.
+  const landing = page.getByRole('main');
+  await expect(
+    landing.getByRole('heading', { exact: true, name: uniqueName }),
+  ).toBeVisible();
+  await expect(landing.getByText('Owner', { exact: true })).toBeVisible();
+  await expect(
+    landing.getByText('Some workspace details could not be loaded.'),
+  ).toHaveCount(0);
+  await expect(
+    landing.getByRole('link', { name: 'Members 1 of 100' }),
+  ).toHaveAttribute('href', `/${createdSlug}/members`);
+  await expect(
+    landing.getByRole('link', { name: 'Pending invitations 0' }),
+  ).toHaveAttribute('href', `/${createdSlug}/members?tab=invitations`);
+  await expect(
+    landing.getByRole('link', { name: 'Legal entities 0' }),
+  ).toHaveAttribute('href', `/${createdSlug}/entities`);
+  await expect(
+    landing.getByRole('heading', { name: 'Next steps' }),
+  ).toBeVisible();
+  await expect(
+    landing.getByRole('link', { name: 'Add your first legal entity' }),
+  ).toHaveAttribute('href', `/${createdSlug}/entities`);
+  await expect(
+    landing.getByRole('link', { name: 'Invite people to the workspace' }),
+  ).toHaveAttribute('href', `/${createdSlug}/members?tab=invitations`);
+  await expect(
+    landing.getByRole('link', { name: 'Upload your first dataset' }),
+  ).toHaveAttribute('href', '/datasets');
   await expectNoAccessibilityViolations(page);
 
-  await page.getByRole('link', { name: 'Members' }).click();
+  await landing.getByRole('link', { name: 'Members 1 of 100' }).click();
   await expect(page).toHaveURL(new RegExp(`/${createdSlug}/members$`));
   await expect(
     page.getByRole('heading', { name: `${uniqueName} members` }),
@@ -114,7 +144,11 @@ test('walks the Carbon workspace loop through explicit member-scoped actions', a
   await expectNoAccessibilityViolations(page);
 
   await page.goto(`/${createdSlug}`);
-  await page.getByRole('link', { name: 'Settings' }).click();
+  // The sent invitation is pending, so the tile counts it.
+  await expect(
+    landing.getByRole('link', { name: 'Pending invitations 1' }),
+  ).toBeVisible();
+  await landing.getByRole('link', { exact: true, name: 'Settings' }).click();
   await expect(page).toHaveURL(new RegExp(`/${createdSlug}/settings$`));
   await expect(
     page.getByRole('heading', { name: `${uniqueName} settings` }),
@@ -138,11 +172,21 @@ test('walks the Carbon workspace loop through explicit member-scoped actions', a
   await expectNoHorizontalOverflow(page);
   await page.setViewportSize({ height: 640, width: 320 });
   await expectNoHorizontalOverflow(page);
+  // The landing tiles must reflow inside the same 320px viewport.
+  await page.goto(`/${renamedSlug}`);
+  await expect(
+    landing.getByRole('heading', { exact: true, name: renamedName }),
+  ).toBeVisible();
+  await expectNoHorizontalOverflow(page);
 
   // The Carbon workspace list and create pages are driven at the shell's normal width.
   await page.setViewportSize({ height: 900, width: 1280 });
   await page.goto(`/${renamedSlug}`);
-  await page.getByRole('link', { name: 'All organizations' }).click();
+  // The landing page reaches the list through the shell breadcrumb.
+  await page
+    .getByRole('navigation', { name: 'Breadcrumb' })
+    .getByRole('link', { name: 'Workspaces' })
+    .click();
   await expect(page).toHaveURL(/\/organizations$/);
   // The renamed workspace is a DataGrid row; clicking it navigates to the workspace.
   const renamedRow = page.getByRole('row').filter({ hasText: renamedName });
