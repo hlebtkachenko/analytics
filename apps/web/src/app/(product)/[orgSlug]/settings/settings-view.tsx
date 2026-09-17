@@ -45,13 +45,13 @@ export default function SettingsView({
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
 
-  const slugValid = organizationSlugSchema.safeParse(slug).success;
+  const nextSlug = normalizeOrganizationSlug(slug);
+  const slugValid = organizationSlugSchema.safeParse(nextSlug).success;
   const canSave =
     !submitting && slugValid && name.trim().length > 0 && !slugTaken;
 
   async function save(): Promise<void> {
     const trimmedName = name.trim();
-    const nextSlug = normalizeOrganizationSlug(slug);
     setSubmitting(true);
     setSlugTaken(false);
     const result = await authClient.organization.update({

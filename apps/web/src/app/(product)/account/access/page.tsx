@@ -17,7 +17,6 @@ import {
   Select,
   SelectItem,
   Stack,
-  Tag,
   Tile,
 } from '@bap/design-system/react';
 import { useRouter } from 'next/navigation';
@@ -285,19 +284,16 @@ export default function AccessPage() {
                   </Button>
                 </Column>
               ) : null}
-              {applicationAccess.capabilities.useAi ? (
+              {applicationAccess.capabilities.useAi && selectedOrganization ? (
                 <Column lg={4} md={4} sm={4}>
-                  <Tile>
-                    <Stack gap={3}>
-                      <AiGenerate
-                        aria-hidden="true"
-                        focusable="false"
-                        size={20}
-                      />
-                      <h3>{t('access.useAi')}</h3>
-                      <Tag type="gray">{t('access.unavailable')}</Tag>
-                    </Stack>
-                  </Tile>
+                  <Button
+                    href={`/datasets?organization=${encodeURIComponent(selectedOrganization.slug)}`}
+                    kind="tertiary"
+                    renderIcon={AiGenerate}
+                    size="lg"
+                  >
+                    {t('access.useAi')}
+                  </Button>
                 </Column>
               ) : null}
             </Grid>

@@ -186,11 +186,11 @@ function ShellChrome({
             isCollapsible
             onClick={toggleNavigation}
           />
-          <HeaderName href="/access" prefix="Afframe">
+          <HeaderName href="/organizations" prefix="Afframe">
             Analytics
           </HeaderName>
           <HeaderNavigation aria-label="Areas">
-            <HeaderMenuItem href="/access" isActive>
+            <HeaderMenuItem href="/organizations" isActive>
               Analytics
             </HeaderMenuItem>
           </HeaderNavigation>

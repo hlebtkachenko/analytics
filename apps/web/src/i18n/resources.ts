@@ -33,7 +33,6 @@ export const resources = {
         title: 'Organization access',
         updateEntities: 'Edit legal entities',
         uploadData: 'Upload data',
-        unavailable: 'Unavailable',
         useAi: 'Ask the assistant',
       },
       account: {
@@ -132,6 +131,7 @@ export const resources = {
           verify: 'Verify',
           verifyBody:
             'Add the secret to your authenticator app, then enter the code it shows.',
+          verifyTitle: 'Confirm your authenticator',
         },
         workspaces: {
           columnName: 'Name',
@@ -447,6 +447,7 @@ export const resources = {
           kindLabel: 'Kind',
           nameInUse: 'A legal entity with this name already exists.',
           nameLabel: 'Name',
+          registrationInvalid: 'Enter a valid registration number.',
           registrationLabel: 'Registration number',
           submit: 'Save',
         },
@@ -565,8 +566,13 @@ export const resources = {
         },
         roles: {
           admin: 'Admin',
+          adminHelp:
+            'An admin creates and edits legal entities and uploads data.',
           member: 'Member',
+          memberHelp: 'A member has read-only access.',
           owner: 'Owner',
+          ownerHelp:
+            'An owner manages members, invitations, settings, entity access, and entity deletion.',
         },
         scope: {
           all: 'All entities',
