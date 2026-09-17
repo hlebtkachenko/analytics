@@ -198,10 +198,7 @@ const reviewedCallsites = [
   ],
 ] as const;
 
-const throwawayPages = [
-  'app/(product)/[orgSlug]/page.tsx',
-  'app/(product)/[orgSlug]/settings/page.tsx',
-] as const;
+const throwawayPages = ['app/(product)/[orgSlug]/page.tsx'] as const;
 
 const intentionalPlainAccountSources = [
   'app/(product)/account/account-actions.tsx',

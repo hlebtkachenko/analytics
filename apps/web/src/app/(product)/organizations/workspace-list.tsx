@@ -55,6 +55,10 @@ const toastByResult = {
     key: 'workspaces.invitations.declineSuccess',
     kind: 'success',
   },
+  'workspace-left': {
+    key: 'workspaces.list.leftSuccess',
+    kind: 'success',
+  },
 } as const;
 
 export default function WorkspaceList({
