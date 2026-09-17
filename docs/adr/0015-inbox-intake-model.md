@@ -1,6 +1,8 @@
 # ADR 0015: Inbox Intake Model
 
 - Status: accepted
+- Amended by [ADR 0016](0016-channel-principal.md): the channel principal
+  deferred below is decided there.
 - Date: 2026-09-16
 
 ## Context
