@@ -33,10 +33,7 @@ export const resources = {
         title: 'Organization access',
         updateEntities: 'Edit legal entities',
         uploadData: 'Upload data',
-        unavailable: 'Unavailable',
         useAi: 'Ask the assistant',
-        useAiUnavailable:
-          'The general assistant is not available from this page yet.',
       },
       account: {
         delete: {
@@ -134,6 +131,7 @@ export const resources = {
           verify: 'Verify',
           verifyBody:
             'Add the secret to your authenticator app, then enter the code it shows.',
+          verifyTitle: 'Confirm your authenticator',
         },
         workspaces: {
           columnName: 'Name',
@@ -449,6 +447,7 @@ export const resources = {
           kindLabel: 'Kind',
           nameInUse: 'A legal entity with this name already exists.',
           nameLabel: 'Name',
+          registrationInvalid: 'Enter a valid registration number.',
           registrationLabel: 'Registration number',
           submit: 'Save',
         },
@@ -567,8 +566,13 @@ export const resources = {
         },
         roles: {
           admin: 'Admin',
+          adminHelp:
+            'An admin creates and edits legal entities and uploads data.',
           member: 'Member',
+          memberHelp: 'A member has read-only access.',
           owner: 'Owner',
+          ownerHelp:
+            'An owner manages members, invitations, settings, entity access, and entity deletion.',
         },
         scope: {
           all: 'All entities',
@@ -634,6 +638,35 @@ export const resources = {
           title: 'Leave {{name}}',
         },
         title: '{{name}} settings',
+      },
+      shell: {
+        account: {
+          preferences: 'Preferences',
+          profile: 'My profile',
+          security: 'Security and sessions',
+          themeDark: 'Dark',
+          themeLight: 'Light',
+          themeSystem: 'System',
+          themeTitle: 'Appearance',
+        },
+        help: {
+          about: 'Version {{version}}',
+          documentation: 'Documentation',
+          feedback: 'Send feedback',
+        },
+        roles: {
+          admin: 'Admin',
+          member: 'Member',
+          owner: 'Owner',
+        },
+        search: {
+          empty: 'No results.',
+          groupEntity: 'Legal entities',
+          groupPage: 'Pages',
+          groupWorkspace: 'Workspaces',
+          label: 'Search',
+          placeholder: 'Search Afframe Analytics',
+        },
       },
       signUp: {
         email: 'Email address',

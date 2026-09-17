@@ -82,6 +82,7 @@ export default function EntitiesView({
   const [name, setName] = useState('');
   const [kind, setKind] = useState<EntityKind>('company');
   const [registrationNumber, setRegistrationNumber] = useState('');
+  const [registrationInvalid, setRegistrationInvalid] = useState(false);
   const [nameInUse, setNameInUse] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<LegalEntity | null>(null);
@@ -111,7 +112,7 @@ export default function EntitiesView({
     id: entity.id,
     kind: kindLabels[entity.kind],
     name: entity.name,
-    registrationNumber: entity.registrationNumber ?? '—',
+    registrationNumber: entity.registrationNumber ?? '',
   }));
 
   const toolbarActions = canCreate
@@ -156,6 +157,7 @@ export default function EntitiesView({
     setKind('company');
     setRegistrationNumber('');
     setNameInUse(false);
+    setRegistrationInvalid(false);
     setFormOpen(true);
   }
 
@@ -169,6 +171,7 @@ export default function EntitiesView({
     setKind(entity.kind);
     setRegistrationNumber(entity.registrationNumber ?? '');
     setNameInUse(false);
+    setRegistrationInvalid(false);
     setFormOpen(true);
   }
 
@@ -201,7 +204,7 @@ export default function EntitiesView({
       registrationNumber: registrationNumber.trim(),
     });
     if (!parsed.success) {
-      notify({ kind: 'error', title: t('entities.toast.failure') });
+      setRegistrationInvalid(true);
       return;
     }
 
@@ -227,6 +230,7 @@ export default function EntitiesView({
 
     setSubmitting(true);
     setNameInUse(false);
+    setRegistrationInvalid(false);
     const result =
       current === null
         ? await mutateJson(legalEntitiesPath(organizationId), {
@@ -256,6 +260,12 @@ export default function EntitiesView({
     // A duplicate name is the one failure the form keeps distinct and inline.
     if (result.status === 409) {
       setNameInUse(true);
+      return;
+    }
+
+    // The API rejects an invalid registration number format, shown inline on its field.
+    if (result.status === 400) {
+      setRegistrationInvalid(true);
       return;
     }
 
@@ -370,9 +380,12 @@ export default function EntitiesView({
           </Select>
           <TextInput
             id="entity-registration"
+            invalid={registrationInvalid}
+            invalidText={t('entities.form.registrationInvalid')}
             labelText={t('entities.form.registrationLabel')}
             onChange={(event) => {
               setRegistrationNumber(event.target.value);
+              setRegistrationInvalid(false);
             }}
             value={registrationNumber}
           />

@@ -189,7 +189,9 @@ describe('AccessPage', () => {
       await screen.findByRole('link', { name: 'Manage members' }),
     ).toBeVisible();
     expect(screen.getByText('Entity scope: All legal entities')).toBeVisible();
-    expect(screen.getAllByText('Unavailable')).toHaveLength(1);
+    expect(
+      screen.getByRole('link', { name: 'Ask the assistant' }),
+    ).toHaveAttribute('href', '/datasets?organization=organization-1');
     expect(
       screen.getByRole('link', { name: 'Manage members' }),
     ).toHaveAttribute('href', '/organization-1/members');

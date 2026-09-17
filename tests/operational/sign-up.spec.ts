@@ -686,7 +686,19 @@ test('proves invitation-only registration, acceptance, and membership management
     expect((await signedOutPromise).ok()).toBe(true);
     await expect(recipientPage).toHaveURL(/\/sign-in$/);
     await signInThroughForm(recipientPage, email, password);
-    await expect(recipientPage).toHaveURL(/\/account\/access$/);
+    // A plain sign-in lands on the workspace list: no membership yet, one pending invitation.
+    await expect(recipientPage).toHaveURL(/\/organizations$/);
+    await expect(
+      recipientPage.getByRole('heading', { name: 'Workspaces' }),
+    ).toBeVisible();
+    await expect(
+      recipientPage.getByText('You do not belong to a workspace yet.'),
+    ).toBeVisible();
+    await expect(
+      recipientPage
+        .getByRole('region', { name: 'Invitations for you' })
+        .getByRole('cell', { name: 'BAP Operational' }),
+    ).toBeVisible();
 
     await navigateToSensitivePath(recipientPage, `/invitation/${invitationId}`);
     await expect(
@@ -710,9 +722,24 @@ test('proves invitation-only registration, acceptance, and membership management
     expect((await acceptedPromise).ok()).toBe(true);
     await expect
       .poll(() => new URL(recipientPage.url()).pathname, {
-        message: 'Invitation acceptance did not reach access.',
+        message: 'Invitation acceptance did not reach the workspace list.',
       })
-      .toBe('/account/access');
+      .toBe('/organizations');
+    // The accepted membership is a workspace row, and the header switcher lists it.
+    await expect(
+      recipientPage.getByRole('cell', { name: 'BAP Operational' }),
+    ).toBeVisible();
+    await recipientPage
+      .getByRole('banner')
+      .getByRole('button', { exact: true, name: 'Workspaces' })
+      .click();
+    await expect(
+      recipientPage
+        .getByRole('banner')
+        .getByRole('list', { name: 'Workspaces' })
+        .getByRole('link', { name: 'BAP Operational' }),
+    ).toHaveAttribute('href', `/${operationalOrganizationSlug}`);
+    await recipientPage.goto('/account/access');
     await expect(
       recipientPage.getByText('Application API role: member'),
     ).toBeVisible();

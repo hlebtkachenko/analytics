@@ -171,6 +171,10 @@ export default function MembersView({
   const activeIndex = searchParams.get('tab') === 'invitations' ? 1 : 0;
 
   function scopeSummary(userId: string): string {
+    // Without the scope editor the real scope is unknown, so it is never shown as all entities.
+    if (!scopeEditorAvailable) {
+      return t('members.scope.unavailable');
+    }
     const scope = scopes.get(userId);
     if (scope === undefined || scope.mode === 'all') {
       return t('members.list.scopeAll');
@@ -689,18 +693,25 @@ export default function MembersView({
           primaryButtonText={t('members.role.submit')}
           secondaryButtonText={t('members.role.cancel')}
         >
-          <Select
-            id="role-value"
-            labelText={t('members.role.label')}
-            onChange={(event) => {
-              setRoleValue(asRole(event.target.value));
-            }}
-            value={roleValue}
-          >
-            {assignableRoles.map((role) => (
-              <SelectItem key={role} text={roleLabels[role]} value={role} />
-            ))}
-          </Select>
+          <Stack gap={5}>
+            <Select
+              id="role-value"
+              labelText={t('members.role.label')}
+              onChange={(event) => {
+                setRoleValue(asRole(event.target.value));
+              }}
+              value={roleValue}
+            >
+              {assignableRoles.map((role) => (
+                <SelectItem key={role} text={roleLabels[role]} value={role} />
+              ))}
+            </Select>
+            <div>
+              <p>{t('members.roles.ownerHelp')}</p>
+              <p>{t('members.roles.adminHelp')}</p>
+              <p>{t('members.roles.memberHelp')}</p>
+            </div>
+          </Stack>
         </Modal>
       ) : null}
 

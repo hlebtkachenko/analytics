@@ -1,6 +1,6 @@
 'use client';
 
-import { Asleep, Light, Logout, UserAvatar } from '@bap/design-system/icons';
+import { Asleep, Light, Logout } from '@bap/design-system/icons';
 import {
   Button,
   HeaderPanel,
@@ -14,6 +14,7 @@ import { themeModes, useThemeMode } from '@bap/design-system/theme';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
 
 import { authClient } from '../../lib/auth/client';
@@ -23,9 +24,8 @@ import {
 } from '../../lib/preferences/cookies';
 import type { ActiveOrganizationValue } from './active-organization';
 import styles from './header-panels.module.scss';
-import { useToast } from './toast';
 
-const organizationsSchema = z.array(
+export const organizationsSchema = z.array(
   z.object({
     id: z.string().min(1),
     name: z.string().min(1),
@@ -34,6 +34,18 @@ const organizationsSchema = z.array(
 );
 
 type PanelProperties = Readonly<{ expanded: boolean }>;
+
+// Two initials from a name, else one from the email; a real avatar label.
+function deriveInitials(name: string, email: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    return `${words[0]![0]!}${words[1]![0]!}`.toUpperCase();
+  }
+  if (words.length === 1 && words[0]!.length > 0) {
+    return words[0]!.slice(0, 2).toUpperCase();
+  }
+  return (email.trim()[0] ?? '?').toUpperCase();
+}
 
 export function SwitcherPanel({
   activeOrganization,
@@ -66,7 +78,7 @@ export function SwitcherPanel({
       : activeOrganization
         ? [
             {
-              id: activeOrganization.slug,
+              id: activeOrganization.id,
               name: activeOrganization.name,
               slug: activeOrganization.slug,
             },
@@ -76,7 +88,8 @@ export function SwitcherPanel({
   return (
     <HeaderPanel expanded={expanded}>
       {expanded ? (
-        <Switcher aria-label="Workspaces">
+        // Only an expanded Switcher gives its items a tab stop.
+        <Switcher aria-label="Workspaces" expanded>
           {list.map((organization) => (
             <SwitcherItem
               aria-label={organization.name}
@@ -100,69 +113,49 @@ export function SwitcherPanel({
   );
 }
 
-export function NotificationsPanel({ expanded }: PanelProperties) {
-  return (
-    <HeaderPanel expanded={expanded}>
-      {expanded ? (
-        <div className={styles.panel!}>
-          <h2 className={styles.panelHeading!}>Notifications</h2>
-          <p className={styles.muted!}>You have no notifications yet.</p>
-        </div>
-      ) : null}
-    </HeaderPanel>
-  );
-}
-
-export function HelpPanel({ expanded }: PanelProperties) {
-  const { notify } = useToast();
-  const soon = (title: string) => () =>
-    notify({
-      subtitle: `${title} is not available yet.`,
-      title: 'Coming soon',
-    });
+export function HelpPanel({
+  expanded,
+  feedbackEmail,
+  version,
+}: PanelProperties &
+  Readonly<{ feedbackEmail?: string | undefined; version: string }>) {
+  const { t } = useTranslation();
 
   return (
     <HeaderPanel expanded={expanded}>
       {expanded ? (
         <div className={styles.menu!}>
-          <Button kind="ghost" onClick={soon('Documentation')}>
-            Documentation
-          </Button>
-          <Button kind="ghost" onClick={soon('Send feedback')}>
-            Send feedback
-          </Button>
-          <Button kind="ghost" onClick={soon("What's new")}>
-            What&apos;s new
-          </Button>
-          <Button kind="ghost" onClick={soon('About')}>
-            About
-          </Button>
+          <a
+            className={styles.link!}
+            href="https://github.com/hlebtkachenko/analytics/tree/main/docs"
+            rel="noreferrer"
+            target="_blank"
+          >
+            {t('shell.help.documentation')}
+          </a>
+          {feedbackEmail === undefined || feedbackEmail.length === 0 ? null : (
+            <a className={styles.link!} href={`mailto:${feedbackEmail}`}>
+              {t('shell.help.feedback')}
+            </a>
+          )}
+          <p className={styles.about!}>{t('shell.help.about', { version })}</p>
         </div>
       ) : null}
     </HeaderPanel>
   );
 }
 
-export function SettingsPanel({ expanded }: PanelProperties) {
-  return (
-    <HeaderPanel expanded={expanded}>
-      {expanded ? (
-        <div className={styles.panel!}>
-          <h2 className={styles.panelHeading!}>Settings</h2>
-          <p className={styles.muted!}>
-            Application preferences arrive with the first product module.
-          </p>
-          <Link className={styles.link!} href="/account">
-            Account settings
-          </Link>
-        </div>
-      ) : null}
-    </HeaderPanel>
-  );
-}
-
-export function AccountPanel({ expanded }: PanelProperties) {
+export function AccountPanel({
+  activeOrganization,
+  expanded,
+  user,
+}: PanelProperties &
+  Readonly<{
+    activeOrganization?: ActiveOrganizationValue;
+    user: Readonly<{ email: string; name: string }>;
+  }>) {
   const router = useRouter();
+  const { t } = useTranslation();
   const { mode, setMode } = useThemeMode();
 
   async function signOut(): Promise<void> {
@@ -171,33 +164,45 @@ export function AccountPanel({ expanded }: PanelProperties) {
     router.refresh();
   }
 
+  const role = activeOrganization?.role;
+  const roleLabels: Readonly<Record<string, string>> = {
+    admin: t('shell.roles.admin'),
+    member: t('shell.roles.member'),
+    owner: t('shell.roles.owner'),
+  };
+
   return (
     <HeaderPanel expanded={expanded}>
       {expanded ? (
         <div className={styles.account!}>
           <div className={styles.identity!}>
-            <UserAvatar aria-hidden="true" focusable="false" size={32} />
+            <span aria-hidden="true" className={styles.initials!}>
+              {deriveInitials(user.name, user.email)}
+            </span>
             <div>
-              <p className={styles.identityName!}>Your account</p>
-              <p className={styles.identityMeta!}>
-                Manage your profile and preferences
-              </p>
+              <p className={styles.identityName!}>{user.name}</p>
+              <p className={styles.identityMeta!}>{user.email}</p>
+              {role === undefined ? null : (
+                <p className={styles.identityMeta!}>
+                  {roleLabels[role] ?? role}
+                </p>
+              )}
             </div>
           </div>
           <div className={styles.section!}>
             <Link className={styles.link!} href="/account">
-              My profile
+              {t('shell.account.profile')}
             </Link>
             <Link className={styles.link!} href="/account/security">
-              Security and sessions
+              {t('shell.account.security')}
             </Link>
             <Link className={styles.link!} href="/account/preferences">
-              Preferences
+              {t('shell.account.preferences')}
             </Link>
           </div>
           <div className={styles.section!}>
             <RadioButtonGroup
-              legendText="Appearance"
+              legendText={t('shell.account.themeTitle')}
               name="theme-mode"
               onChange={(value) => {
                 const next = value as (typeof themeModes)[number];
@@ -211,7 +216,7 @@ export function AccountPanel({ expanded }: PanelProperties) {
                 labelText={
                   <span className={styles.option!}>
                     <Light aria-hidden="true" focusable="false" size={16} />
-                    Light
+                    {t('shell.account.themeLight')}
                   </span>
                 }
                 value="light"
@@ -220,12 +225,15 @@ export function AccountPanel({ expanded }: PanelProperties) {
                 labelText={
                   <span className={styles.option!}>
                     <Asleep aria-hidden="true" focusable="false" size={16} />
-                    Dark
+                    {t('shell.account.themeDark')}
                   </span>
                 }
                 value="dark"
               />
-              <RadioButton labelText="System" value="system" />
+              <RadioButton
+                labelText={t('shell.account.themeSystem')}
+                value="system"
+              />
             </RadioButtonGroup>
           </div>
           <div className={styles.section!}>
@@ -235,7 +243,7 @@ export function AccountPanel({ expanded }: PanelProperties) {
               renderIcon={Logout}
               type="button"
             >
-              Sign out
+              {t('common.signOut')}
             </Button>
           </div>
         </div>

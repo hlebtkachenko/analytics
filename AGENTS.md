@@ -28,7 +28,7 @@ financial, operational, or development data.
 - Database access must go through `@bap/db`.
 - Service JWT and access contracts must go through `@bap/security`.
 - Application UI must import Carbon through `@bap/design-system`.
-- Application icons must use named exports from the exact curated 29-icon
+- Application icons must use named exports from the exact curated 27-icon
   `@bap/design-system/icons` facade, never `@carbon/icons-react` directly.
 - Application tables must reuse the `@bap/design-system/blocks` components
   (`DataGrid`, `TreeDataGrid`, `PivotGrid`); never hand-roll Carbon `DataTable`

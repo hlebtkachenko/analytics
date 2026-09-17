@@ -86,9 +86,11 @@ trail. Give its parent an entry in `childFallbacks`, for example
 `documents: 'Document'`, so an unknown child renders that label instead of the
 raw value. Cover both in `breadcrumb-trail.test.ts`.
 
-Optionally add one entry to `stubResults` in
-`apps/web/src/components/shell/global-search.tsx` so the page is discoverable
-from the header search.
+A whole-app destination in `railDestinations` is already in the header search
+index, which `global-search.tsx` builds from the rail destinations, the
+account's workspaces, and the active workspace's legal entities. A page that is
+not a rail destination needs no search wiring; do not hand-maintain a static
+result list.
 
 ## 5. Add the icon to the facade and to the icon contract
 

@@ -187,7 +187,7 @@ owns the model-provider boundary. The web streaming chat route consumes it
 directly, and the worker entrypoint built from `apps/api` consumes it for
 dataset summarization and embedding.
 
-The client-only `@bap/design-system/icons` entrypoint is an exact 29-export
+The client-only `@bap/design-system/icons` entrypoint is an exact 27-export
 curated named facade, not a mirror of the full upstream icon module. Application
 code imports no `@carbon/icons-react` symbol directly. The generated catalog
 retains the complete installed upstream inventory for upgrade inspection, while
@@ -275,17 +275,20 @@ TypeScript slug contract through migration `20260831.0004`, and migration
 
 Authenticated `app/(product)` routes share a server layout that renders the
 client `ProductShell`, a Carbon UI Shell header branded "Afframe Analytics" over
-a pinned-persistable left icon rail for Organizations, Datasets, Documents, and
+a pinned-persistable left icon rail for Workspaces, Datasets, Documents, and
 Account, and a workspace section shown when an organization is active. The
 account area holds Carbon profile, security, and preferences pages plus the
 access diagnostic at `/account/access`; `/access` redirects there. Header
-actions open single-purpose panels for search, notifications, help, settings,
-workspace switching, and account, the last holding the light/dark/system theme
-control and sign out. The shell is not rendered around identity, invitation, or
-design-system reference routes. The layout owns the single `main-content`
-landmark and renders small Carbon breadcrumbs from the route segments, including
-subordinate organization pages and the inline dataset detail. The complete
-discoverability and state contract is recorded in
+actions open single-purpose panels for search, help, account, and workspace
+switching. The search panel builds a client index from the rail destinations,
+the signed-in account's workspaces, and the active workspace's legal entities.
+The help panel links the public docs, the running version, and an optional
+feedback address. The account panel holds identity, the account links, the
+light/dark/system theme control, and sign out. The shell is not rendered around
+identity, invitation, or design-system reference routes. The layout owns the
+single `main-content` landmark and renders small Carbon breadcrumbs from the
+route segments, including subordinate organization pages and the inline dataset
+detail. The complete discoverability and state contract is recorded in
 [the application route map](docs/application-routes.md).
 
 The separately selected development and operational-proof Mailpit overlay adds 1

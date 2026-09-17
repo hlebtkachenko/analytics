@@ -4,9 +4,7 @@ import {
   Close,
   Enterprise,
   Help,
-  Notification,
   Search,
-  Settings,
   Switcher,
   UserAvatar,
 } from '@bap/design-system/icons';
@@ -43,49 +41,59 @@ import {
 } from './active-organization';
 import Breadcrumbs from './breadcrumbs';
 import GlobalSearch from './global-search';
-import {
-  AccountPanel,
-  HelpPanel,
-  NotificationsPanel,
-  SettingsPanel,
-  SwitcherPanel,
-} from './header-panels';
+import { AccountPanel, HelpPanel, SwitcherPanel } from './header-panels';
 import {
   activeRoute,
-  ASSISTANT_AREA_LABEL,
   railDestinations,
   workspaceSectionItems,
 } from './product-navigation';
 import styles from './product-shell.module.scss';
-import { ToastProvider, useToast } from './toast';
+import { ToastProvider } from './toast';
 import { largeViewportQuery, useMediaQuery } from './use-media-query';
 
-type PanelId =
-  'account' | 'help' | 'notifications' | 'search' | 'settings' | 'switcher';
+type PanelId = 'account' | 'help' | 'search' | 'switcher';
 
 type ProductShellProperties = Readonly<{
   children: ReactNode;
+  feedbackEmail?: string | undefined;
   railPinned: boolean;
+  user: Readonly<{ email: string; name: string }>;
+  version: string;
 }>;
 
 export default function ProductShell({
   children,
+  feedbackEmail,
   railPinned,
+  user,
+  version,
 }: ProductShellProperties) {
   return (
     <ToastProvider>
       <ActiveOrganizationProvider>
-        <ShellChrome railPinned={railPinned}>{children}</ShellChrome>
+        <ShellChrome
+          feedbackEmail={feedbackEmail}
+          railPinned={railPinned}
+          user={user}
+          version={version}
+        >
+          {children}
+        </ShellChrome>
       </ActiveOrganizationProvider>
     </ToastProvider>
   );
 }
 
-function ShellChrome({ children, railPinned }: ProductShellProperties) {
+function ShellChrome({
+  children,
+  feedbackEmail,
+  railPinned,
+  user,
+  version,
+}: ProductShellProperties) {
   const pathname = usePathname();
   const route = activeRoute(pathname);
   const organization = useActiveOrganization();
-  const { notify } = useToast();
   const isLarge = useMediaQuery(largeViewportQuery, true);
   const [pinned, setPinned] = useState(railPinned);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -178,28 +186,19 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
             isCollapsible
             onClick={toggleNavigation}
           />
-          <HeaderName href="/access" prefix="Afframe">
+          <HeaderName href="/organizations" prefix="Afframe">
             Analytics
           </HeaderName>
           <HeaderNavigation aria-label="Areas">
-            <HeaderMenuItem href="/access" isActive>
+            <HeaderMenuItem href="/organizations" isActive>
               Analytics
-            </HeaderMenuItem>
-            <HeaderMenuItem
-              href="#"
-              onClick={(event) => {
-                event.preventDefault();
-                notify({
-                  subtitle: 'The AI Assistant is coming soon.',
-                  title: ASSISTANT_AREA_LABEL,
-                });
-              }}
-            >
-              {ASSISTANT_AREA_LABEL}
             </HeaderMenuItem>
           </HeaderNavigation>
           {searchOpen ? (
-            <GlobalSearch onClose={() => setOpenPanel(null)} />
+            <GlobalSearch
+              activeOrganization={organization}
+              onClose={() => setOpenPanel(null)}
+            />
           ) : null}
           <HeaderGlobalBar>
             <HeaderGlobalAction
@@ -212,15 +211,6 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
               {searchOpen ? <Close size={20} /> : <Search size={20} />}
             </HeaderGlobalAction>
             <HeaderGlobalAction
-              aria-expanded={openPanel === 'notifications'}
-              aria-label="Notifications"
-              isActive={openPanel === 'notifications'}
-              onClick={() => togglePanel('notifications')}
-              tooltipAlignment="end"
-            >
-              <Notification size={20} />
-            </HeaderGlobalAction>
-            <HeaderGlobalAction
               aria-expanded={openPanel === 'help'}
               aria-label="Help"
               isActive={openPanel === 'help'}
@@ -228,15 +218,6 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
               tooltipAlignment="end"
             >
               <Help size={20} />
-            </HeaderGlobalAction>
-            <HeaderGlobalAction
-              aria-expanded={openPanel === 'settings'}
-              aria-label="Settings"
-              isActive={openPanel === 'settings'}
-              onClick={() => togglePanel('settings')}
-              tooltipAlignment="end"
-            >
-              <Settings size={20} />
             </HeaderGlobalAction>
             <HeaderGlobalAction
               aria-expanded={openPanel === 'account'}
@@ -257,10 +238,16 @@ function ShellChrome({ children, railPinned }: ProductShellProperties) {
               <Switcher size={20} />
             </HeaderGlobalAction>
           </HeaderGlobalBar>
-          <NotificationsPanel expanded={openPanel === 'notifications'} />
-          <HelpPanel expanded={openPanel === 'help'} />
-          <SettingsPanel expanded={openPanel === 'settings'} />
-          <AccountPanel expanded={openPanel === 'account'} />
+          <HelpPanel
+            expanded={openPanel === 'help'}
+            feedbackEmail={feedbackEmail}
+            version={version}
+          />
+          <AccountPanel
+            activeOrganization={organization}
+            expanded={openPanel === 'account'}
+            user={user}
+          />
           <SwitcherPanel
             activeOrganization={organization}
             expanded={openPanel === 'switcher'}

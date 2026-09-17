@@ -56,7 +56,7 @@ pixel mismatch cap and a 0.2 pixelmatch threshold. Chromium baselines are
 platform-specific: `chromium-darwin` supports local development and
 `chromium-linux` is refreshed in Playwright 1.62.1 Noble for GitHub Actions.
 
-Design-system icon tests pin the exact 29 curated `@bap/design-system/icons`
+Design-system icon tests pin the exact 27 curated `@bap/design-system/icons`
 exports and their intrinsic glyph behavior at the supported 16, 20, 24, and 32px
 artboards. A separate TypeScript compiler AST contract parses the actual
 production TSX, rejects direct application imports from `@carbon/icons-react`,
@@ -168,17 +168,17 @@ Separate BFF and PostgreSQL assertions prove a valid slug-shaped selector can
 cross the web's syntax check but cannot resolve as an id at the service
 membership boundary. Organization page tests cover every route: membership
 listing, quota-positive and quota-zero creation states, name-to-slug prefill,
-organization navigation, plain native breadcrumbs, explicit-id member and
-invitation reads, permission-based control visibility, and settings name and
-slug prefill that stays read-only for non-owners and for a failed access read.
-The settings page tests also prove that a save calls Better Auth with the
-resolved id and refreshes, a slug change navigates to the new URL, a taken slug
-shows an inline error with the form kept, and that leaving pushes to
-`/organizations` while a sole owner's leave surfaces inline. Action tests prove
-normalized creation preserves ambient session state, invitation accept and
-decline carry only a verified invitation id, and failures expose only fixed
-generic outcomes. The auth before-hook test proves an update revalidates and
-normalizes a submitted slug against the reserved contract.
+organization navigation, explicit-id member and invitation reads,
+permission-based control visibility, and settings name and slug prefill that
+stays read-only for non-owners and for a failed access read. The settings page
+tests also prove that a save calls Better Auth with the resolved id and
+refreshes, a slug change navigates to the new URL, a taken slug shows an inline
+error with the form kept, and that leaving pushes to `/organizations` while a
+sole owner's leave surfaces inline. Action tests prove normalized creation
+preserves ambient session state, invitation accept and decline carry only a
+verified invitation id, and failures expose only fixed generic outcomes. The
+auth before-hook test proves an update revalidates and normalizes a submitted
+slug against the reserved contract.
 
 The identity and organization integration closure adds no runtime path. The
 shared TypeScript/PostgreSQL corpus explicitly enumerates all 16 reserved
@@ -199,8 +199,8 @@ through `bap_auth`.
 
 The live organization browser walk starts from `/organizations`, creates an
 allowed organization, and traverses its overview, members, and settings pages
-through Caddy. It also covers the shared skip link and primary navigation, plain
-native breadcrumbs, native keyboard operation, axe, a mobile viewport, 640
+through Caddy. It also covers the shared skip link and primary navigation, the
+shared shell breadcrumbs, native keyboard operation, axe, a mobile viewport, 640
 CSS-pixel layout-equivalent reflow, horizontal overflow, and page/console
 errors. This is not a browser-zoom assertion. The overview, members, and
 settings pages are Carbon pages under the product shell layout under

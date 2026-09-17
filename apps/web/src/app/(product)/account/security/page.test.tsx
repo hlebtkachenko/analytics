@@ -228,6 +228,7 @@ describe('AccountSecurityPage', () => {
     expect(await screen.findByText('SECRET123')).toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.getByText('Confirm your authenticator')).toBeVisible();
     fireEvent.change(screen.getByLabelText('Verification code'), {
       target: { value: '123456' },
     });

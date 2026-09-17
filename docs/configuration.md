@@ -15,10 +15,15 @@ template. Copy it to an ignored file for local development.
 | `BAP_PUBLIC_ORIGIN`  | Exact Better Auth issuer and public origin | `http://localhost:3000`  |
 | `BAP_MAIL_SENDER`    | From address for transactional mail        | `no-reply@bap.localhost` |
 | `BAP_MAIL_TRANSPORT` | Explicit `resend`, `smtp`, or `log` mode   | `smtp` in development    |
+| `BAP_FEEDBACK_EMAIL` | Optional shell "Send feedback" address     | unset (item hidden)      |
 
 `BAP_PUBLIC_ORIGIN` must be an origin without a path. It is never a
 `NEXT_PUBLIC_*` value. Production accepts HTTPS origins, with plain HTTP
 restricted to local loopback development.
+
+`BAP_FEEDBACK_EMAIL` is read server-side and passed to the shell; it is not a
+`NEXT_PUBLIC_*` build input. When it is unset the help panel omits the "Send
+feedback" item entirely.
 
 The committed template uses production-shaped host and origin values. Override
 `BAP_PUBLIC_HOST` to `http://localhost` for the development Compose stack; its
