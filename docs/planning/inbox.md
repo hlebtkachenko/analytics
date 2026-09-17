@@ -413,9 +413,14 @@ in PostgreSQL.
   revoke for owners; the public intake route with the edge IP bucket; channel
   settings page for API channels; the sniff stays synchronous as in Phase 0.
   Spec: [inbox channels](../../.ai/specs/2026-09-17-inbox-channels.md).
-- Phase 1a-email, stacked on 1a with its own spec: Mailgun EU webhook, the API
-  email route, the email split job, ClamAV service, email channels in the
-  settings page, the Caddy cap for the inbound path.
+- Phase 1a-email, stacked on 1a: the Mailgun webhook
+  `POST /api/inbound/mailgun/mime` bound by the recipient token only, the
+  `email_address` credential kind issuing `in-<token>@<intake domain>`, the API
+  email route storing the `.eml` at position 1, the `split_email_item` job with
+  the channel job payload union, ClamAV (`clamd` on its own `scan` network,
+  `freshclam` on egress) and `app.record_blob_scan`, `inbox_item.sender`, email
+  channels in the settings page, the Caddy cap for the inbound path. Spec:
+  [inbox email channel](../../.ai/specs/2026-09-17-inbox-email-channel.md).
 - Phase 1b, smart: the pull cron skeleton, `list_due_channels` and the orphan
   sweep job; `inbox_rule` with auto-route running as the rule's author,
   `inbox_routing_target`, `inbox_correction`; reply summaries through
