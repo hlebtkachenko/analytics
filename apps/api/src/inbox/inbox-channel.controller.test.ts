@@ -265,9 +265,10 @@ describe('application inbox channel routes', () => {
       role: 'channel',
     });
 
+    // A person pushes with no origin: the prefix names a credential and created_by names the user.
     await as('owner', 'post', itemsPath).send(body).expect(202);
     expect(calls.intakeStructured?.[1]).toMatchObject({
-      origin: 'user_1',
+      origin: null,
       role: 'owner',
       userId: 'user_1',
     });

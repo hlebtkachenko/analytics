@@ -473,12 +473,37 @@ export async function receiveIntake(
       input.organizationId,
     ]);
 
-    // A replayed external id answers the item it already created and writes nothing.
-    if (input.externalId !== null) {
+    // A channel item inherits the entity and the kind hint of its channel; a disabled or foreign channel is not found.
+    // Checked before the replay, so a replay never answers through a disabled or deleted channel.
+    let legalEntityId: string | null = null;
+    let hintKind: string | null = null;
+
+    if (input.channelId !== null) {
+      const channel = await transaction.query<{
+        hint_kind: string | null;
+        legal_entity_id: string | null;
+      }>(
+        `select legal_entity_id, hint_kind
+           from app.inbox_channel
+          where id = $1 and kind = $2 and enabled and deleted_at is null`,
+        [input.channelId, input.channelKind],
+      );
+      const row = channel.rows[0];
+
+      if (row === undefined) {
+        throw new NotFoundException();
+      }
+
+      legalEntityId = row.legal_entity_id;
+      hintKind = row.hint_kind;
+    }
+
+    // A replayed external id answers the item its channel already created and writes nothing.
+    if (input.externalId !== null && input.channelId !== null) {
       const replayed = await transaction.query<{ id: string }>(
         `select id from app.inbox_item
-          where channel_kind = $1 and external_id = $2`,
-        [input.channelKind, input.externalId],
+          where organization_id = $1 and channel_id = $2 and external_id = $3`,
+        [input.organizationId, input.channelId, input.externalId],
       );
       const replayedId = replayed.rows[0]?.id;
 
@@ -501,30 +526,6 @@ export async function receiveIntake(
           item,
         };
       }
-    }
-
-    // A channel item inherits the entity and the kind hint of its channel; a disabled or foreign channel is not found.
-    let legalEntityId: string | null = null;
-    let hintKind: string | null = null;
-
-    if (input.channelId !== null) {
-      const channel = await transaction.query<{
-        hint_kind: string | null;
-        legal_entity_id: string | null;
-      }>(
-        `select legal_entity_id, hint_kind
-           from app.inbox_channel
-          where id = $1 and kind = $2 and enabled and deleted_at is null`,
-        [input.channelId, input.channelKind],
-      );
-      const row = channel.rows[0];
-
-      if (row === undefined) {
-        throw new NotFoundException();
-      }
-
-      legalEntityId = row.legal_entity_id;
-      hintKind = row.hint_kind;
     }
 
     const existing = await transaction.query<{ id: string }>(

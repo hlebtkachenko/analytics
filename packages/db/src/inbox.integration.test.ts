@@ -519,7 +519,7 @@ describe('inbox intake isolation', () => {
       ),
     ).rejects.toMatchObject({
       code: '23505',
-      constraint: 'inbox_item_external_id_key',
+      constraint: 'inbox_item_channel_external_id_key',
     });
     await rootPool.query(
       "delete from app.inbox_item where external_id = 'external-1'",

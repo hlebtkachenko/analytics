@@ -309,6 +309,52 @@ describe('postIntakeItem', () => {
     expect(response.headers.get('cache-control')).toBe('private, no-store');
   });
 
+  it('answers 502 when the upstream refuses the minted channel token', async () => {
+    const error = vi.spyOn(webLogger, 'error');
+    const { pool } = fakePool({ credential: { kind: 'api_token' } });
+
+    for (const status of [401, 403]) {
+      const response = await postIntakeItem(
+        multipartRequest(),
+        dependencies(
+          pool,
+          vi.fn<typeof fetch>(async () => new Response(null, { status })),
+        ),
+      );
+
+      expect(response.status).toBe(502);
+      expect(await response.json()).toEqual({ error: 'service_unavailable' });
+    }
+    expect(error.mock.calls.map(([, context]) => context)).toEqual([
+      { operation: 'postIntakeItem', status: 401 },
+      { operation: 'postIntakeItem', status: 403 },
+    ]);
+  });
+
+  it('copies retry-after from an upstream 429 and from nothing else', async () => {
+    const { pool } = fakePool({ credential: { kind: 'api_token' } });
+    const upstream = (status: number) =>
+      vi.fn<typeof fetch>(
+        async () =>
+          new Response(null, { headers: { 'retry-after': '7' }, status }),
+      );
+
+    const limited = await postIntakeItem(
+      multipartRequest(),
+      dependencies(pool, upstream(429)),
+    );
+    const conflicted = await postIntakeItem(
+      multipartRequest(),
+      dependencies(pool, upstream(409)),
+    );
+
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error: 'rate_limited' });
+    expect(limited.headers.get('retry-after')).toBe('7');
+    expect(conflicted.status).toBe(409);
+    expect(conflicted.headers.get('retry-after')).toBeNull();
+  });
+
   it('answers 502 for an upstream fault and 503 when the lookup fails', async () => {
     const { pool } = fakePool({ credential: { kind: 'api_token' } });
     const faulted = await postIntakeItem(

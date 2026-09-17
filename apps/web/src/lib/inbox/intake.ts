@@ -23,8 +23,6 @@ const INTERNAL_APPLICATION_ORIGIN = 'http://api:3001';
 
 const upstreamErrorCodes: Readonly<Record<number, string>> = {
   400: 'invalid_body',
-  401: 'unauthorized',
-  403: 'forbidden',
   404: 'channel_not_found',
   409: 'conflict',
   413: 'too_large',
@@ -315,15 +313,29 @@ export async function postIntakeItem(
       });
       return jsonResponse({ error: 'service_unavailable' }, 502);
     }
+    // The minted channel token is the web's own; an upstream refusal of it is a platform fault, not the caller's.
+    if (response.status === 401 || response.status === 403) {
+      webLogger.error('intake upstream call failed', {
+        operation: 'postIntakeItem',
+        status: response.status,
+      });
+      return jsonResponse({ error: 'service_unavailable' }, 502);
+    }
     webLogger.info('intake rejected', {
       channelId: credential.channelId,
       operation: 'postIntakeItem',
       status: response.status,
     });
+    const retryAfter =
+      response.status === 429 ? response.headers.get('retry-after') : null;
     return jsonResponse(
       { error: upstreamErrorCodes[response.status] ?? 'intake_rejected' },
       response.status,
-      { 'x-request-id': requestId },
+      {
+        'x-request-id': requestId,
+        // Only the upstream rate limit answer carries a wait; no other upstream header crosses.
+        ...(retryAfter === null ? {} : { 'retry-after': retryAfter }),
+      },
     );
   }
 

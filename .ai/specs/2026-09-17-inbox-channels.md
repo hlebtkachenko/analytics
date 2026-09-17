@@ -15,9 +15,12 @@ intake API. Email intake is a stacked follow-up with its own spec.
 ## Scope
 
 - Migration `20260917.0001_inbox_channels.sql`: `app.inbox_channel`,
-  `inbox_item.channel_id` and `origin`, `auth.inbox_channel_credential` and its
-  definer functions, `app.role_is_channel()`, the policy edits, the `auth.user`
-  CHECK, the `app.erase_user` guard.
+  `inbox_item.channel_id` and `origin`, the per-channel replay index,
+  `auth.inbox_channel_credential` and its definer functions,
+  `app.role_is_channel()`, the policy edits, the `auth.user` CHECK, the
+  `app.erase_user` guard. Migration `20260917.0002_channel_credential_list.sql`:
+  `auth.list_channel_credentials(channel_id uuid)` and the edge rate-limit
+  index.
 - API: `resolveChannelAccess`, `receiveIntake`, the channel items route, channel
   CRUD and credential issue and revoke for owners.
 - Web: the public intake route with the edge IP bucket, the channel settings
@@ -44,19 +47,29 @@ DELETE `app.role_is_owner()`; UPDATE `app.role_can_write()`. A channel is
 soft-deleted (`enabled = false`, `deleted_at`), never removed while items point
 at it. `app.inbox_item` gains `channel_id uuid` (composite FK to
 `inbox_channel(id, organization_id)`, `ON DELETE RESTRICT`, null for uploads)
-and `origin text` (credential display prefix). `auth.inbox_channel_credential`
-as in ADR 0016; the REVOKE of the default `bap_auth` DML follows the CREATE.
+and `origin text`. `origin` is the credential display prefix a channel push
+carries in `x-bap-intake-origin`; a person pushing under a session stores
+`null`, because `created_by` already names the user. The Phase 0 replay key
+`inbox_item_external_id_key` on `(organization_id, channel_kind, external_id)`
+is dropped and replaced by `inbox_item_channel_external_id_key`, unique on
+`(organization_id, channel_id, external_id) WHERE external_id IS NOT NULL AND channel_id IS NOT NULL`:
+a replay is scoped to the channel that asks, and two channels of one
+organization may share an external id. `auth.inbox_channel_credential` as in ADR
+0016; the REVOKE of the default `bap_auth` DML follows the CREATE.
 `auth.issue_channel_credential(channel_id uuid, kind text)` filters the channel
 by `organization_id` from the settings explicitly and asserts
 `current_setting('bap.role', true) = 'owner'`;
 `auth.revoke_channel_credential(credential_id uuid)` reads the same settings;
 both are granted to `bap_api`.
 `auth.resolve_channel_credential(secret_sha256 text)` is granted to `bap_auth`.
-`app.role_is_channel()` beside `role_can_write()`, EXECUTE to `bap_api` and
-`bap_reporting`. The five inbox INSERT policies become
-`... AND (app.role_can_write() OR app.role_is_channel())` with the `created_by`
-check outside the parentheses; `blob_update` is not changed.
-`inbox_item_channel_update`: USING
+`auth.list_channel_credentials(channel_id uuid)` (SECURITY DEFINER, granted to
+`bap_api`) lists the active credentials of a channel by id, kind, prefix and
+timestamps under the same owner and organization checks; `bap_api` holds no
+SELECT on the credential table. `app.role_is_channel()` beside
+`role_can_write()`, EXECUTE to `bap_api` and `bap_reporting`. The five inbox
+INSERT policies become `... AND (app.role_can_write() OR app.role_is_channel())`
+with the `created_by` check outside the parentheses; `blob_update` is not
+changed. `inbox_item_channel_update`: USING
 `organization_id = current_setting('bap.organization_id', true) AND app.role_is_channel() AND status <> 'routed' AND decided_by_kind IS DISTINCT FROM 'user'`,
 WITH CHECK the same plus
 `AND document_id IS NULL AND dataset_id IS NULL AND partner_id IS NULL`. Every
@@ -67,7 +80,7 @@ create; the runner is transactional (`packages/db/src/migrations.ts`) and
 rollback is forward-only by restore.
 `ALTER TABLE auth."user" ADD CONSTRAINT user_id_not_channel_check CHECK (id NOT LIKE 'channel\_%')`
 validates existing rows; `app.erase_user` raises on a `channel_%` subject.
-`DATABASE_MIGRATION_COMPATIBILITY` becomes `20260917.0001`.
+`DATABASE_MIGRATION_COMPATIBILITY` becomes `20260917.0002`.
 
 API. `resolveChannelAccess(request, organizationId, channelId)` in
 `apps/api/src/channel-access.ts` accepts only a `channel_<uuid>` subject whose
@@ -80,7 +93,9 @@ no channel capability. `receiveUpload` in
 `receiveIntake(channelKind, channelId, payloadKind, origin, externalId)` with
 `legalEntityIds: null` for channels and the channel's `legal_entity_id` and
 `hint_kind` copied onto the item; the item lands `received`, or `discarded` on
-an exact-hash duplicate, as in Phase 0.
+an exact-hash duplicate, as in Phase 0. The channel row (`kind`, `enabled`,
+`deleted_at`) is checked before the replay lookup, so a disabled or deleted
+channel answers 404 even for a known external id.
 `POST /v1/organizations/:organizationId/inbox/channels/:channelId/items` accepts
 one multipart file or a JSON structured payload (`payload_kind` `file` or
 `structured`, `external_id` required for structured) under a `ChannelAccess` or

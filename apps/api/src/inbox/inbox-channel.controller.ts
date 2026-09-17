@@ -405,7 +405,8 @@ export class InboxChannelController {
       throw new ForbiddenException();
     }
 
-    return { origin: access.tenant.userId, tenant: access.tenant };
+    // Origin names a credential prefix, never a person; the item's created_by already records the user.
+    return { origin: null, tenant: access.tenant };
   }
 
   private async channel(

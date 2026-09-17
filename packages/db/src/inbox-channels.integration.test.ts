@@ -37,6 +37,7 @@ const datasetId = '00000000-0000-4000-8000-0000000000d1';
 const channelId = '00000000-0000-4000-8000-0000000000c1';
 const disabledChannelId = '00000000-0000-4000-8000-0000000000c2';
 const foreignChannelId = '00000000-0000-4000-8000-0000000000c3';
+const secondChannelId = '00000000-0000-4000-8000-0000000000c4';
 const routedItemId = '00000000-0000-4000-8000-000000001001';
 const decidedItemId = '00000000-0000-4000-8000-000000001002';
 const channelItemId = '00000000-0000-4000-8000-000000001003';
@@ -888,6 +889,52 @@ describe('inbox channel principal', () => {
       code: '23514',
       constraint: 'inbox_channel_deleted_disabled_check',
     });
+  });
+
+  it('keys the replay per channel, so two channels of one organization may share an external id', async () => {
+    const indexes = await rootPool.query<{ indexdef: string }>(
+      `select indexdef from pg_indexes
+        where schemaname = 'app' and tablename = 'inbox_item' and indexname like '%external_id%'`,
+    );
+    expect(indexes.rows.map((row) => row.indexdef)).toEqual([
+      'CREATE UNIQUE INDEX inbox_item_channel_external_id_key ON app.inbox_item USING btree (organization_id, channel_id, external_id) WHERE ((external_id IS NOT NULL) AND (channel_id IS NOT NULL))',
+    ]);
+
+    await asTenant(apiPool, orgOneOwner, (transaction) =>
+      transaction.query(
+        `insert into app.inbox_channel (id, organization_id, kind, name, created_by)
+         values ($1, 'org-1', 'api', 'Placeholder second push', 'user-1')`,
+        [secondChannelId],
+      ),
+    );
+    for (const target of [channelId, secondChannelId]) {
+      await asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.inbox_item (organization_id, channel_kind, channel_id, payload_kind, external_id, created_by)
+           values ('org-1', 'api', $1, 'structured', 'shared-1', 'user-1')`,
+          [target],
+        ),
+      );
+    }
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.inbox_item (organization_id, channel_kind, channel_id, payload_kind, external_id, created_by)
+           values ('org-1', 'api', $1, 'structured', 'shared-1', 'user-1')`,
+          [secondChannelId],
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: '23505',
+      constraint: 'inbox_item_channel_external_id_key',
+    });
+
+    await rootPool.query(
+      "delete from app.inbox_item where external_id = 'shared-1'",
+    );
+    await rootPool.query('delete from app.inbox_channel where id = $1', [
+      secondChannelId,
+    ]);
   });
 
   it('keeps the channel namespace out of identities and out of erasure', async () => {

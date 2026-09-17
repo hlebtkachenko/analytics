@@ -86,7 +86,7 @@ export const credentialIdentifierSchema = z
   .trim()
   .toLowerCase()
   .uuid();
-// The caller's own idempotency key: one item per (organization, channel kind, external id).
+// The caller's own idempotency key: one item per (organization, channel, external id).
 export const externalIdSchema = z.string().trim().min(1).max(255);
 export const tokenSchema = z.string().regex(TOKEN_PATTERN);
 export const inboxItemStatusSchema = z.enum(INBOX_ITEM_STATUSES);

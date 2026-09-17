@@ -205,6 +205,45 @@ describe('InboxChannelsPage', () => {
     });
   });
 
+  it('marks an invalid kind hint instead of dropping it', async () => {
+    const fetchMock = respondWith([]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage();
+    const form = await screen.findByRole('form', { name: 'New API channel' });
+    fireEvent.change(within(form).getByLabelText('Name'), {
+      target: { value: 'Placeholder push' },
+    });
+    fireEvent.change(within(form).getByLabelText('Kind hint'), {
+      target: { value: 'Not A Token' },
+    });
+    fireEvent.click(
+      within(form).getByRole('button', { name: 'Create channel' }),
+    );
+
+    expect(within(form).getByLabelText('Kind hint')).toBeInvalid();
+    expect(
+      within(form).getByText(/A kind hint is lowercase letters/),
+    ).toBeInTheDocument();
+    expect(calls(fetchMock, 'POST')).toEqual([]);
+
+    // A corrected hint clears the mark and the request carries it.
+    fireEvent.change(within(form).getByLabelText('Kind hint'), {
+      target: { value: 'invoice' },
+    });
+    fireEvent.click(
+      within(form).getByRole('button', { name: 'Create channel' }),
+    );
+
+    await vi.waitFor(() => {
+      expect(calls(fetchMock, 'POST')).toHaveLength(1);
+    });
+    expect(within(form).getByLabelText('Kind hint')).toBeValid();
+    expect(JSON.parse(String(calls(fetchMock, 'POST')[0]?.[1]))).toMatchObject({
+      hintKind: 'invoice',
+    });
+  });
+
   it('shows an issued secret once with the curl example, then disables and deletes', async () => {
     const fetchMock = respondWith([channel]);
     vi.stubGlobal('fetch', fetchMock);

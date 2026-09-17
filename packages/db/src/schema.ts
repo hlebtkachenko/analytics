@@ -501,9 +501,11 @@ export const inboxItems = appSchema.table(
       table.receivedAt,
       table.id,
     ),
-    uniqueIndex('inbox_item_external_id_key')
-      .on(table.organizationId, table.channelKind, table.externalId)
-      .where(sql`${table.externalId} is not null`),
+    uniqueIndex('inbox_item_channel_external_id_key')
+      .on(table.organizationId, table.channelId, table.externalId)
+      .where(
+        sql`${table.externalId} is not null and ${table.channelId} is not null`,
+      ),
   ],
 );
 

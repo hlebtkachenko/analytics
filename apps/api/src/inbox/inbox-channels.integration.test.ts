@@ -487,6 +487,57 @@ describe('inbox channels', () => {
     ]);
   });
 
+  it('keys the replay per channel: another channel with the same external id gets its own item', async () => {
+    const second = await service.createChannel({
+      ...owner,
+      body: { kind: 'api', name: 'Second ERP push' },
+    });
+    const secondChannelId = second?.id ?? '';
+    const tenant = channelTenant('org-1', secondChannelId);
+
+    const response = await service.intakeStructured({
+      ...tenant,
+      channelId: secondChannelId,
+      externalId: 'erp-2',
+      origin: null,
+      payload: { total: '1.00' },
+    });
+    expect(response.itemId).not.toBe(structuredItemId);
+    expect(
+      (
+        await readItem(apiPool, {
+          ...owner,
+          ...allEntities,
+          itemId: response.itemId,
+        })
+      )?.item,
+    ).toMatchObject({ channelId: secondChannelId });
+
+    // The replay is answered by the item of the channel that asks, not the first one with that id.
+    const replayed = await service.intakeStructured({
+      ...tenant,
+      channelId: secondChannelId,
+      externalId: 'erp-2',
+      origin: null,
+      payload: { total: '2.00' },
+    });
+    expect(replayed).toEqual(response);
+    expect(
+      (await service.readChannel({ ...owner, channelId }))?.itemCount,
+    ).toBe(2);
+    expect(
+      (await service.readChannel({ ...owner, channelId: secondChannelId }))
+        ?.itemCount,
+    ).toBe(1);
+
+    // Soft deleted so the later list assertions see the first channel only.
+    await service.updateChannel({
+      ...owner,
+      body: { deleted: true, enabled: false },
+      channelId: secondChannelId,
+    });
+  });
+
   it('revokes a credential so the web lookup finds nothing, only from its own channel', async () => {
     expect(
       await service.revokeCredential({
@@ -546,6 +597,16 @@ describe('inbox channels', () => {
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
     expect(await readdir(store.temporaryDirectory())).toEqual([]);
+    // A replay does not bypass the channel state: the known external id is refused as well.
+    await expect(
+      service.intakeStructured({
+        ...channelTenant('org-1', channelId),
+        channelId,
+        externalId: 'erp-2',
+        origin: null,
+        payload: { total: '10.00' },
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
 
     const deleted = await service.updateChannel({
       ...owner,

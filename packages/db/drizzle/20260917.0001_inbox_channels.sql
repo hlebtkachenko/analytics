@@ -85,6 +85,12 @@ CREATE INDEX IF NOT EXISTS inbox_item_channel_idx
   ON app.inbox_item(channel_id)
   WHERE channel_id IS NOT NULL;
 
+-- Replay is scoped per channel, not per kind: two channels of one organization may share an external id.
+DROP INDEX IF EXISTS app.inbox_item_external_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS inbox_item_channel_external_id_key
+  ON app.inbox_item(organization_id, channel_id, external_id)
+  WHERE external_id IS NOT NULL AND channel_id IS NOT NULL;
+
 -- The secret of a channel: a hash and a display prefix, never the plain value.
 CREATE TABLE IF NOT EXISTS auth.inbox_channel_credential (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

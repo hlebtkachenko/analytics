@@ -470,6 +470,8 @@ export const resources = {
         enabled: 'Enabled',
         entityAny: 'Any legal entity',
         error: 'The channels could not be loaded.',
+        hintKindInvalid:
+          'A kind hint is lowercase letters, digits and underscores, up to 64 characters, starting with a letter.',
         hintKindNone: 'None',
         hintKindPlaceholder: 'e.g. invoice',
         issueCredential: 'Issue credential',

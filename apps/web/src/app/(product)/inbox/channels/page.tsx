@@ -78,6 +78,7 @@ export default function InboxChannelsPage() {
   const [hintKind, setHintKind] = useState('');
   const [createFailed, setCreateFailed] = useState(false);
   const [nameInvalid, setNameInvalid] = useState(false);
+  const [hintKindInvalid, setHintKindInvalid] = useState(false);
   const [writeFailed, setWriteFailed] = useState(false);
   const [issueFailed, setIssueFailed] = useState(false);
   const [issued, setIssued] = useState<IssueInboxChannelCredentialResponse>();
@@ -125,18 +126,22 @@ export default function InboxChannelsPage() {
 
   async function createChannel() {
     const trimmedName = name.trim();
-    const parsedHint = tokenSchema.safeParse(hintKind.trim());
-    if (trimmedName.length === 0) {
-      setNameInvalid(true);
+    const trimmedHint = hintKind.trim();
+    // An empty hint is no hint; a non-empty one must be a token, exactly as the API checks it.
+    const parsedHint =
+      trimmedHint.length === 0 ? null : tokenSchema.safeParse(trimmedHint);
+    const hintRejected = parsedHint !== null && !parsedHint.success;
+    setNameInvalid(trimmedName.length === 0);
+    setHintKindInvalid(hintRejected);
+    if (trimmedName.length === 0 || hintRejected) {
       return;
     }
-    setNameInvalid(false);
     setCreateFailed(false);
     try {
       await sendJson(
         {
           body: {
-            ...(parsedHint.success ? { hintKind: parsedHint.data } : {}),
+            ...(parsedHint === null ? {} : { hintKind: parsedHint.data }),
             kind: 'api',
             ...(legalEntityId.length === 0 ? {} : { legalEntityId }),
             name: trimmedName,
@@ -448,6 +453,8 @@ export default function InboxChannelsPage() {
             </Select>
             <TextInput
               id="inbox-channel-hint-kind"
+              invalid={hintKindInvalid}
+              invalidText={t('inboxChannels.hintKindInvalid')}
               labelText={t('inboxChannels.columnHintKind')}
               onChange={(event) => {
                 setHintKind(event.target.value);
