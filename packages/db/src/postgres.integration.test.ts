@@ -1637,6 +1637,16 @@ describe('PostgreSQL 18 isolation', () => {
         table_name: 'inbox_channel',
       },
       {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_correction',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_correction',
+      },
+      {
         column_name: 'actor_user_id',
         privilege_type: 'SELECT',
         table_name: 'inbox_event',
@@ -1715,6 +1725,66 @@ describe('PostgreSQL 18 isolation', () => {
         column_name: 'updated_by',
         privilege_type: 'UPDATE',
         table_name: 'inbox_routing_target',
+      },
+      {
+        column_name: 'auto_route',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'deleted_at',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'deleted_at',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'enabled',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'priority',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'set_assignee_id',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'set_assignee_id',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'set_document_kind',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'set_legal_entity_id',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'set_partner_id',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_rule',
       },
       {
         column_name: 'created_by',
