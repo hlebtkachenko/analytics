@@ -406,12 +406,18 @@ in PostgreSQL.
   `/inbox` page, rail entry, reserved slug. No channels table, no rules, no
   ClamAV. Spec:
   [inbox foundation](../../.ai/specs/2026-09-16-inbox-foundation.md).
-- Phase 1a, channels: ADR 0016; `inbox_channel` and the channel credential
-  table; email-in (Mailgun EU) and the intake API under a channel token; the
-  post-commit understand job, the email split job, the pull cron skeleton and
-  the orphan sweep job; ClamAV service; channel settings page. Spec:
+- Phase 1a, channels: ADR 0016; the channel principal, `inbox_channel` and the
+  intake API credential table with its definer functions; `resolveChannelAccess`
+  and `receiveIntake`; the channel items route under a channel token; channel
+  CRUD and credential issue and revoke for owners; the public intake route with
+  the edge IP bucket; channel settings page for API channels; the sniff stays
+  synchronous as in Phase 0. Spec:
   [inbox channels](../../.ai/specs/2026-09-17-inbox-channels.md).
-- Phase 1b, smart: `inbox_rule` with auto-route running as the rule's author,
+- Phase 1a-email, stacked on 1a with its own spec: Mailgun EU webhook, the API
+  email route, the email split job, ClamAV service, email channels in the
+  settings page, the Caddy cap for the inbound path.
+- Phase 1b, smart: the pull cron skeleton, `list_due_channels` and the orphan
+  sweep job; `inbox_rule` with auto-route running as the rule's author,
   `inbox_routing_target`, `inbox_correction`; reply summaries through
   `@bap/mail`; per-organization quota setting; AI extraction with
   per-organization opt-in; ARES enrichment; fingerprint duplicates; Split
