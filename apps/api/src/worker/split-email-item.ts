@@ -14,7 +14,10 @@ import { z } from 'zod';
 import { blobStorageKey } from '../blobs/blob-store.js';
 import type { BlobStore } from '../blobs/blob-store.js';
 import { channelTenant } from '../channel-access.js';
-import { SPLIT_EMAIL_ITEM_QUEUE } from '../inbox/contract.js';
+import {
+  MEDIA_TYPE_PATTERN,
+  SPLIT_EMAIL_ITEM_QUEUE,
+} from '../inbox/contract.js';
 import {
   appendEvent,
   insertExtraction,
@@ -95,10 +98,43 @@ interface ParentItem {
 // One part cut out of the message, staged on disk with what the intake row needs.
 interface StagedPart {
   byteSize: number;
+  // A cid-referenced inline image: stored and scanned like any part, then discarded as decoration.
+  decorative: boolean;
+  // Null when the sniff decides; text and decoration carry their type from the start.
+  mediaType: string | null;
   originalFilename: string | null;
   payloadKind: 'file' | 'text';
   sha256: string;
   temporaryPath: string;
+}
+
+const HTML_ENTITIES: Record<string, string> = {
+  '&#39;': "'",
+  '&amp;': '&',
+  '&gt;': '>',
+  '&lt;': '<',
+  '&quot;': '"',
+};
+
+// The text of an HTML-only message: a bounded tag strip, never a render; only the five basic entities decode.
+export function textFromHtml(html: string): string {
+  return html
+    .slice(0, MAX_HTML_LENGTH_TO_PARSE)
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/&(?:amp|lt|gt|quot|#39);/g, (entity) => HTML_ENTITIES[entity]!)
+    .trim();
+}
+
+function bodyText(mail: ParsedMail): string {
+  const text = mail.text?.trim() ?? '';
+
+  if (text.length > 0 || typeof mail.html !== 'string') {
+    return text;
+  }
+
+  return textFromHtml(mail.html);
 }
 
 type SplitOutcome =
@@ -220,8 +256,10 @@ async function nestingDepth(mail: ParsedMail, depth: number): Promise<number> {
 async function stage(
   blobs: BlobStore,
   bytes: Buffer,
-  payloadKind: StagedPart['payloadKind'],
-  originalFilename: string | null,
+  part: Pick<
+    StagedPart,
+    'decorative' | 'mediaType' | 'originalFilename' | 'payloadKind'
+  >,
 ): Promise<StagedPart> {
   const temporaryPath = join(
     blobs.temporaryDirectory(),
@@ -230,12 +268,19 @@ async function stage(
   await writeFile(temporaryPath, bytes, { flag: 'wx' });
 
   return {
+    ...part,
     byteSize: bytes.length,
-    originalFilename,
-    payloadKind,
     sha256: await sha256Of(temporaryPath),
     temporaryPath,
   };
+}
+
+// A decorative image is not sniffed; its declared image type is kept when well-formed, anything else is opaque bytes.
+function declaredImageType(contentType: string): string {
+  const declared = contentType.trim().toLowerCase();
+  return declared.startsWith('image/') && MEDIA_TYPE_PATTERN.test(declared)
+    ? declared
+    : 'application/octet-stream';
 }
 
 // Display metadata only, the same rule as an upload: no separator, no control character and no bidi override.
@@ -425,7 +470,16 @@ async function splitParts(
   mail: ParsedMail,
   context: { sender: string | null; staged: string[] },
 ): Promise<SplitOutcome> {
-  if ((await nestingDepth(mail, 0)) > MAX_NESTING_DEPTH) {
+  let depth: number;
+
+  // A nested message that does not parse is a parse failure of the whole, the same as its outer envelope.
+  try {
+    depth = await nestingDepth(mail, 0);
+  } catch {
+    throw new SplitEmailError('parse_failed');
+  }
+
+  if (depth > MAX_NESTING_DEPTH) {
     return { kind: 'too_large' };
   }
 
@@ -451,30 +505,39 @@ async function splitParts(
       continue;
     }
 
-    const part = await stage(
-      options.blobs,
-      attachment.content,
-      'file',
-      displayFilename(attachment.filename),
-    );
+    const decorative = attachment.related === true;
+    const part = await stage(options.blobs, attachment.content, {
+      decorative,
+      mediaType: decorative ? declaredImageType(attachment.contentType) : null,
+      originalFilename: displayFilename(attachment.filename),
+      payloadKind: 'file',
+    });
     context.staged.push(part.temporaryPath);
     parts.push(part);
   }
 
-  if (parts.length === 0) {
-    const text = Buffer.from(mail.text?.trim() ?? '', 'utf8');
+  // Decoration alone is no content: the body text is still the review item when every part is a cid image.
+  if (parts.every((part) => part.decorative)) {
+    const text = Buffer.from(bodyText(mail), 'utf8');
 
     if (text.length > MAX_TEXT_BYTES) {
       return { kind: 'too_large' };
     }
 
-    if (text.length === 0) {
+    if (text.length === 0 && parts.length === 0) {
       return { kind: 'empty' };
     }
 
-    const part = await stage(options.blobs, text, 'text', null);
-    context.staged.push(part.temporaryPath);
-    parts.push(part);
+    if (text.length > 0) {
+      const part = await stage(options.blobs, text, {
+        decorative: false,
+        mediaType: 'text/plain',
+        originalFilename: null,
+        payloadKind: 'text',
+      });
+      context.staged.push(part.temporaryPath);
+      parts.push(part);
+    }
   }
 
   return createChildren(options, payload, tenant, parent, parts, {
@@ -523,12 +586,20 @@ async function createChildren(
       throw new SplitEmailError('scan_failed');
     }
 
-    const sniffed = await sniffFile(part.temporaryPath, part.byteSize);
-    const extraction: ExtractionRecord = {
-      output: toProviderOutput(sniffed),
-      provider: SNIFF_PROVIDER,
-      providerVersion: SNIFF_PROVIDER_VERSION,
-    };
+    // A decorative image is never sniffed: it is discarded whatever its bytes say.
+    const sniffed = part.decorative
+      ? null
+      : await sniffFile(part.temporaryPath, part.byteSize);
+    const mediaType =
+      part.mediaType ?? sniffed?.mediaType ?? 'application/octet-stream';
+    const extraction: ExtractionRecord | null =
+      sniffed === null
+        ? null
+        : {
+            output: toProviderOutput(sniffed),
+            provider: SNIFF_PROVIDER,
+            providerVersion: SNIFF_PROVIDER_VERSION,
+          };
     await runTenantJob({
       data: payload,
       pool: options.pool,
@@ -542,8 +613,7 @@ async function createChildren(
             channelKind: 'email',
             externalId,
             legalEntityIds: null,
-            mediaType:
-              part.payloadKind === 'text' ? 'text/plain' : sniffed.mediaType,
+            mediaType,
             origin: parent.origin,
             originalFilename: part.originalFilename,
             parentItemId: payload.itemId,
@@ -589,6 +659,18 @@ async function createChildren(
             result.item.id,
             'discarded',
             'policy_rejected',
+          );
+          return;
+        }
+
+        if (extraction === null) {
+          await setStatus(transaction, result.item.id, 'discarded');
+          await appendEvent(
+            transaction,
+            tenant,
+            result.item.id,
+            'discarded',
+            'decorative_image',
           );
           return;
         }

@@ -85,28 +85,6 @@ export function inboxBlobInlinePath(
   return `${inboxPath(organizationId)}/blobs/${encodeURIComponent(blobId)}/inline`;
 }
 
-// A quarantined blob answers 409 on both blob routes; the probe reads the status and drops any body.
-export async function isBlobQuarantined(
-  organizationId: string,
-  blobId: string,
-  signal: AbortSignal,
-): Promise<boolean> {
-  const response = await fetch(inboxBlobDownloadPath(organizationId, blobId), {
-    cache: 'no-store',
-    signal,
-  });
-  if (response.status !== 409) {
-    await response.body?.cancel();
-    return false;
-  }
-  const payload: unknown = await response.json();
-  return (
-    typeof payload === 'object' &&
-    payload !== null &&
-    (payload as { error?: unknown }).error === 'blob_quarantined'
-  );
-}
-
 export type UploadOutcome =
   | Readonly<{ itemId: string; kind: 'created' }>
   | Readonly<{ duplicateOfItemId: string; itemId: string; kind: 'duplicate' }>

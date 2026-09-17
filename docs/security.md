@@ -487,17 +487,18 @@ inbound email adds a second, public boundary, `POST /api/inbound/mailgun/mime`
 in the web service. The poster is trusted only after its signature verifies:
 HMAC-SHA256 of `timestamp` concatenated with `token`, keyed with
 `BAP_MAILGUN_WEBHOOK_SIGNING_KEY_FILE`, compared with `timingSafeEqual`, and a
-300 second window on `timestamp`. The edge bucket `bap-edge:inbound:` is
-consumed on a signature failure only, not on a signed miss, so a valid poster is
-never rate-limited by an attacker's guesses. Binding is the recipient token
-alone: the local part `in-<32 hex>` is required, hashed with sha256 of its
-lowercased form, and resolved through `auth.resolve_channel_credential`; an
-unknown recipient or a credential of the wrong kind answers 406 so Mailgun stops
-retrying, and every permanent refusal on this route answers 406 for the same
-reason. An in-flight semaphore answers 503 past `BAP_INBOUND_MAX_IN_FLIGHT` so a
-burst degrades instead of queuing unbounded work. `From`, `To`, subject and body
-bind nothing; the sender is `MAIL FROM` only, unverified, and stored for
-display, never for routing.
+300 second window on `timestamp`. A signature failure, including a body that is
+not a form, answers 401 and consumes the edge bucket `bap-edge:inbound:`; a
+signed miss never consumes it, so a valid poster is never rate-limited by an
+attacker's guesses. Binding is the recipient token alone: the local part
+`in-<32 hex>` is required, hashed with sha256 of its lowercased form, and
+resolved through `auth.resolve_channel_credential`; the domain is never checked.
+An unknown recipient or a credential of the wrong kind answers 406 so Mailgun
+stops retrying, and every permanent refusal of a signed request on this route
+answers 406 for the same reason. An in-flight semaphore answers 503 past
+`BAP_INBOUND_MAX_IN_FLIGHT` so a burst degrades instead of queuing unbounded
+work. `From`, `To`, subject and body bind nothing; the sender stored for display
+is the parsed `From` header address, unverified, never used for routing.
 
 Once bound, the worker parses hostile MIME in-process under the channel context:
 mailparser caps enforced in code (20 attachments, 25 MB per attachment, a

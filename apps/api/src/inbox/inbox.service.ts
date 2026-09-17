@@ -15,6 +15,7 @@ import {
   Logger,
   NotFoundException,
   PayloadTooLargeException,
+  ServiceUnavailableException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
 import type { InboxChannelKind, TenantContext } from '@bap/db';
@@ -415,10 +416,11 @@ export class InboxService {
           organizationId: input.organizationId,
         });
       } catch {
-        // The item is stored and answered; a recovery of the enqueue is an open question of the spec.
+        // The item stays received; 503 makes the poster retry and the replay enqueues it again.
         this.logger.error(
           `Enqueue of split_email_item failed for item ${result.item.id} of channel ${input.channelId}.`,
         );
+        throw new ServiceUnavailableException();
       }
     }
 

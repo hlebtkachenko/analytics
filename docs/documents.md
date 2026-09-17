@@ -322,26 +322,28 @@ in the web service, which forwards a signature-verified message as raw MIME to
 the email route above with a `ChannelAccess` only; a `TenantAccess` answers 403
 there, unlike the items route. The stored `.eml` enqueues `split_email_item`,
 which parses the MIME, scans every new blob through `clamd`, and splits
-attachments into child items. `inboxItemSchema` gains `sender`, the envelope
-`MAIL FROM` as the worker parsed it from the MIME, null for a manual upload or
-before the split runs; it is display-only and never used for routing. An email
-channel's credential issue response carries
-`secret: intakeToken | intakeEmailAddress`: an API channel's `secret` is the
-bearer token shown once, an email channel's is the issued address itself
-(`in-<32 hex>@<intake domain>`), stored plain on `inbox_channel.email_address`
-because the owner must read it back to hand it out.
+attachments into child items. `inboxItemSchema` gains `sender`, the parsed
+`From` header address as the worker read it from the MIME (not `MAIL FROM`),
+unverified, null for a manual upload or before the split runs; it is
+display-only and never used for routing. An email channel's credential issue
+response carries `secret: intakeToken | intakeEmailAddress`: an API channel's
+`secret` is the bearer token shown once, an email channel's is the issued
+address itself (`in-<32 hex>@<intake domain>`), stored plain on
+`inbox_channel.email_address` because the owner must read it back to hand it
+out.
 
 The channel items route accepts a channel's own resource JWT, minted only by the
 public intake route below, or a person's `TenantAccess` with `manageDocuments`
 and unrestricted entity scope; every other channel route requires a person and
-refuses a `channel_` subject with 403. `POST /api/intake/v1/items` is the one
-organization-less, session-less route in the whole platform: it runs in the web
-service behind Caddy, checks an edge IP bucket before it resolves the bearer
-against `auth.resolve_channel_credential`, and mints the channel's JWT
-server-side before forwarding to the channel items route above. Its error
-vocabulary is `unauthorized`, `rate_limited`, `too_large`,
-`unsupported_media_type`, `channel_not_found`, `conflict`, `intake_rejected`,
-`service_unavailable`, and `intake_unavailable`.
+refuses a `channel_` subject with 403. `POST /api/intake/v1/items` and
+`POST /api/inbound/mailgun/mime` are the two organization-less, session-less
+routes in the whole platform. The items route runs in the web service behind
+Caddy, checks an edge IP bucket before it resolves the bearer against
+`auth.resolve_channel_credential`, and mints the channel's JWT server-side
+before forwarding to the channel items route above. Its error vocabulary is
+`unauthorized`, `rate_limited`, `too_large`, `unsupported_media_type`,
+`channel_not_found`, `conflict`, `intake_rejected`, `service_unavailable`, and
+`intake_unavailable`.
 
 ## BFF and page routes
 

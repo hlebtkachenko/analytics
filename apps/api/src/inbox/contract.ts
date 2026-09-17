@@ -1,4 +1,5 @@
 import {
+  blobScanStatuses,
   inboxChannelKinds,
   inboxChannelKindsForChannels,
   inboxDecidedByKinds,
@@ -28,6 +29,7 @@ export const INBOX_PAYLOAD_KINDS = inboxPayloadKinds;
 export const INBOX_DECIDED_BY_KINDS = inboxDecidedByKinds;
 export const INBOX_EVENT_KINDS = inboxEventKinds;
 export const INBOX_EVENT_REASONS = inboxEventReasons;
+export const BLOB_SCAN_STATUSES = blobScanStatuses;
 export const INBOX_DISCARD_REASONS = inboxDiscardReasons;
 export const INBOX_UNPROCESSABLE_REASONS = inboxUnprocessableReasons;
 
@@ -167,6 +169,8 @@ export const inboxItemFileSchema = z
     mediaType: z.string().regex(MEDIA_TYPE_PATTERN),
     originalFilename: z.string().min(1).max(255).nullable(),
     position: z.number().int().min(1),
+    // The verdict the blob routes enforce: infected or failed bytes are quarantined and never served.
+    scanStatus: z.enum(BLOB_SCAN_STATUSES),
     sha256: z.string().regex(SHA256_PATTERN),
   })
   .strict();
@@ -651,6 +655,7 @@ export const inboxItemFileOpenApiSchema = {
       type: 'string',
     },
     position: { minimum: 1, type: 'integer' },
+    scanStatus: { enum: [...BLOB_SCAN_STATUSES], type: 'string' },
     sha256: { pattern: SHA256_PATTERN.source, type: 'string' },
   },
   required: [
@@ -659,6 +664,7 @@ export const inboxItemFileOpenApiSchema = {
     'mediaType',
     'originalFilename',
     'position',
+    'scanStatus',
     'sha256',
   ],
   type: 'object',

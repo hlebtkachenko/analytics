@@ -4,7 +4,7 @@ import type { Readable } from 'node:stream';
 
 // Mirrors StreamMaxLength in infrastructure/clamav/clamd.conf: a larger stream is refused here instead of mid-upload.
 export const DEFAULT_STREAM_MAX_BYTES = 30_000_000;
-export const DEFAULT_SCAN_TIMEOUT_MS = 60_000;
+export const DEFAULT_SCAN_TIMEOUT_MS = 90_000;
 // clamd reads INSTREAM in length-prefixed chunks; 64 KiB keeps the socket busy without a large resident buffer.
 const CHUNK_BYTES = 65_536;
 const MAX_REPLY_BYTES = 4_096;

@@ -12,7 +12,7 @@ ALTER TABLE app.inbox_item
 COMMENT ON COLUMN app.inbox_item.origin IS
   'The credential display prefix for every channel kind: who pushed, never a sender address.';
 COMMENT ON COLUMN app.inbox_item.sender IS
-  'MAIL FROM of the parsed MIME as reported by the provider, unverified, display only.';
+  'The parsed From header address of the MIME, unverified, display only, never MAIL FROM.';
 
 -- The intake domain is shared by every organization, so an address is unique across the platform, not per tenant.
 CREATE UNIQUE INDEX IF NOT EXISTS inbox_channel_email_address_key

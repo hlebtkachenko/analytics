@@ -1614,6 +1614,7 @@ const inboxFile = {
   mediaType: 'application/pdf',
   originalFilename: 'placeholder.pdf',
   position: 1,
+  scanStatus: 'clean',
   sha256: 'a'.repeat(64),
 };
 

@@ -10,6 +10,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
   PayloadTooLargeException,
+  ServiceUnavailableException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
 import type { BlobScanStatus } from '@bap/db';
@@ -183,7 +184,7 @@ describe('InboxService', () => {
     readBlob: vi.fn(async (input: { blobId: string }) =>
       storedFile === null || input.blobId !== storedFile.blobId
         ? null
-        : { id: storedFile.blobId, scanStatus: blobScanStatus, ...storedFile },
+        : { ...storedFile, id: storedFile.blobId, scanStatus: blobScanStatus },
     ),
     readChannel: vi.fn(),
     readChannelPrincipal: vi.fn(),
@@ -303,6 +304,7 @@ describe('InboxService', () => {
       mediaType: 'application/pdf',
       originalFilename: 'placeholder.pdf',
       position: 1,
+      scanStatus: 'clean',
       sha256: input?.sha256 ?? '',
       storageKey: input?.storageKey ?? '',
     };
@@ -557,7 +559,7 @@ describe('InboxService', () => {
     expect(await readdir(store.temporaryDirectory())).toEqual([]);
   });
 
-  it('enqueues nothing for an email replay already past received and survives a queue failure', async () => {
+  it('enqueues nothing for an email replay already past received', async () => {
     const bytes = Buffer.from('Subject: y\r\n\r\n');
     // The stub answers the default needs_review item: a replay of a split message.
     await service.intakeEmail({
@@ -569,28 +571,59 @@ describe('InboxService', () => {
       temporaryPath: await stage(bytes, 'email-2'),
     });
     expect(enqueued).toEqual([]);
+  });
+
+  it('answers 503 when the enqueue after the commit fails and enqueues on the replay', async () => {
+    const bytes = Buffer.from('Subject: z\r\n\r\n');
+    const receivedItem = async (input: ReceiveIntakeInput) => {
+      received.push(input);
+      await input.persist();
+      return {
+        duplicateOfItemId: null,
+        files: [],
+        item: { ...item, status: 'received' as const },
+        replayed: false,
+      };
+    };
 
     enqueueFails = true;
-    repository.receiveIntake.mockImplementationOnce(
-      async (input: ReceiveIntakeInput) => {
-        await input.persist();
-        return {
-          duplicateOfItemId: null,
-          files: [],
-          item: { ...item, status: 'received' as const },
-          replayed: false,
-        };
-      },
-    );
+    repository.receiveIntake.mockImplementationOnce(receivedItem);
+    await expect(
+      service.intakeEmail({
+        ...channelTenant,
+        channelId: CHANNEL_ID,
+        externalId: 'mailgun-token-3',
+        origin: null,
+        size: bytes.length,
+        temporaryPath: await stage(bytes, 'email-3'),
+      }),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    // The item was committed as received before the enqueue, so nothing is rolled back.
+    expect(received).toHaveLength(1);
+    expect(enqueued).toEqual([]);
+
+    // The poster retries: the replay answers the same received item and enqueues it this time.
+    enqueueFails = false;
+    repository.receiveIntake.mockImplementationOnce(async (input) => ({
+      ...(await receivedItem(input)),
+      replayed: true,
+    }));
     const response = await service.intakeEmail({
       ...channelTenant,
       channelId: CHANNEL_ID,
       externalId: 'mailgun-token-3',
       origin: null,
       size: bytes.length,
-      temporaryPath: await stage(Buffer.from('Subject: z\r\n\r\n'), 'email-3'),
+      temporaryPath: await stage(bytes, 'email-3-retry'),
     });
     expect(response.status).toBe('received');
+    expect(enqueued).toEqual([
+      {
+        channelId: CHANNEL_ID,
+        itemId: ITEM_ID,
+        organizationId: 'organization_1',
+      },
+    ]);
   });
   it('stores a structured payload as JSON bytes on the channel and leaves no temporary file', async () => {
     const response = await service.intakeStructured({

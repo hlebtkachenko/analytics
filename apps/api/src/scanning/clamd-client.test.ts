@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import type { AddressInfo, Server, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -8,7 +8,12 @@ import { Readable } from 'node:stream';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { ClamdClient, scanWithClamd } from './clamd-client.js';
+import {
+  ClamdClient,
+  DEFAULT_SCAN_TIMEOUT_MS,
+  DEFAULT_STREAM_MAX_BYTES,
+  scanWithClamd,
+} from './clamd-client.js';
 
 interface ReceivedStream {
   command: string;
@@ -169,6 +174,19 @@ describe('scanWithClamd', () => {
         1,
       ),
     ).toEqual({ outcome: 'error', reason: 'reply' });
+  });
+
+  it('outlives MaxScanTime by default and mirrors StreamMaxLength of clamd.conf', async () => {
+    const configuration = await readFile(
+      new URL('../../../../infrastructure/clamav/clamd.conf', import.meta.url),
+      'utf8',
+    );
+    // clamd gives up a scan after MaxScanTime; the client must wait past that to read the daemon's own answer.
+    expect(configuration).toMatch(/^MaxScanTime 60000$/m);
+    expect(DEFAULT_SCAN_TIMEOUT_MS).toBe(90_000);
+    expect(configuration).toMatch(/^StreamMaxLength 30M$/m);
+    expect(configuration).toMatch(/^MaxFileSize 30M$/m);
+    expect(DEFAULT_STREAM_MAX_BYTES).toBe(30_000_000);
   });
 
   it('times out a silent scanner and fails an unreachable one', async () => {

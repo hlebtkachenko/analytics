@@ -37,12 +37,12 @@ import {
   inboxBlobInlinePath,
   inboxItemActionPath,
   inboxItemPath,
-  isBlobQuarantined,
 } from '../../../../lib/inbox/client';
 import type { InboxItemAction } from '../../../../lib/inbox/client';
 import {
   inboxDiscardReasonSchema,
   inboxItemDetailSchema,
+  isBlobQuarantined,
   isInlineMediaType,
 } from '../../../../lib/inbox/contract.ts';
 import type {
@@ -63,7 +63,6 @@ import styles from './page.module.scss';
 
 type LoadState = 'error' | 'idle' | 'loading';
 type DetailResult = Readonly<{ key: string; value?: InboxItemDetail }>;
-type QuarantineResult = Readonly<{ key: string; blobIds: ReadonlySet<string> }>;
 
 // The draft fields the person can still change; everything else in the draft passes through untouched.
 type DraftFields = Readonly<{
@@ -138,7 +137,6 @@ export default function InboxItemPage() {
   const canManage = access?.capabilities.manageDocuments ?? false;
   const legalEntities = useLegalEntities(organizationId);
   const [result, setResult] = useState<DetailResult>();
-  const [quarantine, setQuarantine] = useState<QuarantineResult>();
   const [refreshCount, setRefreshCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [writeFailed, setWriteFailed] = useState(false);
@@ -192,36 +190,6 @@ export default function InboxItemPage() {
       controller.abort();
     };
   }, [detailKey, itemId, organizationId]);
-
-  // Each blob is probed once per detail read; a quarantined one gets a notice instead of its links.
-  useEffect(() => {
-    if (detail === undefined) {
-      return;
-    }
-    const controller = new AbortController();
-    void Promise.all(
-      detail.files.map((file) =>
-        isBlobQuarantined(organizationId, file.blobId, controller.signal)
-          .then((quarantined) => (quarantined ? file.blobId : null))
-          .catch(() => null),
-      ),
-    ).then((blobIds) => {
-      if (!controller.signal.aborted) {
-        setQuarantine({
-          blobIds: new Set(
-            blobIds.filter((blobId): blobId is string => blobId !== null),
-          ),
-          key: detailKey,
-        });
-      }
-    });
-    return () => {
-      controller.abort();
-    };
-  }, [detail, detailKey, organizationId]);
-
-  const quarantinedBlobIds =
-    quarantine?.key === detailKey ? quarantine.blobIds : new Set<string>();
 
   const fields =
     draft ??
@@ -368,7 +336,7 @@ export default function InboxItemPage() {
             <h2>{t('inbox.preview')}</h2>
             {previewFile === undefined ? (
               <p>{t('inbox.noPreview')}</p>
-            ) : quarantinedBlobIds.has(previewFile.blobId) ? (
+            ) : isBlobQuarantined(previewFile) ? (
               <InlineNotification
                 hideCloseButton
                 kind="warning"
@@ -410,7 +378,7 @@ export default function InboxItemPage() {
                         {name} ({file.mediaType}, {String(file.byteSize)} B)
                       </StructuredListCell>
                       <StructuredListCell>
-                        {quarantinedBlobIds.has(file.blobId) ? (
+                        {isBlobQuarantined(file) ? (
                           <Tag size="sm" type="red">
                             {t('inbox.quarantined')}
                           </Tag>

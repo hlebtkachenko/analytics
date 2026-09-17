@@ -98,6 +98,7 @@ const file: InboxItemFile = {
   mediaType: 'text/plain',
   originalFilename: 'placeholder.txt',
   position: 1,
+  scanStatus: 'clean',
   sha256: SHA256,
 };
 

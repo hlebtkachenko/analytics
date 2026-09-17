@@ -13,8 +13,19 @@ import type {
 let configuration: Promise<InboundConfiguration> | undefined;
 let gate: InFlightGate | undefined;
 
+// A rejected load is forgotten, so a key file fixed after a bad start is read on the next post, not never.
+function loadConfiguration(): Promise<InboundConfiguration> {
+  const loading = loadInboundConfiguration(process.env);
+  loading.catch(() => {
+    if (configuration === loading) {
+      configuration = undefined;
+    }
+  });
+  return loading;
+}
+
 async function inboundRuntime() {
-  configuration ??= loadInboundConfiguration(process.env);
+  configuration ??= loadConfiguration();
   const loaded = await configuration;
   gate ??= createInFlightGate(loaded.maxInFlight);
   return { gate, signingKey: loaded.signingKey };

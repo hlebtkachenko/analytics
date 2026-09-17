@@ -181,7 +181,9 @@ recipient address alone.
   lookup and consumed on a miss, the same shape as the sign-up bucket. Amended
   2026-09-17: the bucket is consumed only on signature failure; a signed miss
   answers 406 without consuming it; an in-flight semaphore answers 503 beyond
-  `BAP_INBOUND_MAX_IN_FLIGHT`.
+  `BAP_INBOUND_MAX_IN_FLIGHT`. Amended 2026-09-17: a signature failure,
+  including a body that is not a form, answers 401; every permanent refusal of a
+  signed request answers 406.
 - Replay: the Mailgun `token` becomes `inbox_item.external_id`, with the sha256
   of the `Message-Id` header as the fallback when the token is absent, so a
   re-delivery hits `inbox_item_external_id_key` and creates no second item; the

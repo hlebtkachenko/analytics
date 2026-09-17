@@ -91,17 +91,19 @@ once, bounded by the Caddy cap, and the forwarded body reuses the same `Blob`
 rather than a copy; `signature` must be exactly 64 hex characters, then
 HMAC-SHA256 over `timestamp + token` with the key from
 `BAP_MAILGUN_WEBHOOK_SIGNING_KEY_FILE` is compared with `timingSafeEqual`, and
-`timestamp` must be within 300 seconds of now. A signature failure consumes the
-edge IP bucket from `apps/web/src/lib/inbox/intake.ts` (that IP is not Mailgun)
-and answers 406, or 429 when the bucket is already full. A signed post never
-consumes the bucket: `recipient` is parsed, the local part lowercased, the `in-`
-prefix required, the local part hashed and resolved through
-`auth.resolve_channel_credential` on the `bap_auth` pool, and a miss or a row of
-kind other than `email_address` answers 406 without touching the bucket, since
-128 bits of token entropy make enumeration moot and Mailgun stops retrying. The
-route then mints the channel JWT (`sub = channel_<uuid>`, the 1a mint) and
-forwards `body-mime` as a `message/rfc822` body to the API email route with
-`x-bap-intake-origin` = the credential `display_prefix` and
+`timestamp` must be within 300 seconds of now; a body that is not a form counts
+as a signature failure too. A signature failure consumes the edge IP bucket from
+`apps/web/src/lib/inbox/intake.ts` (that IP is not Mailgun) and answers 401, or
+429 when the bucket is already full. A signed post never consumes the bucket:
+`recipient` is parsed, the local part lowercased and the domain discarded (the
+token alone binds, never the domain), the `in-` prefix required, the local part
+hashed and resolved through `auth.resolve_channel_credential` on the `bap_auth`
+pool, and a miss or a row of kind other than `email_address` answers 406 without
+touching the bucket, since 128 bits of token entropy make enumeration moot and
+Mailgun stops retrying. Every permanent refusal of a signed request on this
+route answers 406. The route then mints the channel JWT (`sub = channel_<uuid>`,
+the 1a mint) and forwards `body-mime` as a `message/rfc822` body to the API
+email route with `x-bap-intake-origin` = the credential `display_prefix` and
 `x-bap-intake-external-id` = the Mailgun `token`; a post without `token` fails
 the signature anyway, so there is no `Message-Id` fallback. Mailgun may re-sign
 a retry with a fresh token (to verify in staging); if so, the exact-hash rule
@@ -129,7 +131,9 @@ earlier item, and the Phase 0 exact-hash rule lands a duplicate `.eml` as
 ADR 0005, `retryLimit: 3`, `retryDelay: 60`, `singletonKey = itemId`. Answers
 202 with the item id and never returns content. `readBlob` gates on
 `scan_status`, so the blob download and inline routes refuse an `infected` or
-`failed` blob with 409 `blob_quarantined`.
+`failed` blob with 409 `blob_quarantined`. The item detail response carries
+`scanStatus` per file, so the item page renders the quarantine notice directly
+from it (`isBlobQuarantined`) rather than probing the blob routes.
 
 Worker. `tenantJobPayloadSchema` is strict with `userId` required
 (`job-context.ts:16-21`); `runTenantJob` parses a union of it and
@@ -141,39 +145,49 @@ channel row, throws when it is missing or disabled, and opens the transaction as
 `scanned` per blob, `classified` per sniffed child, `discarded` and `failed`
 where they apply, no new kind) and scans the `.eml` blob through `clamd`
 INSTREAM over TCP to `BAP_CLAMAV_HOST:3310`, the production path for every blob.
-Outcomes: `FOUND` records `infected` through `app.record_blob_scan` and discards
-the item (child or parent) with reason `policy_rejected`, nothing else runs on
-it; `ERROR`, an unreachable `clamd`, or a `clamd` with no database yet throws,
-so pg-boss retries; only when `job.retryCount >= retryLimit` the handler records
-`scan_status = 'failed'` and marks the parent `failed` (the `ingest-dataset.ts`
-failure recording pattern), never `discarded`. The split is idempotent: each
-child carries `external_id = '<parentItemId>:<n>'` under the per-channel replay
-index, so a retry skips children that already exist. It then parses the `.eml`
-with mailparser `simpleParser` on a stream (`skipHtmlToText: true`,
+`clamd.conf`'s `MaxFileSize` is 30 MB; the client mirrors that ceiling as
+`DEFAULT_STREAM_MAX_BYTES` and refuses a larger stream before it connects, and
+its own socket timeout is 90 seconds (`DEFAULT_SCAN_TIMEOUT_MS`), independent of
+`clamd`'s own `MaxScanTime 60000`. Outcomes: `FOUND` records `infected` through
+`app.record_blob_scan` and discards the item (child or parent) with reason
+`policy_rejected`, nothing else runs on it; `ERROR`, an unreachable `clamd`, or
+a `clamd` with no database yet throws, so pg-boss retries; only when
+`job.retryCount >= retryLimit` the handler records `scan_status = 'failed'` and
+marks the parent `failed` (the `ingest-dataset.ts` failure recording pattern),
+never `discarded`. The split is idempotent: each child carries
+`external_id = '<parentItemId>:<n>'` under the per-channel replay index, so a
+retry skips children that already exist. It then parses the `.eml` with
+mailparser `simpleParser` on a stream (`skipHtmlToText: true`,
 `skipImageLinks: true`, `skipTextToHtml: true`, `maxHtmlLengthToParse` at 1 MB)
 and enforces in code what mailparser cannot: at most 20 attachments, 25 MB per
 attachment, 1 MB of text, a nesting depth of 10; past a cap the parent becomes
 `needs_review` with a `failed` event reason `too_large` and the already created
 children stay. Each attachment becomes a child `inbox_item` (`parent_item_id`,
 same `channel_id`, `channel_kind = 'email'`, `payload_kind = 'file'`, `origin`
-inherited, `sender` from the parsed envelope, `legal_entity_id` and `hint_kind`
-from the channel) whose blob is content-addressed at position 1 under the
-organization dedup rule (an existing hash makes the child `discarded` as
-`duplicate` and skips the scan). A message with no attachment gets one child of
-`payload_kind = 'text'` holding the plain text body as its blob; a message with
-neither attachments nor text produces no child and never a zero-byte blob
-(`blob_byte_size_check`): the parent becomes `needs_review` with issue `empty`.
-Every new blob is scanned before the sniff; `clean` runs the Phase 0 sniff
-synchronously, leaving the child `needs_review`. Done, the parent becomes
-`needs_review`. Split errors are wrapped to a code before they reach `runJob`,
-so `worker.ts` never logs addresses or row values.
+inherited, `sender` from the parsed `From` header address (not `MAIL FROM`),
+unverified, `legal_entity_id` and `hint_kind` from the channel) whose blob is
+content-addressed at position 1 under the organization dedup rule (an existing
+hash makes the child `discarded` as `duplicate` and skips the scan). A
+`related`, cid-referenced inline image is staged and scanned like any other
+part, then becomes a `discarded` child with reason `decorative_image`. A message
+with no attachment gets one child of `payload_kind = 'text'` holding the plain
+text body as its blob; when the message has no `text` part and an `html` part
+instead, the text child holds the output of a bounded tag strip (`textFromHtml`,
+capped at `maxHtmlLengthToParse`, only the five basic HTML entities decoded,
+never a render). A message with neither attachments nor a text or HTML body
+produces no child and never a zero-byte blob (`blob_byte_size_check`): the
+parent becomes `needs_review` with issue `empty`. Every new blob is scanned
+before the sniff; `clean` runs the Phase 0 sniff synchronously, leaving the
+child `needs_review`. Done, the parent becomes `needs_review`. Split errors are
+wrapped to a code before they reach `runJob`, so `worker.ts` never logs
+addresses or row values.
 
 Compose and Caddy. `clamd` is the official `clamav/clamav` image pinned by
 digest with `CLAMAV_NO_FRESHCLAMD=true`, on a new internal network `scan` shared
 only with `worker`, `read_only`, `cap_drop: ALL`, `user:` set, tmpfs
 `/run/clamav` with the matching `uid` and tmpfs `/tmp`, the signature volume
 mounted read-only. Its configuration is a read-only `clamd.conf` mount:
-`StreamMaxLength 30M`, `MaxFileSize 25M`, `MaxScanSize 60M`, `MaxRecursion 10`,
+`StreamMaxLength 30M`, `MaxFileSize 30M`, `MaxScanSize 60M`, `MaxRecursion 10`,
 `MaxFiles 200`, `MaxScanTime 60000`, `AlertExceedsMax yes`,
 `DatabaseMirror database.clamav.net`; its `SelfCheck` reload picks up new
 signatures. `freshclam` is the same image with `CLAMAV_NO_CLAMD=true`,
@@ -228,12 +242,14 @@ counts. The webhook signing key is read once from its file and never echoed.
 ## Verification
 
 - `apps/web` unit: signature vectors (valid, 63 and 65 characters, non-hex,
-  expired, wrong key); the bucket is consumed on a signature failure only and a
-  signed unknown recipient answers 406 without consuming it; the fifth in-flight
-  post answers 503; a 25 MB `body-mime` field survives the form parser
-  untruncated; an `api_token` credential on the email route is a miss; missing
-  `in-` prefix 406; declared `content-length` over the cap 406; upstream mapping
-  202 to 200, 404 to 406, 500 to 502; settings page for an email channel.
+  expired, wrong key) and a body that is not a form, each answering 401 and
+  consuming the bucket; a signed unknown recipient answers 406 without consuming
+  it; the fifth in-flight post answers 503; a 25 MB `body-mime` field survives
+  the form parser untruncated; an `api_token` credential on the email route is a
+  miss; missing `in-` prefix 406; a recipient with a foreign domain but a valid
+  local part still resolves, since the domain is never checked; declared
+  `content-length` over the cap 406; upstream mapping 202 to 200, 404 to 406,
+  500 to 502; settings page for an email channel.
 - `apps/api` unit and integration: email route under `TenantAccess` is 403;
   wrong content type 415; 30 MB cap 413; the stored item is `received` with
   `media_type = 'message/rfc822'` and no sniff; replay by external id creates no
@@ -264,5 +280,9 @@ counts. The webhook signing key is read once from its file and never echoed.
 - An item stuck in `received` when the enqueue after commit fails. Proposal: a
   `poll`-less requeue on the next intake of the same channel, or leave it to the
   1b sweep. Open.
+- A parent left `processing` by a crash on the last attempt has no reaper; the
+  1b sweep covers it.
+- `body-mime` arrives as a UTF-8 text field; invalid bytes in 8bit parts are
+  replaced; accepted.
 - The reply to the sender listing created items and skipped files stays in Phase
   1b with `@bap/mail`.

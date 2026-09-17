@@ -66,13 +66,14 @@ const inboxItem = {
   updatedAt: '2026-09-16T08:00:00.000Z',
 };
 
-function file(mediaType: string) {
+function file(mediaType: string, scanStatus = 'clean') {
   return {
     blobId: BLOB_ID,
     byteSize: 3,
     mediaType,
     originalFilename: 'placeholder.bin',
     position: 1,
+    scanStatus,
     sha256: 'a'.repeat(64),
   };
 }
@@ -120,18 +121,8 @@ function capabilities(manageDocuments: boolean) {
 }
 
 // One router per test, so every request is answered by the shape its route promises.
-function respondWith(
-  detail: Record<string, unknown>,
-  manageDocuments = true,
-  quarantinedBlobIds: readonly string[] = [],
-) {
+function respondWith(detail: Record<string, unknown>, manageDocuments = true) {
   return vi.fn(async (input: string, init?: RequestInit) => {
-    if (input.includes('/inbox/blobs/')) {
-      const blobId = input.split('/inbox/blobs/')[1]!.split('/')[0]!;
-      return quarantinedBlobIds.includes(blobId)
-        ? Response.json({ error: 'blob_quarantined' }, { status: 409 })
-        : new Response('bytes', { status: 200 });
-    }
     if (input === '/api/auth/organization/list') {
       return Response.json([
         {
@@ -264,14 +255,15 @@ describe('InboxItemPage', () => {
     ).toBeVisible();
   });
 
-  it('shows a quarantine notice instead of the preview and the download once the blob route answers 409', async () => {
-    const otherBlobId = '00000000-0000-4000-8000-000000000061';
-    const fetchMock = respondWith(
-      {
+  it.each(['infected', 'failed'])(
+    'shows a quarantine notice instead of the preview and the download for a %s blob',
+    async (scanStatus) => {
+      const otherBlobId = '00000000-0000-4000-8000-000000000061';
+      const fetchMock = respondWith({
         events: [],
         extraction: null,
         files: [
-          file('application/pdf'),
+          file('application/pdf', scanStatus),
           {
             ...file('application/zip'),
             blobId: otherBlobId,
@@ -280,37 +272,35 @@ describe('InboxItemPage', () => {
           },
         ],
         item: inboxItem,
-      },
-      true,
-      [BLOB_ID],
-    );
-    vi.stubGlobal('fetch', fetchMock);
+      });
+      vi.stubGlobal('fetch', fetchMock);
 
-    renderItemPage();
+      renderItemPage();
 
-    expect(await screen.findAllByText('Quarantined')).toHaveLength(2);
-    expect(
-      screen.getByText(
-        'The virus scan flagged this file or could not complete. It cannot be previewed or downloaded.',
-      ),
-    ).toBeVisible();
-    expect(screen.queryByTitle('File preview')).toBeNull();
-    expect(
-      screen.queryByRole('link', { name: 'Download placeholder.bin' }),
-    ).toBeNull();
-    // The clean sibling keeps its download link, and each blob was probed once.
-    expect(
-      screen.getByRole('link', { name: 'Download clean.zip' }),
-    ).toHaveAttribute(
-      'href',
-      `/api/bff/application/organizations/organization_1/inbox/blobs/${otherBlobId}/download`,
-    );
-    expect(
-      fetchMock.mock.calls.filter(([input]) =>
-        String(input).includes('/inbox/blobs/'),
-      ),
-    ).toHaveLength(2);
-  });
+      expect(await screen.findAllByText('Quarantined')).toHaveLength(2);
+      expect(
+        screen.getByText(
+          'The virus scan flagged this file or could not complete. It cannot be previewed or downloaded.',
+        ),
+      ).toBeVisible();
+      expect(screen.queryByTitle('File preview')).toBeNull();
+      expect(
+        screen.queryByRole('link', { name: 'Download placeholder.bin' }),
+      ).toBeNull();
+      // The clean sibling keeps its download link; the verdict comes with the detail, so no blob is fetched.
+      expect(
+        screen.getByRole('link', { name: 'Download clean.zip' }),
+      ).toHaveAttribute(
+        'href',
+        `/api/bff/application/organizations/organization_1/inbox/blobs/${otherBlobId}/download`,
+      );
+      expect(
+        fetchMock.mock.calls.filter(([input]) =>
+          String(input).includes('/inbox/blobs/'),
+        ),
+      ).toHaveLength(0);
+    },
+  );
 
   it('prefills the draft from the extraction, explains it, and routes with every blob', async () => {
     const fetchMock = respondWith({

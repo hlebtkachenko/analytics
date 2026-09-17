@@ -17,7 +17,9 @@ import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
 } from '@testcontainers/postgresql';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type * as Mailparser from 'mailparser';
+import type { ParsedMail, SimpleParserOptions } from 'mailparser';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
   createBlobDirectories,
@@ -55,8 +57,25 @@ import {
   MAX_ATTACHMENT_BYTES,
   splitEmailItem,
   SplitEmailError,
+  textFromHtml,
 } from './split-email-item.js';
 import { WorkerMetrics } from './worker-metrics.js';
+
+// mailparser rejects no byte sequence, so a nested part carrying this header stands in for a parser failure.
+const UNPARSABLE_MARKER = 'X-BAP-Test: unparsable';
+
+vi.mock('mailparser', async (importOriginal) => {
+  const actual = await importOriginal<typeof Mailparser>();
+  // The worker only uses the promise overload, so the stand-in narrows to it.
+  const simpleParser = (
+    input: Parameters<typeof actual.simpleParser>[0],
+    options?: SimpleParserOptions,
+  ): Promise<ParsedMail> =>
+    Buffer.isBuffer(input) && input.includes(UNPARSABLE_MARKER)
+      ? Promise.reject(new Error('unparsable nested message'))
+      : actual.simpleParser(input, options);
+  return { ...actual, simpleParser };
+});
 
 const postgresImage =
   'pgvector/pgvector:pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a';
@@ -149,6 +168,54 @@ function buildMime(input: {
   }
 
   lines.push(`--${boundary}--`, '');
+  return Buffer.from(lines.join('\r\n'), 'utf8');
+}
+
+// A multipart/related HTML body with one cid-referenced image and, optionally, a real attachment beside them.
+function buildRelatedMime(input: {
+  attachments?: MimePart[];
+  html: string;
+  image: Buffer;
+}): Buffer {
+  const related = `----bap-related-${Math.random().toString(16).slice(2)}`;
+  const mixed = `----bap-mixed-${Math.random().toString(16).slice(2)}`;
+  const lines: string[] = [
+    'From: Sender <sender@example.org>',
+    'To: in-0123456789abcdef0123456789abcdef@in.bap.invalid',
+    'Subject: Invoice',
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/mixed; boundary="${mixed}"`,
+    '',
+    `--${mixed}`,
+    `Content-Type: multipart/related; boundary="${related}"`,
+    '',
+    `--${related}`,
+    'Content-Type: text/html; charset=utf-8',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    input.html,
+    `--${related}`,
+    'Content-Type: image/png; name="logo.png"',
+    'Content-Transfer-Encoding: base64',
+    'Content-ID: <logo@bap.invalid>',
+    'Content-Disposition: inline; filename="logo.png"',
+    '',
+    input.image.toString('base64'),
+    `--${related}--`,
+  ];
+
+  for (const attachment of input.attachments ?? []) {
+    lines.push(
+      `--${mixed}`,
+      `Content-Type: ${attachment.contentType}; name="${attachment.filename ?? 'part'}"`,
+      'Content-Transfer-Encoding: base64',
+      `Content-Disposition: attachment; filename="${attachment.filename ?? 'part'}"`,
+      '',
+      attachment.content.toString('base64'),
+    );
+  }
+
+  lines.push(`--${mixed}--`, '');
   return Buffer.from(lines.join('\r\n'), 'utf8');
 }
 
@@ -524,6 +591,157 @@ describe('splitEmailItem', () => {
     });
   });
 
+  it('discards a cid-referenced inline image as decoration and keeps the body text beside a real attachment', async () => {
+    const scanner = new FakeScanner();
+    const itemId = await intake(
+      buildRelatedMime({
+        attachments: [
+          {
+            content: Buffer.from('the invoice beside the logo'),
+            contentType: 'text/plain',
+            filename: 'invoice.txt',
+          },
+        ],
+        html: '<html><body><p>Invoice attached</p><img src="cid:logo@bap.invalid"></body></html>',
+        image: fixtures.png(),
+      }),
+      'token-inline-image',
+    );
+
+    await run(itemId, scanner);
+
+    const parts = await children(itemId);
+    expect(parts).toMatchObject([
+      {
+        external_id: `${itemId}:1`,
+        payload_kind: 'file',
+        scan_status: 'clean',
+        status: 'discarded',
+      },
+      {
+        external_id: `${itemId}:2`,
+        payload_kind: 'file',
+        scan_status: 'clean',
+        status: 'needs_review',
+      },
+    ]);
+    const image = await readItem(apiPool, {
+      ...owner,
+      ...allEntities,
+      itemId: parts[0]?.id ?? '',
+    });
+    // Stored under its declared image type with its blob scanned, never sniffed, discarded as decoration.
+    expect(image?.files[0]).toMatchObject({
+      mediaType: 'image/png',
+      originalFilename: 'logo.png',
+      scanStatus: 'clean',
+    });
+    expect(image?.extraction).toBeNull();
+    expect(image?.events.map((event) => [event.kind, event.reason])).toEqual([
+      ['received', null],
+      ['scanned', null],
+      ['discarded', 'decorative_image'],
+    ]);
+    expect(image?.item.detectedType).toBeNull();
+    // Parent, image, attachment: every blob is scanned.
+    expect(scanner.calls).toBe(3);
+    expect((await parentState(itemId)).status).toBe('needs_review');
+
+    // With nothing but decoration around it, the HTML body becomes the text child.
+    const bodyOnlyId = await intake(
+      buildRelatedMime({
+        html: '<html><body><p>Invoice &amp; receipt follow</p><img src="cid:logo@bap.invalid"></body></html>',
+        image: fixtures.png(),
+      }),
+      'token-inline-image-only',
+    );
+    await run(bodyOnlyId, new FakeScanner());
+    const bodyParts = await children(bodyOnlyId);
+    expect(bodyParts).toMatchObject([
+      { payload_kind: 'file', status: 'discarded' },
+      { payload_kind: 'text', status: 'needs_review' },
+    ]);
+    const text = await readItem(apiPool, {
+      ...owner,
+      ...allEntities,
+      itemId: bodyParts[1]?.id ?? '',
+    });
+    expect(text?.files[0]?.mediaType).toBe('text/plain');
+    expect(
+      (
+        await store.stat(
+          (
+            await readBlob(apiPool, {
+              ...owner,
+              ...allEntities,
+              blobId: text?.files[0]?.blobId ?? '',
+            })
+          )?.storageKey ?? '',
+        )
+      )?.byteSize,
+    ).toBe(Buffer.byteLength('Invoice & receipt follow'));
+  });
+
+  it('derives the text child of an HTML-only message from a bounded tag strip', async () => {
+    const boundary = '----bap-alt';
+    const bytes = Buffer.from(
+      [
+        'From: Sender <sender@example.org>',
+        'To: in-0123456789abcdef0123456789abcdef@in.bap.invalid',
+        'Subject: Invoice',
+        'MIME-Version: 1.0',
+        `Content-Type: multipart/alternative; boundary="${boundary}"`,
+        '',
+        `--${boundary}`,
+        'Content-Type: text/html; charset=utf-8',
+        'Content-Transfer-Encoding: 8bit',
+        '',
+        '<html><head><style>p { color: red }</style></head>',
+        '<body><h1>Invoice   42</h1>\n<p>Amount: 10 &lt; 20 &amp; &quot;paid&quot; &#39;now&#39;</p>',
+        '<script>alert(1)</script><img src="x" onerror="alert(1)"></body></html>',
+        `--${boundary}--`,
+        '',
+      ].join('\r\n'),
+      'utf8',
+    );
+    const itemId = await intake(bytes, 'token-html-only');
+
+    await run(itemId, new FakeScanner());
+
+    const parts = await children(itemId);
+    expect(parts).toMatchObject([
+      { payload_kind: 'text', scan_status: 'clean', status: 'needs_review' },
+    ]);
+    const blob = await readBlob(apiPool, {
+      ...owner,
+      ...allEntities,
+      blobId:
+        (
+          await readItem(apiPool, {
+            ...owner,
+            ...allEntities,
+            itemId: parts[0]?.id ?? '',
+          })
+        )?.files[0]?.blobId ?? '',
+    });
+    expect(blob?.mediaType).toBe('text/plain');
+    const stored: Buffer[] = [];
+    for await (const chunk of store.open(blob?.storageKey ?? '')) {
+      stored.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    expect(Buffer.concat(stored).toString('utf8')).toBe(
+      'Invoice 42 Amount: 10 < 20 & "paid" \'now\'',
+    );
+  });
+
+  it('strips tags within the first megabyte only and decodes just the five basic entities', () => {
+    expect(textFromHtml('<p>a &nbsp; &copy; b</p>')).toBe('a &nbsp; &copy; b');
+    expect(textFromHtml('&lt;b&gt;bold&lt;/b&gt;')).toBe('<b>bold</b>');
+    const oversize = `<p>${'x'.repeat(1_000_000)}<b>tail</b></p>`;
+    // The cut lands inside the text, so the unclosed tail never reaches the strip.
+    expect(textFromHtml(oversize)).toHaveLength(1_000_000 - '<p>'.length);
+  });
+
   it('keeps the first twenty attachments and marks the parent too_large past the cap', async () => {
     const attachments = Array.from({ length: 21 }, (_, index) => ({
       content: Buffer.from(`attachment number ${index + 1}\n`),
@@ -578,6 +796,86 @@ describe('splitEmailItem', () => {
     const withinId = await intake(nestedMessage(10), 'token-nested-ok');
     await run(withinId, new FakeScanner());
     expect((await children(withinId)).length).toBe(1);
+  });
+
+  it('fails with parse_failed when a nested message/rfc822 part does not parse', async () => {
+    const itemId = await intake(
+      buildMime({
+        attachments: [
+          {
+            content: Buffer.from(
+              `${UNPARSABLE_MARKER}\r\nSubject: broken\r\n\r\nbody`,
+            ),
+            contentType: 'message/rfc822',
+          },
+        ],
+        text: 'forwarded',
+      }),
+      'token-nested-broken',
+    );
+
+    await expect(
+      run(itemId, new FakeScanner(), { count: 3, limit: 3 }),
+    ).rejects.toMatchObject({ code: 'parse_failed' });
+    expect(await children(itemId)).toEqual([]);
+    expect(await parentState(itemId)).toMatchObject({
+      scanStatus: 'clean',
+      status: 'failed',
+    });
+    expect(await readdir(store.temporaryDirectory())).toEqual([]);
+  });
+
+  it('is a no-op for a parent a person discarded or decided before the split ran', async () => {
+    const scanner = new FakeScanner();
+    const itemId = await intake(
+      buildMime({ text: 'discarded before the worker got to it' }),
+      'token-user-discarded',
+    );
+    const discarded = await service.discardItem({
+      ...owner,
+      ...allEntities,
+      itemId,
+      reason: 'irrelevant',
+    });
+    expect(discarded?.item.status).toBe('discarded');
+
+    // A discarded parent is past received: nothing scanned, nothing created, no event added.
+    await run(itemId, scanner);
+    expect(scanner.calls).toBe(0);
+    expect(await children(itemId)).toEqual([]);
+    expect(await parentState(itemId)).toMatchObject({
+      events: [
+        ['received', null],
+        ['discarded', 'irrelevant'],
+      ],
+      scanStatus: 'not_scanned',
+      status: 'discarded',
+    });
+
+    // A row a person decided is invisible to the channel's FOR UPDATE read, whatever its status says.
+    const decidedId = await intake(
+      buildMime({ text: 'decided before the worker got to it' }),
+      'token-user-decided',
+    );
+    const root = createDatabasePool(configurationFor('postgres'));
+    try {
+      await root.query(
+        `update app.inbox_item
+            set decided_by_kind = 'user', decided_by_user_id = 'user-1'
+          where id = $1`,
+        [decidedId],
+      );
+    } finally {
+      await root.end();
+    }
+    await run(decidedId, scanner);
+    expect(scanner.calls).toBe(0);
+    expect(await children(decidedId)).toEqual([]);
+    expect(await parentState(decidedId)).toMatchObject({
+      events: [['received', null]],
+      scanStatus: 'not_scanned',
+      status: 'received',
+    });
   });
 
   it('quarantines an infected attachment as a discarded child and an infected message as a discarded parent', async () => {

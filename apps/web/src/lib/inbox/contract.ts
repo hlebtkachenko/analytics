@@ -159,6 +159,13 @@ export const inboxItemSchema = inboxHintsSchema
   })
   .strict();
 
+export const blobScanStatusSchema = z.enum([
+  'not_scanned',
+  'clean',
+  'infected',
+  'failed',
+]);
+
 export const inboxItemFileSchema = z
   .object({
     blobId: identifierSchema,
@@ -166,9 +173,15 @@ export const inboxItemFileSchema = z
     mediaType: z.string().regex(MEDIA_TYPE_PATTERN),
     originalFilename: z.string().min(1).max(255).nullable(),
     position: z.number().int().min(1),
+    scanStatus: blobScanStatusSchema,
     sha256: z.string().regex(SHA256_PATTERN),
   })
   .strict();
+
+// The blob routes answer 409 for these verdicts, so the page shows the notice instead of the links.
+export function isBlobQuarantined(file: InboxItemFile): boolean {
+  return file.scanStatus === 'infected' || file.scanStatus === 'failed';
+}
 
 export const providerReasonSchema = z
   .object({

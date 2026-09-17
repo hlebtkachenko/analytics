@@ -220,6 +220,7 @@ interface FileRow {
   media_type: string;
   original_filename: string | null;
   position: number;
+  scan_status: BlobScanStatus;
   sha256: string;
   storage_key: string;
 }
@@ -281,6 +282,7 @@ function toFile(row: FileRow): ItemFileRecord {
     mediaType: row.media_type,
     originalFilename: row.original_filename,
     position: row.position,
+    scanStatus: row.scan_status,
     sha256: row.sha256,
     storageKey: row.storage_key,
   };
@@ -294,6 +296,7 @@ function publicFile(file: ItemFileRecord): InboxItemFile {
     mediaType: file.mediaType,
     originalFilename: file.originalFilename,
     position: file.position,
+    scanStatus: file.scanStatus,
     sha256: file.sha256,
   };
 }
@@ -322,7 +325,7 @@ export async function loadItemFiles(
 ): Promise<ItemFileRecord[]> {
   const result = await transaction.query<FileRow>(
     `select f.blob_id, f.position, b.sha256, b.byte_size::text as byte_size, b.media_type,
-            b.original_filename, b.storage_key
+            b.original_filename, b.scan_status, b.storage_key
        from app.inbox_item_file as f
        join app.blob as b on b.id = f.blob_id
       where f.item_id = $1

@@ -39,8 +39,8 @@ override in Phase 0.
 `BAP_INTAKE_DOMAIN` is the bare DNS name (no scheme, no `@`) whose MX records
 point at Mailgun EU; every email channel address is `in-<token>@<domain>`. The
 production overlay requires it, because the value is written into stored
-addresses. `BAP_INBOUND_MAX_IN_FLIGHT` is a positive integer; a post beyond it
-answers 503 so Mailgun retries later.
+addresses. `BAP_INBOUND_MAX_IN_FLIGHT` is an integer from 1 through 64 (default
+`4`); a post beyond it answers 503 so Mailgun retries later.
 
 ## Runtime configuration
 
@@ -53,8 +53,9 @@ paths. These are internal runtime values, not user configuration.
   are fixed internal service origins, not deployment inputs. The Mailgun webhook
   reads `BAP_MAILGUN_WEBHOOK_SIGNING_KEY_FILE`
   (`/run/credentials/mailgun-webhook-signing-key`, the mounted
-  `mailgun_webhook_signing_key` secret) once at startup and never echoes it,
-  plus `BAP_INTAKE_DOMAIN` and `BAP_INBOUND_MAX_IN_FLIGHT`.
+  `mailgun_webhook_signing_key` secret) once, on the first post, and never
+  echoes it; the file must be a protected regular file with mode `0400`, `0444`,
+  or `0600`, plus `BAP_INTAKE_DOMAIN` and `BAP_INBOUND_MAX_IN_FLIGHT`.
 - Organization route resolution reuses the `bap_auth` pool and has no separate
   database role, endpoint, cache, or runtime configuration. The Phase 10 quota
   display reuses that pool's existing SELECT-only quota access and adds no
