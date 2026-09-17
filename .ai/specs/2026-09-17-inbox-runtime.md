@@ -183,7 +183,11 @@ both existed only for the row sweep this spec replaces.
   job per still-received item every 15 minutes, and two worker replicas could
   split the same item concurrently (`split-email-item.ts:311-316` admits
   `processing`, not only `received`). The integration suite proves a second
-  enqueue with the same key is dropped against a real pg-boss.
+  enqueue with the same key is dropped against a real pg-boss. Because pg-boss
+  `createQueue` is `ON CONFLICT DO NOTHING` and `updateQueue` refuses a policy
+  change, both creators recreate a `split_email_item` or `inbox_maintenance`
+  queue found with another policy at startup, dropping its pending jobs, which
+  the requeue task recovers.
 
 One queue `inbox_maintenance` (`INBOX_MAINTENANCE_QUEUE` in
 `apps/api/src/inbox/contract.ts`), created beside the others in

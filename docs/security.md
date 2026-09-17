@@ -199,9 +199,12 @@ stuck email requeue re-enqueues `split_email_item` for an email item still
 pg-boss `policy: 'exclusive'`, because `singletonKey` is inert on a standard
 queue: exclusive admits at most one job per key across `created`, `retry` and
 `active`, so the tick cannot pile up a job per still-received item every 15
-minutes and two worker replicas cannot split the same item concurrently. Metrics
-carry the queue label only; log lines carry counts and ids, never a storage key,
-filename or organization name.
+minutes and two worker replicas cannot split the same item concurrently. A
+policy is fixed at creation, so the worker recreates a `split_email_item` or
+`inbox_maintenance` queue found with another policy at startup, dropping its
+pending jobs, which the requeue task recovers. Metrics carry the queue label
+only; log lines carry counts and ids, never a storage key, filename or
+organization name.
 
 Better Auth uses opaque cookies for browser identity, `Secure` whenever the
 configured public origin is HTTPS, which is every production deployment, and

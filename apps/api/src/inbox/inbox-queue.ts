@@ -1,4 +1,4 @@
-import { Injectable, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import type { PgBoss } from 'pg-boss';
 
@@ -33,6 +33,7 @@ export abstract class InboxQueue {
 @Injectable()
 export class PgBossInboxQueue extends InboxQueue implements OnModuleDestroy {
   private clientPromise: Promise<PgBoss> | undefined;
+  private readonly logger = new Logger(PgBossInboxQueue.name);
 
   async enqueueSplitEmailItem(job: SplitEmailItemJob): Promise<void> {
     await sendSplitEmailItem(await this.getClient(), job);
@@ -75,9 +76,12 @@ export class PgBossInboxQueue extends InboxQueue implements OnModuleDestroy {
 
     try {
       await client.start();
-      await createQueue(client, SPLIT_EMAIL_ITEM_QUEUE, {
-        policy: 'exclusive',
-      });
+      await createQueue(
+        client,
+        SPLIT_EMAIL_ITEM_QUEUE,
+        { policy: 'exclusive' },
+        (message) => this.logger.warn(message),
+      );
     } catch (error) {
       // A retry builds a new client, so this one must not keep its connection pool open.
       await client.stop({ graceful: false }).catch(() => undefined);

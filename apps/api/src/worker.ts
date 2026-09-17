@@ -94,8 +94,20 @@ async function bootstrap(): Promise<void> {
   await createQueue(queue, BACKFILL_EMBEDDINGS_QUEUE);
   await createQueue(queue, SUMMARIZE_DATASET_QUEUE);
   // Keyed queues: the item id and the tick name are singleton keys, which pg-boss honours only under exclusive.
-  await createQueue(queue, SPLIT_EMAIL_ITEM_QUEUE, { policy: 'exclusive' });
-  await createQueue(queue, INBOX_MAINTENANCE_QUEUE, { policy: 'exclusive' });
+  const warnQueue = (message: string): void =>
+    logger.warn(message, SERVICE_NAME);
+  await createQueue(
+    queue,
+    SPLIT_EMAIL_ITEM_QUEUE,
+    { policy: 'exclusive' },
+    warnQueue,
+  );
+  await createQueue(
+    queue,
+    INBOX_MAINTENANCE_QUEUE,
+    { policy: 'exclusive' },
+    warnQueue,
+  );
   // The real error is logged here; only the curated one reaches pgboss.job.output.
   const runJob = async (work: () => Promise<void>): Promise<void> => {
     try {

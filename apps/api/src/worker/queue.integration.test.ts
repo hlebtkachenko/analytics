@@ -270,6 +270,52 @@ describe('worker queue confinement', () => {
     expect(whileRetrying.rows).toEqual([{ state: 'retry' }]);
   });
 
+  it('recreates a queue found with another policy so the singleton key holds', async () => {
+    const probe = 'worker_policy_probe';
+    const warnings: string[] = [];
+    // The queue as PR #67 left it: standard, with a pending job that the recreation drops.
+    await boss.createQueue(probe, { partition: false });
+    await boss.send(probe, { itemId: 'stale' }, { singletonKey: 'key-1' });
+
+    await createQueue(boss, probe, { policy: 'exclusive' }, (message) =>
+      warnings.push(message),
+    );
+
+    expect(warnings).toEqual([
+      'Recreating queue worker_policy_probe: policy standard cannot become exclusive in place',
+    ]);
+    const policy = await apiPool.query<{ policy: string }>(
+      'select policy from pgboss.queue where name = $1',
+      [probe],
+    );
+    expect(policy.rows).toEqual([{ policy: 'exclusive' }]);
+    const dropped = await apiPool.query(
+      'select 1 from pgboss.job where name = $1',
+      [probe],
+    );
+    expect(dropped.rowCount).toBe(0);
+
+    // A second send with the same key is now dropped instead of queued twice.
+    await boss.send(probe, { itemId: 'fresh' }, { singletonKey: 'key-1' });
+    await boss.send(probe, { itemId: 'fresh' }, { singletonKey: 'key-1' });
+    const queued = await apiPool.query<{ singleton_key: string }>(
+      'select singleton_key from pgboss.job where name = $1',
+      [probe],
+    );
+    expect(queued.rows).toEqual([{ singleton_key: 'key-1' }]);
+
+    // Running the setup again against the exclusive queue changes nothing.
+    await createQueue(boss, probe, { policy: 'exclusive' }, (message) =>
+      warnings.push(message),
+    );
+    expect(warnings).toHaveLength(1);
+    const kept = await apiPool.query(
+      'select 1 from pgboss.job where name = $1',
+      [probe],
+    );
+    expect(kept.rowCount).toBe(1);
+  });
+
   it('refuses object creation in the pgboss schema so self-migration stays impossible', async () => {
     await expect(
       apiPool.query('create table pgboss.worker_probe (id text)'),
