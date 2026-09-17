@@ -158,11 +158,12 @@ into, the entities named there.
 
 Subordinate routes expose semantic breadcrumbs. Permanent Carbon content uses
 Carbon breadcrumbs, including `Datasets > {dataset name}` for an inline dataset
-view. The two temporary `[orgSlug]` page modules keep plain native breadcrumbs,
-their exact throwaway markers, and zero CSS, design-system, or icon imports. The
-`/organizations` list and create pages and the `/[orgSlug]/entities` and
-`/[orgSlug]/members` pages are Carbon; the remaining Carbon `[orgSlug]` and
-account content is future work.
+view. The one temporary `[orgSlug]` landing page module keeps plain native
+breadcrumbs, its exact throwaway marker, and zero CSS, design-system, or icon
+imports. The `/organizations` list and create pages and the
+`/[orgSlug]/entities`, `/[orgSlug]/members`, and `/[orgSlug]/settings` pages are
+Carbon; the remaining Carbon `[orgSlug]` landing and account content is future
+work.
 
 ## Admin HTTP inventory
 
@@ -551,13 +552,12 @@ segment in the same pull request.
 
 ## Temporary organization pages
 
-The 2 temporary `[orgSlug]` pages are an intentionally throwaway, unstyled
-browser loop. They use semantic headings, navigation, labels, native controls,
-lists, and progressive-enhancement server-action forms, with no page CSS,
-design-system, or icon imports. Each subordinate page uses a plain native
-breadcrumb. Their exact throwaway markers remain enforced, and permanent Carbon
-page content is future work even though the shared root shell surrounds
-authenticated routes. The `/[orgSlug]/entities` and `/[orgSlug]/members` pages
+The 1 temporary `[orgSlug]` landing page is an intentionally throwaway, unstyled
+browser loop. It uses semantic headings, navigation, and lists, with no page
+CSS, design-system, or icon imports, and a plain native breadcrumb. Its exact
+throwaway marker remains enforced, and permanent Carbon page content is future
+work even though the shared root shell surrounds authenticated routes. The
+`/[orgSlug]/entities`, `/[orgSlug]/members`, and `/[orgSlug]/settings` pages
 have left this loop and are now Carbon pages that mutate by client call.
 
 The `/organizations` list and `/organizations/new` create pages are now Carbon
@@ -572,15 +572,14 @@ step with name edits.
 
 Creation validates and normalizes again on the server, calls Better Auth with
 `keepCurrentActiveOrganization: true`, and redirects only to the validated
-created slug. Settings, invitation, role, and removal actions accept no
-organization id or callback from the browser. They resolve the bound slug
-through the member-gated route resolver and pass that exact id to Better Auth.
-Before doing either, every scoped action validates the bound slug. A malformed,
-protocol-relative-looking, or encoded-looking value redirects only to
-`/organizations?result=error`, without calling the resolver or Better Auth.
-Destinations for valid values use only the parsed slug or the durable slug
-returned by the resolver. All failures use fixed local redirects and generic
-messages.
+created slug. The remaining organization server actions are invitation accept
+and decline; each carries only an invitation id in its form body, and Better
+Auth matches that invitation to the verified session, so no browser-supplied
+organization id or callback selects a tenant. All failures use fixed local
+redirects and generic messages. Settings, membership, and entity-scope mutations
+are no longer server actions: the Carbon `/[orgSlug]/settings`,
+`/[orgSlug]/members`, and `/[orgSlug]/entities` pages call Better Auth or the
+BFF directly with the organization id resolved server-side from the route slug.
 
 Only owners can update settings, invite, assign `owner`, `admin`, or `member`,
 remove a member, and edit an admin's or a member's entity scope. Admins and
@@ -594,10 +593,17 @@ requires and from which Better Auth re-derives membership and permission; the
 browser id never selects a tenant. It also offers an owner-only entity scope
 editor next to each admin or member, setting `all` or an explicit set of legal
 entity ids through the BFF; the editor is hidden for an owner target, which the
-API also rejects with a 409. Better Auth 1.7.4 owns the sole-owner invariant: it
-blocks removing the only owner and blocks a sole owner's self-demotion, so the
-page no longer rereads the member list to guard that case. Organization
-deletion, active selection, custom roles, and teams remain unavailable.
+API also rejects with a 409. The Carbon `/[orgSlug]/settings` page saves name
+and slug changes through `authClient.organization.update` and lets any member
+leave through `authClient.organization.leave`, both carrying the server-resolved
+`organizationId`; a slug change re-checks the reserved contract in the auth
+before-hook and refreshes the active organization context, while name and slug
+fields stay read-only for admins and members. Better Auth 1.7.4 owns the
+sole-owner invariant: it blocks removing the only owner, blocks a sole owner's
+self-demotion, and refuses a sole owner's own leave, which the settings page
+surfaces inline; the members page no longer rereads the member list to guard
+that case. Organization deletion, active selection, custom roles, and teams
+remain unavailable.
 
 The new `/[orgSlug]/entities` page lists the legal entities in the viewer's
 scope. An owner or an admin holding `createEntities`/`updateEntities` can add or
