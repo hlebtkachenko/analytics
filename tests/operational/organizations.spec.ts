@@ -195,7 +195,31 @@ test('walks the Carbon workspace loop through explicit member-scoped actions', a
   await expect(page).toHaveURL(new RegExp(`/${renamedSlug}$`));
   await expect(page.getByRole('heading', { name: renamedName })).toBeVisible();
 
-  await page.goto('/organizations');
+  // The header account panel names the role in the active workspace, and the
+  // header switcher lists the renamed workspace as the current one.
+  const header = page.getByRole('banner');
+  await header.getByRole('button', { exact: true, name: 'Account' }).click();
+  await expect(header.getByText('Owner', { exact: true })).toBeVisible();
+  await header.getByRole('button', { exact: true, name: 'Workspaces' }).click();
+  await expect(header.getByText('Owner', { exact: true })).toHaveCount(0);
+  const switcher = header.getByRole('list', { name: 'Workspaces' });
+  const currentWorkspace = switcher.getByRole('link', { name: renamedName });
+  await expect(currentWorkspace).toHaveAttribute('href', `/${renamedSlug}`);
+  await expect(currentWorkspace).toHaveClass(/--selected/);
+  await expect(
+    switcher.getByRole('link', { name: 'BAP Operational' }),
+  ).not.toHaveClass(/--selected/);
+  await expect(
+    switcher.getByRole('link', { name: 'Create workspace' }),
+  ).toHaveAttribute('href', '/organizations/new');
+  // Carbon animates the header panel open; axe must scan the settled 256px panel.
+  await expect(page.locator('.cds--header-panel--expanded')).toHaveCSS(
+    'width',
+    '256px',
+  );
+  await expectNoAccessibilityViolations(page);
+  await switcher.getByRole('link', { name: 'Manage workspaces' }).click();
+  await expect(page).toHaveURL(/\/organizations$/);
   await page.getByRole('button', { name: 'Create workspace' }).click();
   await expect(page).toHaveURL(/\/organizations\/new$/);
   await expect(page.getByText('Remaining of granted quota: 0')).toBeVisible();
