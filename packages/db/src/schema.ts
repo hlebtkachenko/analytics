@@ -399,6 +399,10 @@ export const inboxChannels = appSchema.table(
       table.organizationId,
       table.kind,
     ),
+    // The intake domain is shared by every organization, so the address is unique across the platform.
+    uniqueIndex('inbox_channel_email_address_key')
+      .on(table.emailAddress)
+      .where(sql`${table.emailAddress} is not null`),
   ],
 );
 
@@ -438,6 +442,7 @@ export const inboxItems = appSchema.table(
       .notNull()
       .defaultNow(),
     routedAt: timestamp('routed_at', { withTimezone: true }),
+    sender: text('sender'),
     snoozedUntil: timestamp('snoozed_until', { withTimezone: true }),
     status: text('status', { enum: inboxItemStatuses })
       .notNull()
@@ -478,6 +483,10 @@ export const inboxItems = appSchema.table(
     check(
       'inbox_item_channel_check',
       sql`(${table.channelKind} = 'upload') = (${table.channelId} is null)`,
+    ),
+    check(
+      'inbox_item_sender_check',
+      sql`${table.sender} is null or length(${table.sender}) between 1 and 320`,
     ),
     unique('inbox_item_id_organization_key').on(table.id, table.organizationId),
     foreignKey({
