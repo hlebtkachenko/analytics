@@ -60,9 +60,9 @@ artboards. A separate TypeScript compiler AST contract parses the actual
 production TSX, rejects direct application imports from `@carbon/icons-react`,
 and pins the reviewed Carbon control-icon callsites plus the direct decorative
 status icons, facade imports, visible labels, and absence of icon-only controls.
-The AST coverage also protects the two temporary pages' exact throwaway marker
+The AST coverage also protects the one temporary page's exact throwaway marker
 and zero CSS/design-system/icon boundary. That source-level guard scopes the
-temporary page modules, not the product shell layout under `app/(product)` that
+temporary page module, not the product shell layout under `app/(product)` that
 surrounds authenticated routes. Committed production Playwright coverage
 verifies real public and authenticated controls for keyboard order, axe,
 label-derived accessible names, Carbon SVG semantics and alignment, 44px
@@ -168,14 +168,19 @@ resolver errors disclose nothing, and the layout uses the same not-found path
 for every negative result. The root redirect is pinned to `/organizations`.
 Separate BFF and PostgreSQL assertions prove a valid slug-shaped selector can
 cross the web's syntax check but cannot resolve as an id at the service
-membership boundary. Temporary organization page tests cover every route:
-membership listing, quota-positive and quota-zero creation states, name-to-slug
-prefill, organization navigation, plain native breadcrumbs, explicit-id member
-and invitation reads, permission-based form visibility, and settings prefill.
-Action tests prove normalized creation preserves ambient session state, forged
-organization ids are ignored, explicit resolved ids reach Better Auth, the
-temporary sole-owner recheck runs, co-owner changes work, and failures expose
-only fixed generic outcomes.
+membership boundary. Organization page tests cover every route: membership
+listing, quota-positive and quota-zero creation states, name-to-slug prefill,
+organization navigation, plain native breadcrumbs, explicit-id member and
+invitation reads, permission-based control visibility, and settings name and
+slug prefill that stays read-only for non-owners and for a failed access read.
+The settings page tests also prove that a save calls Better Auth with the
+resolved id and refreshes, a slug change navigates to the new URL, a taken slug
+shows an inline error with the form kept, and that leaving pushes to
+`/organizations` while a sole owner's leave surfaces inline. Action tests prove
+normalized creation preserves ambient session state, invitation accept and
+decline carry only a verified invitation id, and failures expose only fixed
+generic outcomes. The auth before-hook test proves an update revalidates and
+normalizes a submitted slug against the reserved contract.
 
 The identity and organization integration closure adds no runtime path. The
 shared TypeScript/PostgreSQL corpus explicitly enumerates all 16 reserved
@@ -199,9 +204,9 @@ allowed organization, and traverses its overview, members, and settings pages
 through Caddy. It also covers the shared skip link and primary navigation, plain
 native breadcrumbs, native keyboard operation, axe, a mobile viewport, 640
 CSS-pixel layout-equivalent reflow, horizontal overflow, and page/console
-errors. This is not a browser-zoom assertion. The temporary page modules
-intentionally retain their marker comments and have no CSS, design-system, or
-icon imports; only the product shell layout under `app/(product)` is Carbon. The
+errors. This is not a browser-zoom assertion. The temporary landing page module
+intentionally retains its marker comment and has no CSS, design-system, or icon
+imports; only the product shell layout under `app/(product)` is Carbon. The
 operational workflow raises only its disposable synthetic owner's total quota
 from 1 to 2 through the existing migrator command; the second organization
 consumes that capacity and the proof finishes on the zero-quota state. The

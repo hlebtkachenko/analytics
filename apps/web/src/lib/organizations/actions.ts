@@ -9,13 +9,7 @@ import { z } from 'zod';
 import { getOrganizationCreationQuota } from '@bap/db/access';
 
 import { getAuth, getAuthPool } from '../auth/server';
-import {
-  formValue,
-  invalidScopedActionPath,
-  organizationPath,
-  resolveActionOrganization,
-  resultPath,
-} from './action-support';
+import { formValue, organizationPath, resultPath } from './action-support';
 import { normalizeOrganizationSlug, organizationSlugSchema } from './slug';
 
 const invitationInputIdSchema = z.object({ invitationId: z.string().min(1) });
@@ -144,63 +138,6 @@ async function respondToInvitation(
         '/organizations',
         decision === 'accept' ? 'accept-error' : 'decline-error',
       );
-    }
-  }
-
-  redirect(destination as Route);
-}
-
-export async function updateOrganizationAction(
-  organizationSlug: string,
-  formData: FormData,
-): Promise<never> {
-  const routeSlug = organizationSlugSchema.safeParse(organizationSlug);
-  if (!routeSlug.success) {
-    return redirect(invalidScopedActionPath as Route);
-  }
-
-  const input = createOrganizationInputSchema.safeParse({
-    name: formValue(formData, 'name'),
-    slug: formValue(formData, 'slug'),
-  });
-  let fallback = resultPath(
-    organizationPath(routeSlug.data, '/settings'),
-    'error',
-  );
-  let destination = fallback;
-
-  if (input.success) {
-    const slug = organizationSlugSchema.safeParse(
-      normalizeOrganizationSlug(input.data.slug),
-    );
-    if (slug.success) {
-      try {
-        const organization = await resolveActionOrganization(
-          routeSlug.data,
-          'owner',
-        );
-        fallback = resultPath(
-          organizationPath(organization.slug, '/settings'),
-          'error',
-        );
-        destination = fallback;
-        const auth = await getAuth();
-        await auth.api.updateOrganization({
-          body: {
-            data: { name: input.data.name, slug: slug.data },
-            organizationId: organization.id,
-          },
-          headers: await headers(),
-        });
-        revalidatePath('/organizations');
-        revalidatePath(organizationPath(organization.slug), 'layout');
-        destination = resultPath(
-          organizationPath(slug.data, '/settings'),
-          'success',
-        );
-      } catch {
-        destination = fallback;
-      }
     }
   }
 

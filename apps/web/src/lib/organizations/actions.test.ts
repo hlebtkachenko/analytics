@@ -6,7 +6,6 @@ import {
   acceptOrganizationInvitationAction,
   createOrganizationAction,
   declineOrganizationInvitationAction,
-  updateOrganizationAction,
 } from './actions';
 
 const mocks = vi.hoisted(() => ({
@@ -20,7 +19,6 @@ const mocks = vi.hoisted(() => ({
   rejectInvitation: vi.fn(),
   resolveOrganizationRouteForRequest: vi.fn(),
   revalidatePath: vi.fn(),
-  updateOrganization: vi.fn(),
 }));
 
 vi.mock('@bap/db/access', () => ({
@@ -61,7 +59,6 @@ describe('organization server actions', () => {
         createOrganization: mocks.createOrganization,
         getSession: mocks.getSession,
         rejectInvitation: mocks.rejectInvitation,
-        updateOrganization: mocks.updateOrganization,
       },
     });
     mocks.getAuthPool.mockResolvedValue({});
@@ -227,68 +224,5 @@ describe('organization server actions', () => {
     expect(mocks.redirect).toHaveBeenCalledWith(
       '/organizations/new?result=error',
     );
-  });
-
-  it('updates settings with the resolved id and a safe renamed route', async () => {
-    await updateOrganizationAction(
-      'organization-one',
-      form({
-        name: ' Organization Renamed ',
-        organizationId: 'forged-organization',
-        slug: 'Organization Renamed',
-      }),
-    );
-
-    expect(mocks.updateOrganization).toHaveBeenCalledWith({
-      body: {
-        data: {
-          name: 'Organization Renamed',
-          slug: 'organization-renamed',
-        },
-        organizationId: 'organization-1',
-      },
-      headers: expect.any(Headers),
-    });
-    expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organization-renamed/settings?result=success',
-    );
-  });
-
-  it.each(['admin', 'member'] as const)(
-    'refuses the owner-only settings update to an %s',
-    async (role) => {
-      mocks.resolveOrganizationRouteForRequest.mockResolvedValue({
-        ...organization,
-        role,
-      });
-
-      await updateOrganizationAction(
-        'organization-one',
-        form({ name: 'Organization Renamed', slug: 'organization-renamed' }),
-      );
-
-      expect(mocks.updateOrganization).not.toHaveBeenCalled();
-      expect(mocks.revalidatePath).not.toHaveBeenCalled();
-      expect(mocks.redirect).toHaveBeenCalledWith(
-        '/organization-one/settings?result=error',
-      );
-    },
-  );
-
-  it('rejects an invalid settings action scope with one fixed same-origin redirect', async () => {
-    await updateOrganizationAction(
-      'organization%2Fsettings',
-      form({ name: 'Organization Renamed', slug: 'organization-renamed' }),
-    );
-
-    expect(mocks.redirect).toHaveBeenCalledOnce();
-    expect(mocks.redirect).toHaveBeenCalledWith('/organizations?result=error');
-    expect(
-      new URL(mocks.redirect.mock.calls[0]?.[0], 'https://bap.invalid').origin,
-    ).toBe('https://bap.invalid');
-    expect(mocks.resolveOrganizationRouteForRequest).not.toHaveBeenCalled();
-    expect(mocks.getAuth).not.toHaveBeenCalled();
-    expect(mocks.updateOrganization).not.toHaveBeenCalled();
-    expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 });

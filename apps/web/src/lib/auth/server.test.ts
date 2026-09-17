@@ -722,6 +722,28 @@ describe('organization creation policy', () => {
     },
   );
 
+  it('normalizes and validates a submitted update slug before the id check', async () => {
+    const hook = createAuthBeforeHook(poolWithQuery(vi.fn()));
+    const body = {
+      data: { name: 'Example', slug: ' Example  Org ' },
+      organizationId: 'organization-1',
+    };
+
+    await expect(
+      hook({ body, path: '/organization/update' }),
+    ).resolves.toBeUndefined();
+    expect(body.data.slug).toBe('example-org');
+
+    await expect(
+      hook({
+        body: { data: { slug: 'API' }, organizationId: 'organization-1' },
+        path: '/organization/update',
+      }),
+    ).rejects.toMatchObject({
+      body: { code: invalidOrganizationSlugErrorCode },
+    });
+  });
+
   it('injects the authenticated creator and overwrites forged hook data', async () => {
     await expect(
       beforeCreateOrganization({

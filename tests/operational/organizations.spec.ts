@@ -115,16 +115,21 @@ test('walks the Carbon workspace loop through explicit member-scoped actions', a
 
   await page.goto(`/${createdSlug}`);
   await page.getByRole('link', { name: 'Settings' }).click();
+  await expect(page).toHaveURL(new RegExp(`/${createdSlug}/settings$`));
+  await expect(
+    page.getByRole('heading', { name: `${uniqueName} settings` }),
+  ).toBeVisible();
   const renamedName = `${uniqueName} renamed`;
   const renamedSlug = normalizeOrganizationSlug(`${createdSlug}-new`);
-  await page.getByLabel('Name').fill(renamedName);
-  await page.getByLabel('Slug').fill(renamedSlug);
-  await page.getByRole('button', { name: 'Save settings' }).click();
-  await expect(page).toHaveURL(
-    new RegExp(`/${renamedSlug}/settings\\?result=success$`),
-  );
+  const settingsForm = page.getByRole('form', { name: 'General' });
+  await settingsForm.getByLabel('Name').fill(renamedName);
+  await settingsForm.getByLabel('Slug').fill(renamedSlug);
+  await settingsForm.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByText('The workspace was updated.')).toBeVisible();
+  // A slug change moves the settings route to the new address.
+  await expect(page).toHaveURL(new RegExp(`/${renamedSlug}/settings$`));
   await expect(
-    page.getByText('Organization settings were updated.'),
+    page.getByRole('heading', { name: `${renamedName} settings` }),
   ).toBeVisible();
   await expectNoAccessibilityViolations(page);
 
@@ -136,7 +141,7 @@ test('walks the Carbon workspace loop through explicit member-scoped actions', a
 
   // The Carbon workspace list and create pages are driven at the shell's normal width.
   await page.setViewportSize({ height: 900, width: 1280 });
-  await page.getByRole('link', { name: 'Back to organization' }).click();
+  await page.goto(`/${renamedSlug}`);
   await page.getByRole('link', { name: 'All organizations' }).click();
   await expect(page).toHaveURL(/\/organizations$/);
   // The renamed workspace is a DataGrid row; clicking it navigates to the workspace.
