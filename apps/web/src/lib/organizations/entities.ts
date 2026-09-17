@@ -2,6 +2,7 @@ import { headers } from 'next/headers';
 
 import {
   accessResponseSchema,
+  getDatasets,
   getLegalEntities,
   getMemberEntityScopes,
   getOrganizationAccess,
@@ -12,11 +13,14 @@ import type { EntityScope, LegalEntity, OrganizationAccess } from '../auth/bff';
 import { getAuth } from '../auth/server';
 import {
   accessPath,
+  datasetListSchema,
+  datasetsPath,
   entityScopesPath,
   legalEntitiesPath,
 } from '../datasets/client';
+import type { DatasetSummary } from '../datasets/client';
 
-export type { EntityScope, LegalEntity, OrganizationAccess };
+export type { DatasetSummary, EntityScope, LegalEntity, OrganizationAccess };
 
 // Never dialled: the synthetic request only carries the caller's session to the BFF helpers.
 const serverRequestOrigin = 'http://web.internal';
@@ -87,6 +91,24 @@ export async function readLegalEntities(
 
   const parsed = legalEntityListSchema.safeParse(await response.json());
   return parsed.success ? parsed.data.legalEntities : null;
+}
+
+// The API has no count endpoint, so the scope-wide list is read in full for its length.
+export async function readDatasets(
+  organizationId: string,
+): Promise<readonly DatasetSummary[] | null> {
+  const response = await getDatasets(
+    await authApi(),
+    await serverBffRequest(datasetsPath(organizationId)),
+    organizationId,
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const parsed = datasetListSchema.safeParse(await response.json());
+  return parsed.success ? parsed.data.datasets : null;
 }
 
 // One read for the whole member list; a member without a stored row is unrestricted.

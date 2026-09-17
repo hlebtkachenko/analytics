@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  readDatasets,
   readLegalEntities,
   readMemberEntityScopes,
   readOrganizationAccess,
@@ -145,6 +146,44 @@ describe('server-side legal entity reads and writes', () => {
     expect(scopes?.get('user-3')).toEqual({ mode: 'all' });
     // A member without a stored row is simply absent, which the page reads as unrestricted.
     expect(scopes?.has('user-4')).toBe(false);
+  });
+
+  it('reads the scope-wide dataset list in one request', async () => {
+    const dataset = {
+      createdAt: '2026-09-11T06:00:00.000Z',
+      description: null,
+      id: '2f1c9a44-3e21-4b88-9f0a-6c7d2e5b1a90',
+      legalEntityId: LEGAL_ENTITY_ID,
+      name: 'Placeholder ledger',
+      rowCount: 12,
+      status: 'ready',
+      updatedAt: '2026-09-11T06:05:00.000Z',
+    };
+    const fetchMock = vi.fn(async () => Response.json({ datasets: [dataset] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const datasets = await readDatasets('organization-1');
+
+    expect(datasets).toEqual([dataset]);
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      'http://api:3001/v1/organizations/organization-1/datasets',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer resource-token',
+        }),
+      }),
+    );
+  });
+
+  it('reports an unavailable dataset read as null', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({ error: 'datasets_unavailable' }, { status: 403 }),
+      ),
+    );
+
+    await expect(readDatasets('organization-1')).resolves.toBeNull();
   });
 
   it('reports an unavailable bulk scope read as null', async () => {
