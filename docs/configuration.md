@@ -5,19 +5,19 @@
 `config/compose.environment.example` is the complete non-secret Compose input
 template. Copy it to an ignored file for local development.
 
-| Variable                                | Purpose                                                    | Development default      |
-| --------------------------------------- | ---------------------------------------------------------- | ------------------------ |
-| `WEB_PORT`                              | Caddy host port                                            | `3000`                   |
-| `POSTGRES_PORT`                         | Loopback PostgreSQL host port                              | `5432`                   |
-| `MAILPIT_HTTP_PORT`                     | Unique loopback mail-inspection port                       | `8025`                   |
-| `POSTGRES_DB`                           | Database name                                              | `bap`                    |
-| `BAP_PUBLIC_HOST`                       | Caddy site address                                         | `http://localhost`       |
-| `BAP_PUBLIC_ORIGIN`                     | Exact Better Auth issuer and public origin                 | `http://localhost:3000`  |
-| `BAP_MAIL_SENDER`                       | From address for transactional mail                        | `no-reply@bap.localhost` |
-| `BAP_MAIL_TRANSPORT`                    | Explicit `resend`, `smtp`, or `log` mode                   | `smtp` in development    |
-| `BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION` | Platform-wide byte quota per organization for stored blobs | `1073741824`             |
-| `BAP_INTAKE_DOMAIN`                     | Domain of every issued inbox email address                 | `in.bap.localhost`       |
-| `BAP_INBOUND_MAX_IN_FLIGHT`             | Concurrent Mailgun posts web accepts before answering 503  | `4`                      |
+| Variable                                | Purpose                                                             | Development default      |
+| --------------------------------------- | ------------------------------------------------------------------- | ------------------------ |
+| `WEB_PORT`                              | Caddy host port                                                     | `3000`                   |
+| `POSTGRES_PORT`                         | Loopback PostgreSQL host port                                       | `5432`                   |
+| `MAILPIT_HTTP_PORT`                     | Unique loopback mail-inspection port                                | `8025`                   |
+| `POSTGRES_DB`                           | Database name                                                       | `bap`                    |
+| `BAP_PUBLIC_HOST`                       | Caddy site address                                                  | `http://localhost`       |
+| `BAP_PUBLIC_ORIGIN`                     | Exact Better Auth issuer and public origin                          | `http://localhost:3000`  |
+| `BAP_MAIL_SENDER`                       | From address for transactional mail                                 | `no-reply@bap.localhost` |
+| `BAP_MAIL_TRANSPORT`                    | Explicit `resend`, `smtp`, or `log` mode                            | `smtp` in development    |
+| `BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION` | Platform default and cap for the per-organization stored blob quota | `1073741824`             |
+| `BAP_INTAKE_DOMAIN`                     | Domain of every issued inbox email address                          | `in.bap.localhost`       |
+| `BAP_INBOUND_MAX_IN_FLIGHT`             | Concurrent Mailgun posts web accepts before answering 503           | `4`                      |
 
 `BAP_PUBLIC_ORIGIN` must be an origin without a path. It is never a
 `NEXT_PUBLIC_*` value. Production accepts HTTPS origins, with plain HTTP
@@ -30,11 +30,14 @@ overlay sets the matching local origin from `WEB_PORT`. Select
 `MAILPIT_HTTP_PORT` may be any integer from 1 through 65535, but it cannot equal
 the web or PostgreSQL host port.
 
-`BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION` is a positive integer of bytes. The
-application API refuses an upload that would take the sum of an organization's
-`app.blob.byte_size` above it, before any byte is committed
-([ADR 0014](adr/0014-durable-blob-storage.md)). There is no per-organization
-override in Phase 0.
+`BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION` is a positive integer of bytes and is
+the platform default and cap. The application API refuses an upload that would
+take the sum of an organization's `app.blob.byte_size` above the effective
+quota, before any byte is committed
+([ADR 0014](adr/0014-durable-blob-storage.md)). An owner can only tighten the
+quota per organization, on `/inbox/settings`; the effective quota is the lesser
+of the organization setting and this variable. No new environment variable backs
+the per-organization setting; it is stored in `app.organization_inbox_setting`.
 
 `BAP_INTAKE_DOMAIN` is the bare DNS name (no scheme, no `@`) whose MX records
 point at Mailgun EU; every email channel address is `in-<token>@<domain>`. The

@@ -390,6 +390,36 @@ local part and hashes exactly that, never the whole address.
 `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
 `20260917.0003`.
 
+Migration `20260917.0004` adds the runtime layer of 1b-runtime.
+`app.inbox_routing_target` (`organization_id`, `detected_type`, `destination`,
+`document_kind`, `default_legal_entity_id`, `partner_policy`, `auto`,
+`auto_threshold`, `default_assignee_id`, `required_fields`, `created_by`,
+`updated_by`, `unique (organization_id, detected_type)`) carries the per command
+policy shape of `inbox_channel`: SELECT is organization wide and excludes a
+channel (`AND NOT app.role_is_channel()`), INSERT checks `created_by`, and
+UPDATE and DELETE both need `app.role_can_write()`; the owner-only rule above
+that is an API permission, not a policy. A row absent for a type falls back to
+the code constant, so no seeding migration copies it.
+`app.organization_inbox_setting` (`organization_id` primary key,
+`blob_quota_bytes`, `created_by`) is one row per organization: SELECT is
+organization wide with no channel exclusion, because the intake gate and the
+split job both read it inside the channel's own transaction, while INSERT and
+UPDATE need `app.role_is_owner()` and there is no DELETE policy. Three more
+`SECURITY DEFINER` functions owned by `bap_owner` (`app.list_blob_keys`,
+`app.reap_stalled_inbox_items`, `app.list_stuck_email_items`), EXECUTE to
+`bap_api`, back the `inbox_maintenance` worker tick and raise
+`insufficient_privilege` whenever `bap.organization_id` is set; because
+`FORCE ROW LEVEL SECURITY` also applies to `bap_owner`, the migration adds
+`TO bap_owner USING (true)` maintenance policies in the shape of
+`inbox_channel_maintenance_select`: SELECT on `inbox_item` and `blob`, UPDATE on
+`inbox_item`, INSERT on `inbox_event`. The `stalled` event reason joins
+`inbox_event_reason_check`. The eraser gains column grants on
+`inbox_routing_target.default_assignee_id`, `inbox_routing_target.created_by`,
+`inbox_routing_target.updated_by` and `organization_inbox_setting.created_by`;
+both tables get full DML for `bap_api` and SELECT for `bap_reporting` and
+`bap_backup`. `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts`
+is now `20260917.0004`.
+
 ## Tenant policy contract
 
 Every future tenant table must include:

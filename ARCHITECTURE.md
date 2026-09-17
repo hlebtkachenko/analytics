@@ -193,6 +193,21 @@ Webhook and Worker sections: `app.record_blob_scan`, the platform-unique
 `inbox_channel.email_address`, the recreated `auth.issue_channel_credential`
 with its `email_address` kind, and `app.inbox_item.sender`.
 
+Migration `20260917.0004` adds the Phase 1b-runtime layer.
+`app.inbox_routing_target` holds a per-organization override of a detected
+type's destination, kind, default entity, partner policy, auto policy and
+required fields; the effective target for a type is that row when one exists,
+else the `ROUTING_TARGET_DEFAULTS` code constant, a lazy override with no
+seeding migration. `app.organization_inbox_setting` holds a per-organization
+blob quota; the effective quota is the lesser of that setting and
+`BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION`, so an owner can only tighten the
+platform cap. The worker's `inbox_maintenance` job, scheduled with pg-boss cron
+on `*/15 * * * *` and opening no tenant transaction, runs three tasks each tick:
+it unlinks a blob-volume file left untracked by a failed commit once it clears a
+60 minute grace period, fails an `inbox_item` stuck in `processing` past 60
+minutes, and re-enqueues `split_email_item` for an email item still `received`
+past 10 minutes.
+
 ## Workspace dependency rules
 
 ```mermaid
@@ -385,11 +400,12 @@ The Inbox intake boundary and its durable per-organization blob storage,
 described in [ADR 0014](docs/adr/0014-durable-blob-storage.md) and
 [ADR 0015](docs/adr/0015-inbox-intake-model.md), are also no longer deferred.
 Uploaded bytes behind an inbox item or a document are durable, never deleted
-after intake. Inbox channels beyond manual upload, the `inbox_channel` and
-`inbox_rule` tables, a non-human channel principal, a per-organization quota
-setting, routing target settings, the orphan blob sweep, and any AI or parser
-provider remain deferred; see [the inbox plan](docs/planning/inbox.md) for the
-full list.
+after intake. The per-organization quota setting, routing target settings, and
+the orphan blob sweep land with Phase 1b-runtime. The `inbox_rule` table, rules
+and auto-route, Split, versioning, fingerprint duplicates, attach-to-existing,
+bulk actions, any connector, the credential vault, retention, channel health,
+and any AI or parser provider remain deferred; see
+[the inbox plan](docs/planning/inbox.md) for the full list.
 
 Metric definitions, aggregation and transformation semantics beyond derivation,
 derived datasets, cross-dataset joins, dataset editing and versioning, custom
