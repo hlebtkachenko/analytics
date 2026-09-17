@@ -35,8 +35,15 @@ import { resolveTenantAccess } from '../tenant-access.js';
 import type { SplitEmailItemJob } from './contract.js';
 import { InboxService } from './inbox.service.js';
 import {
+  adoptRule,
   assignItem,
   createChannel,
+  createRule,
+  deleteRule,
+  listRules,
+  orderRules,
+  readRule,
+  updateRule,
   deleteRoutingTarget,
   discardItem,
   issueCredential,
@@ -194,7 +201,14 @@ beforeAll(async () => {
   await createBlobDirectories(directory);
   store = new FilesystemBlobStore(directory);
   const repository: InboxRepository = {
+    adoptRule: (input) => adoptRule(apiPool, input),
     assignItem: (input) => assignItem(apiPool, input),
+    createRule: (input) => createRule(apiPool, input),
+    deleteRule: (input) => deleteRule(apiPool, input),
+    listRules: (input) => listRules(apiPool, input),
+    orderRules: (input) => orderRules(apiPool, input),
+    readRule: (input) => readRule(apiPool, input),
+    updateRule: (input) => updateRule(apiPool, input),
     createChannel: (input) => createChannel(apiPool, input),
     deleteRoutingTarget: (input) => deleteRoutingTarget(apiPool, input),
     discardItem: (input) => discardItem(apiPool, input),
@@ -221,6 +235,8 @@ beforeAll(async () => {
     updateInboxSettings: (input) => updateInboxSettings(apiPool, input),
   };
   service = new InboxService(repository, store, QUOTA, INTAKE_DOMAIN, {
+    enqueueRerunInboxRule: async () => undefined,
+    enqueueRouteInboxItem: async () => undefined,
     enqueueSplitEmailItem: async (job) => {
       enqueued.push(job);
     },

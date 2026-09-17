@@ -13,9 +13,10 @@ import {
 import { FilesystemBlobStore } from './blobs/blob-store.js';
 import {
   INBOX_MAINTENANCE_QUEUE,
+  ROUTE_INBOX_ITEM_QUEUE,
   SPLIT_EMAIL_ITEM_QUEUE,
 } from './inbox/contract.js';
-import { sendSplitEmailItem } from './inbox/inbox-queue.js';
+import { sendRouteInboxItem, sendSplitEmailItem } from './inbox/inbox-queue.js';
 import { INGEST_DATASET_QUEUE } from './ingestion/contract.js';
 import {
   createStagingDirectory,
@@ -108,6 +109,12 @@ async function bootstrap(): Promise<void> {
     { policy: 'exclusive' },
     warnQueue,
   );
+  await createQueue(
+    queue,
+    ROUTE_INBOX_ITEM_QUEUE,
+    { policy: 'exclusive' },
+    warnQueue,
+  );
   // The real error is logged here; only the curated one reaches pgboss.job.output.
   const runJob = async (work: () => Promise<void>): Promise<void> => {
     try {
@@ -190,6 +197,7 @@ async function bootstrap(): Promise<void> {
           splitEmailItem({
             blobs,
             data: job.data,
+            enqueueRouteInboxItem: (route) => sendRouteInboxItem(queue, route),
             metrics,
             pool,
             quotaBytes: runtime.blob.quotaBytesPerOrganization,

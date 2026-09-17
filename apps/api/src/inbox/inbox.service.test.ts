@@ -77,6 +77,7 @@ const item: InboxItem = {
   createdAt: '2026-09-16T06:00:00.000Z',
   datasetId: null,
   decidedByKind: null,
+  decidedByRuleId: null,
   decidedByUserId: null,
   detectedType: null,
   documentId: null,
@@ -99,6 +100,7 @@ const item: InboxItem = {
 };
 
 const detail: InboxItemDetail = {
+  corrections: [],
   events: [],
   extraction: null,
   files: [],
@@ -128,6 +130,8 @@ describe('InboxService', () => {
   const settingsUpdates: UpdateInboxSettingsInput[] = [];
   let enqueueFails = false;
   const queue = {
+    enqueueRerunInboxRule: vi.fn(async () => undefined),
+    enqueueRouteInboxItem: vi.fn(async () => undefined),
     enqueueSplitEmailItem: vi.fn(async (job: SplitEmailItemJob) => {
       if (enqueueFails) {
         throw new Error('queue down');
@@ -138,6 +142,13 @@ describe('InboxService', () => {
 
   // The repository stub mirrors the real transaction order: quota, duplicate, then persist only for new bytes.
   const repository = {
+    adoptRule: vi.fn(),
+    createRule: vi.fn(),
+    deleteRule: vi.fn(),
+    listRules: vi.fn(),
+    orderRules: vi.fn(),
+    readRule: vi.fn(),
+    updateRule: vi.fn(),
     assignItem: vi.fn(),
     createChannel: vi.fn(),
     deleteRoutingTarget: vi.fn(),
@@ -225,6 +236,7 @@ describe('InboxService', () => {
           files: [],
           item: { ...item, status: 'discarded' as const },
           replayed: false,
+          routeJob: null,
         };
       }
       if (usedBytes + input.byteSize > input.quotaBytes) {
@@ -232,7 +244,13 @@ describe('InboxService', () => {
       }
       await input.persist();
       usedBytes += input.byteSize;
-      return { duplicateOfItemId: null, files: [], item, replayed: false };
+      return {
+        duplicateOfItemId: null,
+        files: [],
+        item,
+        replayed: false,
+        routeJob: null,
+      };
     }),
     recordExtraction: vi.fn(async (input: RecordExtractionInput) => {
       extractions.push(input);
@@ -539,6 +557,7 @@ describe('InboxService', () => {
           files: [],
           item: { ...item, status: 'received' as const },
           replayed: false,
+          routeJob: null,
         };
       },
     );
@@ -604,6 +623,7 @@ describe('InboxService', () => {
         files: [],
         item: { ...item, status: 'received' as const },
         replayed: false,
+        routeJob: null,
       };
     };
 

@@ -72,6 +72,7 @@ const item: InboxItem = {
   createdAt: '2026-09-16T06:00:00.000Z',
   datasetId: null,
   decidedByKind: null,
+  decidedByRuleId: null,
   decidedByUserId: null,
   detectedType: 'pdf',
   documentId: null,
@@ -110,6 +111,7 @@ const listEntry: InboxItemListEntry = {
 };
 
 const detail: InboxItemDetail = {
+  corrections: [],
   events: [
     {
       actorUserId: 'user_1',

@@ -33,6 +33,7 @@ import type {
   InboxItemDetail,
   InboxItemListResponse,
   InboxRoutingTarget,
+  InboxRule,
   InboxSettings,
   InboxUploadResponse,
   IssueInboxChannelCredentialResponse,
@@ -47,17 +48,21 @@ import {
   type BlobRecord,
   type ChannelSelector,
   type CreateChannelInput,
+  type CreateRuleInput,
   type DiscardItemInput,
   type EntityScopeSelector,
   type ListItemsInput,
+  type OrderRulesInput,
   type PutRoutingTargetInput,
   type ReadItemInput,
   type ReceiveIntakeResult,
   type RevokeCredentialInput,
   type RoutingTargetSelector,
+  type RuleSelector,
   type SnoozeItemInput,
   type UpdateChannelInput,
   type UpdateHintsInput,
+  type UpdateRuleInput,
 } from './inbox-repository.js';
 import {
   MANUAL_PROVIDER,
@@ -73,6 +78,7 @@ import {
   toProviderOutput,
   type SniffResult,
 } from './providers/sniff.js';
+import { isInvoiceAutoRoute } from './rules.js';
 
 export const BLOB_QUOTA_BYTES = Symbol('BLOB_QUOTA_BYTES');
 export const INTAKE_DOMAIN = Symbol('INTAKE_DOMAIN');
@@ -451,7 +457,7 @@ export class InboxService {
           : await sniffFile(temporaryPath, size);
       const storageKey = blobStorageKey(staged.organizationId, sha256);
 
-      return await this.inbox.receiveIntake({
+      const result = await this.inbox.receiveIntake({
         ...staged,
         byteSize: size,
         // A structured payload is JSON by construction; every file is what its bytes say.
@@ -475,6 +481,19 @@ export class InboxService {
               },
         storageKey,
       });
+
+      // Sent after the commit; nothing routes inside a request. A lost job leaves the item in review for a person.
+      if (result.routeJob !== null) {
+        try {
+          await this.queue.enqueueRouteInboxItem(result.routeJob);
+        } catch {
+          this.logger.error(
+            `Enqueue of route_inbox_item failed for item ${result.item.id}.`,
+          );
+        }
+      }
+
+      return result;
     } catch (error) {
       if (error instanceof QuotaExceededError) {
         throw new PayloadTooLargeException();
@@ -638,6 +657,7 @@ export class InboxService {
 
     return this.inbox.routeToDocument({
       ...input,
+      correctionReasons: input.body.correctionReasons ?? {},
       document,
       extraction: {
         output,
@@ -646,6 +666,72 @@ export class InboxService {
       },
       fileBlobIds: input.body.fileBlobIds,
     });
+  }
+
+  listRules(input: TenantContext): Promise<InboxRule[]> {
+    return this.inbox.listRules(input);
+  }
+
+  readRule(input: RuleSelector): Promise<InboxRule | null> {
+    return this.inbox.readRule(input);
+  }
+
+  // The enabled cap and the invoice refusal are the controller's answers; the rerun is queued after the commit.
+  async createRule(input: CreateRuleInput): Promise<InboxRule | null> {
+    const created = await this.inbox.createRule(input);
+
+    // Enqueued after the commit, as the creator; a lost job is the creator's to retry from the page.
+    if (created !== null && input.body.applyToExisting) {
+      try {
+        await this.queue.enqueueRerunInboxRule({
+          organizationId: input.organizationId,
+          ruleId: created.id,
+          userId: input.userId,
+        });
+      } catch {
+        this.logger.error(
+          `Enqueue of rerun_inbox_rule failed for rule ${created.id}.`,
+        );
+        throw new ServiceUnavailableException();
+      }
+    }
+
+    return created;
+  }
+
+  // The invoice refusal needs the merged row: the stored rule plus the patch.
+  async updateRule(input: UpdateRuleInput): Promise<InboxRule | null> {
+    const current = await this.inbox.readRule(input);
+
+    if (current === null) {
+      return null;
+    }
+
+    if (
+      isInvoiceAutoRoute({
+        autoRoute: input.body.autoRoute ?? current.autoRoute,
+        setDocumentKind:
+          input.body.setDocumentKind === undefined
+            ? current.setDocumentKind
+            : input.body.setDocumentKind,
+      })
+    ) {
+      throw new UnprocessableEntityException('not_available');
+    }
+
+    return this.inbox.updateRule(input);
+  }
+
+  deleteRule(input: RuleSelector): Promise<boolean> {
+    return this.inbox.deleteRule(input);
+  }
+
+  orderRules(input: OrderRulesInput): Promise<InboxRule[]> {
+    return this.inbox.orderRules(input);
+  }
+
+  adoptRule(input: RuleSelector): Promise<InboxRule | null> {
+    return this.inbox.adoptRule(input);
   }
 
   listItems(input: ListItemsInput): Promise<InboxItemListResponse> {
