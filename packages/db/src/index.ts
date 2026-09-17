@@ -62,8 +62,14 @@ export {
   inboxItemFiles,
   inboxItems,
   inboxItemStatuses,
+  inboxMaintenanceReasons,
   inboxPayloadKinds,
+  inboxRoutingAutoPolicies,
+  inboxRoutingDestinations,
+  inboxRoutingPartnerPolicies,
+  inboxRoutingTargets,
   inboxUnprocessableReasons,
+  organizationInboxSettings,
   schema,
 } from './schema.js';
 export type {
@@ -83,7 +89,12 @@ export type {
   InboxItemExtraction,
   InboxItemFile,
   InboxItemStatus,
+  InboxMaintenanceReason,
   InboxPayloadKind,
+  InboxRoutingAutoPolicy,
+  InboxRoutingDestination,
+  InboxRoutingPartnerPolicy,
+  InboxRoutingTarget,
   InboxUnprocessableReason,
   NewBlob,
   NewDocumentFile,
@@ -92,6 +103,9 @@ export type {
   NewInboxItem,
   NewInboxItemExtraction,
   NewInboxItemFile,
+  NewInboxRoutingTarget,
+  NewOrganizationInboxSetting,
+  OrganizationInboxSetting,
 } from './schema.js';
 export {
   readEntityScope,
