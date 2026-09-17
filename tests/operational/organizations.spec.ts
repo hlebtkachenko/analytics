@@ -97,6 +97,11 @@ test('walks the Carbon workspace loop through explicit member-scoped actions', a
   await expect(
     page.getByRole('heading', { name: `${uniqueName} members` }),
   ).toBeVisible();
+  // The populated members grid must stay within a 320px viewport.
+  await page.setViewportSize({ height: 720, width: 320 });
+  await expectNoHorizontalOverflow(page);
+  await expectNoAccessibilityViolations(page);
+  await page.setViewportSize({ height: 720, width: 1280 });
   await page.getByRole('button', { name: 'Invite member' }).click();
   const inviteDialog = page.getByRole('dialog', { name: 'Invite member' });
   await expect(inviteDialog).toBeVisible();
