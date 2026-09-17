@@ -31,6 +31,7 @@ import {
   mutateJson,
 } from '../../../../lib/datasets/client';
 import type { LegalEntity } from '../../../../lib/datasets/client';
+import styles from './members-view.module.scss';
 
 export type MemberRole = 'admin' | 'member' | 'owner';
 
@@ -567,7 +568,7 @@ export default function MembersView({
             <Tab>{t('members.tabs.invitations')}</Tab>
           </TabList>
           <TabPanels>
-            <TabPanel>
+            <TabPanel className={styles.tabPanel!}>
               {members.length === 0 ? (
                 <Tile>
                   <p>{t('members.list.empty')}</p>
@@ -597,7 +598,7 @@ export default function MembersView({
                 />
               )}
             </TabPanel>
-            <TabPanel>
+            <TabPanel className={styles.tabPanel!}>
               {invitations.length === 0 ? (
                 <Tile>
                   <p>{t('members.invitations.empty')}</p>

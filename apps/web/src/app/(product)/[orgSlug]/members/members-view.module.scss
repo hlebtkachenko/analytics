@@ -1,0 +1,6 @@
+// Carbon Tabs is the grid item here, so the tab panel must be allowed to shrink
+// for the wide DataGrid to scroll inside itself instead of stretching the page
+// below a 320px viewport. The data grid block already zeroes its own minimum.
+.tabPanel {
+  min-inline-size: 0;
+}
