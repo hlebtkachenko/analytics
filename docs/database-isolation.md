@@ -351,7 +351,12 @@ Migration `20260917.0002` adds the fourth definer function of ADR 0016,
 unrevoked credentials by `display_prefix` only, in creation order, through this
 function instead. It asserts `bap.role = 'owner'` and reads the organization
 from the transaction settings, the same checks as `issue_channel_credential` and
-`revoke_channel_credential`, and never returns the hash.
+`revoke_channel_credential`, and never returns the hash. The same migration adds
+`rate_limit_intake_edge_last_request_idx`, the intake namespace's counterpart to
+`rate_limit_public_signup_edge_last_request_idx`, a partial index on
+`auth.rate_limit(last_request)` where `"key" LIKE 'bap-edge:intake:%'`. The web
+tier's public intake route calls `auth.resolve_channel_credential` and reads or
+upserts `auth.rate_limit` in that namespace, both on the `bap_auth` pool.
 `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
 `20260917.0002`.
 

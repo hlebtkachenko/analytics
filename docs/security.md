@@ -462,13 +462,17 @@ the role the web service already holds;
 by prefix only and is granted to `bap_api`.
 
 The public intake path is `POST /api/intake/v1/items` in the web service,
-organization-less by design. It checks the edge IP bucket (the sign-up bucket's
-shape) before the credential lookup and consumes it on a miss, so an unknown
-token cannot be guessed at line rate; it then hashes the bearer and resolves it
-on the `bap_auth` pool, and mints the channel's resource JWT server-side from
-the resolved channel id. `/api/auth/token` stays in `disabledAuthPaths`: a
-browser session is still never exchanged for a bearer token, and a channel
-credential is the only way to mint one from outside a verified session.
+organization-less by design. A malformed bearer is refused with no database call
+at all. Otherwise, it checks the edge IP bucket (the sign-up bucket's shape, in
+its own `bap-edge:intake:` namespace: 3 requests per 60 seconds) before the
+credential lookup and consumes it on a miss only, so an unknown token cannot be
+guessed at line rate; it then hashes the bearer and resolves it on the
+`bap_auth` pool, and mints the channel's resource JWT server-side from the
+resolved channel id. A credential whose kind is not `api_token` is a miss on
+this route, whatever its channel. `/api/auth/token` stays in
+`disabledAuthPaths`: a browser session is still never exchanged for a bearer
+token, and a channel credential is the only way to mint one from outside a
+verified session.
 
 Ranked by what a stolen credential could do: first, binding the wrong
 organization is closed by resolving the channel from the credential row and

@@ -39,3 +39,7 @@ $$;
 ALTER FUNCTION auth.list_channel_credentials(uuid) OWNER TO bap_owner;
 REVOKE ALL ON FUNCTION auth.list_channel_credentials(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION auth.list_channel_credentials(uuid) TO bap_api;
+
+CREATE INDEX IF NOT EXISTS rate_limit_intake_edge_last_request_idx
+ON auth.rate_limit(last_request)
+WHERE "key" LIKE 'bap-edge:intake:%';

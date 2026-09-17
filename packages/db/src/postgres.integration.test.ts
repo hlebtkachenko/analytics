@@ -1245,6 +1245,17 @@ describe('PostgreSQL 18 isolation', () => {
     });
   });
 
+  it('indexes the sign-up and intake edge rate-limit namespaces by last request', async () => {
+    const indexes = await rootPool.query<{ indexname: string }>(
+      "select indexname from pg_indexes where schemaname = 'auth' and tablename = 'rate_limit'",
+    );
+    const indexNames = indexes.rows.map((row) => row.indexname);
+    expect(indexNames).toContain(
+      'rate_limit_public_signup_edge_last_request_idx',
+    );
+    expect(indexNames).toContain('rate_limit_intake_edge_last_request_idx');
+  });
+
   it('executes inherited auth-table DML as bap_auth on a newly created disposable table', async () => {
     await asOwner((client) =>
       client.query(

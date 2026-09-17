@@ -447,8 +447,11 @@ independently of the BFF and API capability checks above.
 kind beside a person: it holds no membership and no capability, so it is
 resolved by a sibling `resolveChannelAccess`, not `resolveTenantAccess`, and its
 resource JWT is minted server-side by the web's public intake route from a
-hashed credential lookup, never by the browser session flow above. Every route
-other than the two intake routes refuses a `channel_` subject outright.
+hashed credential lookup, never by the browser session flow above. The intake
+route calls `auth.api.signJWT` directly, the same five-minute Ed25519 token with
+the same fixed claims as every other resource JWT above, never
+`/api/auth/token`. Every route other than the two intake routes refuses a
+`channel_` subject outright.
 
 ## Organization creation
 

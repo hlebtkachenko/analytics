@@ -322,7 +322,10 @@ refuses a `channel_` subject with 403. `POST /api/intake/v1/items` is the one
 organization-less, session-less route in the whole platform: it runs in the web
 service behind Caddy, checks an edge IP bucket before it resolves the bearer
 against `auth.resolve_channel_credential`, and mints the channel's JWT
-server-side before forwarding to the channel items route above.
+server-side before forwarding to the channel items route above. Its error
+vocabulary is `unauthorized`, `rate_limited`, `too_large`,
+`unsupported_media_type`, `channel_not_found`, `conflict`, `intake_rejected`,
+`service_unavailable`, and `intake_unavailable`.
 
 ## BFF and page routes
 
