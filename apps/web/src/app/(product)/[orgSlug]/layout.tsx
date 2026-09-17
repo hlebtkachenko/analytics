@@ -21,6 +21,7 @@ export default async function OrganizationLayout({
   return (
     <>
       <ActiveOrganization
+        id={organization.id}
         name={organization.name}
         role={organization.role}
         slug={organization.slug}

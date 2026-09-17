@@ -43,6 +43,25 @@
   padding: 1rem;
 }
 
+.initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background-color: var(--cds-background-inverse);
+  color: var(--cds-text-inverse);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.about {
+  padding: 0.5rem 1rem;
+  color: var(--cds-text-secondary);
+  font-size: 0.75rem;
+}
+
 .identityName {
   font-weight: 600;
 }

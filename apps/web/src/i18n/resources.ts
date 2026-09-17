@@ -35,8 +35,6 @@ export const resources = {
         uploadData: 'Upload data',
         unavailable: 'Unavailable',
         useAi: 'Ask the assistant',
-        useAiUnavailable:
-          'The general assistant is not available from this page yet.',
       },
       account: {
         delete: {
@@ -634,6 +632,35 @@ export const resources = {
           title: 'Leave {{name}}',
         },
         title: '{{name}} settings',
+      },
+      shell: {
+        account: {
+          preferences: 'Preferences',
+          profile: 'My profile',
+          security: 'Security and sessions',
+          themeDark: 'Dark',
+          themeLight: 'Light',
+          themeSystem: 'System',
+          themeTitle: 'Appearance',
+        },
+        help: {
+          about: 'Version {{version}}',
+          documentation: 'Documentation',
+          feedback: 'Send feedback',
+        },
+        roles: {
+          admin: 'Admin',
+          member: 'Member',
+          owner: 'Owner',
+        },
+        search: {
+          empty: 'No results.',
+          groupEntity: 'Legal entities',
+          groupPage: 'Pages',
+          groupWorkspace: 'Workspaces',
+          label: 'Search',
+          placeholder: 'Search Afframe Analytics',
+        },
       },
       signUp: {
         email: 'Email address',

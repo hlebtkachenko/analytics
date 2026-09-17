@@ -6,9 +6,6 @@ import {
 } from '@bap/design-system/icons';
 import type { ComponentType } from 'react';
 
-// The AI Assistant area is a placeholder header item with no route yet.
-export const ASSISTANT_AREA_LABEL = 'AI Assistant';
-
 // Carbon icon components accept a Carbon artboard size and nothing the rail sets.
 type RailIcon = ComponentType<Readonly<{ size?: number }>>;
 

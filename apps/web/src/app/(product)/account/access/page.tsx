@@ -296,7 +296,6 @@ export default function AccessPage() {
                       />
                       <h3>{t('access.useAi')}</h3>
                       <Tag type="gray">{t('access.unavailable')}</Tag>
-                      <p>{t('access.useAiUnavailable')}</p>
                     </Stack>
                   </Tile>
                 </Column>
