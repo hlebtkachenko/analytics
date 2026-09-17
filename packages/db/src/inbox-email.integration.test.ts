@@ -701,7 +701,7 @@ describe('inbox email channel', () => {
       {
         column_name: 'sender',
         comment:
-          'MAIL FROM of the parsed MIME as reported by the provider, unverified, display only.',
+          'The parsed From header address of the MIME, unverified, display only, never MAIL FROM.',
       },
     ]);
   });
