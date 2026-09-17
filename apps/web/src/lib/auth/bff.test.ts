@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   deleteDocumentLink,
   deleteInboxChannelCredential,
+  deleteInboxRoutingTarget,
   deleteLegalEntity,
   getDocument,
   getDocumentAnalytics,
@@ -16,11 +17,14 @@ import {
   getInboxChannels,
   getInboxItem,
   getInboxItems,
+  getInboxRoutingTargets,
+  getInboxSettings,
   getLegalEntities,
   getMemberEntityScope,
   getMemberEntityScopes,
   getOrganizationAccess,
   patchInboxChannel,
+  patchInboxSettings,
   patchLegalEntity,
   patchPartner,
   postDatasetUpload,
@@ -31,6 +35,7 @@ import {
   postInboxItemRouteDocument,
   postInboxUpload,
   postLegalEntity,
+  putInboxRoutingTarget,
   putMemberEntityScope,
 } from './bff.js';
 import type { BffAuth } from './bff.js';
@@ -1623,6 +1628,19 @@ const inboxDetail = {
   extraction: null,
   files: [inboxFile],
   item: inboxItem,
+  routingTarget: {
+    auto: 'never',
+    autoThreshold: null,
+    defaultAssigneeId: null,
+    defaultLegalEntityId: null,
+    destination: 'documents',
+    detectedType: 'pdf',
+    documentKind: 'other',
+    partnerPolicy: 'match_only',
+    requiredFields: [],
+    source: 'platform',
+    updatedAt: null,
+  },
 };
 
 const inboxRequest = (path: string, init?: RequestInit) =>
@@ -2271,6 +2289,213 @@ describe('inbox channels', () => {
     expect(revoked.status).toBe(204);
     expect(revoked.headers.get('cache-control')).toBe('private, no-store');
     expect(malformed.status).toBe(404);
+    expect(fetchImplementation).toHaveBeenCalledTimes(3);
+  });
+});
+
+const routingTarget = {
+  auto: 'never',
+  autoThreshold: null,
+  defaultAssigneeId: null,
+  defaultLegalEntityId: null,
+  destination: 'documents',
+  detectedType: 'pdf',
+  documentKind: 'other',
+  partnerPolicy: 'match_only',
+  requiredFields: [],
+  source: 'platform',
+  updatedAt: null,
+};
+const routingTargetBody = {
+  auto: 'above_threshold',
+  autoThreshold: 0.9,
+  defaultAssigneeId: null,
+  defaultLegalEntityId: LEGAL_ENTITY_ID,
+  destination: 'documents',
+  documentKind: 'contract',
+  partnerPolicy: 'match_only',
+  requiredFields: ['title'],
+};
+
+describe('inbox routing targets', () => {
+  it('lists the effective targets from the fixed path', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/routing-targets',
+      );
+      expect(init?.method).toBe('GET');
+      return Response.json({ targets: [routingTarget] });
+    });
+
+    const response = await getInboxRoutingTargets(
+      auth,
+      inboxRequest('routing-targets'),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).targets).toEqual([routingTarget]);
+  });
+
+  it('puts a full target, refuses a partial or inconsistent body, and maps a 403', async () => {
+    let puts = 0;
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/routing-targets/pdf',
+      );
+      expect(init?.method).toBe('PUT');
+      expect(JSON.parse(String(init?.body))).toEqual(routingTargetBody);
+      puts += 1;
+      return puts === 1
+        ? Response.json({
+            ...routingTarget,
+            ...routingTargetBody,
+            source: 'organization',
+            updatedAt: '2026-09-17T08:00:00.000Z',
+          })
+        : new Response(null, { status: 403 });
+    });
+    const put = (body: unknown, detectedType = 'pdf') =>
+      putInboxRoutingTarget(
+        auth,
+        inboxRequest(`routing-targets/${detectedType}`, {
+          body: JSON.stringify(body),
+          method: 'PUT',
+        }),
+        'org_1',
+        detectedType,
+        fetchImplementation,
+      );
+
+    const saved = await put(routingTargetBody);
+    const forbidden = await put(routingTargetBody);
+    const partial = await put({ auto: 'never' });
+    const noThreshold = await put({
+      ...routingTargetBody,
+      autoThreshold: null,
+    });
+    const kindOnDiscard = await put({
+      ...routingTargetBody,
+      destination: 'discard',
+    });
+    const malformed = await put(routingTargetBody, 'Not-A-Type');
+
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({
+      documentKind: 'contract',
+      source: 'organization',
+    });
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toEqual({
+      error: 'inbox_routing_target_rejected',
+    });
+    expect(partial.status).toBe(400);
+    expect(noThreshold.status).toBe(400);
+    expect(kindOnDiscard.status).toBe(400);
+    expect(malformed.status).toBe(404);
+    expect(await malformed.json()).toEqual({
+      error: 'inbox_routing_target_not_found',
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it('deletes a target with no content and answers 404 for a malformed type', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/routing-targets/pdf',
+      );
+      expect(init?.method).toBe('DELETE');
+      return new Response(null, { status: 204 });
+    });
+
+    const removed = await deleteInboxRoutingTarget(
+      auth,
+      inboxRequest('routing-targets/pdf', { method: 'DELETE' }),
+      'org_1',
+      'pdf',
+      fetchImplementation,
+    );
+    const malformed = await deleteInboxRoutingTarget(
+      auth,
+      inboxRequest('routing-targets/..', { method: 'DELETE' }),
+      'org_1',
+      '..',
+      fetchImplementation,
+    );
+
+    expect(removed.status).toBe(204);
+    expect(removed.headers.get('cache-control')).toBe('private, no-store');
+    expect(malformed.status).toBe(404);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('inbox settings', () => {
+  const settings = {
+    blobQuotaBytes: null,
+    platformQuotaBytes: 10_000_000_000,
+    usedBytes: 12_345,
+  };
+
+  it('reads the quota triple', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/settings',
+      );
+      return Response.json(settings);
+    });
+
+    const response = await getInboxSettings(
+      auth,
+      inboxRequest('settings'),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(settings);
+  });
+
+  it('patches the quota, passes a 422 above the cap through, and refuses a bad body', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/settings',
+      );
+      expect(init?.method).toBe('PATCH');
+      const body = JSON.parse(String(init?.body));
+      return body.blobQuotaBytes > settings.platformQuotaBytes
+        ? Response.json(
+            { status: 422, title: 'Quota above the platform cap' },
+            { status: 422 },
+          )
+        : Response.json({ ...settings, blobQuotaBytes: body.blobQuotaBytes });
+    });
+    const patch = (body: unknown) =>
+      patchInboxSettings(
+        auth,
+        inboxRequest('settings', {
+          body: JSON.stringify(body),
+          method: 'PATCH',
+        }),
+        'org_1',
+        fetchImplementation,
+      );
+
+    const saved = await patch({ blobQuotaBytes: 5_000 });
+    const cleared = await patch({ blobQuotaBytes: null });
+    const aboveCap = await patch({ blobQuotaBytes: 20_000_000_000 });
+    const negative = await patch({ blobQuotaBytes: -1 });
+    const unknownField = await patch({ blobQuotaBytes: 1, usedBytes: 0 });
+
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).blobQuotaBytes).toBe(5_000);
+    expect(cleared.status).toBe(200);
+    expect((await cleared.json()).blobQuotaBytes).toBeNull();
+    expect(aboveCap.status).toBe(422);
+    expect(await aboveCap.json()).toEqual({ error: 'inbox_settings_rejected' });
+    expect(negative.status).toBe(400);
+    expect(unknownField.status).toBe(400);
     expect(fetchImplementation).toHaveBeenCalledTimes(3);
   });
 });

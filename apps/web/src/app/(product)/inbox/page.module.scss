@@ -8,6 +8,12 @@
   justify-content: space-between;
 }
 
+.headingActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-03;
+}
+
 .filters {
   display: flex;
   flex-wrap: wrap;

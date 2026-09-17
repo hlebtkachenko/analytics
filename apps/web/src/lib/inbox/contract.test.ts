@@ -7,6 +7,9 @@ import {
   inboxEventReasons,
   inboxItemStatuses,
   inboxPayloadKinds,
+  inboxRoutingAutoPolicies,
+  inboxRoutingDestinations,
+  inboxRoutingPartnerPolicies,
 } from '@bap/db';
 import { describe, expect, it } from 'vitest';
 
@@ -19,7 +22,14 @@ import {
   inboxEventReasonSchema,
   inboxItemStatusSchema,
   inboxPayloadKindSchema,
+  inboxRoutingAutoPolicySchema,
+  inboxRoutingDestinationSchema,
+  inboxRoutingPartnerPolicySchema,
+  inboxRoutingTargetSchema,
+  inboxSettingsSchema,
   issueInboxChannelCredentialResponseSchema,
+  putInboxRoutingTargetRequestSchema,
+  updateInboxSettingsRequestSchema,
 } from './contract.ts';
 
 // The web mirror is hand-written, so every vocabulary is pinned to the database constants it copies.
@@ -31,6 +41,17 @@ describe('inbox contract enums', () => {
     ['decided-by kinds', inboxDecidedByKindSchema, inboxDecidedByKinds],
     ['event kinds', inboxEventKindSchema, inboxEventKinds],
     ['event reasons', inboxEventReasonSchema, inboxEventReasons],
+    [
+      'routing destinations',
+      inboxRoutingDestinationSchema,
+      inboxRoutingDestinations,
+    ],
+    [
+      'partner policies',
+      inboxRoutingPartnerPolicySchema,
+      inboxRoutingPartnerPolicies,
+    ],
+    ['auto policies', inboxRoutingAutoPolicySchema, inboxRoutingAutoPolicies],
   ])('mirrors the database %s', (_name, schema, expected) => {
     expect(schema.options).toEqual([...expected]);
   });
@@ -87,5 +108,115 @@ describe('inbox channel contract', () => {
         secret: address,
       }).success,
     ).toBe(true);
+  });
+});
+
+const target = {
+  auto: 'never',
+  autoThreshold: null,
+  defaultAssigneeId: null,
+  defaultLegalEntityId: null,
+  destination: 'documents',
+  detectedType: 'pdf',
+  documentKind: 'other',
+  partnerPolicy: 'match_only',
+  requiredFields: [],
+  source: 'platform',
+  updatedAt: null,
+};
+const targetBody = {
+  auto: target.auto,
+  autoThreshold: target.autoThreshold,
+  defaultAssigneeId: target.defaultAssigneeId,
+  defaultLegalEntityId: target.defaultLegalEntityId,
+  destination: target.destination,
+  documentKind: target.documentKind,
+  partnerPolicy: target.partnerPolicy,
+  requiredFields: target.requiredFields,
+};
+
+// The row checks are mirrored so the browser refuses what the database would.
+describe('inbox routing target contract', () => {
+  it('accepts an effective target and a full PUT body', () => {
+    expect(inboxRoutingTargetSchema.safeParse(target).success).toBe(true);
+    expect(
+      putInboxRoutingTargetRequestSchema.safeParse(targetBody).success,
+    ).toBe(true);
+    expect(
+      putInboxRoutingTargetRequestSchema.safeParse({
+        ...targetBody,
+        destination: 'discard',
+        documentKind: null,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('ties the document kind to the documents destination', () => {
+    expect(
+      putInboxRoutingTargetRequestSchema.safeParse({
+        ...targetBody,
+        documentKind: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      putInboxRoutingTargetRequestSchema.safeParse({
+        ...targetBody,
+        destination: 'datasets',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('requires a threshold for above_threshold and bounds the required fields', () => {
+    expect(
+      putInboxRoutingTargetRequestSchema.safeParse({
+        ...targetBody,
+        auto: 'above_threshold',
+      }).success,
+    ).toBe(false);
+    expect(
+      putInboxRoutingTargetRequestSchema.safeParse({
+        ...targetBody,
+        auto: 'above_threshold',
+        autoThreshold: 0.8,
+      }).success,
+    ).toBe(true);
+    expect(
+      putInboxRoutingTargetRequestSchema.safeParse({
+        ...targetBody,
+        requiredFields: Array.from(
+          { length: 33 },
+          (_, index) => `f${String(index)}`,
+        ),
+      }).success,
+    ).toBe(false);
+    expect(
+      putInboxRoutingTargetRequestSchema.safeParse({
+        ...targetBody,
+        source: 'organization',
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('inbox settings contract', () => {
+  it('reads the quota triple and writes a positive or null quota', () => {
+    expect(
+      inboxSettingsSchema.safeParse({
+        blobQuotaBytes: null,
+        platformQuotaBytes: 1_000,
+        usedBytes: 0,
+      }).success,
+    ).toBe(true);
+    expect(
+      updateInboxSettingsRequestSchema.safeParse({ blobQuotaBytes: null })
+        .success,
+    ).toBe(true);
+    expect(
+      updateInboxSettingsRequestSchema.safeParse({ blobQuotaBytes: 0 }).success,
+    ).toBe(false);
+    expect(
+      updateInboxSettingsRequestSchema.safeParse({ blobQuotaBytes: 1.5 })
+        .success,
+    ).toBe(false);
   });
 });

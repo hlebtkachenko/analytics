@@ -1,5 +1,10 @@
 import type { StatusTagType } from '../documents/labels.ts';
-import type { InboxDiscardReason, InboxItemStatus } from './contract.ts';
+import type {
+  InboxDiscardReason,
+  InboxItemStatus,
+  InboxRoutingAutoPolicy,
+  InboxRoutingDestination,
+} from './contract.ts';
 
 // One translation key per contract value, so no page invents its own wording.
 export const inboxStatusLabelKeys: Readonly<Record<InboxItemStatus, string>> = {
@@ -29,6 +34,22 @@ export const inboxDiscardReasonLabelKeys: Readonly<
   irrelevant: 'inbox.discardReasonIrrelevant',
   not_ours: 'inbox.discardReasonNotOurs',
   spam: 'inbox.discardReasonSpam',
+};
+
+export const inboxRoutingDestinationLabelKeys: Readonly<
+  Record<InboxRoutingDestination, string>
+> = {
+  datasets: 'inboxSettings.destinationDatasets',
+  discard: 'inboxSettings.destinationDiscard',
+  documents: 'inboxSettings.destinationDocuments',
+};
+
+export const inboxRoutingAutoLabelKeys: Readonly<
+  Record<InboxRoutingAutoPolicy, string>
+> = {
+  above_threshold: 'inboxSettings.autoAboveThreshold',
+  always: 'inboxSettings.autoAlways',
+  never: 'inboxSettings.autoNever',
 };
 
 export const inboxDecidedByLabelKeys: Readonly<Record<string, string>> = {
