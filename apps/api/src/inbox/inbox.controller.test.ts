@@ -63,6 +63,7 @@ const SHA256 = 'c'.repeat(64);
 
 const item: InboxItem = {
   assigneeId: null,
+  channelId: null,
   channelKind: 'upload',
   confidence: 1,
   createdAt: '2026-09-16T06:00:00.000Z',
@@ -79,6 +80,7 @@ const item: InboxItem = {
   hintText: null,
   id: ITEM_ID,
   legalEntityId: null,
+  origin: null,
   partnerId: null,
   payloadKind: 'file',
   receivedAt: '2026-09-16T06:00:00.000Z',

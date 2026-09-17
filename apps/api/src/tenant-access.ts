@@ -8,6 +8,7 @@ import {
   type OrganizationCapabilities,
 } from '@bap/security';
 
+import { isChannelSubject } from './channel-access.js';
 import type { MembershipResolver } from './membership-resolver.js';
 import type { AuthenticatedRequest } from './request-context.js';
 
@@ -33,6 +34,11 @@ export async function resolveTenantAccess(
 
   if (principal === undefined) {
     throw new UnauthorizedException();
+  }
+
+  // A channel principal (ADR 0016) has no membership; only the intake routes accept it, through resolveChannelAccess.
+  if (isChannelSubject(principal.subject)) {
+    throw new ForbiddenException();
   }
 
   const membership = await input.memberships.resolve(
