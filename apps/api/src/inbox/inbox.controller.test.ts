@@ -52,6 +52,7 @@ import type {
 import { InboxController } from './inbox.controller.js';
 import { InboxService } from './inbox.service.js';
 import type { OpenedBlob, UploadInput } from './inbox.service.js';
+import { routingTargetFor } from './routing-targets.js';
 
 const ENTITY_ID = '4a2b7c1e-9f5d-4c3a-8b21-6e0f7d5a4c39';
 const ITEM_ID = '6c4d9e30-1b7f-4e5c-ad43-801b9f7c6e51';
@@ -133,6 +134,7 @@ const detail: InboxItemDetail = {
   },
   files: [file],
   item,
+  routingTarget: routingTargetFor('pdf'),
 };
 
 const documentBody = {
@@ -385,6 +387,12 @@ describe('application inbox routes', () => {
     );
 
     expect(response.body).toEqual(detail);
+    // The effective target rides on the detail so the setting is visible on the item the day it lands.
+    expect(response.body.routingTarget).toMatchObject({
+      detectedType: 'pdf',
+      documentKind: 'other',
+      source: 'platform',
+    });
     await authorized('get', `/inbox/items/${UNKNOWN_ITEM_ID}`).expect(404);
     await authorized('get', '/inbox/items/not-a-uuid').expect(400);
   });

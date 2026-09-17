@@ -23,6 +23,7 @@ import {
   deleteDocumentInTransaction,
 } from '../documents/document-repository.js';
 import { entityFilter } from '../documents/sql.js';
+import { DETECTED_TYPES } from './contract.js';
 import type {
   CreateInboxChannelRequest,
   InboxChannel,
@@ -35,12 +36,22 @@ import type {
   InboxItemListEntry,
   InboxItemListQuery,
   InboxItemListResponse,
+  InboxRoutingTarget,
+  InboxSettings,
   IssueInboxChannelCredentialResponse,
   ProviderInput,
   ProviderOutput,
+  PutInboxRoutingTargetRequest,
   UpdateInboxChannelRequest,
   UpdateInboxHintsRequest,
 } from './contract.js';
+import {
+  knownDetectedType,
+  routingTargetFor,
+  type DetectedType,
+  type RoutingTarget,
+  type RoutingTargetOverrides,
+} from './routing-targets.js';
 
 export type { EntityScopeSelector };
 
@@ -77,6 +88,7 @@ export interface ReceiveIntakeInput extends EntityScopeSelector {
   payloadKind: 'email' | 'file' | 'structured' | 'text';
   // Runs last inside the transaction: a failed move rolls every row back, an earlier failure never moves the bytes.
   persist: () => Promise<void>;
+  // The platform quota; the organization's own row can only tighten it, read inside the transaction.
   quotaBytes: number;
   // The parsed envelope sender a child inherits; null until the split has read the MIME.
   sender: string | null;
@@ -146,6 +158,22 @@ export interface ReadBlobInput extends EntityScopeSelector {
   blobId: string;
 }
 
+export interface RoutingTargetSelector extends TenantContext {
+  detectedType: DetectedType;
+}
+
+export interface PutRoutingTargetInput extends RoutingTargetSelector {
+  body: PutInboxRoutingTargetRequest;
+}
+
+export interface ReadInboxSettingsInput extends TenantContext {
+  platformQuotaBytes: number;
+}
+
+export interface UpdateInboxSettingsInput extends ReadInboxSettingsInput {
+  blobQuotaBytes: number | null;
+}
+
 export interface BlobRecord {
   byteSize: number;
   id: string;
@@ -212,6 +240,18 @@ interface CredentialRow {
 interface ListRow extends ItemRow {
   file_count: number;
   primary_filename: string | null;
+}
+
+interface RoutingTargetRow {
+  auto: string;
+  auto_threshold: string | null;
+  default_assignee_id: string | null;
+  default_legal_entity_id: string | null;
+  destination: string;
+  detected_type: string;
+  document_kind: string | null;
+  partner_policy: string;
+  required_fields: string[];
 }
 
 interface FileRow {
@@ -407,6 +447,43 @@ async function loadEvents(
   }));
 }
 
+function toRoutingTarget(row: RoutingTargetRow): RoutingTarget {
+  return {
+    auto: row.auto as RoutingTarget['auto'],
+    autoThreshold:
+      row.auto_threshold === null ? null : Number(row.auto_threshold),
+    defaultAssigneeId: row.default_assignee_id,
+    defaultLegalEntityId: row.default_legal_entity_id,
+    destination: row.destination as RoutingTarget['destination'],
+    documentKind: row.document_kind as RoutingTarget['documentKind'],
+    partnerPolicy: row.partner_policy as RoutingTarget['partnerPolicy'],
+    requiredFields: row.required_fields,
+  };
+}
+
+const ROUTING_TARGET_COLUMNS = `t.detected_type, t.destination, t.document_kind, t.default_legal_entity_id, t.partner_policy,
+          t.auto, t.auto_threshold::text as auto_threshold, t.default_assignee_id, t.required_fields`;
+
+// The organization's own rows; a channel context sees none and gets the platform defaults.
+async function loadRoutingTargetOverrides(
+  transaction: PoolClient,
+): Promise<RoutingTargetOverrides> {
+  const result = await transaction.query<RoutingTargetRow>(
+    `select ${ROUTING_TARGET_COLUMNS} from app.inbox_routing_target as t`,
+  );
+  const overrides: RoutingTargetOverrides = {};
+
+  for (const row of result.rows) {
+    const known = DETECTED_TYPES.find((type) => type === row.detected_type);
+
+    if (known !== undefined) {
+      overrides[known] = toRoutingTarget(row);
+    }
+  }
+
+  return overrides;
+}
+
 async function loadDetail(
   transaction: PoolClient,
   item: InboxItem,
@@ -416,7 +493,26 @@ async function loadDetail(
     extraction: await loadLatestExtraction(transaction, item.id),
     files: (await loadItemFiles(transaction, item.id)).map(publicFile),
     item,
+    routingTarget: routingTargetFor(
+      item.detectedType,
+      await loadRoutingTargetOverrides(transaction),
+    ),
   };
+}
+
+// The organization row can only tighten the platform value; absent or null means the platform value.
+async function loadEffectiveQuotaBytes(
+  transaction: PoolClient,
+  platformQuotaBytes: number,
+): Promise<number> {
+  const setting = await transaction.query<{ blob_quota_bytes: string | null }>(
+    'select blob_quota_bytes::text as blob_quota_bytes from app.organization_inbox_setting',
+  );
+  const own = setting.rows[0]?.blob_quota_bytes ?? null;
+
+  return own === null
+    ? platformQuotaBytes
+    : Math.min(Number(own), platformQuotaBytes);
 }
 
 export async function appendEvent(
@@ -564,8 +660,12 @@ export async function receiveIntakeInTransaction(
     const used = await transaction.query<{ total: string }>(
       'select coalesce(sum(byte_size), 0)::text as total from app.blob',
     );
+    const quotaBytes = await loadEffectiveQuotaBytes(
+      transaction,
+      input.quotaBytes,
+    );
 
-    if (Number(used.rows[0]?.total ?? 0) + input.byteSize > input.quotaBytes) {
+    if (Number(used.rows[0]?.total ?? 0) + input.byteSize > quotaBytes) {
       throw new QuotaExceededError();
     }
 
@@ -1040,13 +1140,15 @@ export async function undoRoute(
   });
 }
 
+// A person's decision: a discard records who decided, a restore clears it so a channel may work the item again.
 async function transition(
   pool: DatabasePool,
   input: ReadItemInput,
   allowed: readonly InboxItem['status'][],
   status: InboxItem['status'],
   event: InboxEventKind,
-  reason: InboxEventReason | null = null,
+  reason: InboxEventReason | null,
+  decidedByUserId: string | null,
 ): Promise<InboxItemDetail | null> {
   return runInTenantContext(pool, input, async (transaction) => {
     const before = await loadItem(
@@ -1065,8 +1167,13 @@ async function transition(
     }
 
     const updated = await transaction.query(
-      'update app.inbox_item set status = $2, updated_at = now() where id = $1',
-      [before.id, status],
+      `update app.inbox_item
+          set status = $2,
+              decided_by_kind = case when $3::text is null then null else 'user' end,
+              decided_by_user_id = $3::text,
+              updated_at = now()
+        where id = $1`,
+      [before.id, status, decidedByUserId],
     );
 
     if (updated.rowCount === 0) {
@@ -1095,6 +1202,7 @@ export function discardItem(
     'discarded',
     'discarded',
     input.reason,
+    input.userId,
   );
 }
 
@@ -1102,7 +1210,15 @@ export function restoreItem(
   pool: DatabasePool,
   input: ReadItemInput,
 ): Promise<InboxItemDetail | null> {
-  return transition(pool, input, ['discarded'], 'needs_review', 'restored');
+  return transition(
+    pool,
+    input,
+    ['discarded'],
+    'needs_review',
+    'restored',
+    null,
+    null,
+  );
 }
 
 export async function assignItem(
@@ -1299,6 +1415,15 @@ function isForeignKeyViolation(error: unknown): boolean {
     typeof error === 'object' &&
     error !== null &&
     (error as { code?: unknown }).code === '23503'
+  );
+}
+
+// An insert the row policy refuses raises instead of matching no row; the API gate answers before it, so this is not a fault.
+function isPolicyViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === '42501'
   );
 }
 
@@ -1527,11 +1652,188 @@ export async function revokeCredential(
   });
 }
 
+export async function listRoutingTargets(
+  pool: DatabasePool,
+  input: TenantContext,
+): Promise<InboxRoutingTarget[]> {
+  return runInTenantContext(pool, input, async (transaction) => {
+    const overrides = await loadRoutingTargetOverrides(transaction);
+    return DETECTED_TYPES.map((type) => routingTargetFor(type, overrides));
+  });
+}
+
+// An upsert of the whole target; the row remembers who saved it because the rules auto-route runs as that account.
+export async function putRoutingTarget(
+  pool: DatabasePool,
+  input: PutRoutingTargetInput,
+): Promise<InboxRoutingTarget | null> {
+  const { body } = input;
+  const detectedType = knownDetectedType(input.detectedType);
+
+  return runInTenantContext(pool, input, async (transaction) => {
+    let saved: { rows: { id: string }[] };
+
+    try {
+      saved = await transaction.query<{ id: string }>(
+        `insert into app.inbox_routing_target
+           (organization_id, detected_type, destination, document_kind, default_legal_entity_id, partner_policy,
+            auto, auto_threshold, default_assignee_id, required_fields, created_by, updated_by)
+         values ($1, $2, $3, $4, $5::uuid, $6, $7, $8, $9, $10::text[], $11, $11)
+         on conflict (organization_id, detected_type) do update
+           set destination = excluded.destination,
+               document_kind = excluded.document_kind,
+               default_legal_entity_id = excluded.default_legal_entity_id,
+               partner_policy = excluded.partner_policy,
+               auto = excluded.auto,
+               auto_threshold = excluded.auto_threshold,
+               default_assignee_id = excluded.default_assignee_id,
+               required_fields = excluded.required_fields,
+               updated_at = now(),
+               updated_by = excluded.updated_by
+         returning id`,
+        [
+          input.organizationId,
+          detectedType,
+          body.destination,
+          body.documentKind,
+          body.defaultLegalEntityId,
+          body.partnerPolicy,
+          body.auto,
+          body.autoThreshold,
+          body.defaultAssigneeId,
+          body.requiredFields,
+          input.userId,
+        ],
+      );
+    } catch (error) {
+      if (isForeignKeyViolation(error) || isPolicyViolation(error)) {
+        return null;
+      }
+
+      throw error;
+    }
+
+    const id = saved.rows[0]?.id;
+
+    if (id === undefined) {
+      throw new Error('The routing target upsert returned no row.');
+    }
+
+    await transaction.query(
+      "select app.record_audit('inbox_routing_target.updated', 'inbox_routing_target', $1, $2::jsonb)",
+      [
+        id,
+        JSON.stringify({
+          auto: body.auto,
+          destination: body.destination,
+          detectedType,
+          documentKind: body.documentKind,
+        }),
+      ],
+    );
+
+    return routingTargetFor(
+      detectedType,
+      await loadRoutingTargetOverrides(transaction),
+    );
+  });
+}
+
+// False when the organization holds no row for the type; the platform default was already in force.
+export async function deleteRoutingTarget(
+  pool: DatabasePool,
+  input: RoutingTargetSelector,
+): Promise<boolean> {
+  const detectedType = knownDetectedType(input.detectedType);
+
+  return runInTenantContext(pool, input, async (transaction) => {
+    const deleted = await transaction.query<{ id: string }>(
+      'delete from app.inbox_routing_target where detected_type = $1 returning id',
+      [detectedType],
+    );
+    const id = deleted.rows[0]?.id;
+
+    if (id === undefined) {
+      return false;
+    }
+
+    await transaction.query(
+      "select app.record_audit('inbox_routing_target.deleted', 'inbox_routing_target', $1, $2::jsonb)",
+      [id, JSON.stringify({ detectedType })],
+    );
+
+    return true;
+  });
+}
+
+async function loadInboxSettings(
+  transaction: PoolClient,
+  platformQuotaBytes: number,
+): Promise<InboxSettings> {
+  const setting = await transaction.query<{ blob_quota_bytes: string | null }>(
+    'select blob_quota_bytes::text as blob_quota_bytes from app.organization_inbox_setting',
+  );
+  const used = await transaction.query<{ total: string }>(
+    'select coalesce(sum(byte_size), 0)::text as total from app.blob',
+  );
+  const own = setting.rows[0]?.blob_quota_bytes ?? null;
+
+  return {
+    blobQuotaBytes: own === null ? null : Number(own),
+    platformQuotaBytes,
+    usedBytes: Number(used.rows[0]?.total ?? 0),
+  };
+}
+
+export async function readInboxSettings(
+  pool: DatabasePool,
+  input: ReadInboxSettingsInput,
+): Promise<InboxSettings> {
+  return runInTenantContext(pool, input, (transaction) =>
+    loadInboxSettings(transaction, input.platformQuotaBytes),
+  );
+}
+
+// The row is created on first write and reset by nulling the column, never deleted; only an owner passes the policy.
+export async function updateInboxSettings(
+  pool: DatabasePool,
+  input: UpdateInboxSettingsInput,
+): Promise<InboxSettings | null> {
+  return runInTenantContext(pool, input, async (transaction) => {
+    try {
+      await transaction.query(
+        `insert into app.organization_inbox_setting (organization_id, blob_quota_bytes, created_by)
+         values ($1, $2, $3)
+         on conflict (organization_id) do update
+           set blob_quota_bytes = excluded.blob_quota_bytes, updated_at = now()`,
+        [input.organizationId, input.blobQuotaBytes, input.userId],
+      );
+    } catch (error) {
+      if (isPolicyViolation(error)) {
+        return null;
+      }
+
+      throw error;
+    }
+
+    await transaction.query(
+      "select app.record_audit('organization_inbox_setting.updated', 'organization_inbox_setting', $1, $2::jsonb)",
+      [
+        input.organizationId,
+        JSON.stringify({ blobQuotaBytes: input.blobQuotaBytes }),
+      ],
+    );
+
+    return loadInboxSettings(transaction, input.platformQuotaBytes);
+  });
+}
+
 export abstract class InboxRepository implements ChannelPrincipalReader {
   abstract assignItem(input: AssignItemInput): Promise<InboxItemDetail | null>;
   abstract createChannel(
     input: CreateChannelInput,
   ): Promise<InboxChannel | null>;
+  abstract deleteRoutingTarget(input: RoutingTargetSelector): Promise<boolean>;
   abstract discardItem(
     input: DiscardItemInput,
   ): Promise<InboxItemDetail | null>;
@@ -1540,12 +1842,21 @@ export abstract class InboxRepository implements ChannelPrincipalReader {
   ): Promise<IssueInboxChannelCredentialResponse>;
   abstract listChannels(input: TenantContext): Promise<InboxChannel[]>;
   abstract listItems(input: ListItemsInput): Promise<InboxItemListResponse>;
+  abstract listRoutingTargets(
+    input: TenantContext,
+  ): Promise<InboxRoutingTarget[]>;
+  abstract putRoutingTarget(
+    input: PutRoutingTargetInput,
+  ): Promise<InboxRoutingTarget | null>;
   abstract readBlob(input: ReadBlobInput): Promise<BlobRecord | null>;
   abstract readChannel(input: ChannelSelector): Promise<InboxChannel | null>;
   abstract readChannelPrincipal(input: {
     channelId: string;
     organizationId: string;
   }): Promise<boolean>;
+  abstract readInboxSettings(
+    input: ReadInboxSettingsInput,
+  ): Promise<InboxSettings>;
   abstract readItem(input: ReadItemInput): Promise<InboxItemDetail | null>;
   abstract readProviderInput(
     input: ReadItemInput,
@@ -1569,6 +1880,9 @@ export abstract class InboxRepository implements ChannelPrincipalReader {
   abstract updateHints(
     input: UpdateHintsInput,
   ): Promise<InboxItemDetail | null>;
+  abstract updateInboxSettings(
+    input: UpdateInboxSettingsInput,
+  ): Promise<InboxSettings | null>;
 }
 
 @Injectable()
@@ -1584,6 +1898,10 @@ export class DatabaseInboxRepository
 
   async createChannel(input: CreateChannelInput): Promise<InboxChannel | null> {
     return createChannel(await this.getPool(), input);
+  }
+
+  async deleteRoutingTarget(input: RoutingTargetSelector): Promise<boolean> {
+    return deleteRoutingTarget(await this.getPool(), input);
   }
 
   async discardItem(input: DiscardItemInput): Promise<InboxItemDetail | null> {
@@ -1604,10 +1922,22 @@ export class DatabaseInboxRepository
     return listItems(await this.getPool(), input);
   }
 
+  async listRoutingTargets(
+    input: TenantContext,
+  ): Promise<InboxRoutingTarget[]> {
+    return listRoutingTargets(await this.getPool(), input);
+  }
+
   async onModuleDestroy(): Promise<void> {
     if (this.poolPromise !== undefined) {
       await (await this.poolPromise).end();
     }
+  }
+
+  async putRoutingTarget(
+    input: PutRoutingTargetInput,
+  ): Promise<InboxRoutingTarget | null> {
+    return putRoutingTarget(await this.getPool(), input);
   }
 
   async readBlob(input: ReadBlobInput): Promise<BlobRecord | null> {
@@ -1623,6 +1953,12 @@ export class DatabaseInboxRepository
     organizationId: string;
   }): Promise<boolean> {
     return readChannelPrincipal(await this.getPool(), input);
+  }
+
+  async readInboxSettings(
+    input: ReadInboxSettingsInput,
+  ): Promise<InboxSettings> {
+    return readInboxSettings(await this.getPool(), input);
   }
 
   async readItem(input: ReadItemInput): Promise<InboxItemDetail | null> {
@@ -1673,6 +2009,12 @@ export class DatabaseInboxRepository
 
   async updateHints(input: UpdateHintsInput): Promise<InboxItemDetail | null> {
     return updateHints(await this.getPool(), input);
+  }
+
+  async updateInboxSettings(
+    input: UpdateInboxSettingsInput,
+  ): Promise<InboxSettings | null> {
+    return updateInboxSettings(await this.getPool(), input);
   }
 
   private getPool(): Promise<DatabasePool> {

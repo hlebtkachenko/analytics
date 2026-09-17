@@ -1,4 +1,11 @@
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdtemp,
+  readdir,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
@@ -22,6 +29,7 @@ import type { ParsedMail, SimpleParserOptions } from 'mailparser';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
+  blobStorageKey,
   createBlobDirectories,
   FilesystemBlobStore,
 } from '../blobs/blob-store.js';
@@ -31,13 +39,17 @@ import { InboxService } from '../inbox/inbox.service.js';
 import {
   assignItem,
   createChannel,
+  deleteRoutingTarget,
   discardItem,
   issueCredential,
   listChannels,
   listItems,
+  listRoutingTargets,
+  putRoutingTarget,
   readBlob,
   readChannel,
   readChannelPrincipal,
+  readInboxSettings,
   readItem,
   readProviderInput,
   receiveIntake,
@@ -49,10 +61,15 @@ import {
   undoRoute,
   updateChannel,
   updateHints,
+  updateInboxSettings,
   type InboxRepository,
 } from '../inbox/inbox-repository.js';
 import * as fixtures from '../inbox/providers/__fixtures__/index.js';
 import type { BlobScanner, ScanOutcome } from '../scanning/clamd-client.js';
+import {
+  runInboxMaintenance,
+  type InboxMaintenanceReport,
+} from './inbox-maintenance.js';
 import {
   MAX_ATTACHMENT_BYTES,
   splitEmailItem,
@@ -371,13 +388,17 @@ beforeAll(async () => {
   const repository: InboxRepository = {
     assignItem: (input) => assignItem(apiPool, input),
     createChannel: (input) => createChannel(apiPool, input),
+    deleteRoutingTarget: (input) => deleteRoutingTarget(apiPool, input),
     discardItem: (input) => discardItem(apiPool, input),
     issueCredential: (input) => issueCredential(apiPool, input),
     listChannels: (input) => listChannels(apiPool, input),
     listItems: (input) => listItems(apiPool, input),
+    listRoutingTargets: (input) => listRoutingTargets(apiPool, input),
+    putRoutingTarget: (input) => putRoutingTarget(apiPool, input),
     readBlob: (input) => readBlob(apiPool, input),
     readChannel: (input) => readChannel(apiPool, input),
     readChannelPrincipal: (input) => readChannelPrincipal(apiPool, input),
+    readInboxSettings: (input) => readInboxSettings(apiPool, input),
     readItem: (input) => readItem(apiPool, input),
     readProviderInput: (input) => readProviderInput(apiPool, input),
     receiveIntake: (input) => receiveIntake(apiPool, input),
@@ -389,6 +410,7 @@ beforeAll(async () => {
     undoRoute: (input) => undoRoute(apiPool, input),
     updateChannel: (input) => updateChannel(apiPool, input),
     updateHints: (input) => updateHints(apiPool, input),
+    updateInboxSettings: (input) => updateInboxSettings(apiPool, input),
   };
   service = new InboxService(repository, store, QUOTA, INTAKE_DOMAIN, {
     enqueueSplitEmailItem: async (job) => {
@@ -839,6 +861,18 @@ describe('splitEmailItem', () => {
     });
     expect(discarded?.item.status).toBe('discarded');
 
+    // The channel update policy refuses a row a person decided, whatever the statement says.
+    const refused = await runInTenantContext(
+      apiPool,
+      channelTenant('org-1', channelId),
+      (transaction) =>
+        transaction.query(
+          "update app.inbox_item set status = 'processing', updated_at = now() where id = $1",
+          [itemId],
+        ),
+    );
+    expect(refused.rowCount).toBe(0);
+
     // A discarded parent is past received: nothing scanned, nothing created, no event added.
     await run(itemId, scanner);
     expect(scanner.calls).toBe(0);
@@ -1030,5 +1064,161 @@ describe('splitEmailItem', () => {
       code: 'channel_unavailable',
     });
     expect((await parentState(itemId)).status).toBe('received');
+  });
+});
+
+describe('inbox maintenance', () => {
+  const quiet = {
+    debug: () => undefined,
+    error: () => undefined,
+    log: () => undefined,
+  };
+  const requeued: SplitEmailItemJob[] = [];
+
+  function tick(): Promise<InboxMaintenanceReport> {
+    return runInboxMaintenance({
+      blobs: store,
+      data: {},
+      enqueueSplitEmailItem: async (job) => {
+        requeued.push(job);
+      },
+      logger: quiet,
+      metrics: new WorkerMetrics(),
+      pool: apiPool,
+    });
+  }
+
+  async function backdate(
+    itemId: string,
+    column: 'received_at' | 'updated_at',
+  ) {
+    const root = createDatabasePool(configurationFor('postgres'));
+    try {
+      await root.query(
+        `update app.inbox_item set ${column} = now() - interval '2 hours' where id = $1`,
+        [itemId],
+      );
+    } finally {
+      await root.end();
+    }
+  }
+
+  it('raises inside a tenant transaction and runs only from the organization-less pool', async () => {
+    await service.updateChannel({
+      ...owner,
+      body: { enabled: true },
+      channelId,
+    });
+    await expect(
+      runInTenantContext(apiPool, owner, (transaction) =>
+        transaction.query(
+          "select app.reap_stalled_inbox_items('60 minutes', 1)",
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '42501' });
+    const report = await tick();
+    expect(report.failedTasks).toEqual([]);
+  });
+
+  it('reaps a stale processing item and the guarded split update leaves it failed', async () => {
+    // A fresh processing item is never reaped: the clock starts at the first attempt.
+    const freshId = await intake(buildMime({ text: 'fresh' }), 'token-fresh');
+    const reaper = new FakeScanner();
+    reaper.failOnCall = 1;
+    await expect(run(freshId, reaper)).rejects.toMatchObject({
+      code: 'scan_failed',
+    });
+    expect((await parentState(freshId)).status).toBe('processing');
+    expect((await tick()).reapedItemIds).not.toContain(freshId);
+
+    // The reaper runs while the split is mid-flight: the scan hook backdates the item and ticks.
+    const itemId = await intake(
+      buildMime({ text: 'stalled' }),
+      'token-stalled',
+    );
+    const reaped: string[] = [];
+    const scanner = new FakeScanner();
+    const scan = scanner.scan.bind(scanner);
+    // The parent scan and the child scan both run the hook; the second tick finds the item already failed.
+    scanner.scan = async (source) => {
+      const verdict = await scan(source);
+      await backdate(itemId, 'updated_at');
+      reaped.push(...(await tick()).reapedItemIds);
+      return verdict;
+    };
+
+    await expect(run(itemId, scanner)).rejects.toMatchObject({
+      code: 'item_unavailable',
+    });
+    expect(reaped).toEqual([itemId]);
+    expect(await parentState(itemId)).toMatchObject({
+      // The tick ran inside the scan hook, before the verdict was recorded.
+      events: [
+        ['received', null],
+        ['failed', 'stalled'],
+        ['scanned', null],
+      ],
+      status: 'failed',
+    });
+    const actor = await runInTenantContext(apiPool, owner, (transaction) =>
+      transaction.query<{ actor_user_id: string | null }>(
+        "select actor_user_id from app.inbox_event where item_id = $1 and reason = 'stalled'",
+        [itemId],
+      ),
+    );
+    expect(actor.rows).toEqual([{ actor_user_id: null }]);
+    // The child the split created before the guard fired survives; the parent is not resurrected.
+    expect((await children(itemId)).map((child) => child.status)).toEqual([
+      'needs_review',
+    ]);
+    await run(itemId, new FakeScanner());
+    expect((await parentState(itemId)).status).toBe('failed');
+  });
+
+  it('requeues a received email parent past the grace period with the item id as its key', async () => {
+    requeued.length = 0;
+    const stuckId = await intake(buildMime({ text: 'stuck' }), 'token-stuck');
+    const youngId = await intake(buildMime({ text: 'young' }), 'token-young');
+    await backdate(stuckId, 'received_at');
+
+    const report = await tick();
+    expect(report.requeuedItemIds).toEqual([stuckId]);
+    expect(requeued).toEqual([
+      { channelId, itemId: stuckId, organizationId: 'org-1' },
+    ]);
+    expect(report.requeuedItemIds).not.toContain(youngId);
+
+    // A disabled channel stops the requeue too.
+    await service.updateChannel({
+      ...owner,
+      body: { enabled: false },
+      channelId,
+    });
+    expect((await tick()).requeuedItemIds).toEqual([]);
+    await service.updateChannel({
+      ...owner,
+      body: { enabled: true },
+      channelId,
+    });
+  });
+
+  it('removes an old untracked file, keeps a young one and one with a blob row', async () => {
+    const organization = join(directory, 'org', 'org-1');
+    const tracked = (await readdir(organization))[0] ?? '';
+    expect(tracked).toMatch(/^[0-9a-f]{64}$/);
+    const orphan = 'e'.repeat(64);
+    const young = 'f'.repeat(64);
+    await writeFile(join(organization, orphan), 'orphaned bytes');
+    await writeFile(join(organization, young), 'in-flight bytes');
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    await utimes(join(organization, orphan), twoHoursAgo, twoHoursAgo);
+    await utimes(join(organization, tracked), twoHoursAgo, twoHoursAgo);
+
+    const report = await tick();
+    expect(report.orphansRemoved).toBe(1);
+    await expect(stat(join(organization, orphan))).rejects.toThrow();
+    expect((await stat(join(organization, young))).isFile()).toBe(true);
+    expect(await store.stat(blobStorageKey('org-1', tracked))).not.toBeNull();
+    expect((await tick()).orphansRemoved).toBe(0);
   });
 });

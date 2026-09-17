@@ -16,6 +16,7 @@ import {
   NotFoundException,
   PayloadTooLargeException,
   ServiceUnavailableException,
+  UnprocessableEntityException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
 import type { InboxChannelKind, TenantContext } from '@bap/db';
@@ -31,10 +32,13 @@ import type {
   InboxIntakeResponse,
   InboxItemDetail,
   InboxItemListResponse,
+  InboxRoutingTarget,
+  InboxSettings,
   InboxUploadResponse,
   IssueInboxChannelCredentialResponse,
   ProviderOutput,
   RouteInboxItemToDocumentRequest,
+  UpdateInboxSettingsRequest,
 } from './contract.js';
 import {
   InboxRepository,
@@ -46,9 +50,11 @@ import {
   type DiscardItemInput,
   type EntityScopeSelector,
   type ListItemsInput,
+  type PutRoutingTargetInput,
   type ReadItemInput,
   type ReceiveIntakeResult,
   type RevokeCredentialInput,
+  type RoutingTargetSelector,
   type SnoozeItemInput,
   type UpdateChannelInput,
   type UpdateHintsInput,
@@ -127,6 +133,10 @@ export interface RouteInput extends ReadItemInput {
 export interface OpenBlobInput extends EntityScopeSelector {
   blobId: string;
   inline: boolean;
+}
+
+export interface UpdateSettingsInput extends TenantContext {
+  body: UpdateInboxSettingsRequest;
 }
 
 export interface OpenedBlob {
@@ -542,6 +552,44 @@ export class InboxService {
 
   revokeCredential(input: RevokeCredentialInput): Promise<boolean> {
     return this.inbox.revokeCredential(input);
+  }
+
+  listRoutingTargets(input: TenantContext): Promise<InboxRoutingTarget[]> {
+    return this.inbox.listRoutingTargets(input);
+  }
+
+  putRoutingTarget(
+    input: PutRoutingTargetInput,
+  ): Promise<InboxRoutingTarget | null> {
+    return this.inbox.putRoutingTarget(input);
+  }
+
+  deleteRoutingTarget(input: RoutingTargetSelector): Promise<boolean> {
+    return this.inbox.deleteRoutingTarget(input);
+  }
+
+  readSettings(input: TenantContext): Promise<InboxSettings> {
+    return this.inbox.readInboxSettings({
+      ...input,
+      platformQuotaBytes: this.quotaBytes,
+    });
+  }
+
+  // The platform value is the cap: an owner can only tighten it, so anything above is unprocessable.
+  async updateSettings(
+    input: UpdateSettingsInput,
+  ): Promise<InboxSettings | null> {
+    const { blobQuotaBytes } = input.body;
+
+    if (blobQuotaBytes !== null && blobQuotaBytes > this.quotaBytes) {
+      throw new UnprocessableEntityException();
+    }
+
+    return this.inbox.updateInboxSettings({
+      ...input,
+      blobQuotaBytes,
+      platformQuotaBytes: this.quotaBytes,
+    });
   }
 
   // Re-runs the sniff on the first file and lets the stored hints outrank it.

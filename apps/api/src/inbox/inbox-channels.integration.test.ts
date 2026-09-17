@@ -37,13 +37,17 @@ import { InboxService } from './inbox.service.js';
 import {
   assignItem,
   createChannel,
+  deleteRoutingTarget,
   discardItem,
   issueCredential,
   listChannels,
   listItems,
+  listRoutingTargets,
+  putRoutingTarget,
   readBlob,
   readChannel,
   readChannelPrincipal,
+  readInboxSettings,
   readItem,
   readProviderInput,
   receiveIntake,
@@ -55,6 +59,7 @@ import {
   undoRoute,
   updateChannel,
   updateHints,
+  updateInboxSettings,
   type InboxRepository,
 } from './inbox-repository.js';
 import * as fixtures from './providers/__fixtures__/index.js';
@@ -191,13 +196,17 @@ beforeAll(async () => {
   const repository: InboxRepository = {
     assignItem: (input) => assignItem(apiPool, input),
     createChannel: (input) => createChannel(apiPool, input),
+    deleteRoutingTarget: (input) => deleteRoutingTarget(apiPool, input),
     discardItem: (input) => discardItem(apiPool, input),
     issueCredential: (input) => issueCredential(apiPool, input),
     listChannels: (input) => listChannels(apiPool, input),
     listItems: (input) => listItems(apiPool, input),
+    listRoutingTargets: (input) => listRoutingTargets(apiPool, input),
+    putRoutingTarget: (input) => putRoutingTarget(apiPool, input),
     readBlob: (input) => readBlob(apiPool, input),
     readChannel: (input) => readChannel(apiPool, input),
     readChannelPrincipal: (input) => readChannelPrincipal(apiPool, input),
+    readInboxSettings: (input) => readInboxSettings(apiPool, input),
     readItem: (input) => readItem(apiPool, input),
     readProviderInput: (input) => readProviderInput(apiPool, input),
     receiveIntake: (input) => receiveIntake(apiPool, input),
@@ -209,6 +218,7 @@ beforeAll(async () => {
     undoRoute: (input) => undoRoute(apiPool, input),
     updateChannel: (input) => updateChannel(apiPool, input),
     updateHints: (input) => updateHints(apiPool, input),
+    updateInboxSettings: (input) => updateInboxSettings(apiPool, input),
   };
   service = new InboxService(repository, store, QUOTA, INTAKE_DOMAIN, {
     enqueueSplitEmailItem: async (job) => {

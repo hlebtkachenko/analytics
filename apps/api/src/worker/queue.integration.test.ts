@@ -13,6 +13,8 @@ import type { PgBoss } from 'pg-boss';
 import type { PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { SPLIT_EMAIL_ITEM_QUEUE } from '../inbox/contract.js';
+import { sendSplitEmailItem } from '../inbox/inbox-queue.js';
 import { runTenantJob } from './job-context.js';
 import { createQueue, createQueueClientFromConfiguration } from './queue.js';
 
@@ -127,6 +129,7 @@ beforeAll(async () => {
   boss = createQueueClientFromConfiguration(configurationFor('bap_api'));
   await boss.start();
   await createQueue(boss, queueName);
+  await createQueue(boss, SPLIT_EMAIL_ITEM_QUEUE, { policy: 'exclusive' });
 });
 
 afterAll(async () => {
@@ -212,6 +215,59 @@ describe('worker queue confinement', () => {
         work: async () => 'unreachable',
       }),
     ).rejects.toThrow('Job subject has no membership in the organization.');
+  });
+
+  it('drops a second split job with the same item key while the first is created, retrying or active', async () => {
+    const job = {
+      channelId: '4a2b7c1e-9f5d-4c3a-8b21-6e0f7d5a4c39',
+      itemId: '6c4d9e30-1b7f-4e5c-ad43-801b9f7c6e51',
+      organizationId: 'org-1',
+    };
+    const policy = await apiPool.query<{ policy: string }>(
+      'select policy from pgboss.queue where name = $1',
+      [SPLIT_EMAIL_ITEM_QUEUE],
+    );
+    expect(policy.rows[0]?.policy).toBe('exclusive');
+
+    // The intake sends once and the maintenance requeue sends again: one job, with the retry options intact.
+    await sendSplitEmailItem(boss, job);
+    await sendSplitEmailItem(boss, job);
+    const created = await apiPool.query<{
+      retry_delay: number;
+      retry_limit: number;
+      singleton_key: string;
+      state: string;
+    }>(
+      'select state, singleton_key, retry_limit, retry_delay from pgboss.job where name = $1',
+      [SPLIT_EMAIL_ITEM_QUEUE],
+    );
+    expect(created.rows).toEqual([
+      {
+        retry_delay: 60,
+        retry_limit: 3,
+        singleton_key: job.itemId,
+        state: 'created',
+      },
+    ]);
+
+    // Fetched into active, the key is still held.
+    const [active] = (await boss.fetch(SPLIT_EMAIL_ITEM_QUEUE)) ?? [];
+    expect(active?.data).toEqual(job);
+    await sendSplitEmailItem(boss, job);
+    const whileActive = await apiPool.query(
+      'select 1 from pgboss.job where name = $1',
+      [SPLIT_EMAIL_ITEM_QUEUE],
+    );
+    expect(whileActive.rowCount).toBe(1);
+
+    // Failed with retries left, the job goes to retry and the key is still held.
+    await boss.fail(SPLIT_EMAIL_ITEM_QUEUE, active?.id ?? '');
+    await sendSplitEmailItem(boss, job);
+    const whileRetrying = await apiPool.query<{ state: string }>(
+      'select state from pgboss.job where name = $1',
+      [SPLIT_EMAIL_ITEM_QUEUE],
+    );
+    expect(whileRetrying.rows).toEqual([{ state: 'retry' }]);
   });
 
   it('refuses object creation in the pgboss schema so self-migration stays impossible', async () => {

@@ -161,17 +161,20 @@ async function recordScan(
   await appendEvent(transaction, tenant, itemId, 'scanned');
 }
 
+// The parent's terminal updates are guarded on processing: a reaped (failed) parent is never resurrected.
 async function setStatus(
   transaction: PoolClient,
   itemId: string,
   status: string,
+  expected: 'processing' | null = null,
 ): Promise<void> {
   const updated = await transaction.query(
-    'update app.inbox_item set status = $2, updated_at = now() where id = $1',
-    [itemId, status],
+    `update app.inbox_item set status = $2, updated_at = now()
+      where id = $1 and ($3::text is null or status = $3::text)`,
+    [itemId, status, expected],
   );
 
-  // The channel update policy refused the row: a person decided it meanwhile, so the split stops here.
+  // The channel update policy refused the row, or the reaper failed it meanwhile: the split stops here.
   if (updated.rowCount !== 1) {
     throw new SplitEmailError('item_unavailable');
   }
@@ -315,9 +318,8 @@ export async function splitEmailItem(
           return null;
         }
 
-        if (loaded.status === 'received') {
-          await setStatus(transaction, payload.itemId, 'processing');
-        }
+        // Every attempt touches updated_at, so the reaper's clock runs from the first attempt, not the last.
+        await setStatus(transaction, payload.itemId, 'processing');
 
         return loaded;
       },
@@ -353,7 +355,12 @@ export async function splitEmailItem(
           );
 
           if (verdict.outcome === 'infected') {
-            await setStatus(transaction, payload.itemId, 'discarded');
+            await setStatus(
+              transaction,
+              payload.itemId,
+              'discarded',
+              'processing',
+            );
             await appendEvent(
               transaction,
               tenant,
@@ -435,7 +442,12 @@ export async function splitEmailItem(
           await appendEvent(transaction, tenant, payload.itemId, 'classified');
         }
 
-        await setStatus(transaction, payload.itemId, 'needs_review');
+        await setStatus(
+          transaction,
+          payload.itemId,
+          'needs_review',
+          'processing',
+        );
         await transaction.query(
           "select app.record_audit('inbox_item.split', 'inbox_item', $1, $2::jsonb)",
           [payload.itemId, JSON.stringify({ outcome: outcome.kind })],
@@ -717,7 +729,7 @@ async function recordFailure(
         ]);
       }
 
-      await setStatus(transaction, payload.itemId, 'failed');
+      await setStatus(transaction, payload.itemId, 'failed', 'processing');
       await appendEvent(transaction, tenant, payload.itemId, 'failed');
       await transaction.query(
         "select app.record_audit('inbox_item.split_failed', 'inbox_item', $1, $2::jsonb)",
