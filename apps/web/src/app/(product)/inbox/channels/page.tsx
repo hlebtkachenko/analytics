@@ -5,6 +5,7 @@ import type { GridColumn, GridRow } from '@bap/design-system/blocks';
 import {
   Button,
   CodeSnippet,
+  CopyButton,
   Form,
   InlineNotification,
   Modal,
@@ -28,12 +29,15 @@ import {
   intakeCurlExample,
 } from '../../../../lib/inbox/client';
 import {
+  inboxChannelKindForChannelsSchema,
   inboxChannelListResponseSchema,
   inboxChannelSchema,
+  intakeEmailAddressSchema,
   issueInboxChannelCredentialResponseSchema,
   tokenSchema,
 } from '../../../../lib/inbox/contract.ts';
 import type {
+  CreateInboxChannelRequest,
   InboxChannel,
   IssueInboxChannelCredentialResponse,
   UpdateInboxChannelRequest,
@@ -53,6 +57,15 @@ type PendingConfirm =
       kind: 'revoke';
       prefix: string;
     }>;
+
+// The issue route answers an address for an email channel and a bearer secret for an api channel.
+function issuedAddress(
+  issued: IssueInboxChannelCredentialResponse,
+): string | null {
+  return intakeEmailAddressSchema.safeParse(issued.secret).success
+    ? issued.secret
+    : null;
+}
 
 // The most recent use across a channel's credentials, or nothing when none was ever used.
 function lastUsed(channel: InboxChannel): string | null {
@@ -74,6 +87,7 @@ export default function InboxChannelsPage() {
   const [refreshCount, setRefreshCount] = useState(0);
   const [result, setResult] = useState<ListResult>();
   const [name, setName] = useState('');
+  const [kind, setKind] = useState<CreateInboxChannelRequest['kind']>('api');
   const [legalEntityId, setLegalEntityId] = useState('');
   const [hintKind, setHintKind] = useState('');
   const [createFailed, setCreateFailed] = useState(false);
@@ -142,7 +156,7 @@ export default function InboxChannelsPage() {
         {
           body: {
             ...(parsedHint === null ? {} : { hintKind: parsedHint.data }),
-            kind: 'api',
+            kind,
             ...(legalEntityId.length === 0 ? {} : { legalEntityId }),
             name: trimmedName,
           },
@@ -152,6 +166,7 @@ export default function InboxChannelsPage() {
         inboxChannelSchema,
       );
       setName('');
+      setKind('api');
       setLegalEntityId('');
       setHintKind('');
       refresh();
@@ -242,10 +257,43 @@ export default function InboxChannelsPage() {
         </Tag>
       ),
     },
+    {
+      header: t('inboxChannels.columnKind'),
+      key: 'kind',
+      renderCell: (row) => (
+        <Tag size="sm" type={row['kind'] === 'email' ? 'purple' : 'blue'}>
+          {t(
+            row['kind'] === 'email'
+              ? 'inboxChannels.kindEmail'
+              : 'inboxChannels.kindApi',
+          )}
+        </Tag>
+      ),
+    },
     { header: t('inboxChannels.columnEntity'), key: 'legalEntity' },
     { header: t('inboxChannels.columnHintKind'), key: 'hintKind' },
     { align: 'end', header: t('inboxChannels.columnItems'), key: 'items' },
-    { header: t('inboxChannels.columnCredentials'), key: 'credentials' },
+    {
+      header: t('inboxChannels.columnCredentials'),
+      key: 'credentials',
+      // An address is plain on the row, so it can be copied here; a prefix identifies a secret only.
+      renderCell: (row) =>
+        row['kind'] === 'email' && row['address'] !== '' ? (
+          <span className={styles.address!}>
+            <span>{row['credentials']}</span>
+            <CopyButton
+              align="top"
+              feedback={t('inboxChannels.copied')}
+              iconDescription={t('inboxChannels.copyAddress')}
+              onClick={() => {
+                void navigator.clipboard.writeText(String(row['address']));
+              }}
+            />
+          </span>
+        ) : (
+          row['credentials']
+        ),
+    },
     { header: t('inboxChannels.columnLastUsed'), key: 'lastUsed' },
     ...(canManage
       ? [
@@ -285,7 +333,11 @@ export default function InboxChannelsPage() {
                     size="sm"
                     type="button"
                   >
-                    {t('inboxChannels.issueCredential')}
+                    {t(
+                      channel.kind === 'email'
+                        ? 'inboxChannels.issueAddress'
+                        : 'inboxChannels.issueCredential',
+                    )}
                   </Button>
                   {channel.credentials.map((credential) => (
                     <Button
@@ -302,9 +354,12 @@ export default function InboxChannelsPage() {
                       size="sm"
                       type="button"
                     >
-                      {t('inboxChannels.revoke', {
-                        prefix: credential.displayPrefix,
-                      })}
+                      {t(
+                        channel.kind === 'email'
+                          ? 'inboxChannels.revokeAddress'
+                          : 'inboxChannels.revoke',
+                        { prefix: credential.displayPrefix },
+                      )}
                     </Button>
                   ))}
                   <Button
@@ -328,16 +383,20 @@ export default function InboxChannelsPage() {
   // Cells stay primitive so the grid can sort and search them; tags and buttons come from renderCell.
   const rows: readonly GridRow[] = (channels ?? []).map((channel) => ({
     actions: channel.id,
+    address: channel.emailAddress ?? '',
     credentials:
-      channel.credentials.length === 0
-        ? t('inboxChannels.credentialsNone')
-        : channel.credentials
-            .map((credential) => credential.displayPrefix)
-            .join(', '),
+      channel.emailAddress !== null
+        ? channel.emailAddress
+        : channel.credentials.length === 0
+          ? t('inboxChannels.credentialsNone')
+          : channel.credentials
+              .map((credential) => credential.displayPrefix)
+              .join(', '),
     enabled: channel.enabled ? 'yes' : 'no',
     hintKind: channel.hintKind ?? t('inboxChannels.hintKindNone'),
     id: channel.id,
     items: channel.itemCount,
+    kind: channel.kind,
     lastUsed: lastUsed(channel) ?? t('inboxChannels.notAvailable'),
     legalEntity:
       channel.legalEntityId === null
@@ -435,6 +494,24 @@ export default function InboxChannelsPage() {
               value={name}
             />
             <Select
+              id="inbox-channel-kind"
+              helperText={t(
+                kind === 'email'
+                  ? 'inboxChannels.kindEmailHelp'
+                  : 'inboxChannels.kindApiHelp',
+              )}
+              labelText={t('inboxChannels.columnKind')}
+              onChange={(event) => {
+                setKind(
+                  inboxChannelKindForChannelsSchema.parse(event.target.value),
+                );
+              }}
+              value={kind}
+            >
+              <SelectItem text={t('inboxChannels.kindApi')} value="api" />
+              <SelectItem text={t('inboxChannels.kindEmail')} value="email" />
+            </Select>
+            <Select
               id="inbox-channel-entity"
               labelText={t('inboxChannels.columnEntity')}
               onChange={(event) => {
@@ -488,7 +565,7 @@ export default function InboxChannelsPage() {
         }
         title={t('inboxChannels.listTitle')}
       />
-      {issued === undefined ? null : (
+      {issued === undefined ? null : issuedAddress(issued) === null ? (
         <Modal
           modalHeading={t('inboxChannels.credentialIssued')}
           onRequestClose={() => {
@@ -519,13 +596,43 @@ export default function InboxChannelsPage() {
             </CodeSnippet>
           </Stack>
         </Modal>
+      ) : (
+        <Modal
+          modalHeading={t('inboxChannels.addressIssued')}
+          onRequestClose={() => {
+            setIssued(undefined);
+          }}
+          open
+          passiveModal
+        >
+          <Stack gap={5}>
+            <p>{t('inboxChannels.addressIssuedHelp')}</p>
+            <TextInput
+              id="inbox-channel-address"
+              labelText={t('inboxChannels.address')}
+              readOnly
+              value={issued.secret}
+            />
+            <div>
+              <CopyButton
+                feedback={t('inboxChannels.copied')}
+                iconDescription={t('inboxChannels.copyAddress')}
+                onClick={() => {
+                  void navigator.clipboard.writeText(issued.secret);
+                }}
+              />
+            </div>
+          </Stack>
+        </Modal>
       )}
       {confirm === undefined ? null : (
         <Modal
           danger
           modalHeading={t(
             confirm.kind === 'revoke'
-              ? 'inboxChannels.revokeTitle'
+              ? confirm.channel.kind === 'email'
+                ? 'inboxChannels.revokeAddressTitle'
+                : 'inboxChannels.revokeTitle'
               : 'inboxChannels.deleteTitle',
           )}
           onRequestClose={() => {
@@ -535,13 +642,20 @@ export default function InboxChannelsPage() {
           open
           primaryButtonText={t(
             confirm.kind === 'revoke'
-              ? 'inboxChannels.revokeTitle'
+              ? confirm.channel.kind === 'email'
+                ? 'inboxChannels.revokeAddressTitle'
+                : 'inboxChannels.revokeTitle'
               : 'inboxChannels.delete',
           )}
           secondaryButtonText={t('inboxChannels.cancel')}
         >
           {confirm.kind === 'revoke'
-            ? t('inboxChannels.revokeConfirm', { prefix: confirm.prefix })
+            ? t(
+                confirm.channel.kind === 'email'
+                  ? 'inboxChannels.revokeAddressConfirm'
+                  : 'inboxChannels.revokeConfirm',
+                { prefix: confirm.prefix },
+              )
             : t('inboxChannels.deleteConfirm', { name: confirm.channel.name })}
         </Modal>
       )}

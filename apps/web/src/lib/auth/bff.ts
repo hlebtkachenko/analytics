@@ -2053,7 +2053,13 @@ async function streamInboxBlob(
       return upstreamFailure(operation, 'unreachable');
     }
 
-    return jsonResponse({ error: 'blob_rejected' }, response.status);
+    // The API's 409 is the quarantine gate on an infected or unscannable blob; the browser reads the code.
+    return jsonResponse(
+      {
+        error: response.status === 409 ? 'blob_quarantined' : 'blob_rejected',
+      },
+      response.status,
+    );
   }
 
   const mediaType = blobMediaTypeSchema.safeParse(

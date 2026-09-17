@@ -318,6 +318,12 @@ export const intakeSecretSchema = z
   .string()
   .regex(/^bap_intake_[A-Za-z0-9_-]{43}$/);
 const displayPrefixSchema = z.string().length(INTAKE_DISPLAY_PREFIX_LENGTH);
+// An intake address: `in-` then 32 lowercase hex characters at the platform intake domain.
+export const intakeEmailAddressSchema = z
+  .string()
+  .regex(
+    /^in-[0-9a-f]{32}@[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/,
+  );
 // Only email and api channels exist as rows; the wider vocabulary above names an item's source.
 export const inboxChannelKindForChannelsSchema = z.enum(['email', 'api']);
 export const inboxChannelNameSchema = z.string().trim().min(1).max(200);
@@ -335,6 +341,8 @@ export const inboxChannelSchema = z
   .object({
     createdAt: z.iso.datetime(),
     credentials: z.array(inboxChannelCredentialSchema),
+    // Stored plain on the row for an email channel; an api channel never has one.
+    emailAddress: intakeEmailAddressSchema.nullable(),
     enabled: z.boolean(),
     hintKind: tokenSchema.nullable(),
     id: identifierSchema,
@@ -350,11 +358,10 @@ export const inboxChannelListResponseSchema = z
   .object({ channels: z.array(inboxChannelSchema) })
   .strict();
 
-// Only an API channel can be created in Phase 1a.
 export const createInboxChannelRequestSchema = z
   .object({
     hintKind: tokenSchema.optional(),
-    kind: z.literal('api'),
+    kind: inboxChannelKindForChannelsSchema,
     legalEntityId: identifierSchema.optional(),
     name: inboxChannelNameSchema,
   })
@@ -373,12 +380,12 @@ export const updateInboxChannelRequestSchema = z
   .refine((body) => Object.keys(body).length > 0)
   .refine((body) => body.deleted !== true || body.enabled === false);
 
-// The plain secret crosses this boundary exactly once.
+// The plain secret crosses this boundary exactly once; an email channel's secret is its address.
 export const issueInboxChannelCredentialResponseSchema = z
   .object({
     credentialId: identifierSchema,
     displayPrefix: displayPrefixSchema,
-    secret: intakeSecretSchema,
+    secret: z.union([intakeSecretSchema, intakeEmailAddressSchema]),
   })
   .strict();
 

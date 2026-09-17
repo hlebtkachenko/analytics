@@ -9,3 +9,9 @@
   flex-wrap: wrap;
   gap: spacing.$spacing-02;
 }
+
+.address {
+  align-items: center;
+  display: inline-flex;
+  gap: spacing.$spacing-02;
+}
