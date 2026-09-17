@@ -224,7 +224,7 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
           `/api/bff/reporting/organizations/${organizationId}/access`,
     ),
   ]);
-  await page.goto('/access');
+  await page.goto('/account/access');
   for (const response of await accessReady) {
     authenticatedExpect(response.ok()).toBe(true);
   }
@@ -395,7 +395,7 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   await expectNoDocumentOverflow(page);
 
   await page.setViewportSize({ height: 640, width: 320 });
-  await page.goto('/access');
+  await page.goto('/account/access');
   await expectNoDocumentOverflow(page);
   await page.getByRole('button', { name: 'Expand side navigation' }).click();
   const smallScreenAccount = page
@@ -413,6 +413,9 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   await authenticatedExpect(page.locator('main')).toHaveCount(1);
   await expectNoDocumentOverflow(page);
   await expectNoAccessibilityViolations(page);
+
+  await page.goto('/account/security');
+  await expectNoDocumentOverflow(page);
 
   expect(errors.consoleErrors).toEqual([]);
   expect(errors.pageErrors).toEqual([]);

@@ -278,7 +278,7 @@ test.describe.serial('workspace legal entities and entity scope', () => {
     test.setTimeout(150_000);
 
     await useSignedInPage(browser, memberEmail, async (page) => {
-      await page.goto('/access');
+      await page.goto('/account/access');
       await expect(
         page.getByText('Application API role: member'),
       ).toBeVisible();
