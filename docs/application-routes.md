@@ -9,12 +9,16 @@ HTTP routes and internal operational endpoints.
 The `app/(product)` route group wraps Workspaces, Datasets, Documents, Account,
 and member-visible organization routes in a shared server layout that renders
 the client `ProductShell`: a Carbon UI Shell header branded "Afframe Analytics",
-over a left icon rail, with two header areas, "Analytics" (active) and a
-placeholder "AI Assistant" that has no route yet and raises a toast on click.
-The header's global actions, in order, are Search, Notifications, Help,
-Settings, a Workspaces switcher listing the member's real organizations, and
-Account; each opens one single-purpose header panel at a time, and the Account
-panel holds the light/dark/system theme control and sign out.
+over a left icon rail, with one header area, "Analytics" (active). The header's
+global actions, in order, are Search, Help, Account, and a Workspaces switcher
+listing the member's real organizations; each opens one single-purpose header
+panel at a time. The Search panel builds a client index from the rail
+destinations, the account's workspaces, and the active workspace's legal
+entities, and navigates by click or keyboard. The Help panel links the public
+documentation, shows the running version, and shows a feedback `mailto:` only
+when the `BAP_FEEDBACK_EMAIL` operator input is set. The Account panel holds the
+signed-in identity and workspace role, the account links, the light/dark/system
+theme control, and sign out.
 
 The left icon rail (Carbon `SideNav` with `isRail`) is the whole-app navigation
 to these four top-level destinations, plus a workspace section (Members,
