@@ -208,6 +208,20 @@ it unlinks a blob-volume file left untracked by a failed commit once it clears a
 minutes, and re-enqueues `split_email_item` for an email item still `received`
 past 10 minutes.
 
+Migration `20260917.0005` adds the Phase 1b-rules layer. `app.inbox_rule` holds
+closed condition and action columns, no jsonb, evaluated in priority order at
+intake: every rule whose conditions all match applies, first-writer-wins per
+field, a discard rule is terminal, and a hint or the item's standing channel
+hint still outranks every rule action for that field. The first matched rule
+that asks for `auto_route` decides the automatic route, run by the
+`route_inbox_item` job as the rule's author, or as the routing target's editor
+for a target-default auto-route; a document destination only, never a dataset or
+a partner, and never an invoice kind in 1b. `app.inbox_correction` stores the
+suggested and final value of every draft field a route changed, read-only, shown
+under the item's explanation panel; nothing learns from it.
+`created_by = current_setting('bap.user_id', true)` pins a rule's author,
+changed only by an explicit adopt.
+
 ## Workspace dependency rules
 
 ```mermaid
@@ -401,11 +415,12 @@ described in [ADR 0014](docs/adr/0014-durable-blob-storage.md) and
 [ADR 0015](docs/adr/0015-inbox-intake-model.md), are also no longer deferred.
 Uploaded bytes behind an inbox item or a document are durable, never deleted
 after intake. The per-organization quota setting, routing target settings, and
-the orphan blob sweep land with Phase 1b-runtime. The `inbox_rule` table, rules
-and auto-route, Split, versioning, fingerprint duplicates, attach-to-existing,
-bulk actions, any connector, the credential vault, retention, channel health,
-and any AI or parser provider remain deferred; see
-[the inbox plan](docs/planning/inbox.md) for the full list.
+the orphan blob sweep land with Phase 1b-runtime; the `inbox_rule` table, rules,
+corrections, and auto-route land with Phase 1b-rules. Split, the versioning
+route, fingerprint duplicates, attach-to-existing, and bulk actions remain
+deferred to Phase 1b-actions; ARES, AI, OCR, any connector, the credential
+vault, retention, and channel health remain deferred to the connections and
+setup track; see [the inbox plan](docs/planning/inbox.md) for the full list.
 
 Metric definitions, aggregation and transformation semantics beyond derivation,
 derived datasets, cross-dataset joins, dataset editing and versioning, custom
