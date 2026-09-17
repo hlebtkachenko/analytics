@@ -149,6 +149,9 @@ test('walks the Carbon workspace loop through explicit member-scoped actions', a
   await expect(
     page.getByRole('form', { name: 'Create workspace' }),
   ).toHaveCount(0);
+  // The quota-exhausted notification must stay within a 320px viewport.
+  await page.setViewportSize({ height: 640, width: 320 });
+  await expectNoHorizontalOverflow(page);
 
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
