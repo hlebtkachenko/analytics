@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useToast } from '../../../components/shell/toast';
 import { authClient } from '../../../lib/auth/client';
+import styles from './account-view.module.scss';
 
 export type AccountWorkspaceRole = 'admin' | 'member' | 'owner';
 
@@ -187,13 +188,15 @@ export default function AccountView({
           {workspaceRows.length === 0 ? (
             <p>{t('account.workspaces.empty')}</p>
           ) : (
-            <DataGrid
-              columns={workspaceColumns}
-              initialSort={[{ direction: 'ASC', key: 'name' }]}
-              rows={workspaceRows}
-              size="sm"
-              sortable
-            />
+            <div className={styles.tableContainer!}>
+              <DataGrid
+                columns={workspaceColumns}
+                initialSort={[{ direction: 'ASC', key: 'name' }]}
+                rows={workspaceRows}
+                size="sm"
+                sortable
+              />
+            </div>
           )}
         </Stack>
       </section>
