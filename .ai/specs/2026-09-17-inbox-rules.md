@@ -298,6 +298,12 @@ and down, enable and disable, edit, delete, adopt; the pattern of
 newest extraction's reasons, which now include the rule sentences, and the
 corrections list.
 
+This PR exports `composeDocumentDraft(item, matchedRules, effectiveTarget)` from
+`apps/api/src/inbox/`, the same composer the auto-route job uses to fill the
+destination create payload, and the constant `HUMAN_TOUCH_EVENT_KINDS`, also
+from `apps/api/src/inbox/`; 1b-actions consumes both for bulk approve and list
+colouring. Nothing else changes.
+
 ## Security
 
 The rule author is the principal, as ADR 0016 answered. Not a system principal:
