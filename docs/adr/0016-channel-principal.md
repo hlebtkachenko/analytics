@@ -97,7 +97,8 @@ exist and nothing new in the database role set.
   (`packages/security/src/access-contract.ts:56-67`) and gains no key. The two
   intake routes accept a `ChannelAccess` or a `TenantAccess` with
   `manageDocuments`; every other route requires a `TenantAccess` and answers 403
-  to a `channel_` subject.
+  to a `channel_` subject. Amended 2026-09-17: the email route accepts a
+  `ChannelAccess` only and answers 403 to a `TenantAccess`.
 - Non-inbox SELECT policies carry no role predicate today. They gain
   `AND NOT app.role_is_channel()`, so a channel context reads only the inbox
   tables and `app.blob`; foreign key checks bypass row level security, so
@@ -139,7 +140,9 @@ tenant table.
   address to give it out, so it is stored plain on the channel row while the
   credential row keeps its hash. Email address tokens use a lowercase base32
   alphabet and are resolved case-insensitively, because an MTA may lowercase a
-  local part.
+  local part. Amended 2026-09-17: the token is 32 lowercase hex characters from
+  `encode(gen_random_bytes(16), 'hex')`, and the local part is `in-<32 hex>`,
+  not base32.
 - Revocation is `revoked_at` on the credential, checked by the web lookup on
   every request; disabling is `enabled` on the channel, checked by the API on
   every request and, once channel jobs exist, by the worker at every dequeue.
@@ -166,19 +169,24 @@ tenant table.
 Inbound email arrives through Mailgun EU and is bound to a channel by the
 recipient address alone.
 
-- `POST /api/inbound/mailgun` in the web service. The Mailgun forward URL must
-  end with `mime`, otherwise Mailgun posts parsed fields instead of `body-mime`.
-  The signing key is read from `BAP_MAILGUN_WEBHOOK_SIGNING_KEY_FILE`, a mounted
-  credential file as ADR 0005 requires. The route first checks that the posted
-  signature is exactly 64 hex characters, then verifies HMAC-SHA256 over
-  `timestamp` concatenated with `token` using `timingSafeEqual`, and refuses a
-  timestamp outside a 300 second window.
+- `POST /api/inbound/mailgun/mime` in the web service. The Mailgun forward URL
+  must end with `mime`, otherwise Mailgun posts parsed fields instead of
+  `body-mime`. The signing key is read from
+  `BAP_MAILGUN_WEBHOOK_SIGNING_KEY_FILE`, a mounted credential file as ADR 0005
+  requires. The route first checks that the posted signature is exactly 64 hex
+  characters, then verifies HMAC-SHA256 over `timestamp` concatenated with
+  `token` using `timingSafeEqual`, and refuses a timestamp outside a 300 second
+  window.
 - The edge IP bucket from the token section is checked before the recipient
-  lookup and consumed on a miss, the same shape as the sign-up bucket.
+  lookup and consumed on a miss, the same shape as the sign-up bucket. Amended
+  2026-09-17: the bucket is consumed only on signature failure; a signed miss
+  answers 406 without consuming it; an in-flight semaphore answers 503 beyond
+  `BAP_INBOUND_MAX_IN_FLIGHT`.
 - Replay: the Mailgun `token` becomes `inbox_item.external_id`, with the sha256
   of the `Message-Id` header as the fallback when the token is absent, so a
   re-delivery hits `inbox_item_external_id_key` and creates no second item; the
-  exact-hash blob check runs second.
+  exact-hash blob check runs second. Amended 2026-09-17: `external_id` is the
+  Mailgun `token` only; there is no `Message-Id` fallback.
 - Binding: the `recipient` local part `in-<token>@` is hashed and resolved as a
   credential of kind `email_address`. `From`, `To`, the body and any provider
   identity are never consulted. An unknown recipient answers 406 so Mailgun
@@ -190,7 +198,10 @@ recipient address alone.
   schema requires `position >= 1`, so the plan's "file zero" is amended),
   `payload_kind = 'email'`, `origin` = sender address, and enqueues
   `split_email_item`. The worker splits attachments into child items, at most 20
-  per message.
+  per message. Amended 2026-09-17: `origin` stays the credential display prefix
+  as Phase 1a defined it, the sender lives in `inbox_item.sender`, and the Phase
+  1a-email migration rewrites the `inbox_item.origin` column comment
+  (`packages/db/drizzle/20260917.0001_inbox_channels.sql:75`).
 - Body caps. The general `request_body` block in
   `infrastructure/caddy/Caddyfile` stays at 25 MB and gains
   `not path /api/inbound/*`; the inbound path gets its own 30 MB block, because
