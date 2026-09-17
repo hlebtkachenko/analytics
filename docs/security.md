@@ -456,17 +456,18 @@ plugin: only owners may update settings, invite, assign any of the three roles,
 remove a member, cancel or resend an invitation, or edit an admin's or a
 member's entity scope. Admins and members are both read-only in this UI. Better
 Auth remains authoritative and independently refuses the same admin actions. The
-Carbon members page issues its invite, role, removal, and cancel mutations
-through client `authClient.organization.*` calls that each carry an explicit
-`organizationId`; Better Auth re-derives membership and permission from the
-session and owns the sole-owner invariant, refusing to remove the only owner or
-to let a sole owner self-demote, so the page no longer rereads the member list
-to guard that case. The Carbon settings page saves name and slug through
-`authClient.organization.update` and lets any member leave through
-`authClient.organization.leave`, both carrying the same server-resolved
-`organizationId`; the auth before-hook revalidates a submitted slug against the
-reserved contract, and Better Auth refuses a sole owner's own leave, which the
-page surfaces inline.
+Carbon members page issues its invite, role, and removal mutations through
+client `authClient.organization.*` calls that each carry an explicit
+`organizationId`, while the cancel-invitation call carries only the
+`invitationId` and lets Better Auth derive the organization; Better Auth
+re-derives membership and permission from the session and owns the sole-owner
+invariant, refusing to remove the only owner or to let a sole owner self-demote,
+so the page no longer rereads the member list to guard that case. The Carbon
+settings page saves name and slug through `authClient.organization.update` and
+lets any member leave through `authClient.organization.leave`, both carrying the
+same server-resolved `organizationId`; the auth before-hook revalidates a
+submitted slug against the reserved contract, and Better Auth refuses a sole
+owner's own leave, which the page surfaces inline.
 
 ## Account erasure boundary
 

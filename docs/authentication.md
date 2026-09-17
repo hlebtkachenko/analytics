@@ -74,10 +74,11 @@ header or UI shell:
 Both sign-in steps accept an optional `next` parameter, and `safeReturnPath` in
 `apps/web/src/lib/auth/return-path.ts` honours it only when it is a same-origin
 path of at most 2048 characters that starts with a single slash and carries no
-scheme or backslash, otherwise the flow lands on `/access`. A value carrying a
-control character, a protocol-relative or cross-origin target, or a route that
-cannot follow a sign in (`/api` and the identity pages) falls back to `/access`
-as well, and the same validator builds every `/sign-in?next=` link.
+scheme or backslash, otherwise the flow lands on `/organizations`. A value
+carrying a control character, a protocol-relative or cross-origin target, or a
+route that cannot follow a sign in (`/api` and the identity pages) falls back to
+`/organizations` as well, and the same validator builds every `/sign-in?next=`
+link.
 
 The sign-up page reads the switch through the server-only database boundary. The
 form remains available in every switch state: a true value shows public
@@ -117,7 +118,7 @@ Activation callback error codes are canonicalized before render to the fixed
 rendered. A live session redirects from `/activate` to `/welcome`. With no
 session, the page explains generically that an email scanner may have consumed
 the link and offers sign-in. `/welcome` redirects an unauthenticated request to
-`/sign-in` and links an authenticated account to `/access`.
+`/sign-in` and links an authenticated account to `/organizations`.
 
 All identity forms use standard Carbon form controls through
 `@bap/design-system`. Auth failures use a non-dismissible, low-contrast error
@@ -600,15 +601,17 @@ ordinary members both receive read-only settings, membership, and invitation
 views; ADR 0011 moved member and organization management to `owner` alone, and
 Better Auth's explicit access control enforces the same restriction
 independently of this UI. The Carbon `/[orgSlug]/members` page runs its invite,
-role, removal, and cancel mutations through client `authClient.organization.*`
-calls, each carrying an explicit `organizationId` that the auth before-hook
-requires and from which Better Auth re-derives membership and permission; the
-browser id never selects a tenant. It also offers an owner-only entity scope
-editor next to each admin or member, setting `all` or an explicit set of legal
-entity ids through the BFF; the editor is hidden for an owner target, which the
-API also rejects with a 409. The Carbon `/[orgSlug]/settings` page saves name
-and slug changes through `authClient.organization.update` and lets any member
-leave through `authClient.organization.leave`, both carrying the server-resolved
+role, and removal mutations through client `authClient.organization.*` calls,
+each carrying an explicit `organizationId` that the auth before-hook requires
+and from which Better Auth re-derives membership and permission, while the
+cancel-invitation call sends only the `invitationId` and lets Better Auth derive
+the organization; the browser id never selects a tenant. It also offers an
+owner-only entity scope editor next to each admin or member, setting `all` or an
+explicit set of legal entity ids through the BFF; the editor is hidden for an
+owner target, which the API also rejects with a 409. The Carbon
+`/[orgSlug]/settings` page saves name and slug changes through
+`authClient.organization.update` and lets any member leave through
+`authClient.organization.leave`, both carrying the server-resolved
 `organizationId`; a slug change re-checks the reserved contract in the auth
 before-hook and refreshes the active organization context, while name and slug
 fields stay read-only for admins and members. Better Auth 1.7.4 owns the

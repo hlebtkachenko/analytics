@@ -275,7 +275,7 @@ TypeScript slug contract through migration `20260831.0004`, and migration
 
 Authenticated `app/(product)` routes share a server layout that renders the
 client `ProductShell`, a Carbon UI Shell header branded "Afframe Analytics" over
-a pinned-persistable left icon rail for Organizations, Datasets, Documents, and
+a pinned-persistable left icon rail for Workspaces, Datasets, Documents, and
 Account, and a workspace section shown when an organization is active. The
 account area holds Carbon profile, security, and preferences pages plus the
 access diagnostic at `/account/access`; `/access` redirects there. Header
