@@ -222,6 +222,23 @@ export function createAuthBeforeHook(pool: DatabasePool) {
       return undefined;
     }
 
+    // The update route only revalidates a submitted slug; membership and id checks follow.
+    if (context.path === '/organization/update') {
+      const data = objectInput(objectInput(context.body)?.data);
+      if (typeof data?.slug === 'string') {
+        const parsed = organizationSlugSchema.safeParse(
+          normalizeOrganizationSlug(data.slug),
+        );
+        if (!parsed.success) {
+          throw APIError.from('BAD_REQUEST', {
+            code: invalidOrganizationSlugErrorCode,
+            message: 'Organization slug is invalid.',
+          });
+        }
+        data.slug = parsed.data;
+      }
+    }
+
     const location =
       context.path === undefined
         ? undefined
