@@ -18,8 +18,8 @@ import {
 
 const CHANNEL_ID = '00000000-0000-4000-8000-000000000060';
 const ITEM_ID = '00000000-0000-4000-8000-000000000061';
-const SIGNING_KEY =
-  '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+// Built at runtime so no literal high-entropy string lands in the repository.
+const SIGNING_KEY = Buffer.alloc(32, 7).toString('hex');
 const RECIPIENT_TOKEN = 'a'.repeat(32);
 const RECIPIENT = `in-${RECIPIENT_TOKEN}@in.bap.localhost`;
 const LOCAL_PART_SHA256 = createHash('sha256')
