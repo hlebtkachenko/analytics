@@ -508,7 +508,11 @@ export function DataGrid(props: DataGridProps) {
 
   if (state === 'error') {
     return (
-      <TableContainer description={description} title={title}>
+      <TableContainer
+        className={styles.root}
+        description={description}
+        title={title}
+      >
         <InlineNotification
           hideCloseButton
           kind="error"
@@ -520,7 +524,11 @@ export function DataGrid(props: DataGridProps) {
   }
 
   return (
-    <TableContainer description={description} title={title}>
+    <TableContainer
+      className={styles.root}
+      description={description}
+      title={title}
+    >
       {showToolbar && (
         <TableToolbar>
           {batchActions.length > 0 && (

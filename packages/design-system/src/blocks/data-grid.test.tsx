@@ -8,6 +8,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DataGrid } from './data-grid';
+import styles from './data-grid.module.scss';
 import type { GridColumn, GridRow } from './types';
 
 const columns: readonly GridColumn[] = [
@@ -186,6 +187,12 @@ describe('DataGrid', () => {
   it('shows the empty state when there are no rows', () => {
     render(<DataGrid columns={columns} emptyLabel="Nothing here" rows={[]} />);
     expect(screen.getByText('Nothing here')).toBeInTheDocument();
+  });
+
+  it('marks its root so it shrinks inside a grid or flex parent', () => {
+    const { container } = render(<DataGrid columns={columns} rows={rows} />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveClass(styles.root!);
   });
 
   it('limits the page to the client page size', () => {
