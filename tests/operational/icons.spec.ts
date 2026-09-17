@@ -92,12 +92,32 @@ async function expectIconControl(
   ).toBe(false);
 }
 
-// Carbon animates the header panel open; axe must scan the settled 256px panel.
-async function expectSettledHeaderPanel(page: Page): Promise<void> {
-  await expect(page.locator('.cds--header-panel--expanded')).toHaveCSS(
-    'width',
-    '256px',
-  );
+// Carbon animates the header panel open, so axe must scan it settled. Wait by
+// geometry, not the internal expanded class or its fixed width: poll a public
+// element inside the panel until two reads 100ms apart are equal and non-zero.
+async function expectSettledHeaderPanel(panelContent: Locator): Promise<void> {
+  await expect(panelContent).toBeVisible();
+  const page = panelContent.page();
+  await expect
+    .poll(
+      async () => {
+        const first = await panelContent.boundingBox();
+        await page.waitForTimeout(100);
+        const second = await panelContent.boundingBox();
+        return (
+          first !== null &&
+          second !== null &&
+          second.width > 0 &&
+          second.height > 0 &&
+          second.x === first.x &&
+          second.y === first.y &&
+          second.width === first.width &&
+          second.height === first.height
+        );
+      },
+      { timeout: 5_000 },
+    )
+    .toBe(true);
 }
 
 async function focusWithKeyboard(page: Page, control: Locator): Promise<void> {
@@ -278,7 +298,9 @@ test('proves every real authenticated icon control and header panel', async ({
   await authenticatedExpect(
     header.getByText(/^Version \d+\.\d+\.\d+$/),
   ).toBeVisible();
-  await expectSettledHeaderPanel(page);
+  await expectSettledHeaderPanel(
+    header.getByRole('link', { name: 'Documentation' }),
+  );
   await expectNoAccessibilityViolations(page);
   await expectNoDocumentOverflow(page);
 
@@ -298,7 +320,9 @@ test('proves every real authenticated icon control and header panel', async ({
   await authenticatedExpect(
     header.getByRole('button', { name: 'Sign out' }),
   ).toBeVisible();
-  await expectSettledHeaderPanel(page);
+  await expectSettledHeaderPanel(
+    header.getByRole('button', { name: 'Sign out' }),
+  );
   await expectNoAccessibilityViolations(page);
   await expectNoDocumentOverflow(page);
 
@@ -315,7 +339,7 @@ test('proves every real authenticated icon control and header panel', async ({
   ).toHaveAttribute('href', '/organizations');
   // Every switcher item is a real keyboard destination.
   await focusWithKeyboard(page, switcherWorkspace);
-  await expectSettledHeaderPanel(page);
+  await expectSettledHeaderPanel(switcherWorkspace);
   await expectNoAccessibilityViolations(page);
   await expectNoDocumentOverflow(page);
 
