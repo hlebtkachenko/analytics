@@ -16,6 +16,13 @@ describe('buildTrail', () => {
     );
   });
 
+  it('names the inbox channels child rather than falling back to Item', () => {
+    expect(buildTrail(['(product)', 'inbox', 'channels'])).toEqual([
+      { current: false, href: '/inbox', label: 'Inbox' },
+      { current: true, href: '/inbox/channels', label: 'Channels' },
+    ]);
+  });
+
   it('names the documents analytics child rather than falling back to Document', () => {
     expect(buildTrail(['(product)', 'documents', 'analytics'])).toEqual([
       { current: false, href: '/documents', label: 'Documents' },

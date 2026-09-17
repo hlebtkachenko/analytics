@@ -1,5 +1,13 @@
 @use '@bap/design-system/tokens/spacing.scss' as spacing;
 
+.headingRow {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-05;
+  justify-content: space-between;
+}
+
 .filters {
   display: flex;
   flex-wrap: wrap;

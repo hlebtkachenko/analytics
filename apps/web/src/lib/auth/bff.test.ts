@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   deleteDocumentLink,
+  deleteInboxChannelCredential,
   deleteLegalEntity,
   getDocument,
   getDocumentAnalytics,
@@ -11,16 +12,21 @@ import {
   getDatasets,
   getInboxBlobDownload,
   getInboxBlobInline,
+  getInboxChannel,
+  getInboxChannels,
   getInboxItem,
   getInboxItems,
   getLegalEntities,
   getMemberEntityScope,
   getMemberEntityScopes,
   getOrganizationAccess,
+  patchInboxChannel,
   patchLegalEntity,
   patchPartner,
   postDatasetUpload,
   postDocument,
+  postInboxChannel,
+  postInboxChannelCredential,
   postInboxItemDiscard,
   postInboxItemRouteDocument,
   postInboxUpload,
@@ -1575,6 +1581,7 @@ const BLOB_ID = '00000000-0000-4000-8000-000000000060';
 
 const inboxItem = {
   assigneeId: null,
+  channelId: null,
   channelKind: 'upload',
   confidence: 0.9,
   createdAt: '2026-09-16T08:00:00.000Z',
@@ -1591,6 +1598,7 @@ const inboxItem = {
   hintText: null,
   id: INBOX_ITEM_ID,
   legalEntityId: null,
+  origin: null,
   partnerId: null,
   payloadKind: 'file',
   receivedAt: '2026-09-16T08:00:00.000Z',
@@ -1981,5 +1989,236 @@ describe('inbox blob routes', () => {
     expect(malformed.status).toBe(404);
     expect(fetchImplementation).not.toHaveBeenCalled();
     expect(unsupported.status).toBe(415);
+  });
+});
+
+const CHANNEL_ID = '00000000-0000-4000-8000-000000000060';
+const CREDENTIAL_ID = '00000000-0000-4000-8000-000000000061';
+
+const inboxChannel = {
+  createdAt: '2026-09-17T08:00:00.000Z',
+  credentials: [
+    {
+      createdAt: '2026-09-17T08:00:00.000Z',
+      credentialId: CREDENTIAL_ID,
+      displayPrefix: 'AAAAAAAA',
+      lastUsedAt: null,
+    },
+  ],
+  enabled: true,
+  hintKind: 'invoice',
+  id: CHANNEL_ID,
+  itemCount: 0,
+  kind: 'api',
+  legalEntityId: null,
+  name: 'Placeholder push',
+  updatedAt: '2026-09-17T08:00:00.000Z',
+};
+
+describe('inbox channels', () => {
+  it('lists the channels and reads one, answering 404 for a malformed identifier', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/inbox/channels')) {
+        return Response.json({ channels: [inboxChannel] });
+      }
+      expect(url).toBe(
+        `http://api:3001/v1/organizations/org_1/inbox/channels/${CHANNEL_ID}`,
+      );
+      return Response.json(inboxChannel);
+    });
+
+    const list = await getInboxChannels(
+      auth,
+      inboxRequest('channels'),
+      'org_1',
+      fetchImplementation,
+    );
+    const one = await getInboxChannel(
+      auth,
+      inboxRequest(`channels/${CHANNEL_ID}`),
+      'org_1',
+      CHANNEL_ID,
+      fetchImplementation,
+    );
+    const malformed = await getInboxChannel(
+      auth,
+      inboxRequest('channels/not-an-id'),
+      'org_1',
+      'not-an-id',
+      fetchImplementation,
+    );
+
+    expect(list.status).toBe(200);
+    expect((await list.json()).channels[0].id).toBe(CHANNEL_ID);
+    expect(one.status).toBe(200);
+    expect(malformed.status).toBe(404);
+    expect(await malformed.json()).toEqual({
+      error: 'inbox_channel_not_found',
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it('creates an API channel from a validated body and refuses another kind', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/channels',
+      );
+      expect(init?.method).toBe('POST');
+      expect(JSON.parse(String(init?.body))).toEqual({
+        kind: 'api',
+        name: 'Placeholder push',
+      });
+      return Response.json(inboxChannel, { status: 201 });
+    });
+
+    const created = await postInboxChannel(
+      auth,
+      inboxRequest('channels', {
+        body: JSON.stringify({ kind: 'api', name: 'Placeholder push' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      }),
+      'org_1',
+      fetchImplementation,
+    );
+    const refused = await postInboxChannel(
+      auth,
+      inboxRequest('channels', {
+        body: JSON.stringify({ kind: 'email', name: 'Placeholder mail' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      }),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(created.status).toBe(201);
+    expect(refused.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+
+  it('patches a channel, maps a 403 to the rejection code and refuses a delete without disable', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        `http://api:3001/v1/organizations/org_1/inbox/channels/${CHANNEL_ID}`,
+      );
+      expect(init?.method).toBe('PATCH');
+      const body = JSON.parse(String(init?.body));
+      if (body.enabled === false && body.deleted === true) {
+        return Response.json({ ...inboxChannel, enabled: false });
+      }
+      return new Response(null, { status: 403 });
+    });
+
+    const deleted = await patchInboxChannel(
+      auth,
+      inboxRequest(`channels/${CHANNEL_ID}`, {
+        body: JSON.stringify({ deleted: true, enabled: false }),
+        headers: { 'content-type': 'application/json' },
+        method: 'PATCH',
+      }),
+      'org_1',
+      CHANNEL_ID,
+      fetchImplementation,
+    );
+    const forbidden = await patchInboxChannel(
+      auth,
+      inboxRequest(`channels/${CHANNEL_ID}`, {
+        body: JSON.stringify({ enabled: false }),
+        headers: { 'content-type': 'application/json' },
+        method: 'PATCH',
+      }),
+      'org_1',
+      CHANNEL_ID,
+      fetchImplementation,
+    );
+    const invalid = await patchInboxChannel(
+      auth,
+      inboxRequest(`channels/${CHANNEL_ID}`, {
+        body: JSON.stringify({ deleted: true }),
+        headers: { 'content-type': 'application/json' },
+        method: 'PATCH',
+      }),
+      'org_1',
+      CHANNEL_ID,
+      fetchImplementation,
+    );
+
+    expect(deleted.status).toBe(200);
+    expect((await deleted.json()).enabled).toBe(false);
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toEqual({ error: 'inbox_channel_rejected' });
+    expect(invalid.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it('issues a credential once, passes a 409 through and revokes with no content', async () => {
+    const issued = {
+      credentialId: CREDENTIAL_ID,
+      displayPrefix: 'AAAAAAAA',
+      secret: `bap_intake_${'A'.repeat(43)}`,
+    };
+    let issues = 0;
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (init?.method === 'DELETE') {
+        expect(url).toBe(
+          `http://api:3001/v1/organizations/org_1/inbox/channels/${CHANNEL_ID}/credentials/${CREDENTIAL_ID}`,
+        );
+        return new Response(null, { status: 204 });
+      }
+      expect(url).toBe(
+        `http://api:3001/v1/organizations/org_1/inbox/channels/${CHANNEL_ID}/credentials`,
+      );
+      issues += 1;
+      return issues === 1
+        ? Response.json(issued, { status: 201 })
+        : new Response(null, { status: 409 });
+    });
+
+    const first = await postInboxChannelCredential(
+      auth,
+      inboxRequest(`channels/${CHANNEL_ID}/credentials`, { method: 'POST' }),
+      'org_1',
+      CHANNEL_ID,
+      fetchImplementation,
+    );
+    const third = await postInboxChannelCredential(
+      auth,
+      inboxRequest(`channels/${CHANNEL_ID}/credentials`, { method: 'POST' }),
+      'org_1',
+      CHANNEL_ID,
+      fetchImplementation,
+    );
+    const revoked = await deleteInboxChannelCredential(
+      auth,
+      inboxRequest(`channels/${CHANNEL_ID}/credentials/${CREDENTIAL_ID}`, {
+        method: 'DELETE',
+      }),
+      'org_1',
+      CHANNEL_ID,
+      CREDENTIAL_ID,
+      fetchImplementation,
+    );
+    const malformed = await deleteInboxChannelCredential(
+      auth,
+      inboxRequest(`channels/${CHANNEL_ID}/credentials/nope`, {
+        method: 'DELETE',
+      }),
+      'org_1',
+      CHANNEL_ID,
+      'nope',
+      fetchImplementation,
+    );
+
+    expect(first.status).toBe(201);
+    expect(await first.json()).toEqual(issued);
+    expect(third.status).toBe(409);
+    expect(await third.json()).toEqual({ error: 'inbox_credential_rejected' });
+    expect(revoked.status).toBe(204);
+    expect(revoked.headers.get('cache-control')).toBe('private, no-store');
+    expect(malformed.status).toBe(404);
+    expect(fetchImplementation).toHaveBeenCalledTimes(3);
   });
 });

@@ -3,6 +3,7 @@
 import { DataGrid } from '@bap/design-system/blocks';
 import type { GridColumn, GridRow } from '@bap/design-system/blocks';
 import {
+  Button,
   InlineNotification,
   Link,
   Select,
@@ -125,6 +126,7 @@ export default function InboxPage() {
   const list = result?.key === queryKey ? result.value : undefined;
   const canRead = access?.capabilities.readDocuments ?? false;
   const canManage = access?.capabilities.manageDocuments ?? false;
+  const canManageChannels = access?.capabilities.manageOrganization ?? false;
   const loading =
     organization.state === 'loading' ||
     (organizationId.length > 0 &&
@@ -201,7 +203,18 @@ export default function InboxPage() {
 
   return (
     <PageContainer>
-      <h1>{t('inbox.title')}</h1>
+      <div className={styles.headingRow!}>
+        <h1>{t('inbox.title')}</h1>
+        {canManageChannels ? (
+          <Button
+            href={withOrganization('/inbox/channels', organization.slug)}
+            kind="tertiary"
+            size="md"
+          >
+            {t('inbox.channels')}
+          </Button>
+        ) : null}
+      </div>
       {accessState === 'error' ? (
         <InlineNotification
           kind="error"

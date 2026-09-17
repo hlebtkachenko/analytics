@@ -30,6 +30,7 @@ const legalEntities = {
 
 const inboxItem = {
   assigneeId: null,
+  channelId: null,
   channelKind: 'upload',
   confidence: 0.8,
   createdAt: '2026-09-16T08:00:00.000Z',
@@ -47,6 +48,7 @@ const inboxItem = {
   hintText: null,
   id: ITEM_ID,
   legalEntityId: LEGAL_ENTITY_ID,
+  origin: null,
   partnerId: null,
   payloadKind: 'file',
   primaryFilename: 'invoice.pdf',
@@ -57,14 +59,14 @@ const inboxItem = {
   updatedAt: '2026-09-16T08:00:00.000Z',
 };
 
-function capabilities(manageDocuments: boolean) {
+function capabilities(manageDocuments: boolean, manageOrganization = false) {
   return {
     createEntities: false,
     deleteEntities: false,
     manageDocuments,
     manageEntityAccess: false,
     manageMembers: false,
-    manageOrganization: false,
+    manageOrganization,
     readDocuments: true,
     updateEntities: false,
     uploadData: false,
@@ -73,7 +75,11 @@ function capabilities(manageDocuments: boolean) {
 }
 
 // One router per test, so every request is answered by the shape its route promises.
-function respondWith(items: unknown[], manageDocuments = true) {
+function respondWith(
+  items: unknown[],
+  manageDocuments = true,
+  manageOrganization = false,
+) {
   return vi.fn(async (input: string) => {
     if (input === '/api/auth/organization/list') {
       return Response.json([
@@ -86,7 +92,7 @@ function respondWith(items: unknown[], manageDocuments = true) {
     }
     if (input.endsWith('/access')) {
       return Response.json({
-        capabilities: capabilities(manageDocuments),
+        capabilities: capabilities(manageDocuments, manageOrganization),
         organizationId: 'organization_1',
       });
     }
@@ -161,6 +167,24 @@ describe('InboxPage', () => {
     expect(itemRequests(fetchMock)[0]).toBe(
       '/api/bff/application/organizations/organization_1/inbox/items?status=received%2Cprocessing%2Cfailed&page=2&pageSize=50',
     );
+  });
+
+  it('offers the channels page to an owner only', async () => {
+    vi.stubGlobal('fetch', respondWith([inboxItem], true, true));
+
+    renderInboxPage();
+
+    expect(
+      await screen.findByRole('link', { name: 'Channels' }),
+    ).toHaveAttribute('href', '/inbox/channels?organization=organization-1');
+
+    cleanup();
+    vi.stubGlobal('fetch', respondWith([inboxItem]));
+
+    renderInboxPage();
+    await screen.findByText('Placeholder Holding');
+
+    expect(screen.queryByRole('link', { name: 'Channels' })).toBeNull();
   });
 
   it('shows the empty state and hides the drop zone without the manage capability', async () => {
