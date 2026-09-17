@@ -1639,7 +1639,6 @@ const inboxDetail = {
     partnerPolicy: 'match_only',
     requiredFields: [],
     source: 'platform',
-    updatedAt: null,
   },
 };
 
@@ -2304,7 +2303,6 @@ const routingTarget = {
   partnerPolicy: 'match_only',
   requiredFields: [],
   source: 'platform',
-  updatedAt: null,
 };
 const routingTargetBody = {
   auto: 'above_threshold',
@@ -2352,7 +2350,6 @@ describe('inbox routing targets', () => {
             ...routingTarget,
             ...routingTargetBody,
             source: 'organization',
-            updatedAt: '2026-09-17T08:00:00.000Z',
           })
         : new Response(null, { status: 403 });
     });

@@ -54,6 +54,7 @@ import {
   inboxDecidedByLabelKeys,
   inboxDiscardReasonLabelKeys,
   inboxRoutingDestinationLabelKeys,
+  inboxRoutingDestinationNoneLabelKey,
   inboxStatusLabelKeys,
   inboxStatusTagTypes,
 } from '../../../../lib/inbox/labels.ts';
@@ -97,7 +98,7 @@ function draftKind(detail: InboxItemDetail): DocumentKind {
   if (parsedHint.success) {
     return parsedHint.data;
   }
-  return detail.routingTarget?.documentKind ?? 'other';
+  return detail.routingTarget.documentKind ?? 'other';
 }
 
 function asDiscardReason(value: string): InboxDiscardReason {
@@ -413,26 +414,26 @@ export default function InboxItemPage() {
 
           <section aria-label={t('inbox.explanation')}>
             <h2>{t('inbox.explanation')}</h2>
-            {detail.routingTarget === null ? null : (
-              <p>
-                {t('inbox.routingTarget')}:{' '}
-                {t(
-                  inboxRoutingDestinationLabelKeys[
-                    detail.routingTarget.destination
-                  ],
-                )}
-                {detail.routingTarget.documentKind === null
-                  ? ''
-                  : `, ${t(documentKindLabelKeys[detail.routingTarget.documentKind])}`}{' '}
-                (
-                {t(
-                  detail.routingTarget.source === 'organization'
-                    ? 'inbox.routingTargetOrganization'
-                    : 'inbox.routingTargetPlatform',
-                )}
-                )
-              </p>
-            )}
+            <p>
+              {t('inbox.routingTarget')}:{' '}
+              {t(
+                detail.routingTarget.destination === null
+                  ? inboxRoutingDestinationNoneLabelKey
+                  : inboxRoutingDestinationLabelKeys[
+                      detail.routingTarget.destination
+                    ],
+              )}
+              {detail.routingTarget.documentKind === null
+                ? ''
+                : `, ${t(documentKindLabelKeys[detail.routingTarget.documentKind])}`}{' '}
+              (
+              {t(
+                detail.routingTarget.source === 'organization'
+                  ? 'inbox.routingTargetOrganization'
+                  : 'inbox.routingTargetPlatform',
+              )}
+              )
+            </p>
             {extraction === null ? (
               <p>{t('inbox.explanationEmpty')}</p>
             ) : (

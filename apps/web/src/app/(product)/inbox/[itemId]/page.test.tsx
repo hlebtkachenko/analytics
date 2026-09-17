@@ -116,7 +116,6 @@ const routingTarget = {
   partnerPolicy: 'match_only',
   requiredFields: [],
   source: 'platform',
-  updatedAt: null,
 };
 
 function capabilities(manageDocuments: boolean) {
@@ -413,7 +412,6 @@ describe('InboxItemPage', () => {
           destination: 'discard',
           documentKind: null,
           source: 'organization',
-          updatedAt: '2026-09-17T08:00:00.000Z',
         },
       }),
     );

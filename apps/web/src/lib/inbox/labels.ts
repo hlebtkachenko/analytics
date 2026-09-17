@@ -44,6 +44,10 @@ export const inboxRoutingDestinationLabelKeys: Readonly<
   documents: 'inboxSettings.destinationDocuments',
 };
 
+// The platform default for some detected types names no destination yet.
+export const inboxRoutingDestinationNoneLabelKey =
+  'inboxSettings.destinationNone';
+
 export const inboxRoutingAutoLabelKeys: Readonly<
   Record<InboxRoutingAutoPolicy, string>
 > = {

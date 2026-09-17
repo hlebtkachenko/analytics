@@ -267,17 +267,23 @@ export const inboxRoutingTargetSourceSchema = z.enum([
 ]);
 export const MAX_ROUTING_REQUIRED_FIELDS = 32;
 
+// A draft field name a person must fill before routing: any identifier the destination contract names.
+const routingRequiredFieldSchema = z
+  .string()
+  .regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/);
+
 // The editable part of a target; a PUT carries all of it, so one edit never resets another field.
 const routingTargetFieldsSchema = z.object({
   auto: inboxRoutingAutoPolicySchema,
   autoThreshold: confidenceSchema.nullable(),
   defaultAssigneeId: subjectIdentifierSchema.nullable(),
   defaultLegalEntityId: identifierSchema.nullable(),
-  destination: inboxRoutingDestinationSchema,
+  // Null only on a platform default that names no destination yet; a saved row always names one.
+  destination: inboxRoutingDestinationSchema.nullable(),
   documentKind: documentKindSchema.nullable(),
   partnerPolicy: inboxRoutingPartnerPolicySchema,
   requiredFields: z
-    .array(z.string().min(1).max(100))
+    .array(routingRequiredFieldSchema)
     .max(MAX_ROUTING_REQUIRED_FIELDS),
 });
 
@@ -303,7 +309,9 @@ function routingTargetInvariants(
   }
 }
 
+// The full target, never a partial patch: the form is prefilled from the effective target.
 export const putInboxRoutingTargetRequestSchema = routingTargetFieldsSchema
+  .extend({ destination: inboxRoutingDestinationSchema })
   .strict()
   .superRefine(routingTargetInvariants);
 
@@ -312,7 +320,6 @@ export const inboxRoutingTargetSchema = routingTargetFieldsSchema
   .extend({
     detectedType: tokenSchema,
     source: inboxRoutingTargetSourceSchema,
-    updatedAt: z.iso.datetime().nullable(),
   })
   .strict()
   .superRefine(routingTargetInvariants);
@@ -342,8 +349,8 @@ export const inboxItemDetailSchema = z
     extraction: inboxExtractionSchema.nullable(),
     files: z.array(inboxItemFileSchema),
     item: inboxItemSchema,
-    // The effective target of the item's detected type; null until a type is detected.
-    routingTarget: inboxRoutingTargetSchema.nullable(),
+    // The effective target of the item's detected type, so the setting is visible on the item the day it lands.
+    routingTarget: inboxRoutingTargetSchema,
   })
   .strict();
 

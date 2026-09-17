@@ -47,6 +47,7 @@ import type {
 import {
   inboxRoutingAutoLabelKeys,
   inboxRoutingDestinationLabelKeys,
+  inboxRoutingDestinationNoneLabelKey,
 } from '../../../../lib/inbox/labels.ts';
 import { useLegalEntities } from '../../../../lib/organizations/use-legal-entities';
 import { useOrganizationAccess } from '../../../../lib/organizations/use-organization-access';
@@ -63,7 +64,8 @@ type LoadResult = Readonly<{ key: string; value?: Loaded }>;
 type TargetForm = Readonly<{
   assigneeId: string;
   auto: InboxRoutingAutoPolicy;
-  destination: InboxRoutingDestination;
+  // Blank means the platform default names no destination yet; the PUT body still requires a choice.
+  destination: InboxRoutingDestination | '';
   detectedType: string;
   documentKind: string;
   legalEntityId: string;
@@ -83,7 +85,7 @@ function formFromTarget(target: InboxRoutingTarget): TargetForm {
   return {
     assigneeId: target.defaultAssigneeId ?? '',
     auto: target.auto,
-    destination: target.destination,
+    destination: target.destination ?? '',
     detectedType: target.detectedType,
     documentKind: target.documentKind ?? '',
     legalEntityId: target.defaultLegalEntityId ?? '',
@@ -265,6 +267,9 @@ export default function InboxSettingsPage() {
       header: t('inboxSettings.columnDestination'),
       key: 'destination',
       renderCell: (row) => {
+        if (row['destination'] === null) {
+          return t(inboxRoutingDestinationNoneLabelKey);
+        }
         const destination = inboxRoutingDestinationSchema.safeParse(
           row['destination'],
         );
@@ -557,15 +562,21 @@ export default function InboxSettingsPage() {
               id="inbox-target-destination"
               labelText={t('inboxSettings.destination')}
               onChange={(event) => {
+                const parsedDestination =
+                  inboxRoutingDestinationSchema.safeParse(event.target.value);
                 setForm({
                   ...form,
-                  destination: inboxRoutingDestinationSchema.parse(
-                    event.target.value,
-                  ),
+                  destination: parsedDestination.success
+                    ? parsedDestination.data
+                    : '',
                 });
               }}
               value={form.destination}
             >
+              <SelectItem
+                text={t(inboxRoutingDestinationNoneLabelKey)}
+                value=""
+              />
               {inboxRoutingDestinationSchema.options.map((destination) => (
                 <SelectItem
                   key={destination}

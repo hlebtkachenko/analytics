@@ -540,6 +540,7 @@ export const resources = {
         destinationDatasets: 'Datasets',
         destinationDiscard: 'Discard',
         destinationDocuments: 'Documents',
+        destinationNone: 'No destination',
         edit: 'Edit {{type}}',
         editTitle: 'Routing target for {{type}}',
         entityNone: 'No default legal entity',

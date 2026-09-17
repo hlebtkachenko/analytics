@@ -122,7 +122,6 @@ const target = {
   partnerPolicy: 'match_only',
   requiredFields: [],
   source: 'platform',
-  updatedAt: null,
 };
 const targetBody = {
   auto: target.auto,
@@ -149,6 +148,44 @@ describe('inbox routing target contract', () => {
         documentKind: null,
       }).success,
     ).toBe(true);
+  });
+
+  it('accepts a null destination on read but requires one on write', () => {
+    expect(
+      inboxRoutingTargetSchema.safeParse({
+        ...target,
+        destination: null,
+        documentKind: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      putInboxRoutingTargetRequestSchema.safeParse({
+        ...targetBody,
+        destination: null,
+        documentKind: null,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('bounds a required field to the API token pattern', () => {
+    expect(
+      putInboxRoutingTargetRequestSchema.safeParse({
+        ...targetBody,
+        requiredFields: ['title', 'due_date2'],
+      }).success,
+    ).toBe(true);
+    expect(
+      putInboxRoutingTargetRequestSchema.safeParse({
+        ...targetBody,
+        requiredFields: ['2title'],
+      }).success,
+    ).toBe(false);
+    expect(
+      putInboxRoutingTargetRequestSchema.safeParse({
+        ...targetBody,
+        requiredFields: ['bad-name'],
+      }).success,
+    ).toBe(false);
   });
 
   it('ties the document kind to the documents destination', () => {

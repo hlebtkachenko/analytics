@@ -43,10 +43,9 @@ const platformTarget = {
   partnerPolicy: 'match_only',
   requiredFields: [],
   source: 'platform',
-  updatedAt: null,
 };
 
-// Ten detected types: one organization override, one invoice kind, one discard, the rest platform defaults.
+// Ten detected types: one organization override, one invoice kind, one discard, one with no destination yet.
 const targets = [
   {
     ...platformTarget,
@@ -57,7 +56,6 @@ const targets = [
     documentKind: 'contract',
     requiredFields: ['title', 'documentDate'],
     source: 'organization',
-    updatedAt: '2026-09-17T08:00:00.000Z',
   },
   {
     ...platformTarget,
@@ -70,9 +68,16 @@ const targets = [
     detectedType: 'spam_like',
     documentKind: null,
   },
-  ...['image', 'email', 'csv', 'xlsx', 'xml', 'text', 'unknown'].map(
-    (detectedType) => ({ ...platformTarget, detectedType }),
-  ),
+  {
+    ...platformTarget,
+    destination: null,
+    detectedType: 'unknown',
+    documentKind: null,
+  },
+  ...['image', 'email', 'csv', 'xlsx', 'xml', 'text'].map((detectedType) => ({
+    ...platformTarget,
+    detectedType,
+  })),
 ];
 
 const settings = {
@@ -128,7 +133,6 @@ function respondWith(manageOrganization = true) {
         ...JSON.parse(String(init.body)),
         detectedType: type,
         source: 'organization',
-        updatedAt: '2026-09-17T09:00:00.000Z',
       });
     }
     if (
@@ -190,6 +194,7 @@ describe('InboxSettingsPage', () => {
     expect(within(table).getByText('0.85')).toBeVisible();
     expect(within(table).getByText('user_2')).toBeVisible();
     expect(within(table).getByText('Discard')).toBeVisible();
+    expect(within(table).getByText('No destination')).toBeVisible();
     expect(within(table).getByText('Organization')).toBeVisible();
     expect(within(table).getAllByText('Platform default')).toHaveLength(9);
     expect(
@@ -312,6 +317,35 @@ describe('InboxSettingsPage', () => {
 
     expect(within(dialog).getByText(/The target is incomplete/)).toBeVisible();
     expect(calls(fetchMock, 'PUT')).toEqual([]);
+  });
+
+  it('prefills a null destination as unset and requires a choice before saving', async () => {
+    const fetchMock = respondWith();
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit unknown' }),
+    );
+
+    const dialog = screen.getByRole('dialog', {
+      name: 'Routing target for unknown',
+    });
+    expect(within(dialog).getByLabelText('Destination')).toHaveValue('');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    expect(within(dialog).getByText(/The target is incomplete/)).toBeVisible();
+    expect(calls(fetchMock, 'PUT')).toEqual([]);
+
+    fireEvent.change(within(dialog).getByLabelText('Destination'), {
+      target: { value: 'discard' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await vi.waitFor(() => {
+      expect(calls(fetchMock, 'PUT')).toHaveLength(1);
+    });
   });
 
   it('resets an organization row to the platform default', async () => {
