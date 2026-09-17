@@ -9,7 +9,10 @@ describe('loadRuntimeConfiguration', () => {
         quotaBytesPerOrganization: 1_073_741_824,
         storageDirectory: '/var/lib/bap/blobs',
       },
+      clamav: { host: 'clamd', port: 3310 },
       host: '0.0.0.0',
+      inbound: { maxEmailBytes: 30_000_000 },
+      intake: { domain: 'intake.invalid' },
       issuer: 'http://localhost:3000',
       jwksUrl: 'http://web:3000/api/auth/jwks',
       port: 3001,
@@ -48,6 +51,34 @@ describe('loadRuntimeConfiguration', () => {
         BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION: '1.5',
       }),
     ).toThrow('Invalid runtime configuration');
+  });
+
+  it('validates the scanner address and the intake domain', () => {
+    const configuration = loadRuntimeConfiguration({
+      BAP_CLAMAV_HOST: 'scanner',
+      BAP_CLAMAV_PORT: '3311',
+      BAP_INTAKE_DOMAIN: 'In.Example.Org',
+    });
+    expect(configuration.clamav).toEqual({ host: 'scanner', port: 3311 });
+    expect(configuration.intake).toEqual({ domain: 'in.example.org' });
+
+    for (const domain of [
+      ' ',
+      'in example.org',
+      'https://in.example.org',
+      'in.example.org:25',
+      '-bad.example.org',
+    ]) {
+      expect(() =>
+        loadRuntimeConfiguration({ BAP_INTAKE_DOMAIN: domain }),
+      ).toThrow('Invalid runtime configuration');
+    }
+    expect(() => loadRuntimeConfiguration({ BAP_CLAMAV_PORT: '0' })).toThrow(
+      'Invalid runtime configuration',
+    );
+    expect(() => loadRuntimeConfiguration({ BAP_CLAMAV_HOST: ' ' })).toThrow(
+      'Invalid runtime configuration',
+    );
   });
 
   it('rejects an empty host', () => {

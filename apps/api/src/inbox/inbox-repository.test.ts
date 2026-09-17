@@ -91,12 +91,14 @@ function uploadInput(persisted: string[]): ReceiveIntakeInput {
     organizationId: 'organization_1',
     origin: null,
     originalFilename: 'placeholder.pdf',
+    parentItemId: null,
     payloadKind: 'file',
     persist: async () => {
       persisted.push('persist');
     },
     quotaBytes: 1_000,
     role: 'owner',
+    sender: null,
     sha256: SHA256,
     sniff: {
       output: {

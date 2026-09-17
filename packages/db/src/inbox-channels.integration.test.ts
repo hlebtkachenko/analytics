@@ -274,12 +274,12 @@ describe('inbox channel principal', () => {
     const compatibility = await checkMigrationCompatibility(apiPool);
 
     expect(result.applied).toEqual([]);
-    expect(result.currentVersion).toBe('20260917.0002');
-    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260917.0002');
+    expect(result.currentVersion).toBe('20260917.0003');
+    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260917.0003');
     expect(compatibility).toEqual({
       compatible: true,
-      expectedVersion: '20260917.0002',
-      version: '20260917.0002',
+      expectedVersion: '20260917.0003',
+      version: '20260917.0003',
     });
   });
 
@@ -542,7 +542,7 @@ describe('inbox channel principal', () => {
     from pg_proc as function
     inner join pg_namespace as namespace on namespace.oid = function.pronamespace
     where function.oid in (
-      'auth.issue_channel_credential(uuid, text)'::regprocedure,
+      'auth.issue_channel_credential(uuid, text, text)'::regprocedure,
       'auth.revoke_channel_credential(uuid)'::regprocedure,
       'auth.resolve_channel_credential(text)'::regprocedure,
       'app.role_is_channel()'::regprocedure

@@ -31,6 +31,13 @@ if [[ ! -s "$ai_provider_path" ]]; then
 fi
 chmod 0600 "$ai_provider_path"
 
+# A random local signing key lets a development client sign webhook posts the way Mailgun does.
+mailgun_path="$secret_directory/mailgun_webhook_signing_key"
+if [[ ! -s "$mailgun_path" ]]; then
+  openssl rand -hex 32 > "$mailgun_path"
+fi
+chmod 0600 "$mailgun_path"
+
 repository_path="$secret_directory/restic_repository"
 if [[ ! -s "$repository_path" ]]; then
   printf '%s\n' 'local:/repository' > "$repository_path"

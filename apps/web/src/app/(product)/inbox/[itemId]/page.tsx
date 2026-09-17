@@ -42,6 +42,7 @@ import type { InboxItemAction } from '../../../../lib/inbox/client';
 import {
   inboxDiscardReasonSchema,
   inboxItemDetailSchema,
+  isBlobQuarantined,
   isInlineMediaType,
 } from '../../../../lib/inbox/contract.ts';
 import type {
@@ -335,6 +336,14 @@ export default function InboxItemPage() {
             <h2>{t('inbox.preview')}</h2>
             {previewFile === undefined ? (
               <p>{t('inbox.noPreview')}</p>
+            ) : isBlobQuarantined(previewFile) ? (
+              <InlineNotification
+                hideCloseButton
+                kind="warning"
+                lowContrast
+                subtitle={t('inbox.quarantinedHelp')}
+                title={t('inbox.quarantined')}
+              />
             ) : (
               <iframe
                 className={styles.preview!}
@@ -369,14 +378,20 @@ export default function InboxItemPage() {
                         {name} ({file.mediaType}, {String(file.byteSize)} B)
                       </StructuredListCell>
                       <StructuredListCell>
-                        <Link
-                          href={inboxBlobDownloadPath(
-                            organizationId,
-                            file.blobId,
-                          )}
-                        >
-                          {t('inbox.downloadNamed', { name })}
-                        </Link>
+                        {isBlobQuarantined(file) ? (
+                          <Tag size="sm" type="red">
+                            {t('inbox.quarantined')}
+                          </Tag>
+                        ) : (
+                          <Link
+                            href={inboxBlobDownloadPath(
+                              organizationId,
+                              file.blobId,
+                            )}
+                          >
+                            {t('inbox.downloadNamed', { name })}
+                          </Link>
+                        )}
                       </StructuredListCell>
                     </StructuredListRow>
                   );

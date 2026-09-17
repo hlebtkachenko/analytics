@@ -16,6 +16,8 @@ template. Copy it to an ignored file for local development.
 | `BAP_MAIL_SENDER`                       | From address for transactional mail                        | `no-reply@bap.localhost` |
 | `BAP_MAIL_TRANSPORT`                    | Explicit `resend`, `smtp`, or `log` mode                   | `smtp` in development    |
 | `BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION` | Platform-wide byte quota per organization for stored blobs | `1073741824`             |
+| `BAP_INTAKE_DOMAIN`                     | Domain of every issued inbox email address                 | `in.bap.localhost`       |
+| `BAP_INBOUND_MAX_IN_FLIGHT`             | Concurrent Mailgun posts web accepts before answering 503  | `4`                      |
 
 `BAP_PUBLIC_ORIGIN` must be an origin without a path. It is never a
 `NEXT_PUBLIC_*` value. Production accepts HTTPS origins, with plain HTTP
@@ -34,6 +36,12 @@ application API refuses an upload that would take the sum of an organization's
 ([ADR 0014](adr/0014-durable-blob-storage.md)). There is no per-organization
 override in Phase 0.
 
+`BAP_INTAKE_DOMAIN` is the bare DNS name (no scheme, no `@`) whose MX records
+point at Mailgun EU; every email channel address is `in-<token>@<domain>`. The
+production overlay requires it, because the value is written into stored
+addresses. `BAP_INBOUND_MAX_IN_FLIGHT` is an integer from 1 through 64 (default
+`4`); a post beyond it answers 503 so Mailgun retries later.
+
 ## Runtime configuration
 
 Compose provides service hosts, ports, database login names, and credential file
@@ -42,7 +50,12 @@ paths. These are internal runtime values, not user configuration.
 - Web uses `BAP_DATABASE_*`, `BETTER_AUTH_SECRET_FILE`, `BAP_MAIL_SENDER`,
   `BAP_MAIL_TRANSPORT`, `BAP_RESEND_API_KEY_FILE`, `BAP_MAIL_SMTP_HOST`,
   `BAP_MAIL_SMTP_PORT`, and `BAP_AI_PROVIDER_CONFIG_FILE`. Its two BFF targets
-  are fixed internal service origins, not deployment inputs.
+  are fixed internal service origins, not deployment inputs. The Mailgun webhook
+  reads `BAP_MAILGUN_WEBHOOK_SIGNING_KEY_FILE`
+  (`/run/credentials/mailgun-webhook-signing-key`, the mounted
+  `mailgun_webhook_signing_key` secret) once, on the first post, and never
+  echoes it; the file must be a protected regular file with mode `0400`, `0444`,
+  or `0600`, plus `BAP_INTAKE_DOMAIN` and `BAP_INBOUND_MAX_IN_FLIGHT`.
 - Organization route resolution reuses the `bap_auth` pool and has no separate
   database role, endpoint, cache, or runtime configuration. The Phase 10 quota
   display reuses that pool's existing SELECT-only quota access and adds no
@@ -50,15 +63,16 @@ paths. These are internal runtime values, not user configuration.
 - Application and reporting APIs use `BAP_DATABASE_*`, `BAP_JWKS_URL`, and
   `BAP_PUBLIC_ORIGIN`. The application API also uses `BAP_UPLOAD_STAGING_DIR`,
   which must name the mounted upload staging volume, `BAP_BLOB_STORAGE_DIR`,
-  which must name the mounted `blob_storage` volume (`/var/lib/bap/blobs`), and
-  `BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION`. Blob keys are
-  `org/<organization_id>/<sha256>` under that directory. The volume root is
-  owned by the API user with group `999` and the setgid bit, and the `BlobStore`
-  must create directories with mode `0770` and files with mode `0660` (Node
-  masks a requested mode with the process umask, so set the umask to `0007` or
-  `chmod` after creation): the backup and restore one-shots run as UID `999`
-  with no capabilities, and only group access lets them read every original and
-  lets the API keep writing into a restored prefix.
+  which must name the mounted `blob_storage` volume (`/var/lib/bap/blobs`),
+  `BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION`, and `BAP_INTAKE_DOMAIN`, which it
+  passes to `auth.issue_channel_credential` when an email address is issued.
+  Blob keys are `org/<organization_id>/<sha256>` under that directory. The
+  volume root is owned by the API user with group `999` and the setgid bit, and
+  the `BlobStore` must create directories with mode `0770` and files with mode
+  `0660` (Node masks a requested mode with the process umask, so set the umask
+  to `0007` or `chmod` after creation): the backup and restore one-shots run as
+  UID `999` with no capabilities, and only group access lets them read every
+  original and lets the API keep writing into a restored prefix.
 - Owner bootstrap runs the same web image and therefore builds the same auth
   instance. Its primary database path remains `bap_auth`, while the profiled
   one-shot also receives `BAP_MIGRATOR_PASSWORD_FILE` at a separate mount only
@@ -71,7 +85,14 @@ paths. These are internal runtime values, not user configuration.
   `BAP_AI_PROVIDER_CONFIG_FILE`, `BAP_UPLOAD_STAGING_DIR`, and the same
   `BAP_BLOB_STORAGE_DIR` and `BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION` as the
   application API, and serves health, readiness, and metrics on its own internal
-  port.
+  port. It scans inbound email through `BAP_CLAMAV_HOST` and `BAP_CLAMAV_PORT`
+  (`clamd:3310` over the internal `scan` network, INSTREAM protocol); the values
+  are fixed service coordinates, not deployment inputs.
+- `clamd` and `freshclam` read only their bind-mounted
+  `infrastructure/clamav/*.conf`; there is no environment input. `clamd` caps a
+  stream at 30 MB, a file at 25 MB, a scan at 60 MB and 60 seconds, ten levels
+  of nesting and 200 files, and alerts when a cap is exceeded, so an archive
+  bomb reads as a detection rather than a timeout.
 - Web listens on `PORT` with `HOSTNAME`; Nest services validate `PORT` and
   `HOST` at startup.
 - Caddy provides the only public application port and replaces client identity
@@ -88,24 +109,27 @@ Next.js telemetry is disabled in container builds and runtimes.
 
 Compose accepts paths, never literal passwords. The required local file names
 are the PostgreSQL administrator, migrator, auth, application, reporting,
-backup, Better Auth, Resend, AI provider, and restic credential files listed in
-`config/compose.environment.example`. The Resend key and the AI provider
-document are seeded with the literal placeholder
+backup, Better Auth, Resend, AI provider, Mailgun webhook signing key, and
+restic credential files listed in `config/compose.environment.example`. The
+Resend key and the AI provider document are seeded with the literal placeholder
 `local-development-placeholder`, and the AI credential refuses it too, so no
-model call leaves a development machine by accident. The mail transport is never
-inferred from that value: `BAP_MAIL_TRANSPORT` selects it explicitly. Production
-uses `resend`, which refuses an absent or placeholder key. The separately
-selected Mailpit overlay sets `smtp` with the exact `mailpit:1025` endpoint. The
-schema rejects every other SMTP host or port. The SMTP client fixes DNS,
-connection, greeting, and socket timeouts to 1, 1.5, 1.5, and 2 seconds, and
-disables file and URL access. Those are independent fail-fast settings, not a
-total delivery bound. Verification through the development SMTP sink is awaited
-at the auth response boundary; production Resend remains non-blocking.
-Production, operations, and bootstrap Compose contain neither the sink nor its
-SMTP variables, so cleartext unauthenticated SMTP is limited to the isolated
-development/CI network. The `log` transport remains an explicit option for
-non-sending one-shot runtimes and deliberately prints message content if it is
-ever used. Create disposable local values with:
+model call leaves a development machine by accident. The Mailgun signing key is
+seeded with a random value so a local client can sign a webhook post the way
+Mailgun does; production takes the Webhook Signing Key from the Mailgun EU
+dashboard. The mail transport is never inferred from that value:
+`BAP_MAIL_TRANSPORT` selects it explicitly. Production uses `resend`, which
+refuses an absent or placeholder key. The separately selected Mailpit overlay
+sets `smtp` with the exact `mailpit:1025` endpoint. The schema rejects every
+other SMTP host or port. The SMTP client fixes DNS, connection, greeting, and
+socket timeouts to 1, 1.5, 1.5, and 2 seconds, and disables file and URL access.
+Those are independent fail-fast settings, not a total delivery bound.
+Verification through the development SMTP sink is awaited at the auth response
+boundary; production Resend remains non-blocking. Production, operations, and
+bootstrap Compose contain neither the sink nor its SMTP variables, so cleartext
+unauthenticated SMTP is limited to the isolated development/CI network. The
+`log` transport remains an explicit option for non-sending one-shot runtimes and
+deliberately prints message content if it is ever used. Create disposable local
+values with:
 
 ```sh
 pnpm secrets:local

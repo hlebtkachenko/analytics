@@ -11,8 +11,11 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  InternalServerErrorException,
+  Logger,
   NotFoundException,
   PayloadTooLargeException,
+  ServiceUnavailableException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
 import type { InboxChannelKind, TenantContext } from '@bap/db';
@@ -21,7 +24,7 @@ import { z } from 'zod';
 import { blobStorageKey, BlobStore } from '../blobs/blob-store.js';
 import { MAX_UPLOAD_BYTES } from '../ingestion/contract.js';
 import type { ReceivedFile } from '../request-context.js';
-import { INLINE_MEDIA_TYPES } from './contract.js';
+import { EMAIL_MEDIA_TYPE, INLINE_MEDIA_TYPES } from './contract.js';
 import type {
   InboxChannel,
   InboxHints,
@@ -55,15 +58,18 @@ import {
   MANUAL_PROVIDER_VERSION,
   manualProvider,
 } from './providers/manual.js';
+import { InboxQueue } from './inbox-queue.js';
 import {
   SNIFF_PROVIDER,
   SNIFF_PROVIDER_VERSION,
   SNIFF_WINDOW_BYTES,
   sniffBytes,
   toProviderOutput,
+  type SniffResult,
 } from './providers/sniff.js';
 
 export const BLOB_QUOTA_BYTES = Symbol('BLOB_QUOTA_BYTES');
+export const INTAKE_DOMAIN = Symbol('INTAKE_DOMAIN');
 
 // Display metadata only: no separator, no control character and no bidirectional override.
 const SAFE_FILENAME = /^[^\p{Cc}\p{Cf}\\/]{1,255}$/u;
@@ -95,6 +101,13 @@ export interface StructuredIntakeInput extends ChannelIntakeInput {
   payload: Record<string, unknown>;
 }
 
+// A raw MIME message already streamed to the temporary directory under the email cap by the route.
+export interface EmailIntakeInput extends ChannelIntakeInput {
+  externalId: string;
+  size: number;
+  temporaryPath: string;
+}
+
 // One temporary file on disk plus everything the intake row needs beyond the bytes.
 interface StagedIntake extends EntityScopeSelector {
   channelId: string | null;
@@ -102,7 +115,7 @@ interface StagedIntake extends EntityScopeSelector {
   externalId: string | null;
   origin: string | null;
   originalFilename: string | null;
-  payloadKind: 'file' | 'structured';
+  payloadKind: 'email' | 'file' | 'structured';
   size: number;
   temporaryPath: string;
 }
@@ -164,6 +177,27 @@ function windows(byteSize: number): {
   };
 }
 
+// The Phase 0 sniff over a file on disk: the head and tail windows only, never the whole file in memory.
+export async function sniffFile(
+  path: string,
+  byteSize: number,
+): Promise<SniffResult> {
+  const range = windows(byteSize);
+  return sniffBytes({
+    byteSize,
+    head: await readWindow(
+      path,
+      range.head[0],
+      range.head[1] - range.head[0] + 1,
+    ),
+    tail: await readWindow(
+      path,
+      range.tail[0],
+      range.tail[1] - range.tail[0] + 1,
+    ),
+  });
+}
+
 // The definer functions raise these; the service turns them into the response the route documents.
 function databaseErrorCode(error: unknown): {
   code: string | undefined;
@@ -178,6 +212,21 @@ function databaseErrorCode(error: unknown): {
     code: typeof code === 'string' ? code : undefined,
     constraint: typeof constraint === 'string' ? constraint : undefined,
   };
+}
+
+function mediaTypeOf(
+  payloadKind: StagedIntake['payloadKind'],
+  sniffed: SniffResult | null,
+): string {
+  if (payloadKind === 'structured') {
+    return 'application/json';
+  }
+
+  if (payloadKind === 'email' || sniffed === null) {
+    return EMAIL_MEDIA_TYPE;
+  }
+
+  return sniffed.mediaType;
 }
 
 function toIntakeResponse(result: ReceiveIntakeResult): InboxIntakeResponse {
@@ -238,10 +287,14 @@ export function applyHints(
 
 @Injectable()
 export class InboxService {
+  private readonly logger = new Logger(InboxService.name);
+
   constructor(
     @Inject(InboxRepository) private readonly inbox: InboxRepository,
     @Inject(BlobStore) private readonly blobs: BlobStore,
     @Inject(BLOB_QUOTA_BYTES) private readonly quotaBytes: number,
+    @Inject(INTAKE_DOMAIN) private readonly intakeDomain: string,
+    @Inject(InboxQueue) private readonly queue: InboxQueue,
   ) {}
 
   async upload(input: UploadInput): Promise<InboxUploadResponse> {
@@ -344,6 +397,36 @@ export class InboxService {
     );
   }
 
+  // A raw message through an email channel: stored as it came, left received for the worker to scan and split.
+  async intakeEmail(input: EmailIntakeInput): Promise<InboxIntakeResponse> {
+    const result = await this.receive({
+      ...input,
+      channelKind: 'email',
+      legalEntityIds: null,
+      originalFilename: null,
+      payloadKind: 'email',
+    });
+
+    // Enqueued after the commit; a replay of an item already past received enqueues nothing.
+    if (result.item.status === 'received') {
+      try {
+        await this.queue.enqueueSplitEmailItem({
+          channelId: input.channelId,
+          itemId: result.item.id,
+          organizationId: input.organizationId,
+        });
+      } catch {
+        // The item stays received; 503 makes the poster retry and the replay enqueues it again.
+        this.logger.error(
+          `Enqueue of split_email_item failed for item ${result.item.id} of channel ${input.channelId}.`,
+        );
+        throw new ServiceUnavailableException();
+      }
+    }
+
+    return toIntakeResponse(result);
+  }
+
   // Hash, sniff, then one transaction; the temporary file is gone whatever happens.
   private async receive(staged: StagedIntake): Promise<ReceiveIntakeResult> {
     let cleanupTemporaryPath: string | null = staged.temporaryPath;
@@ -351,42 +434,35 @@ export class InboxService {
     try {
       const { size, temporaryPath } = staged;
       const sha256 = await sha256Of(temporaryPath);
-      const range = windows(size);
-      const sniffed = sniffBytes({
-        byteSize: size,
-        head: await readWindow(
-          temporaryPath,
-          range.head[0],
-          range.head[1] - range.head[0] + 1,
-        ),
-        tail: await readWindow(
-          temporaryPath,
-          range.tail[0],
-          range.tail[1] - range.tail[0] + 1,
-        ),
-      });
+      // An email is stored whole for the worker; nothing is sniffed until the split has scanned it.
+      const sniffed =
+        staged.payloadKind === 'email'
+          ? null
+          : await sniffFile(temporaryPath, size);
       const storageKey = blobStorageKey(staged.organizationId, sha256);
 
       return await this.inbox.receiveIntake({
         ...staged,
         byteSize: size,
         // A structured payload is JSON by construction; every file is what its bytes say.
-        mediaType:
-          staged.payloadKind === 'structured'
-            ? 'application/json'
-            : sniffed.mediaType,
+        mediaType: mediaTypeOf(staged.payloadKind, sniffed),
+        parentItemId: null,
         persist: async () => {
           await this.blobs.put({ key: storageKey, temporaryPath });
           // The temporary name is gone once moved, so nothing is left to clean up.
           cleanupTemporaryPath = null;
         },
         quotaBytes: this.quotaBytes,
+        sender: null,
         sha256,
-        sniff: {
-          output: toProviderOutput(sniffed),
-          provider: SNIFF_PROVIDER,
-          providerVersion: SNIFF_PROVIDER_VERSION,
-        },
+        sniff:
+          sniffed === null
+            ? null
+            : {
+                output: toProviderOutput(sniffed),
+                provider: SNIFF_PROVIDER,
+                providerVersion: SNIFF_PROVIDER_VERSION,
+              },
         storageKey,
       });
     } catch (error) {
@@ -418,12 +494,15 @@ export class InboxService {
     return this.inbox.updateChannel(input);
   }
 
-  // The definer's verdicts: a third active credential is a conflict, a missing channel is not found, a non-owner is forbidden.
+  // The definer's verdicts: one active credential too many is a conflict, a missing channel is not found, a non-owner is forbidden.
   async issueCredential(
     input: ChannelSelector,
   ): Promise<IssueInboxChannelCredentialResponse> {
     try {
-      return await this.inbox.issueCredential(input);
+      return await this.inbox.issueCredential({
+        ...input,
+        intakeDomain: this.intakeDomain,
+      });
     } catch (error) {
       const { code, constraint } = databaseErrorCode(error);
 
@@ -432,6 +511,21 @@ export class InboxService {
         constraint === 'inbox_channel_credential_active_limit'
       ) {
         throw new ConflictException();
+      }
+
+      if (
+        code === '23514' &&
+        constraint === 'inbox_channel_credential_kind_match'
+      ) {
+        throw new BadRequestException();
+      }
+
+      // The definer refused an empty intake domain: a deployment fault, never the caller's.
+      if (code === '22023') {
+        this.logger.error(
+          `Credential issue for channel ${input.channelId} was refused: BAP_INTAKE_DOMAIN is not set.`,
+        );
+        throw new InternalServerErrorException();
       }
 
       if (code === 'P0002') {
@@ -543,6 +637,11 @@ export class InboxService {
 
     if (blob === null) {
       throw new NotFoundException();
+    }
+
+    // A blob the scanner flagged, or could not scan, never leaves the store.
+    if (blob.scanStatus === 'infected' || blob.scanStatus === 'failed') {
+      throw new ConflictException('blob_quarantined');
     }
 
     if (

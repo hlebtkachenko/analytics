@@ -7,10 +7,13 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  InternalServerErrorException,
   NotFoundException,
   PayloadTooLargeException,
+  ServiceUnavailableException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
+import type { BlobScanStatus } from '@bap/db';
 import {
   afterAll,
   beforeAll,
@@ -25,7 +28,12 @@ import {
   createBlobDirectories,
   FilesystemBlobStore,
 } from '../blobs/blob-store.js';
-import type { InboxItem, InboxItemDetail, ProviderInput } from './contract.js';
+import type {
+  InboxItem,
+  InboxItemDetail,
+  ProviderInput,
+  SplitEmailItemJob,
+} from './contract.js';
 import { applyHints, InboxService } from './inbox.service.js';
 import {
   QuotaExceededError,
@@ -43,6 +51,7 @@ const ITEM_ID = '6c4d9e30-1b7f-4e5c-ad43-801b9f7c6e51';
 const BLOB_ID = '9f702163-4eac-4b8f-9076-b34ec2af9184';
 const CHANNEL_ID = 'c2a35496-71df-4eb2-8309-e671f5d2c4b7';
 const QUOTA = 100_000;
+const INTAKE_DOMAIN_VALUE = 'in.bap.invalid';
 
 const channelTenant = {
   organizationId: 'organization_1',
@@ -100,6 +109,7 @@ describe('InboxService', () => {
   let usedBytes = 0;
   let existingSha256: string | null = null;
   let storedFile: ItemFileRecord | null = null;
+  let blobScanStatus: BlobScanStatus = 'not_scanned';
   let hints: ProviderInput['hints'] = {
     hintKind: null,
     hintLegalEntityId: null,
@@ -110,43 +120,71 @@ describe('InboxService', () => {
   const received: ReceiveIntakeInput[] = [];
   const extractions: RecordExtractionInput[] = [];
   const routed: RouteToDocumentInput[] = [];
+  const enqueued: SplitEmailItemJob[] = [];
+  let enqueueFails = false;
+  const queue = {
+    enqueueSplitEmailItem: vi.fn(async (job: SplitEmailItemJob) => {
+      if (enqueueFails) {
+        throw new Error('queue down');
+      }
+      enqueued.push(job);
+    }),
+  };
 
   // The repository stub mirrors the real transaction order: quota, duplicate, then persist only for new bytes.
   const repository = {
     assignItem: vi.fn(),
     createChannel: vi.fn(),
     discardItem: vi.fn(),
-    issueCredential: vi.fn(async (input: { channelId: string }) => {
-      if (input.channelId === 'limit') {
-        throw Object.assign(new Error('limit'), {
-          code: '23514',
-          constraint: 'inbox_channel_credential_active_limit',
-        });
-      }
-      if (input.channelId === 'missing') {
-        throw Object.assign(new Error('missing'), { code: 'P0002' });
-      }
-      if (input.channelId === 'admin') {
-        throw Object.assign(new Error('admin'), { code: '42501' });
-      }
-      if (input.channelId === 'other') {
-        throw Object.assign(new Error('other'), {
-          code: '23514',
-          constraint: 'inbox_channel_credential_kind_check',
-        });
-      }
-      return {
-        credentialId: CHANNEL_ID,
-        displayPrefix: 'AAAAAAAA',
-        secret: `bap_intake_${'A'.repeat(43)}`,
-      };
-    }),
+    issueCredential: vi.fn(
+      async (input: { channelId: string; intakeDomain: string }) => {
+        if (input.channelId === 'limit') {
+          throw Object.assign(new Error('limit'), {
+            code: '23514',
+            constraint: 'inbox_channel_credential_active_limit',
+          });
+        }
+        if (input.channelId === 'missing') {
+          throw Object.assign(new Error('missing'), { code: 'P0002' });
+        }
+        if (input.channelId === 'admin') {
+          throw Object.assign(new Error('admin'), { code: '42501' });
+        }
+        if (input.channelId === 'other') {
+          throw Object.assign(new Error('other'), {
+            code: '23514',
+            constraint: 'inbox_channel_credential_kind_check',
+          });
+        }
+        if (input.channelId === 'mismatch') {
+          throw Object.assign(new Error('mismatch'), {
+            code: '23514',
+            constraint: 'inbox_channel_credential_kind_match',
+          });
+        }
+        if (input.channelId === 'no-domain') {
+          throw Object.assign(new Error('no domain'), { code: '22023' });
+        }
+        if (input.channelId === 'email') {
+          return {
+            credentialId: CHANNEL_ID,
+            displayPrefix: 'abcdef01',
+            secret: `in-abcdef01${'0'.repeat(24)}@${input.intakeDomain}`,
+          };
+        }
+        return {
+          credentialId: CHANNEL_ID,
+          displayPrefix: 'AAAAAAAA',
+          secret: `bap_intake_${'A'.repeat(43)}`,
+        };
+      },
+    ),
     listChannels: vi.fn(),
     listItems: vi.fn(),
     readBlob: vi.fn(async (input: { blobId: string }) =>
       storedFile === null || input.blobId !== storedFile.blobId
         ? null
-        : { id: storedFile.blobId, ...storedFile },
+        : { ...storedFile, id: storedFile.blobId, scanStatus: blobScanStatus },
     ),
     readChannel: vi.fn(),
     readChannelPrincipal: vi.fn(),
@@ -173,6 +211,7 @@ describe('InboxService', () => {
           duplicateOfItemId: ITEM_ID,
           files: [],
           item: { ...item, status: 'discarded' as const },
+          replayed: false,
         };
       }
       if (usedBytes + input.byteSize > input.quotaBytes) {
@@ -180,7 +219,7 @@ describe('InboxService', () => {
       }
       await input.persist();
       usedBytes += input.byteSize;
-      return { duplicateOfItemId: null, files: [], item };
+      return { duplicateOfItemId: null, files: [], item, replayed: false };
     }),
     recordExtraction: vi.fn(async (input: RecordExtractionInput) => {
       extractions.push(input);
@@ -208,7 +247,13 @@ describe('InboxService', () => {
     directory = await mkdtemp(join(tmpdir(), 'bap-inbox-service-'));
     await createBlobDirectories(directory);
     store = new FilesystemBlobStore(directory);
-    service = new InboxService(repository, store, QUOTA);
+    service = new InboxService(
+      repository,
+      store,
+      QUOTA,
+      INTAKE_DOMAIN_VALUE,
+      queue,
+    );
   });
 
   afterAll(async () => {
@@ -219,7 +264,10 @@ describe('InboxService', () => {
     received.length = 0;
     extractions.length = 0;
     routed.length = 0;
+    enqueued.length = 0;
+    enqueueFails = false;
     existingSha256 = null;
+    blobScanStatus = 'not_scanned';
   });
 
   it('hashes, sniffs and stores a new upload, then leaves no temporary file', async () => {
@@ -256,6 +304,7 @@ describe('InboxService', () => {
       mediaType: 'application/pdf',
       originalFilename: 'placeholder.pdf',
       position: 1,
+      scanStatus: 'clean',
       sha256: input?.sha256 ?? '',
       storageKey: input?.storageKey ?? '',
     };
@@ -435,6 +484,147 @@ describe('InboxService', () => {
       service.openBlob({ ...tenant, blobId: 'missing', inline: false }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  it('quarantines an infected or unscannable blob on download and inline alike', async () => {
+    for (const status of ['infected', 'failed'] as const) {
+      blobScanStatus = status;
+      for (const inline of [false, true]) {
+        await expect(
+          service.openBlob({ ...tenant, blobId: BLOB_ID, inline }),
+        ).rejects.toMatchObject({ message: 'blob_quarantined', status: 409 });
+      }
+    }
+
+    blobScanStatus = 'clean';
+    const opened = await service.openBlob({
+      ...tenant,
+      blobId: BLOB_ID,
+      inline: false,
+    });
+    opened.stream.destroy();
+  });
+
+  it('stores a raw email unsniffed as received and enqueues the split after the commit', async () => {
+    const bytes = Buffer.from(
+      'From: a@example.org\r\nSubject: x\r\n\r\nbody\r\n',
+    );
+    const path = await stage(bytes, 'email-1');
+    repository.receiveIntake.mockImplementationOnce(
+      async (input: ReceiveIntakeInput) => {
+        received.push(input);
+        await input.persist();
+        return {
+          duplicateOfItemId: null,
+          files: [],
+          item: { ...item, status: 'received' as const },
+          replayed: false,
+        };
+      },
+    );
+
+    const response = await service.intakeEmail({
+      ...channelTenant,
+      channelId: CHANNEL_ID,
+      externalId: 'mailgun-token-1',
+      origin: 'abcdef01',
+      size: bytes.length,
+      temporaryPath: path,
+    });
+
+    expect(response).toEqual({
+      duplicateOfItemId: null,
+      itemId: ITEM_ID,
+      status: 'received',
+    });
+    expect(received[0]).toMatchObject({
+      byteSize: bytes.length,
+      channelId: CHANNEL_ID,
+      channelKind: 'email',
+      externalId: 'mailgun-token-1',
+      mediaType: 'message/rfc822',
+      origin: 'abcdef01',
+      originalFilename: null,
+      parentItemId: null,
+      payloadKind: 'email',
+      sender: null,
+      sniff: null,
+    });
+    expect(enqueued).toEqual([
+      {
+        channelId: CHANNEL_ID,
+        itemId: ITEM_ID,
+        organizationId: 'organization_1',
+      },
+    ]);
+    expect(await readdir(store.temporaryDirectory())).toEqual([]);
+  });
+
+  it('enqueues nothing for an email replay already past received', async () => {
+    const bytes = Buffer.from('Subject: y\r\n\r\n');
+    // The stub answers the default needs_review item: a replay of a split message.
+    await service.intakeEmail({
+      ...channelTenant,
+      channelId: CHANNEL_ID,
+      externalId: 'mailgun-token-2',
+      origin: null,
+      size: bytes.length,
+      temporaryPath: await stage(bytes, 'email-2'),
+    });
+    expect(enqueued).toEqual([]);
+  });
+
+  it('answers 503 when the enqueue after the commit fails and enqueues on the replay', async () => {
+    const bytes = Buffer.from('Subject: z\r\n\r\n');
+    const receivedItem = async (input: ReceiveIntakeInput) => {
+      received.push(input);
+      await input.persist();
+      return {
+        duplicateOfItemId: null,
+        files: [],
+        item: { ...item, status: 'received' as const },
+        replayed: false,
+      };
+    };
+
+    enqueueFails = true;
+    repository.receiveIntake.mockImplementationOnce(receivedItem);
+    await expect(
+      service.intakeEmail({
+        ...channelTenant,
+        channelId: CHANNEL_ID,
+        externalId: 'mailgun-token-3',
+        origin: null,
+        size: bytes.length,
+        temporaryPath: await stage(bytes, 'email-3'),
+      }),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    // The item was committed as received before the enqueue, so nothing is rolled back.
+    expect(received).toHaveLength(1);
+    expect(enqueued).toEqual([]);
+
+    // The poster retries: the replay answers the same received item and enqueues it this time.
+    enqueueFails = false;
+    repository.receiveIntake.mockImplementationOnce(async (input) => ({
+      ...(await receivedItem(input)),
+      replayed: true,
+    }));
+    const response = await service.intakeEmail({
+      ...channelTenant,
+      channelId: CHANNEL_ID,
+      externalId: 'mailgun-token-3',
+      origin: null,
+      size: bytes.length,
+      temporaryPath: await stage(bytes, 'email-3-retry'),
+    });
+    expect(response.status).toBe('received');
+    expect(enqueued).toEqual([
+      {
+        channelId: CHANNEL_ID,
+        itemId: ITEM_ID,
+        organizationId: 'organization_1',
+      },
+    ]);
+  });
   it('stores a structured payload as JSON bytes on the channel and leaves no temporary file', async () => {
     const response = await service.intakeStructured({
       ...channelTenant,
@@ -526,5 +716,24 @@ describe('InboxService', () => {
     await expect(
       service.issueCredential({ ...tenant, channelId: 'other' }),
     ).rejects.toThrow('other');
+  });
+
+  it('issues an email address under the configured intake domain and maps the email verdicts', async () => {
+    await expect(
+      service.issueCredential({ ...tenant, channelId: 'email' }),
+    ).resolves.toEqual({
+      credentialId: CHANNEL_ID,
+      displayPrefix: 'abcdef01',
+      secret: `in-abcdef01${'0'.repeat(24)}@in.bap.invalid`,
+    });
+    expect(repository.issueCredential).toHaveBeenLastCalledWith(
+      expect.objectContaining({ intakeDomain: INTAKE_DOMAIN_VALUE }),
+    );
+    await expect(
+      service.issueCredential({ ...tenant, channelId: 'mismatch' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.issueCredential({ ...tenant, channelId: 'no-domain' }),
+    ).rejects.toBeInstanceOf(InternalServerErrorException);
   });
 });

@@ -20,6 +20,9 @@ const LEGAL_ENTITY_ID = '9b7d1c30-6a4b-4d1f-9c2e-7a5f0e3b8d21';
 const CHANNEL_ID = '00000000-0000-4000-8000-000000000060';
 const CREDENTIAL_ID = '00000000-0000-4000-8000-000000000061';
 const SECRET = `bap_intake_${'A'.repeat(43)}`;
+const EMAIL_CHANNEL_ID = '00000000-0000-4000-8000-000000000062';
+const EMAIL_CREDENTIAL_ID = '00000000-0000-4000-8000-000000000063';
+const ADDRESS = `in-${'b'.repeat(32)}@in.bap.localhost`;
 
 const legalEntities = {
   legalEntities: [
@@ -44,6 +47,7 @@ const channel = {
       lastUsedAt: '2026-09-17T09:00:00.000Z',
     },
   ],
+  emailAddress: null,
   enabled: true,
   hintKind: 'invoice',
   id: CHANNEL_ID,
@@ -52,6 +56,24 @@ const channel = {
   legalEntityId: LEGAL_ENTITY_ID,
   name: 'Placeholder push',
   updatedAt: '2026-09-17T08:00:00.000Z',
+};
+
+const emailChannel = {
+  ...channel,
+  credentials: [
+    {
+      createdAt: '2026-09-17T08:00:00.000Z',
+      credentialId: EMAIL_CREDENTIAL_ID,
+      displayPrefix: 'bbbbbbbb',
+      lastUsedAt: null,
+    },
+  ],
+  emailAddress: ADDRESS,
+  hintKind: null,
+  id: EMAIL_CHANNEL_ID,
+  itemCount: 1,
+  kind: 'email',
+  name: 'Placeholder mailbox',
 };
 
 function capabilities(manageOrganization: boolean) {
@@ -92,15 +114,24 @@ function respondWith(channels: unknown[], manageOrganization = true) {
     }
     if (input.endsWith('/credentials') && init?.method === 'POST') {
       return Response.json(
-        {
-          credentialId: CREDENTIAL_ID,
-          displayPrefix: 'AAAAAAAA',
-          secret: SECRET,
-        },
+        input.includes(EMAIL_CHANNEL_ID)
+          ? {
+              credentialId: EMAIL_CREDENTIAL_ID,
+              displayPrefix: 'bbbbbbbb',
+              secret: ADDRESS,
+            }
+          : {
+              credentialId: CREDENTIAL_ID,
+              displayPrefix: 'AAAAAAAA',
+              secret: SECRET,
+            },
         { status: 201 },
       );
     }
-    if (input.endsWith(`/credentials/${CREDENTIAL_ID}`)) {
+    if (
+      input.endsWith(`/credentials/${CREDENTIAL_ID}`) ||
+      input.endsWith(`/credentials/${EMAIL_CREDENTIAL_ID}`)
+    ) {
       return new Response(null, { status: 204 });
     }
     if (input.endsWith('/inbox/channels') && init?.method === 'POST') {
@@ -111,6 +142,12 @@ function respondWith(channels: unknown[], manageOrganization = true) {
     }
     if (input.endsWith(`/inbox/channels/${CHANNEL_ID}`)) {
       return Response.json({ ...channel, ...JSON.parse(String(init?.body)) });
+    }
+    if (input.endsWith(`/inbox/channels/${EMAIL_CHANNEL_ID}`)) {
+      return Response.json({
+        ...emailChannel,
+        ...JSON.parse(String(init?.body)),
+      });
     }
     if (input.endsWith('/inbox/channels')) {
       return Response.json({ channels });
@@ -146,6 +183,15 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function stubClipboard() {
+  const writeText = vi.fn(async () => undefined);
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText },
+  });
+  return writeText;
+}
+
 describe('InboxChannelsPage', () => {
   it('lists the API channels with entity, hint, count, prefixes and last use', async () => {
     vi.stubGlobal('fetch', respondWith([channel]));
@@ -168,12 +214,136 @@ describe('InboxChannelsPage', () => {
     ).toBeVisible();
   });
 
+  it('lists an email channel with its address, a copy button and address wording', async () => {
+    vi.stubGlobal('fetch', respondWith([channel, emailChannel]));
+    const writeText = stubClipboard();
+
+    renderPage();
+    await screen.findByText('Placeholder mailbox');
+    const table = screen.getByRole('table');
+
+    expect(within(table).getByText(ADDRESS)).toBeVisible();
+    expect(within(table).getByText('Email')).toBeVisible();
+    expect(within(table).getByText('API')).toBeVisible();
+    expect(
+      within(table).getByRole('button', { name: 'Issue address' }),
+    ).toBeVisible();
+    expect(
+      within(table).getByRole('button', { name: 'Issue credential' }),
+    ).toBeVisible();
+    expect(
+      within(table).getByRole('button', { name: 'Revoke address bbbbbbbb' }),
+    ).toBeVisible();
+    fireEvent.click(
+      within(table).getByRole('button', { name: 'Copy address' }),
+    );
+    expect(writeText).toHaveBeenCalledWith(ADDRESS);
+  });
+
+  it('creates an email channel from the kind selector', async () => {
+    const fetchMock = respondWith([]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage();
+    const form = await screen.findByRole('form', { name: 'New channel' });
+    fireEvent.change(within(form).getByLabelText('Name'), {
+      target: { value: 'Placeholder mailbox' },
+    });
+    fireEvent.change(within(form).getByLabelText('Kind'), {
+      target: { value: 'email' },
+    });
+    expect(
+      within(form).getByText(
+        'People forward messages to an address issued for this channel.',
+      ),
+    ).toBeVisible();
+    fireEvent.click(
+      within(form).getByRole('button', { name: 'Create channel' }),
+    );
+
+    await vi.waitFor(() => {
+      expect(calls(fetchMock, 'POST')).toEqual([
+        [
+          '/api/bff/application/organizations/organization_1/inbox/channels',
+          JSON.stringify({ kind: 'email', name: 'Placeholder mailbox' }),
+        ],
+      ]);
+    });
+    await vi.waitFor(() => {
+      expect(within(form).getByLabelText('Kind')).toHaveValue('api');
+    });
+  });
+
+  it('shows an issued address with copy and forwarding guidance, no curl example', async () => {
+    const fetchMock = respondWith([emailChannel]);
+    vi.stubGlobal('fetch', fetchMock);
+    const writeText = stubClipboard();
+
+    renderPage();
+    await screen.findByText('Placeholder mailbox');
+    fireEvent.click(
+      within(screen.getByRole('table')).getByRole('button', {
+        name: 'Issue address',
+      }),
+    );
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Address issued',
+    });
+    expect(within(dialog).getByLabelText('Address')).toHaveValue(ADDRESS);
+    expect(
+      within(dialog).getByText(
+        /Forwarding a message to this address delivers it into this channel/,
+      ),
+    ).toBeVisible();
+    expect(within(dialog).queryByText(/curl -X POST/)).toBeNull();
+    expect(screen.queryByLabelText('Secret')).toBeNull();
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Copy address' }),
+    );
+    expect(writeText).toHaveBeenCalledWith(ADDRESS);
+    expect(calls(fetchMock, 'POST').map(([path]) => path)).toEqual([
+      `/api/bff/application/organizations/organization_1/inbox/channels/${EMAIL_CHANNEL_ID}/credentials`,
+    ]);
+  });
+
+  it('revokes an address with address wording', async () => {
+    const fetchMock = respondWith([emailChannel]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage();
+    await screen.findByText('Placeholder mailbox');
+    fireEvent.click(
+      within(screen.getByRole('table')).getByRole('button', {
+        name: 'Revoke address bbbbbbbb',
+      }),
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Revoke address' });
+    expect(
+      within(dialog).getByText(
+        'Revoke the address starting in-bbbbbbbb? Mail sent to it is refused from now on; issue a new address afterwards.',
+      ),
+    ).toBeVisible();
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Revoke address' }),
+    );
+
+    await vi.waitFor(() => {
+      expect(calls(fetchMock, 'DELETE')).toEqual([
+        [
+          `/api/bff/application/organizations/organization_1/inbox/channels/${EMAIL_CHANNEL_ID}/credentials/${EMAIL_CREDENTIAL_ID}`,
+          undefined,
+        ],
+      ]);
+    });
+  });
+
   it('creates a channel from the form and refreshes the list', async () => {
     const fetchMock = respondWith([]);
     vi.stubGlobal('fetch', fetchMock);
 
     renderPage();
-    const form = await screen.findByRole('form', { name: 'New API channel' });
+    const form = await screen.findByRole('form', { name: 'New channel' });
     fireEvent.change(within(form).getByLabelText('Name'), {
       target: { value: 'Placeholder push' },
     });
@@ -210,7 +380,7 @@ describe('InboxChannelsPage', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     renderPage();
-    const form = await screen.findByRole('form', { name: 'New API channel' });
+    const form = await screen.findByRole('form', { name: 'New channel' });
     fireEvent.change(within(form).getByLabelText('Name'), {
       target: { value: 'Placeholder push' },
     });
@@ -342,7 +512,7 @@ describe('InboxChannelsPage', () => {
         'Only an organization owner can manage channels.',
       ),
     ).toBeVisible();
-    expect(screen.queryByRole('form', { name: 'New API channel' })).toBeNull();
+    expect(screen.queryByRole('form', { name: 'New channel' })).toBeNull();
     expect(
       screen.queryByRole('button', { name: 'Issue credential' }),
     ).toBeNull();

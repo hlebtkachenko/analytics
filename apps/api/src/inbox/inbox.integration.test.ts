@@ -236,7 +236,9 @@ beforeAll(async () => {
     updateChannel: (input) => updateChannel(apiPool, input),
     updateHints: (input) => updateHints(apiPool, input),
   };
-  service = new InboxService(repository, store, QUOTA);
+  service = new InboxService(repository, store, QUOTA, 'intake.invalid', {
+    enqueueSplitEmailItem: async () => undefined,
+  });
 });
 
 afterAll(async () => {
@@ -374,9 +376,11 @@ describe('inbox intake', () => {
         mediaType: sniffed.mediaType,
         origin: null,
         originalFilename: 'orphan.txt',
+        parentItemId: null,
         payloadKind: 'file',
         persist: () => store.put({ key: storageKey, temporaryPath: path }),
         quotaBytes: QUOTA,
+        sender: null,
         sha256,
         sniff: {
           output: toProviderOutput(sniffed),

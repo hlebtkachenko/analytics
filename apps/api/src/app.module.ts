@@ -31,7 +31,12 @@ import {
   DatabaseInboxRepository,
   InboxRepository,
 } from './inbox/inbox-repository.js';
-import { BLOB_QUOTA_BYTES, InboxService } from './inbox/inbox.service.js';
+import { InboxQueue, PgBossInboxQueue } from './inbox/inbox-queue.js';
+import {
+  BLOB_QUOTA_BYTES,
+  INTAKE_DOMAIN,
+  InboxService,
+} from './inbox/inbox.service.js';
 import { EntityScopeController } from './legal-entities/entity-scope.controller.js';
 import { LegalEntityController } from './legal-entities/legal-entity.controller.js';
 import {
@@ -78,6 +83,7 @@ import {
     DatabaseMembershipResolver,
     DatabasePartnerRepository,
     DatabaseUploadRepository,
+    PgBossInboxQueue,
     PgBossIngestionQueue,
     {
       provide: DatasetRepository,
@@ -98,6 +104,10 @@ import {
     {
       provide: PartnerRepository,
       useExisting: DatabasePartnerRepository,
+    },
+    {
+      provide: InboxQueue,
+      useExisting: PgBossInboxQueue,
     },
     {
       provide: IngestionQueue,
@@ -128,6 +138,11 @@ import {
       provide: BLOB_QUOTA_BYTES,
       useFactory: (): number =>
         loadRuntimeConfiguration(process.env).blob.quotaBytesPerOrganization,
+    },
+    {
+      provide: INTAKE_DOMAIN,
+      useFactory: (): string =>
+        loadRuntimeConfiguration(process.env).intake.domain,
     },
     InboxService,
     {

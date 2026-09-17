@@ -1,0 +1,18 @@
+# Gitleaks configuration for this repository. Extends the bundled default rule set.
+# Read by gitleaks-action from the repository root; keep it in sync with GITLEAKS_VERSION in security.yml.
+
+title = "BAP gitleaks configuration"
+
+[extend]
+useDefault = true
+
+# The Mailgun webhook test once declared its signing key as a 64-character hex literal.
+# That value was a synthetic fixture, never a real credential, and the current test builds
+# it at runtime instead. Two pushed commits still carry the literal, so this scoped allowlist
+# keeps the history scan green without silencing the rule anywhere else.
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Synthetic Mailgun signing key fixture in the inbound email test"
+paths = ['''(^|/)apps/web/src/lib/inbox/inbound-mailgun\.test\.ts$''']

@@ -15,11 +15,11 @@ import {
 // The same shape as the public sign-up bucket, in its own namespace, checked before and consumed after a miss.
 export const INTAKE_EDGE_RATE_LIMIT = { max: 3, windowSeconds: 60 } as const;
 const RATE_LIMIT_KEY_PREFIX = 'bap-edge:intake:';
+export const INTERNAL_APPLICATION_ORIGIN = 'http://api:3001';
 // The API's JSON body parser stops at 1 MiB, so a larger structured push is refused here first.
 const MAX_STRUCTURED_BYTES = 1_048_576;
 // A file streams up to 25 MB, so the multipart forward shares the upload budget of Phase 0.
 const INTAKE_TIMEOUT_MS = 120_000;
-const INTERNAL_APPLICATION_ORIGIN = 'http://api:3001';
 
 const upstreamErrorCodes: Readonly<Record<number, string>> = {
   400: 'invalid_body',
@@ -42,7 +42,10 @@ type ResolvedCredential = Readonly<{
   organizationId: string;
 }>;
 
-function jsonResponse(
+export type ResolvedChannelCredential = ResolvedCredential &
+  Readonly<{ kind: string }>;
+
+export function jsonResponse(
   body: unknown,
   status: number,
   headers: Record<string, string> = {},
@@ -53,15 +56,16 @@ function jsonResponse(
   });
 }
 
-function rateLimitKey(request: Request): string {
+// One bucket per replaced client IP under the caller's namespace; the inbound route has its own.
+export function edgeRateLimitKey(request: Request, prefix: string): string {
   const identity = normalizePublicSignUpClientIdentity(
     request.headers.get('x-bap-client-ip'),
   );
-  return `${RATE_LIMIT_KEY_PREFIX}${createHash('sha256').update(identity).digest('hex')}`;
+  return `${prefix}${createHash('sha256').update(identity).digest('hex')}`;
 }
 
 // A read only: a full bucket refuses before any credential is looked up.
-async function bucketRetryAfterSeconds(
+export async function edgeBucketRetryAfterSeconds(
   pool: DatabasePool,
   key: string,
   now: number,
@@ -92,17 +96,18 @@ async function bucketRetryAfterSeconds(
   );
 }
 
-// The sign-up upsert in the intake namespace: one attempt per miss, capped, pruning only its own rows.
-async function consumeBucket(
+// The sign-up upsert in the caller's namespace: one attempt per miss, capped, pruning only its own rows.
+export async function consumeEdgeBucket(
   pool: DatabasePool,
   key: string,
+  prefix: string,
   now: number,
 ): Promise<void> {
   const windowMilliseconds = INTAKE_EDGE_RATE_LIMIT.windowSeconds * 1000;
   await pool.query(
     `with pruned as (
        delete from auth.rate_limit
-       where "key" like '${RATE_LIMIT_KEY_PREFIX}%'
+       where "key" like '${prefix}%'
          and "key" <> $1
          and last_request <= $2::bigint - $3::bigint
      )
@@ -123,11 +128,11 @@ async function consumeBucket(
   );
 }
 
-// The raw bearer is hashed and forgotten; only the definer function sees the hash.
-async function resolveCredential(
+// The raw secret is hashed and forgotten; only the definer function sees the hash.
+export async function resolveChannelCredential(
   pool: DatabasePool,
   secret: string,
-): Promise<ResolvedCredential | null> {
+): Promise<ResolvedChannelCredential | null> {
   const secretSha256 = createHash('sha256').update(secret).digest('hex');
   const result = await pool.query<{
     channel_id: string;
@@ -138,11 +143,46 @@ async function resolveCredential(
     [secretSha256],
   );
   const row = result.rows[0];
-  // An email address credential never authenticates the API route, whatever its channel.
-  if (row === undefined || row.kind !== 'api_token') {
+  if (row === undefined) {
     return null;
   }
-  return { channelId: row.channel_id, organizationId: row.organization_id };
+  return {
+    channelId: row.channel_id,
+    kind: row.kind,
+    organizationId: row.organization_id,
+  };
+}
+
+// An email address credential never authenticates the API route, whatever its channel.
+async function resolveCredential(
+  pool: DatabasePool,
+  secret: string,
+): Promise<ResolvedCredential | null> {
+  const credential = await resolveChannelCredential(pool, secret);
+  if (credential === null || credential.kind !== 'api_token') {
+    return null;
+  }
+  return {
+    channelId: credential.channelId,
+    organizationId: credential.organizationId,
+  };
+}
+
+// The five-minute resource JWT the API reads as a channel principal, the same signer the BFF uses.
+export async function mintChannelToken(
+  signJWT: BffAuth['signJWT'],
+  channelId: string,
+  now: number,
+): Promise<string> {
+  const { token } = await signJWT({
+    body: {
+      payload: {
+        iat: Math.floor(now / 1000),
+        sub: `channel_${channelId}`,
+      },
+    },
+  });
+  return token;
 }
 
 function bearerSecret(request: Request): string | null {
@@ -225,10 +265,10 @@ export async function postIntakeItem(
 
   let pool: DatabasePool;
   let credential: ResolvedCredential | null;
-  const key = rateLimitKey(request);
+  const key = edgeRateLimitKey(request, RATE_LIMIT_KEY_PREFIX);
   try {
     pool = await dependencies.loadPool();
-    const retryAfterSeconds = await bucketRetryAfterSeconds(pool, key, now);
+    const retryAfterSeconds = await edgeBucketRetryAfterSeconds(pool, key, now);
     if (retryAfterSeconds !== null) {
       webLogger.warn('intake refused', {
         operation: 'postIntakeItem',
@@ -240,7 +280,7 @@ export async function postIntakeItem(
     }
     credential = await resolveCredential(pool, secret);
     if (credential === null) {
-      await consumeBucket(pool, key, now);
+      await consumeEdgeBucket(pool, key, RATE_LIMIT_KEY_PREFIX, now);
     }
   } catch {
     webLogger.error('intake lookup failed', {
@@ -263,14 +303,11 @@ export async function postIntakeItem(
     return forward.failure;
   }
 
-  const { token } = await dependencies.signJWT({
-    body: {
-      payload: {
-        iat: Math.floor(now / 1000),
-        sub: `channel_${credential.channelId}`,
-      },
-    },
-  });
+  const token = await mintChannelToken(
+    dependencies.signJWT,
+    credential.channelId,
+    now,
+  );
   const requestId = crypto.randomUUID();
   const origin = secret.slice(
     INTAKE_SECRET_PREFIX.length,
