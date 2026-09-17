@@ -434,13 +434,15 @@ entity-scope mutations are no longer server actions: the Carbon
 call Better Auth or the BFF directly with the organization id resolved
 server-side from the route slug, so no browser-supplied id selects a tenant.
 
-The one `[orgSlug]` landing page module retains the exact throwaway marker,
-plain native breadcrumb, and zero CSS, design-system, or icon imports. A shared
-Carbon shell surrounds these authenticated routes without changing their trust
-boundary. The `/organizations` list and create pages and the
-`/[orgSlug]/entities`, `/[orgSlug]/members`, and `/[orgSlug]/settings` pages are
-now Carbon; the remaining Carbon `[orgSlug]` landing and account page content is
-future work.
+The `/[orgSlug]` landing page is now a Carbon overview that reads member,
+invitation, entity, and dataset counts server-side from the caller's session and
+the server-resolved organization id; no browser-supplied id reaches a query
+string or a log, and only aggregate counts reach the browser. A shared Carbon
+shell surrounds these authenticated routes without changing their trust
+boundary. The `/organizations` list and create pages and the `/[orgSlug]`
+landing, `/[orgSlug]/entities`, `/[orgSlug]/members`, and `/[orgSlug]/settings`
+pages are now Carbon; the one temporary page left is `/account`, whose Carbon
+content is future work.
 
 The UI mirrors the access control ADR 0011 added to the Better Auth organization
 plugin: only owners may update settings, invite, assign any of the three roles,

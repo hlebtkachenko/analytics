@@ -204,15 +204,14 @@ allowed organization, and traverses its overview, members, and settings pages
 through Caddy. It also covers the shared skip link and primary navigation, plain
 native breadcrumbs, native keyboard operation, axe, a mobile viewport, 640
 CSS-pixel layout-equivalent reflow, horizontal overflow, and page/console
-errors. This is not a browser-zoom assertion. The temporary landing page module
-intentionally retains its marker comment and has no CSS, design-system, or icon
-imports; only the product shell layout under `app/(product)` is Carbon. The
-operational workflow raises only its disposable synthetic owner's total quota
-from 1 to 2 through the existing migrator command; the second organization
-consumes that capacity and the proof finishes on the zero-quota state. The
-authenticated access, icon, organization, dataset, and final sign-out specs
-share one worker-scoped synthetic browser session, and every authenticated spec
-asserts accessibility through the one shared
+errors. This is not a browser-zoom assertion. The overview, members, and
+settings pages are Carbon pages under the product shell layout under
+`app/(product)`. The operational workflow raises only its disposable synthetic
+owner's total quota from 1 to 2 through the existing migrator command; the
+second organization consumes that capacity and the proof finishes on the
+zero-quota state. The authenticated access, icon, organization, dataset, and
+final sign-out specs share one worker-scoped synthetic browser session, and
+every authenticated spec asserts accessibility through the one shared
 `tests/operational/accessibility-support.ts` helper beside the shared sign-in
 and legal entity helpers, so a single definition decides what counts as an
 accessibility violation. The public access assertions remain unauthenticated,

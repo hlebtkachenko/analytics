@@ -42,14 +42,14 @@ pinned-persistable left icon rail for Access, Workspaces, Datasets, Documents,
 Account, and a workspace section, rendered from the shell's `railDestinations`
 array. Identity and invitation routes remain outside that shell. The layout owns
 the single `main-content` landmark and renders small Carbon breadcrumbs for
-subordinate views, including the inline dataset view. The temporary `[orgSlug]`
-landing page and the temporary account page remain a deliberate source-level
-exception: their page modules keep the exact throwaway markers, plain semantic
-HTML, and zero CSS, design-system, or icon imports, and no longer render their
-own `<main>` or native breadcrumbs now that the layout owns both. The
-`/organizations` list and create pages and the `/[orgSlug]/entities`,
-`/[orgSlug]/members`, and `/[orgSlug]/settings` pages are now Carbon; converting
-the remaining page content to Carbon is future work.
+subordinate views, including the inline dataset view. The temporary account page
+remains a deliberate source-level exception: its page module keeps the exact
+throwaway marker, plain semantic HTML, and zero CSS, design-system, or icon
+imports, and no longer renders its own `<main>` or native breadcrumbs now that
+the layout owns both. The `/organizations` list and create pages and the
+`/[orgSlug]` landing, `/[orgSlug]/entities`, `/[orgSlug]/members`, and
+`/[orgSlug]/settings` pages are now Carbon; converting the remaining page
+content to Carbon is future work.
 
 Every other product page renders its content inside the shared `PageContainer`
 scaffold; the `bap/product-page-container` ESLint rule enforces it and bans

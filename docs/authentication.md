@@ -158,12 +158,11 @@ into, the entities named there.
 
 Subordinate routes expose semantic breadcrumbs. Permanent Carbon content uses
 Carbon breadcrumbs, including `Datasets > {dataset name}` for an inline dataset
-view. The one temporary `[orgSlug]` landing page module keeps plain native
-breadcrumbs, its exact throwaway marker, and zero CSS, design-system, or icon
-imports. The `/organizations` list and create pages and the
-`/[orgSlug]/entities`, `/[orgSlug]/members`, and `/[orgSlug]/settings` pages are
-Carbon; the remaining Carbon `[orgSlug]` landing and account content is future
-work.
+view. The one temporary `/account` page module keeps its exact throwaway marker
+and zero CSS, design-system, or icon imports. The `/organizations` list and
+create pages and the `/[orgSlug]` landing, `/[orgSlug]/entities`,
+`/[orgSlug]/members`, and `/[orgSlug]/settings` pages are Carbon; the remaining
+Carbon account content is future work.
 
 ## Admin HTTP inventory
 
@@ -550,15 +549,21 @@ top-level routes take precedence over the dynamic segment, so migration
 literal route is published. Adding another top-level route must reserve its
 segment in the same pull request.
 
-## Temporary organization pages
+## Organization pages
 
-The 1 temporary `[orgSlug]` landing page is an intentionally throwaway, unstyled
-browser loop. It uses semantic headings, navigation, and lists, with no page
-CSS, design-system, or icon imports, and a plain native breadcrumb. Its exact
-throwaway marker remains enforced, and permanent Carbon page content is future
-work even though the shared root shell surrounds authenticated routes. The
-`/[orgSlug]/entities`, `/[orgSlug]/members`, and `/[orgSlug]/settings` pages
-have left this loop and are now Carbon pages that mutate by client call.
+The `/[orgSlug]` landing page is now a Carbon overview inside `PageContainer`.
+It renders the workspace name, the slug, and the caller's role as a `Tag`, a row
+of `ClickableTile` quick links to members, invitations, entities, documents,
+datasets, and settings each showing a real count where one exists, and a
+data-driven "Next steps" list that appears only when a matching condition and
+its capability both hold. Every count is read server-side from Better Auth
+(`listMembers` total, pending `listInvitations`) and the BFF
+(`readLegalEntities`, `readDatasets`) using the caller's session and the
+server-resolved organization id; a failed read fails closed and surfaces an
+`InlineNotification`. The `/[orgSlug]/entities`, `/[orgSlug]/members`, and
+`/[orgSlug]/settings` pages are likewise Carbon pages that mutate by client
+call, so the temporary `[orgSlug]` loop is gone and only `/account` remains a
+temporary plain-HTML page.
 
 The `/organizations` list and `/organizations/new` create pages are now Carbon
 pages inside `PageContainer`. The list reads the caller's workspaces with their
@@ -609,8 +614,8 @@ The new `/[orgSlug]/entities` page lists the legal entities in the viewer's
 scope. An owner or an admin holding `createEntities`/`updateEntities` can add or
 edit a `company` or `sole_trader` entity with an optional registration number;
 only an owner can delete one. Members see the list without management forms.
-This page shares the same plain, temporary presentation as the other four
-organization pages.
+This page shares the same Carbon presentation inside `PageContainer` as the
+other organization pages.
 
 ## First owner
 
