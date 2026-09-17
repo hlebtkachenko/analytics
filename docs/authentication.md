@@ -17,7 +17,7 @@ Nine authentication paths are disabled:
 - `/api/auth/change-email`, because email changes use BAP-owned flows
 - `/api/auth/delete-user/callback`, because deletion has no email-verification
   callback
-- `/api/auth/admin/remove-user`, because Better Auth 1.7.3 bypasses the BAP
+- `/api/auth/admin/remove-user`, because Better Auth 1.7.4 bypasses the BAP
   deletion hook and erasure request on that Admin-plugin path
 - `/api/auth/admin/impersonate-user`, because BAP has no approved
   session-minting impersonation workflow
@@ -124,27 +124,32 @@ All identity forms use standard Carbon form controls through
 `InlineNotification` with an alert role. The pages never render or log raw
 tokens, framework error bodies, or database errors.
 
-`/account` is a separate authenticated, deliberately temporary plain-HTML page.
-Its own source has no Carbon components, style sheet, or icons and retains the
-exact throwaway marker. The root layout surrounds it with the shared Carbon
-application shell, but its content remains plain and its permanent Carbon
-replacement is future work. It shows the session email and exposes sign-out,
-password change, and account deletion. Its Server Component redirects failed or
-absent session reads to `/sign-in` and passes only the email into the
-interactive client boundary.
+The `/account` area is a set of authenticated Carbon pages inside the shared
+application shell. `/account` is the profile page: it edits the name through
+`updateUser`, shows a read-only email and an initials `Tag`, lists the caller's
+workspaces and roles read server-side through `listWorkspaceMemberships`, and
+deletes the account from a danger-zone modal that maps the invalid-password and
+sole-owner errors inline. `/account/security` handles password change (with
+revoke-other-sessions), two-step verification enable, disable, and backup-code
+regeneration, and the caller's active sessions with per-row revoke and a
+sign-out-others toolbar. `/account/preferences` writes the theme and rail
+cookies. `/account/access` is the moved access diagnostic; `/access` now only
+redirects to it. Each Server Component redirects a failed or absent session read
+to `/sign-in` and passes no private identifier into the client boundary beyond
+what the page renders.
 
 ## Authenticated application navigation
 
 Signed-in application routes share a minimal Carbon shell whose layout owns a
 skip link to the single `main-content` landmark. Desktop and collapsible mobile
-navigation use native links to Access, Organizations, Datasets, and Account and
-identify the current route. Identity and invitation routes stay outside the
+navigation use native links to Organizations, Datasets, Documents, and Account
+and identify the current route. Identity and invitation routes stay outside the
 shell.
 
-The Access organization cards link implemented capabilities to real routes and
-also list the caller's eight capabilities and `entityScope`. Member management
-and entity access management target `/{slug}/members`, visible only with
-`manageMembers` and `manageEntityAccess`; dataset upload targets
+The access diagnostic organization cards link implemented capabilities to real
+routes and also list the caller's eight capabilities and `entityScope`. Member
+management and entity access management target `/{slug}/members`, visible only
+with `manageMembers` and `manageEntityAccess`; dataset upload targets
 `/datasets?organization={slug}#upload-dataset`. The dataset page accepts that
 slug only when it matches the authenticated organization list, then sends only
 the corresponding immutable organization id through the BFF. There is no
@@ -156,17 +161,16 @@ one legal entity, and an upload entity selector. Both stay within the caller's
 `entityScope`: a restricted admin or member can only switch among, or upload
 into, the entities named there.
 
-Subordinate routes expose semantic breadcrumbs. Permanent Carbon content uses
-Carbon breadcrumbs, including `Datasets > {dataset name}` for an inline dataset
-view. The one temporary `/account` page module keeps its exact throwaway marker
-and zero CSS, design-system, or icon imports. The `/organizations` list and
-create pages and the `/[orgSlug]` landing, `/[orgSlug]/entities`,
-`/[orgSlug]/members`, and `/[orgSlug]/settings` pages are Carbon; the remaining
-Carbon account content is future work.
+Subordinate routes expose semantic breadcrumbs. Carbon content uses Carbon
+breadcrumbs, including `Datasets > {dataset name}` for an inline dataset view
+and `Account > Security`, `Account > Preferences`, and `Account > Access` for
+the account children. The `/organizations` list and create pages, the account
+pages, and the `/[orgSlug]` landing, `/[orgSlug]/entities`,
+`/[orgSlug]/members`, and `/[orgSlug]/settings` pages are all Carbon.
 
 ## Admin HTTP inventory
 
-Installed Better Auth 1.7.3 registers exactly 15 Admin-plugin endpoints. In the
+Installed Better Auth 1.7.4 registers exactly 15 Admin-plugin endpoints. In the
 table below, paths are relative to `/api/auth`. A reachable HTTP endpoint still
 requires the named authoritative browser session and, where listed, permission.
 Requests are JSON unless a query is shown. There is no BAP admin UI or BAP HTTP
@@ -311,14 +315,18 @@ resource-token signatures against it.
 
 Password change uses Better Auth's installed `/change-password` endpoint. It
 requires `currentPassword`, enforces the configured 14-128 character bounds, and
-accepts `revokeOtherSessions`. The account page exposes that option. No custom
-rate rule is added: Better Auth 1.7.3 already applies its special
-3-per-10-second rule to the endpoint.
+accepts `revokeOtherSessions`. The `/account/security` page exposes that option
+and maps `INVALID_PASSWORD`, `PASSWORD_TOO_SHORT`, and `PASSWORD_TOO_LONG`
+inline by field. It falls under the global 100-per-minute rate rule, not a
+custom one. A change with `revokeOtherSessions` rotates the session, so the view
+refreshes to re-derive the current session id.
 
-Account deletion is enabled. Better Auth 1.7.3 accepts either the submitted
-password or a session younger than `session.freshAge`; the endpoint is therefore
-not password-protected. BAP sets freshness to 5 minutes to keep passwordless
-acceptance short, and the account page always submits the current password.
+Account deletion is enabled. In Better Auth 1.7.4 the delete-user endpoint runs
+`sensitiveSessionMiddleware`; when the browser supplies the password there is no
+freshness check. BAP sets `session.freshAge` to 5 minutes, and the account page
+always submits the current password. The delete modal maps `INVALID_PASSWORD`
+and `CREDENTIAL_ACCOUNT_NOT_FOUND` inline on the password field and
+`ACCOUNT_HAS_SOLE_OWNED_ORGANIZATIONS` as an inline notification.
 
 The deletion hook counts organizations where the deleting user has `owner` as an
 exact comma-separated role token and no different member has that same token.
@@ -483,7 +491,7 @@ by single hyphens, cannot be all digits, and cannot be one of `access`, `api`,
 constraints use the same literal contract. The normalizer is deterministic and
 never silently renames a reserved, numeric, empty, or too-short result.
 
-Installed Better Auth 1.7.3 has 11 endpoints that otherwise fall back to
+Installed Better Auth 1.7.4 has 11 endpoints that otherwise fall back to
 `session.activeOrganizationId`. BAP's before-hook requires a non-empty explicit
 `organizationId` in the body for `has-permission`, `update`, `invite-member`,
 `remove-member`, and `update-member-role`; and in the query for
@@ -562,8 +570,8 @@ its capability both hold. Every count is read server-side from Better Auth
 server-resolved organization id; a failed read fails closed and surfaces an
 `InlineNotification`. The `/[orgSlug]/entities`, `/[orgSlug]/members`, and
 `/[orgSlug]/settings` pages are likewise Carbon pages that mutate by client
-call, so the temporary `[orgSlug]` loop is gone and only `/account` remains a
-temporary plain-HTML page.
+call, so the temporary `[orgSlug]` loop is gone and the account pages are Carbon
+as well.
 
 The `/organizations` list and `/organizations/new` create pages are now Carbon
 pages inside `PageContainer`. The list reads the caller's workspaces with their

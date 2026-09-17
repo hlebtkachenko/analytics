@@ -20,8 +20,10 @@ The suite proves:
   server gates, generic outcomes, redirects, and alert semantics;
 - invitation-only sign-up retains its form while both backend admission layers
   reject an uninvited address;
-- the account page gates on a server session and calls the exact Better Auth
-  password-change, session-revocation, sign-out, and deletion client methods;
+- the account pages gate on a server session and drive the exact Better Auth
+  profile, password-change, two-factor, session-revocation, and deletion
+  methods, map their error codes inline, and read sessions and workspaces
+  server-side;
 - web health is public while readiness and metrics remain private;
 - Better Auth configuration, resource-JWT bounds, BFF response boundaries, CSP,
   bootstrap recovery states, and synthetic-account safeguards behave as
@@ -60,16 +62,12 @@ artboards. A separate TypeScript compiler AST contract parses the actual
 production TSX, rejects direct application imports from `@carbon/icons-react`,
 and pins the reviewed Carbon control-icon callsites plus the direct decorative
 status icons, facade imports, visible labels, and absence of icon-only controls.
-The AST coverage also protects the one temporary page's exact throwaway marker
-and zero CSS/design-system/icon boundary. That source-level guard scopes the
-temporary page module, not the product shell layout under `app/(product)` that
-surrounds authenticated routes. Committed production Playwright coverage
-verifies real public and authenticated controls for keyboard order, axe,
-label-derived accessible names, Carbon SVG semantics and alignment, 44px
-targets, temporary-content exclusion, console and page errors, and 640 CSS-pixel
-layout-equivalent reflow without document overflow. The 640px check is not a
-browser-zoom claim; true browser zoom is recorded only as separate dated local
-evidence after setting and reading the Chrome tab zoom.
+Committed production Playwright coverage verifies real public and authenticated
+controls for keyboard order, axe, label-derived accessible names, Carbon SVG
+semantics and alignment, 44px targets, console and page errors, and 640
+CSS-pixel layout-equivalent reflow without document overflow. The 640px check is
+not a browser-zoom claim; true browser zoom is recorded only as separate dated
+local evidence after setting and reading the Chrome tab zoom.
 
 ## Integration and operational proof
 
@@ -249,13 +247,13 @@ The two-level tenancy proof runs as `tests/operational/legal-entities.spec.ts`
 against the same disposable stack. Its narrated steps prove that the owner
 creates two neutral legal entities, restricts the member to the first one
 through the members page scope editor, that an admin is offered the create form
-and no delete control, that the member's `/access` page reports read-only
-capabilities and the restricted scope, that the member's dataset scope select
-lists only the permitted entity, that an owner upload lands in the chosen entity
-and the all-entities versus one-entity switch filters it, and that the owner
-deletes the admin-created entity. The spec signs in the admin and the member
-once each in their own browser contexts and waits out the shared 3-per-minute
-sign-in rule rather than retrying blindly.
+and no delete control, that the member's `/account/access` page reports
+read-only capabilities and the restricted scope, that the member's dataset scope
+select lists only the permitted entity, that an owner upload lands in the chosen
+entity and the all-entities versus one-entity switch filters it, and that the
+owner deletes the admin-created entity. The spec signs in the admin and the
+member once each in their own browser contexts and waits out the shared
+3-per-minute sign-in rule rather than retrying blindly.
 
 ```sh
 pnpm demo:tenancy

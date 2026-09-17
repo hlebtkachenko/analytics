@@ -6,30 +6,29 @@ HTTP routes and internal operational endpoints.
 
 ## Application shell
 
-The `app/(product)` route group wraps Access, Workspaces, Datasets, Documents,
-Account, and member-visible organization routes in a shared server layout that
-renders the client `ProductShell`: a Carbon UI Shell header branded "Afframe
-Analytics", over a left icon rail, with two header areas, "Analytics" (active)
-and a placeholder "AI Assistant" that has no route yet and raises a toast on
-click. The header's global actions, in order, are Search, Notifications, Help,
+The `app/(product)` route group wraps Workspaces, Datasets, Documents, Account,
+and member-visible organization routes in a shared server layout that renders
+the client `ProductShell`: a Carbon UI Shell header branded "Afframe Analytics",
+over a left icon rail, with two header areas, "Analytics" (active) and a
+placeholder "AI Assistant" that has no route yet and raises a toast on click.
+The header's global actions, in order, are Search, Notifications, Help,
 Settings, a Workspaces switcher listing the member's real organizations, and
 Account; each opens one single-purpose header panel at a time, and the Account
 panel holds the light/dark/system theme control and sign out.
 
 The left icon rail (Carbon `SideNav` with `isRail`) is the whole-app navigation
-to these five top-level destinations, plus a workspace section (Members,
+to these four top-level destinations, plus a workspace section (Members,
 Entities, Settings) shown only while an organization is active. The rail, its
 labels, its icons, and its active state are rendered from the `railDestinations`
 array in `components/shell/product-navigation.ts`, which is the single place a
 new destination is registered:
 
-| Label      | Route            | Purpose                                      |
-| ---------- | ---------------- | -------------------------------------------- |
-| Access     | `/access`        | Compare application and reporting access     |
-| Workspaces | `/organizations` | List, create, and enter workspaces           |
-| Datasets   | `/datasets`      | Ingest, list, inspect, export, and chat      |
-| Documents  | `/documents`     | Register documents and read derived events   |
-| Account    | `/account`       | Sign out, change password, or delete account |
+| Label      | Route            | Purpose                                    |
+| ---------- | ---------------- | ------------------------------------------ |
+| Workspaces | `/organizations` | List, create, and enter workspaces         |
+| Datasets   | `/datasets`      | Ingest, list, inspect, export, and chat    |
+| Documents  | `/documents`     | Register documents and read derived events |
+| Account    | `/account`       | Profile, security, preferences, and access |
 
 The header hamburger toggles a pinned expanded rail, persisted in the `bap_rail`
 cookie. The rail's `aria-label` is "Side navigation", and the hamburger button
@@ -43,10 +42,10 @@ invitation, and design-system reference routes render without the shell.
 The layout owns the single `main-content` landmark and renders small
 (`size="sm"`) Carbon breadcrumbs derived from the route segments, collapsing the
 middle into an `OverflowMenu` when the trail exceeds five entries. Organization
-descendants use these layout-owned Carbon breadcrumbs; their page content is
-deliberately temporary. An open dataset is an inline state of `/datasets`, not a
-separate URL, and its breadcrumb entry returns to the list. Top-level pages and
-linear identity tasks do not add breadcrumbs.
+descendants and the account pages use these layout-owned Carbon breadcrumbs. An
+open dataset is an inline state of `/datasets`, not a separate URL, and its
+breadcrumb entry returns to the list. Top-level pages and linear identity tasks
+do not add breadcrumbs.
 
 The `bap_theme` and `bap_rail` preference cookies hold only enum values, are not
 secrets, and are validated with zod on read.
@@ -64,7 +63,7 @@ secrets, and are validated with zod on read.
 | `/activate`                  | Public verification landing. A verified session redirects to `/welcome`; invalid and consumed-link states show generic recovery guidance without exposing a token.                                                                                                                                                                                                                                | Reached through verification mail; recovery links to sign-in.                                                                                                                                                                                                                                                                              | Carbon identity page    |
 | `/welcome`                   | Requires a browser session and otherwise redirects to `/sign-in`.                                                                                                                                                                                                                                                                                                                                 | Reached after successful activation; links to `/access`.                                                                                                                                                                                                                                                                                   | Carbon identity page    |
 | `/invitation/[invitationId]` | A signed-out render performs no invitation lookup and shows only generic guidance. A signed-in invited recipient can load the organization name and role, then accept with the verified matching account.                                                                                                                                                                                         | Reached through invitation mail. Its signed-out links are fixed `/sign-in` and `/sign-up` URLs and carry no invitation id, email, or token.                                                                                                                                                                                                | Carbon task page        |
-| `/access`                    | Usable data requires a verified session and at least 1 organization. It selects an organization and resolves independent application and reporting access contracts. Empty and failure states are explicit.                                                                                                                                                                                       | Primary rail link. Shows the eight capabilities and `entityScope`. Member and entity access management link to `/{orgSlug}/members`; entity management links to `/{orgSlug}/entities`; upload links to the selected `/datasets` state. The general assistant is visibly unavailable, not an inert control.                                 | Carbon application page |
+| `/access`                    | Server component that only calls `redirect('/account/access')`, so the post-sign-in `/access` landing keeps working while the diagnostic lives under the account area.                                                                                                                                                                                                                            | Not a rail link. Reached from post-sign-in redirects and old links.                                                                                                                                                                                                                                                                        | Redirect                |
 | `/organizations`             | Requires a verified session and otherwise redirects to `/sign-in`. Lists the caller's workspaces with their role, a get-started checklist when empty, and pending invitations with accept and decline actions.                                                                                                                                                                                    | Primary rail link; links to workspace creation and each `/{orgSlug}` page.                                                                                                                                                                                                                                                                 | Carbon                  |
 | `/organizations/new`         | Requires a verified session. Shows remaining creator quota; quota 0 replaces the form with an unavailable message. Inline errors report a taken address and an exhausted quota.                                                                                                                                                                                                                   | Linked from `/organizations`; breadcrumb returns there. Successful creation continues to the new `/{orgSlug}` route.                                                                                                                                                                                                                       | Carbon                  |
 | `/[orgSlug]`                 | Requires a verified member. A signed-out request is redirected to `/sign-in?next=` by the product layout before the slug is read; once signed in, malformed, unknown, nonmember, and failed resolution states all return the same 404. The Carbon overview reads member, invitation, entity, and dataset counts server-side; a failed read fails closed and surfaces an `InlineNotification`.     | Linked from `/organizations`; breadcrumb returns there. `ClickableTile` quick links reach members, invitations, entities, documents, datasets, and settings, and a data-driven "Next steps" list appears only when a matching condition and capability both hold.                                                                          | Carbon application page |
@@ -76,15 +75,17 @@ secrets, and are validated with zod on read.
 | `/documents/analytics`       | A verified session reads the stored invoice split for the selected organization and legal entity scope. Reading needs the `readDocuments` capability. Every number is read from stored columns, never recomputed in the browser.                                                                                                                                                                  | Reached from the heading row of `/documents`. Shows the invoices in scope and four aggregates: by month and account, by activity, by VAT regime, and by account. A line under the heading states how many event and invoice lines were read, with how many group by queries, and in how long. Breadcrumb is Documents, then Analytics.     | Carbon application page |
 | `/documents/new`             | A verified session registers one document for a legal entity in scope. Invoice kinds carry invoice content with at least 1 `item` line, optional `advance_deduction` lines, a signed rounding amount, and per line tax point date, service period and activity code; every other kind carries none. Writing needs the `manageDocuments` capability, which the API and row level security enforce. | Reached from `/documents`. Partners are searched in a combo box and can be created inline in a modal. A successful registration raises a toast and continues to the new document.                                                                                                                                                          | Carbon application page |
 | `/documents/[documentId]`    | A verified session reads one document. An unknown identifier, a document outside the caller's entity scope, and a failed read all report the same generic failure.                                                                                                                                                                                                                                | Reached from the list. Shows the register header, invoice lines, the derived economic event, open data issues, document links, and free attributes. Status actions and the link form need `manageDocuments`; without it the page is read-only. Breadcrumb is Documents, then Document: the identifier never reaches the trail.             | Carbon application page |
-| `/account`                   | Requires a session and otherwise redirects to `/sign-in`. Supports sign-out, password change, and deletion; a sole organization owner must delegate ownership first.                                                                                                                                                                                                                              | Primary rail link.                                                                                                                                                                                                                                                                                                                         | Temporary semantic HTML |
+| `/account`                   | Requires a session and otherwise redirects to `/sign-in`. Carbon profile page: name edit through `updateUser`, read-only email, an initials `Tag`, the caller's workspaces and roles, and a danger-zone delete modal that maps the invalid-password and sole-owner errors inline.                                                                                                                 | Primary rail link.                                                                                                                                                                                                                                                                                                                         | Carbon application page |
+| `/account/security`          | Requires a session. Carbon page for password change (with revoke-other-sessions), two-step verification enable, disable, and backup-code regeneration, and the caller's active sessions with per-row revoke and a sign-out-others toolbar. The current session is marked and cannot be revoked; a token never reaches the browser.                                                                | Reached from the account header panel and the account page.                                                                                                                                                                                                                                                                                | Carbon application page |
+| `/account/preferences`       | Requires a session. Carbon page for the light/dark/system theme (`bap_theme`) and the pin-the-rail preference (`bap_rail`); both write their cookie and apply live.                                                                                                                                                                                                                               | Reached from the account header panel.                                                                                                                                                                                                                                                                                                     | Carbon application page |
+| `/account/access`            | Usable data requires a verified session and at least 1 organization. It selects an organization and resolves independent application and reporting access contracts. Empty and failure states are explicit.                                                                                                                                                                                       | Reached from `/access`, the account header panel, and global search. Shows the eight capabilities and `entityScope`. Member and entity access management link to `/{orgSlug}/members`; entity management links to `/{orgSlug}/entities`; upload links to the selected `/datasets` state. The general assistant is visibly unavailable.     | Carbon application page |
 | `/design-system`             | Public implementation reference with no application session requirement.                                                                                                                                                                                                                                                                                                                          | Direct route for development/reference use; excluded from the application shell.                                                                                                                                                                                                                                                           | Carbon reference page   |
 
-The one temporary page is `/account`; it intentionally uses plain semantic HTML
-and no page-level Carbon, CSS, or icon imports. The `/organizations` list and
-`/organizations/new` create pages and the `/[orgSlug]` landing,
-`/[orgSlug]/entities`, `/[orgSlug]/members`, and `/[orgSlug]/settings` pages are
-now Carbon. Their durable authorization, slug-resolution, server-action, and
-shell boundaries are not temporary.
+The `/organizations` list and `/organizations/new` create pages, the account
+pages, and the `/[orgSlug]` landing, `/[orgSlug]/entities`,
+`/[orgSlug]/members`, and `/[orgSlug]/settings` pages are all Carbon. Their
+durable authorization, slug-resolution, server-action, and shell boundaries are
+stable.
 
 ## Browser-callable HTTP routes
 
