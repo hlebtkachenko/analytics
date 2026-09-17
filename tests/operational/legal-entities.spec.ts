@@ -37,6 +37,17 @@ let memberContext: BrowserContext | undefined;
 
 const datasetsPathname = `/api/bff/application/organizations/${organizationId}/datasets`;
 
+// The page must never force horizontal scroll, even at the narrowest viewport.
+async function expectNoDocumentOverflow(page: Page): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    )
+    .toBe(true);
+}
+
 async function signInContext(
   browser: Browser,
   email: string,
@@ -181,6 +192,11 @@ test.describe.serial('workspace legal entities and entity scope', () => {
     await companyRow.getByRole('button', { name: 'Options' }).click();
     await expect(page.getByRole('menuitem', { name: 'Delete' })).toBeVisible();
     await page.keyboard.press('Escape');
+    await expectNoAccessibilityViolations(page);
+
+    // The populated entities grid must stay within a 320px viewport.
+    await page.setViewportSize({ height: 720, width: 320 });
+    await expectNoDocumentOverflow(page);
     await expectNoAccessibilityViolations(page);
   });
 
