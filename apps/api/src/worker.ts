@@ -10,15 +10,20 @@ import {
   BACKFILL_EMBEDDINGS_QUEUE,
   SUMMARIZE_DATASET_QUEUE,
 } from './agents/contract.js';
+import { FilesystemBlobStore } from './blobs/blob-store.js';
+import { SPLIT_EMAIL_ITEM_QUEUE } from './inbox/contract.js';
 import { INGEST_DATASET_QUEUE } from './ingestion/contract.js';
 import {
   createStagingDirectory,
   loadStagingDirectory,
 } from './ingestion/staging.js';
 import { ApplicationLogger } from './logger.js';
+import { loadRuntimeConfiguration } from './runtime-configuration.js';
+import { ClamdClient } from './scanning/clamd-client.js';
 import { backfillDatasetEmbeddings } from './worker/backfill-embeddings.js';
 import { ingestDataset } from './worker/ingest-dataset.js';
 import { curateJobFailure } from './worker/job-failure.js';
+import { splitEmailItem } from './worker/split-email-item.js';
 import { summarizeDataset } from './worker/summarize-dataset.js';
 import { startObservabilityServer } from './worker/observability.js';
 import {
@@ -80,6 +85,7 @@ async function bootstrap(): Promise<void> {
   await createQueue(queue, INGEST_DATASET_QUEUE);
   await createQueue(queue, BACKFILL_EMBEDDINGS_QUEUE);
   await createQueue(queue, SUMMARIZE_DATASET_QUEUE);
+  await createQueue(queue, SPLIT_EMAIL_ITEM_QUEUE);
   // The real error is logged here; only the curated one reaches pgboss.job.output.
   const runJob = async (work: () => Promise<void>): Promise<void> => {
     try {
@@ -144,6 +150,34 @@ async function bootstrap(): Promise<void> {
       });
     }
   });
+
+  // The split parses hostile MIME in-process, so one message at a time per worker; the scanner is one clamd session per blob.
+  const runtime = loadRuntimeConfiguration(process.env);
+  const blobs = new FilesystemBlobStore(runtime.blob.storageDirectory);
+  const scanner = new ClamdClient(runtime.clamav);
+  await queue.work<
+    unknown,
+    void,
+    { includeMetadata: true; localConcurrency: 1 }
+  >(
+    SPLIT_EMAIL_ITEM_QUEUE,
+    { includeMetadata: true, localConcurrency: 1 },
+    async (jobs) => {
+      for (const job of jobs) {
+        await runJob(() =>
+          splitEmailItem({
+            blobs,
+            data: job.data,
+            metrics,
+            pool,
+            quotaBytes: runtime.blob.quotaBytesPerOrganization,
+            retry: { count: job.retryCount, limit: job.retryLimit },
+            scanner,
+          }),
+        );
+      }
+    },
+  );
 
   logger.log('Worker started', SERVICE_NAME);
 

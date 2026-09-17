@@ -6,7 +6,7 @@ import {
   type OnModuleDestroy,
 } from '@nestjs/common';
 import { runInTenantContext } from '@bap/db';
-import type { InboxChannelKind, TenantContext } from '@bap/db';
+import type { BlobScanStatus, InboxChannelKind, TenantContext } from '@bap/db';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 import type { DatabasePool } from '@bap/db/pool';
@@ -72,12 +72,17 @@ export interface ReceiveIntakeInput extends EntityScopeSelector {
   // The credential display prefix that pushed the item; null for a manual upload.
   origin: string | null;
   originalFilename: string | null;
-  payloadKind: 'file' | 'structured';
+  // The email item a child was cut from; null for every item that arrived on its own.
+  parentItemId: string | null;
+  payloadKind: 'email' | 'file' | 'structured' | 'text';
   // Runs last inside the transaction: a failed move rolls every row back, an earlier failure never moves the bytes.
   persist: () => Promise<void>;
   quotaBytes: number;
+  // The parsed envelope sender a child inherits; null until the split has read the MIME.
+  sender: string | null;
   sha256: string;
-  sniff: ExtractionRecord;
+  // Null for an email: the worker scans and splits it, so the item stays received and nothing is classified yet.
+  sniff: ExtractionRecord | null;
   storageKey: string;
 }
 
@@ -85,6 +90,8 @@ export interface ReceiveIntakeResult {
   duplicateOfItemId: string | null;
   files: InboxItemFile[];
   item: InboxItem;
+  // True when the external id named an item that already existed and nothing was written.
+  replayed: boolean;
 }
 
 export interface ChannelSelector extends TenantContext {
@@ -101,6 +108,11 @@ export interface UpdateChannelInput extends ChannelSelector {
 
 export interface RevokeCredentialInput extends ChannelSelector {
   credentialId: string;
+}
+
+export interface IssueCredentialInput extends ChannelSelector {
+  // The platform intake domain an email address is issued under; unused for an API channel.
+  intakeDomain: string;
 }
 
 export interface UpdateHintsInput extends ReadItemInput {
@@ -139,6 +151,7 @@ export interface BlobRecord {
   id: string;
   mediaType: string;
   originalFilename: string | null;
+  scanStatus: BlobScanStatus;
   sha256: string;
   storageKey: string;
 }
@@ -178,6 +191,7 @@ interface ItemRow {
 
 interface ChannelRow {
   created_at: Date;
+  email_address: string | null;
   enabled: boolean;
   hint_kind: string | null;
   id: string;
@@ -285,7 +299,7 @@ function publicFile(file: ItemFileRecord): InboxItemFile {
 }
 
 // Every write path locks the row it is about to change, so two concurrent decisions on one item serialise.
-async function loadItem(
+export async function loadItem(
   transaction: PoolClient,
   itemId: string,
   legalEntityIds: readonly string[] | null,
@@ -402,7 +416,7 @@ async function loadDetail(
   };
 }
 
-async function appendEvent(
+export async function appendEvent(
   transaction: PoolClient,
   input: TenantContext,
   itemId: string,
@@ -425,7 +439,7 @@ async function appendEvent(
 }
 
 // One row per provider run; the item carries the latest verdict so the list can filter on it.
-async function insertExtraction(
+export async function insertExtraction(
   transaction: PoolClient,
   input: TenantContext,
   itemId: string,
@@ -467,153 +481,163 @@ export async function receiveIntake(
   pool: DatabasePool,
   input: ReceiveIntakeInput,
 ): Promise<ReceiveIntakeResult> {
-  return runInTenantContext(pool, input, async (transaction) => {
-    // One intake at a time per organization, so the quota sum, the replay and the duplicate lookup see every earlier row.
-    await transaction.query('select pg_advisory_xact_lock(hashtext($1))', [
-      input.organizationId,
-    ]);
+  return runInTenantContext(pool, input, (transaction) =>
+    receiveIntakeInTransaction(transaction, input),
+  );
+}
 
-    // A channel item inherits the entity and the kind hint of its channel; a disabled or foreign channel is not found.
-    // Checked before the replay, so a replay never answers through a disabled or deleted channel.
-    let legalEntityId: string | null = null;
-    let hintKind: string | null = null;
+// The split job creates children inside its own tenant transaction, so the intake core runs on a given client.
+export async function receiveIntakeInTransaction(
+  transaction: PoolClient,
+  input: ReceiveIntakeInput,
+): Promise<ReceiveIntakeResult> {
+  // One intake at a time per organization, so the quota sum, the replay and the duplicate lookup see every earlier row.
+  await transaction.query('select pg_advisory_xact_lock(hashtext($1))', [
+    input.organizationId,
+  ]);
 
-    if (input.channelId !== null) {
-      const channel = await transaction.query<{
-        hint_kind: string | null;
-        legal_entity_id: string | null;
-      }>(
-        `select legal_entity_id, hint_kind
+  // A channel item inherits the entity and the kind hint of its channel; a disabled or foreign channel is not found.
+  // Checked before the replay, so a replay never answers through a disabled or deleted channel.
+  let legalEntityId: string | null = null;
+  let hintKind: string | null = null;
+
+  if (input.channelId !== null) {
+    const channel = await transaction.query<{
+      hint_kind: string | null;
+      legal_entity_id: string | null;
+    }>(
+      `select legal_entity_id, hint_kind
            from app.inbox_channel
           where id = $1 and kind = $2 and enabled and deleted_at is null`,
-        [input.channelId, input.channelKind],
-      );
-      const row = channel.rows[0];
-
-      if (row === undefined) {
-        throw new NotFoundException();
-      }
-
-      legalEntityId = row.legal_entity_id;
-      hintKind = row.hint_kind;
-    }
-
-    // A replayed external id answers the item its channel already created and writes nothing.
-    if (input.externalId !== null && input.channelId !== null) {
-      const replayed = await transaction.query<{ id: string }>(
-        `select id from app.inbox_item
-          where organization_id = $1 and channel_id = $2 and external_id = $3`,
-        [input.organizationId, input.channelId, input.externalId],
-      );
-      const replayedId = replayed.rows[0]?.id;
-
-      if (replayedId !== undefined) {
-        const item = await loadItem(
-          transaction,
-          replayedId,
-          input.legalEntityIds,
-        );
-
-        if (item === null) {
-          throw new Error(
-            'The replayed item is not readable in its own scope.',
-          );
-        }
-
-        return {
-          duplicateOfItemId: item.duplicateOfItemId,
-          files: (await loadItemFiles(transaction, replayedId)).map(publicFile),
-          item,
-        };
-      }
-    }
-
-    const existing = await transaction.query<{ id: string }>(
-      'select id from app.blob where sha256 = $1',
-      [input.sha256],
+      [input.channelId, input.channelKind],
     );
-    let blobId = existing.rows[0]?.id ?? null;
-    let duplicateOfItemId: string | null = null;
+    const row = channel.rows[0];
 
-    if (blobId === null) {
-      const used = await transaction.query<{ total: string }>(
-        'select coalesce(sum(byte_size), 0)::text as total from app.blob',
+    if (row === undefined) {
+      throw new NotFoundException();
+    }
+
+    legalEntityId = row.legal_entity_id;
+    hintKind = row.hint_kind;
+  }
+
+  // A replayed external id answers the item its channel already created and writes nothing.
+  if (input.externalId !== null && input.channelId !== null) {
+    const replayed = await transaction.query<{ id: string }>(
+      `select id from app.inbox_item
+          where organization_id = $1 and channel_id = $2 and external_id = $3`,
+      [input.organizationId, input.channelId, input.externalId],
+    );
+    const replayedId = replayed.rows[0]?.id;
+
+    if (replayedId !== undefined) {
+      const item = await loadItem(
+        transaction,
+        replayedId,
+        input.legalEntityIds,
       );
 
-      if (
-        Number(used.rows[0]?.total ?? 0) + input.byteSize >
-        input.quotaBytes
-      ) {
-        throw new QuotaExceededError();
+      if (item === null) {
+        throw new Error('The replayed item is not readable in its own scope.');
       }
 
-      const created = await transaction.query<{ id: string }>(
-        `insert into app.blob
+      return {
+        duplicateOfItemId: item.duplicateOfItemId,
+        files: (await loadItemFiles(transaction, replayedId)).map(publicFile),
+        item,
+        replayed: true,
+      };
+    }
+  }
+
+  const existing = await transaction.query<{ id: string }>(
+    'select id from app.blob where sha256 = $1',
+    [input.sha256],
+  );
+  let blobId = existing.rows[0]?.id ?? null;
+  let duplicateOfItemId: string | null = null;
+
+  if (blobId === null) {
+    const used = await transaction.query<{ total: string }>(
+      'select coalesce(sum(byte_size), 0)::text as total from app.blob',
+    );
+
+    if (Number(used.rows[0]?.total ?? 0) + input.byteSize > input.quotaBytes) {
+      throw new QuotaExceededError();
+    }
+
+    const created = await transaction.query<{ id: string }>(
+      `insert into app.blob
            (organization_id, sha256, byte_size, media_type, storage_key, original_filename, created_by)
          values ($1, $2, $3, $4, $5, $6, $7)
          returning id`,
-        [
-          input.organizationId,
-          input.sha256,
-          input.byteSize,
-          input.mediaType,
-          input.storageKey,
-          input.originalFilename,
-          input.userId,
-        ],
-      );
-      blobId = created.rows[0]?.id ?? null;
-    } else {
-      // The earliest item that carries the blob is the one the duplicate points at.
-      const earliest = await transaction.query<{ id: string }>(
-        `select i.id
+      [
+        input.organizationId,
+        input.sha256,
+        input.byteSize,
+        input.mediaType,
+        input.storageKey,
+        input.originalFilename,
+        input.userId,
+      ],
+    );
+    blobId = created.rows[0]?.id ?? null;
+  } else {
+    // The earliest item that carries the blob is the one the duplicate points at.
+    const earliest = await transaction.query<{ id: string }>(
+      `select i.id
            from app.inbox_item as i
            join app.inbox_item_file as f on f.item_id = i.id
           where f.blob_id = $1
           order by i.received_at, i.id
           limit 1`,
-        [blobId],
-      );
-      duplicateOfItemId = earliest.rows[0]?.id ?? null;
-    }
+      [blobId],
+    );
+    duplicateOfItemId = earliest.rows[0]?.id ?? null;
+  }
 
-    if (blobId === null) {
-      throw new Error('The blob insert returned no row.');
-    }
+  if (blobId === null) {
+    throw new Error('The blob insert returned no row.');
+  }
 
-    const inserted = await transaction.query<{ id: string }>(
-      `insert into app.inbox_item
+  const inserted = await transaction.query<{ id: string }>(
+    `insert into app.inbox_item
          (organization_id, channel_kind, channel_id, payload_kind, status, duplicate_of_item_id,
-          legal_entity_id, hint_kind, origin, external_id, created_by)
-       values ($1, $2, $3, $4, 'received', $5, $6, $7, $8, $9, $10)
+          legal_entity_id, hint_kind, origin, external_id, parent_item_id, sender, created_by)
+       values ($1, $2, $3, $4, 'received', $5, $6, $7, $8, $9, $10, $11, $12)
        returning id`,
-      [
-        input.organizationId,
-        input.channelKind,
-        input.channelId,
-        input.payloadKind,
-        duplicateOfItemId,
-        legalEntityId,
-        hintKind,
-        input.origin,
-        input.externalId,
-        input.userId,
-      ],
-    );
-    const itemId = inserted.rows[0]?.id;
+    [
+      input.organizationId,
+      input.channelKind,
+      input.channelId,
+      input.payloadKind,
+      duplicateOfItemId,
+      legalEntityId,
+      hintKind,
+      input.origin,
+      input.externalId,
+      input.parentItemId,
+      input.sender,
+      input.userId,
+    ],
+  );
+  const itemId = inserted.rows[0]?.id;
 
-    if (itemId === undefined) {
-      throw new Error('The inbox item insert returned no row.');
-    }
+  if (itemId === undefined) {
+    throw new Error('The inbox item insert returned no row.');
+  }
 
-    await transaction.query(
-      `insert into app.inbox_item_file (item_id, organization_id, blob_id, position)
+  await transaction.query(
+    `insert into app.inbox_item_file (item_id, organization_id, blob_id, position)
        values ($1, $2, $3, 1)`,
-      [itemId, input.organizationId, blobId],
-    );
-    await appendEvent(transaction, input, itemId, 'received');
+    [itemId, input.organizationId, blobId],
+  );
+  await appendEvent(transaction, input, itemId, 'received');
 
-    const duplicate = existing.rows.length > 0;
+  const duplicate = existing.rows.length > 0;
+
+  // Without a sniff the item stays received for the worker; a duplicate is still discarded on the spot.
+  if (input.sniff !== null) {
     const sniff: ExtractionRecord = duplicate
       ? {
           ...input.sniff,
@@ -630,44 +654,47 @@ export async function receiveIntake(
         }
       : input.sniff;
     await insertExtraction(transaction, input, itemId, sniff);
+  }
+
+  if (input.sniff !== null || duplicate) {
     await transaction.query(
       `update app.inbox_item set status = $2, updated_at = now() where id = $1`,
       [itemId, duplicate ? 'discarded' : 'needs_review'],
     );
+  }
 
-    if (duplicate) {
-      await appendEvent(transaction, input, itemId, 'discarded', 'duplicate');
-    }
+  if (duplicate) {
+    await appendEvent(transaction, input, itemId, 'discarded', 'duplicate');
+  }
 
-    // Identifiers and kinds only: the audit log never carries the filename, the hash or the payload.
-    await transaction.query(
-      "select app.record_audit('inbox_item.received', 'inbox_item', $1, $2::jsonb)",
-      [
-        itemId,
-        JSON.stringify({
-          channelId: input.channelId,
-          channelKind: input.channelKind,
-          duplicate,
-          payloadKind: input.payloadKind,
-        }),
-      ],
-    );
+  // Identifiers and kinds only: the audit log never carries the filename, the hash or the payload.
+  await transaction.query(
+    "select app.record_audit('inbox_item.received', 'inbox_item', $1, $2::jsonb)",
+    [
+      itemId,
+      JSON.stringify({
+        channelId: input.channelId,
+        channelKind: input.channelKind,
+        duplicate,
+        payloadKind: input.payloadKind,
+      }),
+    ],
+  );
 
-    const item = await loadItem(transaction, itemId, input.legalEntityIds);
+  const item = await loadItem(transaction, itemId, input.legalEntityIds);
 
-    if (item === null) {
-      throw new Error('The received item is not readable in its own scope.');
-    }
+  if (item === null) {
+    throw new Error('The received item is not readable in its own scope.');
+  }
 
-    const files = (await loadItemFiles(transaction, itemId)).map(publicFile);
+  const files = (await loadItemFiles(transaction, itemId)).map(publicFile);
 
-    // The bytes move last: every earlier failure rolls back with the temporary file still in place.
-    if (!duplicate) {
-      await input.persist();
-    }
+  // The bytes move last: every earlier failure rolls back with the temporary file still in place.
+  if (!duplicate) {
+    await input.persist();
+  }
 
-    return { duplicateOfItemId, files, item };
-  });
+  return { duplicateOfItemId, files, item, replayed: false };
 }
 
 export class QuotaExceededError extends Error {
@@ -1157,10 +1184,12 @@ export async function readBlob(
       id: string;
       media_type: string;
       original_filename: string | null;
+      scan_status: BlobScanStatus;
       sha256: string;
       storage_key: string;
     }>(
-      `select b.id, b.sha256, b.byte_size::text as byte_size, b.media_type, b.original_filename, b.storage_key
+      `select b.id, b.sha256, b.byte_size::text as byte_size, b.media_type, b.original_filename, b.scan_status,
+              b.storage_key
          from app.blob as b
         where b.id = $2
           and exists (
@@ -1180,6 +1209,7 @@ export async function readBlob(
           id: row.id,
           mediaType: row.media_type,
           originalFilename: row.original_filename,
+          scanStatus: row.scan_status,
           sha256: row.sha256,
           storageKey: row.storage_key,
         };
@@ -1204,7 +1234,8 @@ export async function readChannelPrincipal(
   );
 }
 
-const CHANNEL_COLUMNS = `c.id, c.kind, c.name, c.enabled, c.legal_entity_id, c.hint_kind, c.created_at, c.updated_at,
+const CHANNEL_COLUMNS = `c.id, c.kind, c.name, c.enabled, c.email_address, c.legal_entity_id, c.hint_kind, c.created_at,
+          c.updated_at,
           (select count(*)::int from app.inbox_item as i where i.channel_id = c.id) as item_count`;
 
 async function loadCredentials(
@@ -1232,6 +1263,7 @@ async function toChannel(
   return {
     createdAt: row.created_at.toISOString(),
     credentials: await loadCredentials(transaction, row.id),
+    emailAddress: row.email_address,
     enabled: row.enabled,
     hintKind: row.hint_kind,
     id: row.id,
@@ -1412,19 +1444,32 @@ export async function updateChannel(
   });
 }
 
-// The definer decides everything: owner role, organization, the two-credential limit. Its errors map in the service.
+// The definer decides everything: owner role, organization, the per-kind active limit. Its errors map in the service.
+// The credential kind follows the channel kind; an email channel is issued its address under the intake domain.
 export async function issueCredential(
   pool: DatabasePool,
-  input: ChannelSelector,
+  input: IssueCredentialInput,
 ): Promise<IssueInboxChannelCredentialResponse> {
   return runInTenantContext(pool, input, async (transaction) => {
+    const channel = await transaction.query<{ kind: string }>(
+      'select kind from app.inbox_channel where id = $1 and deleted_at is null',
+      [input.channelId],
+    );
+    const kind = channel.rows[0]?.kind;
+
+    if (kind === undefined) {
+      throw new NotFoundException();
+    }
+
     const issued = await transaction.query<{
       credential_id: string;
       display_prefix: string;
       secret: string;
     }>(
-      "select credential_id, secret, display_prefix from auth.issue_channel_credential($1, 'api_token')",
-      [input.channelId],
+      'select credential_id, secret, display_prefix from auth.issue_channel_credential($1, $2, $3)',
+      kind === 'email'
+        ? [input.channelId, 'email_address', input.intakeDomain]
+        : [input.channelId, 'api_token', null],
     );
     const row = issued.rows[0];
 
@@ -1488,7 +1533,7 @@ export abstract class InboxRepository implements ChannelPrincipalReader {
     input: DiscardItemInput,
   ): Promise<InboxItemDetail | null>;
   abstract issueCredential(
-    input: ChannelSelector,
+    input: IssueCredentialInput,
   ): Promise<IssueInboxChannelCredentialResponse>;
   abstract listChannels(input: TenantContext): Promise<InboxChannel[]>;
   abstract listItems(input: ListItemsInput): Promise<InboxItemListResponse>;
@@ -1543,7 +1588,7 @@ export class DatabaseInboxRepository
   }
 
   async issueCredential(
-    input: ChannelSelector,
+    input: IssueCredentialInput,
   ): Promise<IssueInboxChannelCredentialResponse> {
     return issueCredential(await this.getPool(), input);
   }

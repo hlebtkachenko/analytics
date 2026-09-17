@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 
 import {
+  ConflictException,
   NotFoundException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
@@ -59,6 +60,7 @@ const BLOB_ID = '9f702163-4eac-4b8f-9076-b34ec2af9184';
 const PDF_BLOB_ID = 'a0813274-5fbd-4c90-a187-c45fd3b0a295';
 const UNKNOWN_BLOB_ID = 'b1924385-60ce-4da1-b298-d560e4c1b3a6';
 const PNG_BLOB_ID = 'c2a35496-71df-4eb2-8309-e671f5d2c4b7';
+const QUARANTINED_BLOB_ID = 'd3b46507-82e0-4fc3-9410-f782a6e3d5c8';
 const SHA256 = 'c'.repeat(64);
 
 const item: InboxItem = {
@@ -198,6 +200,9 @@ describe('application inbox routes', () => {
         if (input.blobId === UNKNOWN_BLOB_ID) {
           throw new NotFoundException();
         }
+        if (input.blobId === QUARANTINED_BLOB_ID) {
+          throw new ConflictException('blob_quarantined');
+        }
         const pdf = input.blobId === PDF_BLOB_ID;
         const png = input.blobId === PNG_BLOB_ID;
         if (input.inline && !pdf && !png) {
@@ -207,6 +212,7 @@ describe('application inbox routes', () => {
           blob: {
             byteSize: 17,
             id: input.blobId,
+            scanStatus: 'not_scanned' as const,
             mediaType: pdf
               ? 'application/pdf'
               : png
@@ -534,6 +540,18 @@ describe('application inbox routes', () => {
     await authorized('get', `/inbox/blobs/${UNKNOWN_BLOB_ID}/download`).expect(
       404,
     );
+
+    // A quarantined blob answers 409 with its code on both blob routes.
+    for (const route of ['download', 'inline']) {
+      const quarantined = await authorized(
+        'get',
+        `/inbox/blobs/${QUARANTINED_BLOB_ID}/${route}`,
+      ).expect(409);
+      expect(quarantined.body).toMatchObject({
+        code: 'blob_quarantined',
+        status: 409,
+      });
+    }
   });
 
   it('renders an image inline under a sandbox policy, a PDF without it, and refuses any other type', async () => {

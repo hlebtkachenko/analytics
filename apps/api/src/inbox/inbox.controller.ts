@@ -479,6 +479,9 @@ export class InboxController {
   @ApiUnauthorizedResponse(unauthorized)
   @ApiForbiddenResponse(forbidden)
   @ApiNotFoundResponse({ description: 'The blob is not visible' })
+  @ApiConflictResponse({
+    description: 'The blob is quarantined: infected or not scannable',
+  })
   async downloadBlob(
     @Param('organizationId', { schema: organizationIdentifierSchema })
     organizationId: string,
@@ -506,6 +509,9 @@ export class InboxController {
   @ApiUnauthorizedResponse(unauthorized)
   @ApiForbiddenResponse(forbidden)
   @ApiNotFoundResponse({ description: 'The blob is not visible' })
+  @ApiConflictResponse({
+    description: 'The blob is quarantined: infected or not scannable',
+  })
   @ApiUnsupportedMediaTypeResponse({
     description: 'Only PDF, PNG, JPEG and WebP render inline',
   })

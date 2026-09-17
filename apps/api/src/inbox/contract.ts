@@ -69,6 +69,9 @@ export const INLINE_MEDIA_TYPES = [
   'image/webp',
 ] as const;
 
+// The stored media type of a raw email blob; the route requires it and the store never sniffs it.
+export const EMAIL_MEDIA_TYPE = 'message/rfc822';
+
 export const TOKEN_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 export const MEDIA_TYPE_PATTERN =
   /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/;
@@ -88,6 +91,24 @@ export const credentialIdentifierSchema = z
   .uuid();
 // The caller's own idempotency key: one item per (organization, channel, external id).
 export const externalIdSchema = z.string().trim().min(1).max(255);
+// The Mailgun token of the email route: an opaque provider id, never a Message-Id.
+export const emailExternalIdSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z0-9._-]+$/);
+// The envelope sender as the provider reported it; validated at the boundary, stored only from the parsed MIME.
+export const emailSenderHeaderSchema = z
+  .string()
+  .min(1)
+  .max(320)
+  .regex(/^[\x20-\x7e]+$/);
+// An issued intake address: the hex token local part and the platform intake domain.
+export const intakeEmailAddressSchema = z
+  .string()
+  .regex(
+    /^in-[0-9a-f]{32}@[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/,
+  );
 export const tokenSchema = z.string().regex(TOKEN_PATTERN);
 export const inboxItemStatusSchema = z.enum(INBOX_ITEM_STATUSES);
 export const inboxEventKindSchema = z.enum(INBOX_EVENT_KINDS);
@@ -437,6 +458,8 @@ export const inboxChannelSchema = z
   .object({
     createdAt: z.iso.datetime(),
     credentials: z.array(inboxChannelCredentialSchema),
+    // The active intake address of an email channel, stored plain by ADR 0016; null for every other channel.
+    emailAddress: intakeEmailAddressSchema.nullable(),
     enabled: z.boolean(),
     hintKind: tokenSchema.nullable(),
     id: inboxChannelIdentifierSchema,
@@ -458,11 +481,11 @@ export type InboxChannelListResponse = z.infer<
   typeof inboxChannelListResponseSchema
 >;
 
-// Only an API channel can be created in Phase 1a; email channels arrive with the Mailgun webhook.
+// The kinds with a principal of their own; an email channel gets its address through the credential route.
 export const createInboxChannelRequestSchema = z
   .object({
     hintKind: tokenSchema.optional(),
-    kind: z.literal('api'),
+    kind: z.enum(inboxChannelKindsForChannels),
     legalEntityId: legalEntityIdentifierSchema.optional(),
     name: inboxChannelNameSchema,
   })
@@ -494,18 +517,35 @@ export type UpdateInboxChannelRequest = z.infer<
   typeof updateInboxChannelRequestSchema
 >;
 
-// The plain secret crosses this boundary exactly once.
+export const intakeTokenSchema = z
+  .string()
+  .regex(/^bap_intake_[A-Za-z0-9_-]{43}$/);
+
+// The plain secret crosses this boundary exactly once: an API token, or the intake address of an email channel.
 export const issueInboxChannelCredentialResponseSchema = z
   .object({
     credentialId: credentialIdentifierSchema,
     displayPrefix: z.string().length(8),
-    secret: z.string().regex(/^bap_intake_[A-Za-z0-9_-]{43}$/),
+    secret: z.union([intakeTokenSchema, intakeEmailAddressSchema]),
   })
   .strict();
 
 export type IssueInboxChannelCredentialResponse = z.infer<
   typeof issueInboxChannelCredentialResponseSchema
 >;
+
+// The worker job that scans and splits an email item; identifiers only, because pgboss.job is cross-tenant readable.
+export const SPLIT_EMAIL_ITEM_QUEUE = 'split_email_item';
+
+export const splitEmailItemJobSchema = z
+  .object({
+    channelId: inboxChannelIdentifierSchema,
+    itemId: inboxItemIdentifierSchema,
+    organizationId: z.string().trim().min(1),
+  })
+  .strict();
+
+export type SplitEmailItemJob = z.infer<typeof splitEmailItemJobSchema>;
 
 // A display filename for Content-Disposition: ASCII only, no quote, no separator, no control character.
 export function contentDispositionFilename(
@@ -812,6 +852,12 @@ export const fileIntakeBodyOpenApiSchema = {
   type: 'object',
 };
 
+export const emailIntakeBodyOpenApiSchema = {
+  description: 'The raw MIME message as received from the provider',
+  format: 'binary',
+  type: 'string',
+};
+
 export const inboxIntakeResponseOpenApiSchema = {
   additionalProperties: false,
   properties: {
@@ -842,6 +888,7 @@ export const inboxChannelOpenApiSchema = {
   properties: {
     createdAt: dateTimeProperty,
     credentials: { items: inboxChannelCredentialOpenApiSchema, type: 'array' },
+    emailAddress: nullable({ maxLength: 320, minLength: 1, type: 'string' }),
     enabled: { type: 'boolean' },
     hintKind: nullable(tokenProperty),
     id: uuidProperty,
@@ -854,6 +901,7 @@ export const inboxChannelOpenApiSchema = {
   required: [
     'createdAt',
     'credentials',
+    'emailAddress',
     'enabled',
     'hintKind',
     'id',
@@ -879,7 +927,7 @@ export const createInboxChannelBodyOpenApiSchema = {
   additionalProperties: false,
   properties: {
     hintKind: tokenProperty,
-    kind: { enum: ['api'], type: 'string' },
+    kind: { enum: [...inboxChannelKindsForChannels], type: 'string' },
     legalEntityId: uuidProperty,
     name: channelNameProperty,
   },
@@ -905,7 +953,7 @@ export const issueInboxChannelCredentialResponseOpenApiSchema = {
   properties: {
     credentialId: uuidProperty,
     displayPrefix: { maxLength: 8, minLength: 8, type: 'string' },
-    secret: { pattern: '^bap_intake_[A-Za-z0-9_-]{43}$', type: 'string' },
+    secret: { maxLength: 320, minLength: 1, type: 'string' },
   },
   required: ['credentialId', 'displayPrefix', 'secret'],
   type: 'object',
