@@ -114,6 +114,12 @@ const reviewedCallsites = [
     'Upload',
     "{t('access.uploadData')}",
   ],
+  [
+    'app/(product)/account/access/page.tsx',
+    'Button',
+    'AiGenerate',
+    "{t('access.useAi')}",
+  ],
   ['app/(product)/datasets/page.tsx', 'Button', 'View', "{t('datasets.open')}"],
   [
     'app/(product)/datasets/page.tsx',
@@ -502,16 +508,6 @@ describe('Carbon application icon AST contract', () => {
     );
 
     expect(actualCallsites).toEqual([
-      {
-        attributes: {
-          'aria-hidden': 'true',
-          focusable: 'false',
-          size: '{20}',
-        },
-        file: 'app/(product)/account/access/page.tsx',
-        icon: 'AiGenerate',
-        selfClosing: true,
-      },
       {
         attributes: {
           'aria-hidden': 'true',

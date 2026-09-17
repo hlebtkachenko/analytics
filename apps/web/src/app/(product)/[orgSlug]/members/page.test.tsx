@@ -396,6 +396,19 @@ describe('OrganizationMembersPage', () => {
     expect(mocks.readMemberEntityScopes).not.toHaveBeenCalled();
   });
 
+  it('shows entity access as unavailable when the scope editor is withheld', async () => {
+    mocks.readOrganizationAccess.mockResolvedValue(accessFor('member'));
+
+    await renderPage();
+
+    expect(
+      within(rowFor('Ben Member')).getByText('Entity access is unavailable.'),
+    ).toBeVisible();
+    expect(
+      within(rowFor('Ada Owner')).getByText('Entity access is unavailable.'),
+    ).toBeVisible();
+  });
+
   it('reports a failed load with a notification', async () => {
     mocks.listMembers.mockRejectedValue(new Error('private provider detail'));
 

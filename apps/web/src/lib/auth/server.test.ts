@@ -744,6 +744,30 @@ describe('organization creation policy', () => {
     });
   });
 
+  it('passes an update through when its data carries no slug', async () => {
+    const hook = createAuthBeforeHook(poolWithQuery(vi.fn()));
+
+    await expect(
+      hook({
+        body: { data: { name: 'Example' }, organizationId: 'organization-1' },
+        path: '/organization/update',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('rejects an update with a valid slug but no explicit organization id', async () => {
+    const hook = createAuthBeforeHook(poolWithQuery(vi.fn()));
+
+    await expect(
+      hook({
+        body: { data: { slug: 'example-org' } },
+        path: '/organization/update',
+      }),
+    ).rejects.toMatchObject({
+      body: { code: organizationIdRequiredErrorCode },
+    });
+  });
+
   it('injects the authenticated creator and overwrites forged hook data', async () => {
     await expect(
       beforeCreateOrganization({
