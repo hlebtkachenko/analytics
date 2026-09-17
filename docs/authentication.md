@@ -158,10 +158,11 @@ into, the entities named there.
 
 Subordinate routes expose semantic breadcrumbs. Permanent Carbon content uses
 Carbon breadcrumbs, including `Datasets > {dataset name}` for an inline dataset
-view. The four temporary `[orgSlug]` page modules keep plain native breadcrumbs,
-their exact throwaway markers, and zero CSS, design-system, or icon imports. The
-`/organizations` list and create pages are Carbon; permanent Carbon `[orgSlug]`
-and account content remains future work.
+view. The three temporary `[orgSlug]` page modules keep plain native
+breadcrumbs, their exact throwaway markers, and zero CSS, design-system, or icon
+imports. The `/organizations` list and create pages and the
+`/[orgSlug]/entities` page are Carbon; the remaining Carbon `[orgSlug]` and
+account content is future work.
 
 ## Admin HTTP inventory
 
@@ -550,13 +551,14 @@ segment in the same pull request.
 
 ## Temporary organization pages
 
-The 4 temporary `[orgSlug]` pages, now including `/[orgSlug]/entities`, are an
-intentionally throwaway, unstyled browser loop. They use semantic headings,
-navigation, labels, native controls, lists, and progressive-enhancement
-server-action forms, with no page CSS, design-system, or icon imports. Each
-subordinate page uses a plain native breadcrumb. Their exact throwaway markers
-remain enforced, and permanent Carbon page content is future work even though
-the shared root shell surrounds authenticated routes.
+The 3 temporary `[orgSlug]` pages are an intentionally throwaway, unstyled
+browser loop. They use semantic headings, navigation, labels, native controls,
+lists, and progressive-enhancement server-action forms, with no page CSS,
+design-system, or icon imports. Each subordinate page uses a plain native
+breadcrumb. Their exact throwaway markers remain enforced, and permanent Carbon
+page content is future work even though the shared root shell surrounds
+authenticated routes. The `/[orgSlug]/entities` page has left this loop and is
+now a Carbon page that mutates by client fetch.
 
 The `/organizations` list and `/organizations/new` create pages are now Carbon
 pages inside `PageContainer`. The list reads the caller's workspaces with their

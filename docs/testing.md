@@ -60,7 +60,7 @@ artboards. A separate TypeScript compiler AST contract parses the actual
 production TSX, rejects direct application imports from `@carbon/icons-react`,
 and pins the reviewed Carbon control-icon callsites plus the direct decorative
 status icons, facade imports, visible labels, and absence of icon-only controls.
-The AST coverage also protects the four temporary pages' exact throwaway marker
+The AST coverage also protects the three temporary pages' exact throwaway marker
 and zero CSS/design-system/icon boundary. That source-level guard scopes the
 temporary page modules, not the product shell layout under `app/(product)` that
 surrounds authenticated routes. Committed production Playwright coverage

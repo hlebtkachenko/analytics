@@ -37,6 +37,17 @@ let memberContext: BrowserContext | undefined;
 
 const datasetsPathname = `/api/bff/application/organizations/${organizationId}/datasets`;
 
+// The page must never force horizontal scroll, even at the narrowest viewport.
+async function expectNoDocumentOverflow(page: Page): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    )
+    .toBe(true);
+}
+
 async function signInContext(
   browser: Browser,
   email: string,
@@ -108,10 +119,27 @@ async function useSignedInPage(
   }
 }
 
-function entityParagraph(page: Page, name: string) {
-  return page
-    .getByRole('listitem')
-    .filter({ has: page.getByRole('form', { name: `Edit ${name}` }) });
+// A legal entity is a DataGrid row identified by its unique name.
+function entityRow(page: Page, name: string): Locator {
+  return page.getByRole('row').filter({ hasText: name });
+}
+
+// Drives the Carbon create modal end to end and waits for the success toast.
+async function createLegalEntity(
+  page: Page,
+  values: Readonly<{ kind: string; name: string; registration?: string }>,
+): Promise<void> {
+  await page.getByRole('button', { name: 'Add legal entity' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add legal entity' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Name').fill(values.name);
+  await dialog.getByLabel('Kind').selectOption(values.kind);
+  if (values.registration !== undefined) {
+    await dialog.getByLabel('Registration number').fill(values.registration);
+  }
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('The legal entity was created.')).toBeVisible();
+  await expect(dialog).toBeHidden();
 }
 
 test.afterAll(async () => {
@@ -131,43 +159,44 @@ test.describe.serial('workspace legal entities and entity scope', () => {
     await expect(
       page.getByRole('heading', { name: 'BAP Operational legal entities' }),
     ).toBeVisible();
+
+    await createLegalEntity(page, {
+      kind: 'company',
+      name: companyName,
+      registration: companyRegistration,
+    });
+    const companyRow = entityRow(page, companyName);
     await expect(
-      page.getByText('Your entity scope: All entities'),
+      companyRow.getByRole('cell', { exact: true, name: companyName }),
+    ).toBeVisible();
+    await expect(
+      companyRow.getByRole('cell', { exact: true, name: 'Company' }),
+    ).toBeVisible();
+    await expect(
+      companyRow.getByRole('cell', { exact: true, name: companyRegistration }),
     ).toBeVisible();
 
-    const create = page.getByRole('form', { name: 'Add legal entity' });
-    await create.getByLabel('Name').fill(companyName);
-    await create.getByLabel('Kind').selectOption('company');
-    await create.getByLabel('Registration number').fill(companyRegistration);
-    await create.getByRole('button', { name: 'Add entity' }).click();
-    await expect(page).toHaveURL(
-      new RegExp(`/${organizationSlug}/entities\\?result=success$`),
-    );
+    await createLegalEntity(page, {
+      kind: 'sole_trader',
+      name: soleTraderName,
+    });
+    const soleTraderRow = entityRow(page, soleTraderName);
     await expect(
-      page.getByText(`${companyName}, Company, ${companyRegistration}`),
+      soleTraderRow.getByRole('cell', { exact: true, name: soleTraderName }),
+    ).toBeVisible();
+    await expect(
+      soleTraderRow.getByRole('cell', { exact: true, name: 'Sole trader' }),
     ).toBeVisible();
 
-    await page
-      .getByRole('form', { name: 'Add legal entity' })
-      .getByLabel('Name')
-      .fill(soleTraderName);
-    await page
-      .getByRole('form', { name: 'Add legal entity' })
-      .getByLabel('Kind')
-      .selectOption('sole_trader');
-    await page
-      .getByRole('form', { name: 'Add legal entity' })
-      .getByRole('button', { name: 'Add entity' })
-      .click();
-    await expect(page).toHaveURL(
-      new RegExp(`/${organizationSlug}/entities\\?result=success$`),
-    );
-    await expect(
-      page.getByText(`${soleTraderName}, Sole trader, no registration number`),
-    ).toBeVisible();
-    await expect(
-      page.getByRole('form', { name: `Delete ${companyName}` }),
-    ).toBeVisible();
+    // The owner is offered the delete control in the row overflow menu.
+    await companyRow.getByRole('button', { name: 'Options' }).click();
+    await expect(page.getByRole('menuitem', { name: 'Delete' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expectNoAccessibilityViolations(page);
+
+    // The populated entities grid must stay within a 320px viewport.
+    await page.setViewportSize({ height: 720, width: 320 });
+    await expectNoDocumentOverflow(page);
     await expectNoAccessibilityViolations(page);
   });
 
@@ -209,25 +238,27 @@ test.describe.serial('workspace legal entities and entity scope', () => {
     await useSignedInPage(browser, adminEmail, async (page) => {
       await page.goto(`/${organizationSlug}/entities`);
       await expect(
-        page.getByText('Your entity scope: All entities'),
+        page.getByRole('button', { name: 'Add legal entity' }),
       ).toBeVisible();
-      const create = page.getByRole('form', { name: 'Add legal entity' });
-      await expect(create).toBeVisible();
-      await create.getByLabel('Name').fill(adminEntityName);
-      await create.getByLabel('Kind').selectOption('company');
-      await create.getByRole('button', { name: 'Add entity' }).click();
-      await expect(page).toHaveURL(
-        new RegExp(`/${organizationSlug}/entities\\?result=success$`),
+      await createLegalEntity(page, {
+        kind: 'company',
+        name: adminEntityName,
+      });
+      const row = entityRow(page, adminEntityName);
+      await expect(
+        row.getByRole('cell', { exact: true, name: adminEntityName }),
+      ).toBeVisible();
+      await expect(
+        row.getByRole('cell', { exact: true, name: 'Company' }),
+      ).toBeVisible();
+
+      // The admin may edit but is offered no delete control.
+      await row.getByRole('button', { name: 'Options' }).click();
+      await expect(page.getByRole('menuitem', { name: 'Edit' })).toBeVisible();
+      await expect(page.getByRole('menuitem', { name: 'Delete' })).toHaveCount(
+        0,
       );
-      await expect(
-        page.getByText(`${adminEntityName}, Company, no registration number`),
-      ).toBeVisible();
-      await expect(
-        page.getByRole('form', { name: `Edit ${adminEntityName}` }),
-      ).toBeVisible();
-      await expect(
-        page.getByRole('button', { name: 'Delete entity' }),
-      ).toHaveCount(0);
+      await page.keyboard.press('Escape');
       await expectNoAccessibilityViolations(page);
     });
   });
@@ -367,16 +398,19 @@ test.describe.serial('workspace legal entities and entity scope', () => {
     test.skip(password.length === 0, 'BAP_OPERATIONAL_PASSWORD is required.');
 
     await page.goto(`/${organizationSlug}/entities`);
-    await expect(entityParagraph(page, adminEntityName)).toHaveCount(1);
-    await page
-      .getByRole('form', { name: `Delete ${adminEntityName}` })
-      .getByRole('button', { name: 'Delete entity' })
+    await expect(entityRow(page, adminEntityName)).toHaveCount(1);
+    await entityRow(page, adminEntityName)
+      .getByRole('button', { name: 'Options' })
       .click();
-    await expect(page).toHaveURL(
-      new RegExp(`/${organizationSlug}/entities\\?result=success$`),
-    );
-    await expect(entityParagraph(page, adminEntityName)).toHaveCount(0);
-    await expect(entityParagraph(page, companyName)).toHaveCount(1);
-    await expect(entityParagraph(page, soleTraderName)).toHaveCount(1);
+    await page.getByRole('menuitem', { name: 'Delete' }).click();
+    const dialog = page.getByRole('dialog', {
+      name: `Delete ${adminEntityName}`,
+    });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Delete legal entity' }).click();
+    await expect(page.getByText('The legal entity was deleted.')).toBeVisible();
+    await expect(entityRow(page, adminEntityName)).toHaveCount(0);
+    await expect(entityRow(page, companyName)).toHaveCount(1);
+    await expect(entityRow(page, soleTraderName)).toHaveCount(1);
   });
 });

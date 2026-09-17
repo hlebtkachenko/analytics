@@ -3,13 +3,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  createLegalEntity,
   readLegalEntities,
   readMemberEntityScope,
   readMemberEntityScopes,
   readOrganizationAccess,
-  removeLegalEntity,
-  updateLegalEntity,
   writeMemberEntityScope,
 } from './entities';
 
@@ -166,43 +163,28 @@ describe('server-side legal entity reads and writes', () => {
     await expect(readMemberEntityScopes('organization-1')).resolves.toBeNull();
   });
 
-  it('sends every write as JSON and reports a refusal as false', async () => {
+  it('sends a member scope write as JSON and reports a refusal as false', async () => {
     const fetchMock = vi.fn(async (_input: string, init: RequestInit) =>
-      init.method === 'DELETE'
-        ? new Response(null, { status: 204 })
-        : Response.json(legalEntity, {
-            status: init.method === 'POST' ? 201 : 200,
-          }),
+      init.method === 'PUT'
+        ? Response.json(
+            { legalEntityIds: [LEGAL_ENTITY_ID], mode: 'restricted' },
+            { status: 200 },
+          )
+        : new Response(null, { status: 400 }),
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const created = await createLegalEntity('organization-1', {
-      kind: 'company',
-      name: 'Placeholder Holding',
-    });
-    const updated = await updateLegalEntity('organization-1', LEGAL_ENTITY_ID, {
-      name: 'Renamed Holding',
-    });
-    const removed = await removeLegalEntity('organization-1', LEGAL_ENTITY_ID);
-
-    expect([created, updated, removed]).toEqual([true, true, true]);
-    expect(fetchMock.mock.calls.map((call) => call[1].method)).toEqual([
-      'POST',
-      'PATCH',
-      'DELETE',
-    ]);
-    expect(fetchMock.mock.calls[0]?.[1].body).toBe(
-      JSON.stringify({ kind: 'company', name: 'Placeholder Holding' }),
-    );
-
-    const cleared = await updateLegalEntity('organization-1', LEGAL_ENTITY_ID, {
-      registrationNumber: null,
+    const written = await writeMemberEntityScope('organization-1', 'user-2', {
+      legalEntityIds: [LEGAL_ENTITY_ID],
+      mode: 'restricted',
     });
 
-    expect(cleared).toBe(true);
-    expect(fetchMock.mock.calls[3]?.[1].body).toBe(
-      JSON.stringify({ registrationNumber: null }),
-    );
+    expect(written).toBe(true);
+    expect(fetchMock.mock.calls[0]?.[1].method).toBe('PUT');
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1].body))).toEqual({
+      legalEntityIds: [LEGAL_ENTITY_ID],
+      mode: 'restricted',
+    });
 
     vi.stubGlobal(
       'fetch',

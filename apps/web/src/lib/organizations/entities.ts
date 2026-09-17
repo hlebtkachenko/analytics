@@ -2,7 +2,6 @@ import { headers } from 'next/headers';
 
 import {
   accessResponseSchema,
-  deleteLegalEntity,
   entityScopeSchema,
   getLegalEntities,
   getMemberEntityScope,
@@ -10,8 +9,6 @@ import {
   getOrganizationAccess,
   legalEntityListSchema,
   memberEntityScopeListSchema,
-  patchLegalEntity,
-  postLegalEntity,
   putMemberEntityScope,
 } from '../auth/bff';
 import type { EntityScope, LegalEntity, OrganizationAccess } from '../auth/bff';
@@ -20,18 +17,10 @@ import {
   accessPath,
   entityScopesPath,
   legalEntitiesPath,
-  legalEntityPath,
   memberEntityScopePath,
 } from '../datasets/client';
 
 export type { EntityScope, LegalEntity, OrganizationAccess };
-
-// A null registration number clears the stored one, which only an update may ask for.
-export type LegalEntityInput = Readonly<{
-  kind?: 'company' | 'sole_trader' | undefined;
-  name?: string | undefined;
-  registrationNumber?: string | null | undefined;
-}>;
 
 // Never dialled: the synthetic request only carries the caller's session to the BFF helpers.
 const serverRequestOrigin = 'http://web.internal';
@@ -144,51 +133,6 @@ export async function readMemberEntityScopes(
         parsed.data.entityScopes.map((row) => [row.userId, row.entityScope]),
       )
     : null;
-}
-
-export async function createLegalEntity(
-  organizationId: string,
-  body: LegalEntityInput,
-): Promise<boolean> {
-  const path = legalEntitiesPath(organizationId);
-  const response = await postLegalEntity(
-    await authApi(),
-    await serverBffRequest(path, { body, method: 'POST' }),
-    organizationId,
-  );
-
-  return response.ok;
-}
-
-export async function updateLegalEntity(
-  organizationId: string,
-  legalEntityId: string,
-  body: LegalEntityInput,
-): Promise<boolean> {
-  const path = legalEntityPath(organizationId, legalEntityId);
-  const response = await patchLegalEntity(
-    await authApi(),
-    await serverBffRequest(path, { body, method: 'PATCH' }),
-    organizationId,
-    legalEntityId,
-  );
-
-  return response.ok;
-}
-
-export async function removeLegalEntity(
-  organizationId: string,
-  legalEntityId: string,
-): Promise<boolean> {
-  const path = legalEntityPath(organizationId, legalEntityId);
-  const response = await deleteLegalEntity(
-    await authApi(),
-    await serverBffRequest(path, { method: 'DELETE' }),
-    organizationId,
-    legalEntityId,
-  );
-
-  return response.ok;
 }
 
 export async function writeMemberEntityScope(
