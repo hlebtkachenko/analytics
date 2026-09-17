@@ -157,10 +157,10 @@ B": one row per organization per `detected_type`, with destination module
 (`documents`, `datasets`, `partners`, `discard`), destination kind, default
 legal entity or "resolve by IČO", partner policy (`match_only`,
 `upsert_from_ares`), auto policy (`never`, `above_threshold`, `always`),
-threshold, default assignee, and the fields required before routing. Every
-organization is seeded with platform defaults and edits them in settings.
-`app.inbox_rule` adds conditional overrides (sender, channel, keyword, amount)
-on top of targets.
+threshold, default assignee, and the fields required before routing. The
+platform default applies to a type until the organization saves its own row in
+settings. `app.inbox_rule` adds conditional overrides (sender, channel, keyword,
+amount) on top of targets.
 
 Precedence, documented and shown in the UI:
 
@@ -309,7 +309,7 @@ Two layers, never a second document:
 A re-issued invoice with the same number hits `document_current_reference_key`.
 The version chain (`version`, `supersedes_document_id`, `is_current`) exists in
 the schema but no route sets it (ADR 0012). The Inbox is the first feature that
-needs it; the versioning route is Phase 1.
+needs it; the versioning route is Phase 1b-actions.
 
 ## Issue taxonomy and the agentic loop
 
@@ -398,44 +398,61 @@ in PostgreSQL.
 
 ## Phasing
 
-- Phase 0, foundation: ADR 0014 and ADR 0015; `blob`, `inbox_item`,
-  `inbox_item_file`, `inbox_item_extraction`, `inbox_event`; `document_file` and
-  `inbox_item_id` on documents; manual multi-file upload of any type, one
-  request per file; `sniff` and `manual` providers; hints; exact-hash
-  duplicates; Register as document with a prefilled form; blob download route;
-  `/inbox` page, rail entry, reserved slug. No channels table, no rules, no
-  ClamAV. Spec:
+Phase 1b is the core: everything manual and automatic that needs no external
+connector. After 1b the phase plan stops; every connector and every setup
+feature is one small PR on the connections and setup track, added one by one
+after the core is live.
+
+- Phase 0, foundation, delivered (PR #56): ADR 0014 and ADR 0015; `blob`,
+  `inbox_item`, `inbox_item_file`, `inbox_item_extraction`, `inbox_event`;
+  `document_file` and `inbox_item_id` on documents; manual multi-file upload;
+  `sniff` and `manual` providers; hints; exact-hash duplicates; Register as
+  document with a prefilled form; blob routes; `/inbox` page, rail entry,
+  reserved slug. Spec:
   [inbox foundation](../../.ai/specs/2026-09-16-inbox-foundation.md).
-- Phase 1a, channels, in delivery (branch `inbox-phase-1a`): ADR 0016; the
-  channel principal, `inbox_channel` and the intake API credential table with
-  its definer functions; `resolveChannelAccess` and `receiveIntake`; the channel
-  items route under a channel token; channel CRUD and credential issue and
-  revoke for owners; the public intake route with the edge IP bucket; channel
-  settings page for API channels; the sniff stays synchronous as in Phase 0.
-  Spec: [inbox channels](../../.ai/specs/2026-09-17-inbox-channels.md).
-- Phase 1a-email, in delivery (branch `inbox-phase-1a-email`), stacked on 1a:
-  the Mailgun webhook `POST /api/inbound/mailgun/mime` bound by the recipient
-  token only, the `email_address` credential kind issuing
-  `in-<token>@<intake domain>`, the API email route storing the `.eml` at
-  position 1, the `split_email_item` job with the channel job payload union,
-  ClamAV (`clamd` on its own `scan` network, `freshclam` on egress) and
-  `app.record_blob_scan`, `inbox_item.sender`, email channels in the settings
-  page, the Caddy cap for the inbound path. Spec:
+- Phase 1a, channels, delivered (PR #65): ADR 0016; the channel principal,
+  `inbox_channel` and the credential table with its definer functions;
+  `resolveChannelAccess` and `receiveIntake`; the channel items route; channel
+  CRUD and credentials for owners; the public intake route with the edge IP
+  bucket; channel settings page for API channels. Spec:
+  [inbox channels](../../.ai/specs/2026-09-17-inbox-channels.md).
+- Phase 1a-email, delivered (PR #67), stacked on 1a: the Mailgun webhook bound
+  by the recipient token, the `email_address` credential kind, the API email
+  route, the `split_email_item` job, ClamAV and `app.record_blob_scan`,
+  `inbox_item.sender`, email channels in the settings page, the Caddy cap. Spec:
   [inbox email channel](../../.ai/specs/2026-09-17-inbox-email-channel.md).
-- Phase 1b, smart: the pull cron skeleton, `list_due_channels` and the orphan
-  sweep job; `inbox_rule` with auto-route running as the rule's author,
-  `inbox_routing_target`, `inbox_correction`; reply summaries through
-  `@bap/mail`; per-organization quota setting; AI extraction with
-  per-organization opt-in; ARES enrichment; fingerprint duplicates; Split
-  action; document versioning route.
-- Phase 2, structured Czech: ISDOC and ISDOCX, Money S3 XML, Pohoda XML file,
-  hardened XML parsing; legal entity resolution by IČO.
-- Phase 3, live: credential vault; Fio API poll; Fakturoid webhooks; Pohoda
-  mServer pull; channel health page (last poll, failure streak, credential
-  expiry, throughput).
-- Phase 4, wide: MCP `inbox.submit`; ISDS; cloud folder watch; bank premium
-  APIs; bank statements with a `bank_transaction` table keyed
-  `(bank_account, external_id)` and an optional statement document; Peppol slot.
+- Phase 1b, core, three stacked PRs:
+  - 1b-runtime: `inbox_routing_target` with the `/inbox/settings` page, the
+    per-organization blob quota setting, the `inbox_maintenance` job (orphan
+    blob sweep, reaper for parents stuck `processing`, requeue for email items
+    stuck `received`), discard provenance. Spec:
+    [inbox runtime](../../.ai/specs/2026-09-17-inbox-runtime.md).
+  - 1b-rules: `inbox_rule`, auto-route running as the rule author,
+    `inbox_correction`, create-a-rule-from-this. Spec pending.
+  - 1b-actions: Split, the document versioning route, fingerprint duplicates,
+    attach-to-existing, bulk approve and assign, `pnpm demo:inbox`. Spec
+    pending.
+
+Connections and setup track, each its own PR, added after the core is live. The
+bullets keep the old phase order: Czech structured sources first, then live
+connectors, then wide sources, mirroring the earlier Phase 2, 3 and 4 sequence.
+
+- Czech structured sources: ISDOC and ISDOCX parse; Money S3 XML; Pohoda XML
+  file; hardened XML parsing and legal entity resolution by IČO ride with the
+  first of them.
+- Live connectors: Fio API poll; Fakturoid webhooks; Pohoda mServer pull; ISDS;
+  cloud folder watch; bank premium APIs with the `bank_transaction` table keyed
+  `(bank_account, external_id)` and an optional statement document; Peppol; MCP
+  `inbox.submit`.
+- Enrichment: ARES enrichment (unlocks `partner_policy = 'upsert_from_ares'`);
+  AI extraction with per-organization opt-in; reply summaries through outbound
+  mail, with a new `@bap/mail` package only when two consumers exist.
+- Setup: credential vault; channel health page (last poll, failure streak,
+  credential expiry, throughput); retention policy with the walk of untracked
+  files on the volume; per-channel pull cron with `list_due_channels` and
+  `record_channel_run`, arriving with the first puller; operator wiring (Mailgun
+  EU, `freshclam`, the intake domain) is documented per PR as each channel goes
+  live.
 
 What the phases unlock: reconciliation (arrived in the Inbox but absent from the
 Money S3 export means an unbooked invoice, possible only when arrivals are
