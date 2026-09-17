@@ -192,6 +192,35 @@ describe('ProductShell', () => {
     expect(screen.getByText('Owner')).toBeTruthy();
   });
 
+  it('lists the active organization as a tabbable switcher item', () => {
+    render(
+      <DesignSystemProvider mode="light">
+        <I18nProvider>
+          <ProductShell railPinned={false} user={testUser} version="1.2.3">
+            <ActiveOrganization
+              id="org-1"
+              name="Acme Legal"
+              role="owner"
+              slug="acme-legal"
+            />
+            <p>Page body</p>
+          </ProductShell>
+        </I18nProvider>
+      </DesignSystemProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Workspaces' }));
+
+    const switcher = screen.getByRole('list', { name: 'Workspaces' });
+    const item = within(switcher).getByRole('link', { name: 'Acme Legal' });
+    expect(item.getAttribute('href')).toBe('/acme-legal');
+    expect(item.tabIndex).toBe(0);
+    expect(
+      within(switcher).getByRole('link', { name: 'Manage workspaces' })
+        .tabIndex,
+    ).toBe(0);
+  });
+
   it('shows the workspace section for the active organization', () => {
     render(
       <DesignSystemProvider mode="light">

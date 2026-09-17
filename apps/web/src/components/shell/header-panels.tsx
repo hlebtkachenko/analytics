@@ -88,7 +88,8 @@ export function SwitcherPanel({
   return (
     <HeaderPanel expanded={expanded}>
       {expanded ? (
-        <Switcher aria-label="Workspaces">
+        // Only an expanded Switcher gives its items a tab stop.
+        <Switcher aria-label="Workspaces" expanded>
           {list.map((organization) => (
             <SwitcherItem
               aria-label={organization.name}
