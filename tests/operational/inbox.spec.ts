@@ -387,6 +387,8 @@ test.describe
   test('the inbox list has no accessibility violations', async ({ page }) => {
     test.skip(password.length === 0, 'BAP_OPERATIONAL_PASSWORD is required.');
     await openInbox(page);
+    // The grid shows a header-only skeleton until the items arrive; axe must see the loaded table.
+    await expect(itemRow(page, pdfFilename)).toBeVisible();
     await expectNoAccessibilityViolations(page, 'inbox list');
   });
 
