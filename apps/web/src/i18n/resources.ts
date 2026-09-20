@@ -338,6 +338,7 @@ export const resources = {
       },
       inbox: {
         accessError: 'Organization access could not be checked.',
+        actions: 'Actions',
         assign: 'Assign',
         assignee: 'Assignee',
         assigneeMe: 'Assign to me',
@@ -353,7 +354,6 @@ export const resources = {
         attachTitle: 'Attach to existing document',
         attachTarget: 'Document',
         attachToCandidate: 'Attach to this document',
-        backToInbox: 'Back to inbox',
         bulkApprove: 'Approve',
         bulkAssign: 'Assign',
         bulkDiscard: 'Discard',

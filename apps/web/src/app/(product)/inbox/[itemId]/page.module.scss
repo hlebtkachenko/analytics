@@ -1,4 +1,5 @@
 @use '@bap/design-system/tokens/spacing.scss' as spacing;
+@use '@bap/design-system/tokens/type.scss' as type;
 
 .summary {
   align-items: center;
@@ -7,10 +8,25 @@
   gap: spacing.$spacing-05;
 }
 
+// The two detail columns share the page grid; the row gap keeps the stacked
+// order readable when they collapse below lg.
+.columns {
+  row-gap: spacing.$spacing-06;
+}
+
+.sectionHeading {
+  @include type.type-style('heading-03');
+}
+
 .preview {
   block-size: 32rem;
   border: 1px solid var(--cds-border-subtle);
   inline-size: 100%;
+}
+
+.eventTime {
+  color: var(--cds-text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .actions {

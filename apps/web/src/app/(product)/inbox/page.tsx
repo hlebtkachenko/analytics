@@ -8,6 +8,8 @@ import type {
 } from '@bap/design-system/blocks';
 import {
   Button,
+  Column,
+  Grid,
   InlineNotification,
   Link,
   Modal,
@@ -16,6 +18,7 @@ import {
   Stack,
   Tag,
   TextInput,
+  Tile,
 } from '@bap/design-system/react';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -423,83 +426,93 @@ export default function InboxPage() {
         </Select>
       ) : null}
       {canManage ? (
-        <UploadDropZone
-          itemHref={itemHref}
-          onUploaded={refresh}
-          organizationId={organizationId}
-        />
+        <Tile>
+          <UploadDropZone
+            itemHref={itemHref}
+            onUploaded={refresh}
+            organizationId={organizationId}
+          />
+        </Tile>
       ) : null}
-      <div className={styles.filters!}>
-        <Select
-          id="inbox-filter"
-          labelText={t('inbox.filterStatus')}
-          onChange={(event) => {
-            const next = event.target.value;
-            setFilter(isFilter(next) ? next : 'all');
-            setPage(1);
-          }}
-          value={filter}
-        >
-          {filterKeys.map((key) => (
-            <SelectItem
-              key={key}
-              text={t(inboxStatusFilterLabelKeys[key])}
-              value={key}
-            />
-          ))}
-        </Select>
-        <Select
-          id="inbox-filter-issue"
-          labelText={t('inbox.filterIssue')}
-          onChange={(event) => {
-            setIssue(storedIssue(event.target.value));
-            setPage(1);
-          }}
-          value={issue}
-        >
-          <SelectItem text={t('inbox.filterIssueAny')} value="" />
-          {inboxIssueCodeSchema.options.map((code) => (
-            <SelectItem key={code} text={code} value={code} />
-          ))}
-        </Select>
-        <Select
-          id="inbox-filter-confidence"
-          labelText={t('inbox.filterConfidence')}
-          onChange={(event) => {
-            setConfidence(storedConfidence(event.target.value));
-            setPage(1);
-          }}
-          value={confidence}
-        >
-          <SelectItem text={t('inbox.confidenceAny')} value="" />
-          {inboxConfidenceBandSchema.options.map((band) => (
-            <SelectItem
-              key={band}
-              text={t(inboxConfidenceBandLabelKeys[band])}
-              value={band}
-            />
-          ))}
-        </Select>
-        <TextInput
-          helperText={t('inbox.filterAssigneeHelp')}
-          id="inbox-filter-assignee"
-          labelText={t('inbox.filterAssignee')}
-          onBlur={() => {
-            setAssignee(assigneeDraft.trim());
-            setPage(1);
-          }}
-          onChange={(event) => {
-            setAssigneeDraft(event.target.value);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
+      <Grid>
+        <Column lg={4} md={4} sm={4}>
+          <Select
+            id="inbox-filter"
+            labelText={t('inbox.filterStatus')}
+            onChange={(event) => {
+              const next = event.target.value;
+              setFilter(isFilter(next) ? next : 'all');
+              setPage(1);
+            }}
+            value={filter}
+          >
+            {filterKeys.map((key) => (
+              <SelectItem
+                key={key}
+                text={t(inboxStatusFilterLabelKeys[key])}
+                value={key}
+              />
+            ))}
+          </Select>
+        </Column>
+        <Column lg={4} md={4} sm={4}>
+          <Select
+            id="inbox-filter-issue"
+            labelText={t('inbox.filterIssue')}
+            onChange={(event) => {
+              setIssue(storedIssue(event.target.value));
+              setPage(1);
+            }}
+            value={issue}
+          >
+            <SelectItem text={t('inbox.filterIssueAny')} value="" />
+            {inboxIssueCodeSchema.options.map((code) => (
+              <SelectItem key={code} text={code} value={code} />
+            ))}
+          </Select>
+        </Column>
+        <Column lg={4} md={4} sm={4}>
+          <Select
+            id="inbox-filter-confidence"
+            labelText={t('inbox.filterConfidence')}
+            onChange={(event) => {
+              setConfidence(storedConfidence(event.target.value));
+              setPage(1);
+            }}
+            value={confidence}
+          >
+            <SelectItem text={t('inbox.confidenceAny')} value="" />
+            {inboxConfidenceBandSchema.options.map((band) => (
+              <SelectItem
+                key={band}
+                text={t(inboxConfidenceBandLabelKeys[band])}
+                value={band}
+              />
+            ))}
+          </Select>
+        </Column>
+        <Column lg={4} md={4} sm={4}>
+          <TextInput
+            helperText={t('inbox.filterAssigneeHelp')}
+            id="inbox-filter-assignee"
+            labelText={t('inbox.filterAssignee')}
+            onBlur={() => {
               setAssignee(assigneeDraft.trim());
               setPage(1);
-            }
-          }}
-          value={assigneeDraft}
-        />
-      </div>
+            }}
+            onChange={(event) => {
+              setAssigneeDraft(event.target.value);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                setAssignee(assigneeDraft.trim());
+                setPage(1);
+              }
+            }}
+            value={assigneeDraft}
+          />
+        </Column>
+      </Grid>
       {bulkFailed ? (
         <InlineNotification
           kind="error"

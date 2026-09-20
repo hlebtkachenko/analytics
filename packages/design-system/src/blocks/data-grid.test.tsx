@@ -36,6 +36,12 @@ describe('DataGrid', () => {
     expect(bodyRowText()).toHaveLength(3);
   });
 
+  it('wraps the table in a container that never widens its parent', () => {
+    const { container } = render(<DataGrid columns={columns} rows={rows} />);
+    const section = container.querySelector('.cds--data-table-container');
+    expect(section?.className).toContain('container');
+  });
+
   it('sorts ascending when a sortable header is clicked', () => {
     render(<DataGrid columns={columns} rows={rows} sortable />);
     expect(bodyRowText()[0]).toContain('beta');

@@ -4,6 +4,7 @@ import {
   FileUploaderDropContainer,
   InlineLoading,
   Link,
+  Stack,
   StructuredListBody,
   StructuredListCell,
   StructuredListHead,
@@ -73,7 +74,7 @@ export default function UploadDropZone({
   }
 
   return (
-    <section aria-label={t('inbox.uploadTitle')}>
+    <Stack as="section" aria-label={t('inbox.uploadTitle')} gap={5}>
       <FileUploaderDropContainer
         disabled={busy || organizationId.length === 0}
         labelText={t('inbox.dropZone')}
@@ -108,7 +109,7 @@ export default function UploadDropZone({
           </StructuredListBody>
         </StructuredListWrapper>
       ) : null}
-    </section>
+    </Stack>
   );
 }
 

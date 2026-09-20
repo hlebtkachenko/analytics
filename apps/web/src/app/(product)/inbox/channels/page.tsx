@@ -14,6 +14,7 @@ import {
   Stack,
   Tag,
   TextInput,
+  Tile,
 } from '@bap/design-system/react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -465,87 +466,91 @@ export default function InboxChannelsPage() {
         </Select>
       ) : null}
       {canManage ? (
-        <Form
-          aria-label={t('inboxChannels.createTitle')}
-          className={styles.createForm!}
-          onSubmit={(event) => {
-            event.preventDefault();
-            void createChannel();
-          }}
-        >
-          <Stack gap={5}>
-            <h2>{t('inboxChannels.createTitle')}</h2>
-            {createFailed ? (
-              <InlineNotification
-                kind="error"
-                lowContrast
-                role="alert"
-                title={t('inboxChannels.createFailed')}
-              />
-            ) : null}
-            <TextInput
-              id="inbox-channel-name"
-              invalid={nameInvalid}
-              invalidText={t('inboxChannels.nameRequired')}
-              labelText={t('inboxChannels.name')}
-              onChange={(event) => {
-                setName(event.target.value);
-              }}
-              value={name}
-            />
-            <Select
-              id="inbox-channel-kind"
-              helperText={t(
-                kind === 'email'
-                  ? 'inboxChannels.kindEmailHelp'
-                  : 'inboxChannels.kindApiHelp',
-              )}
-              labelText={t('inboxChannels.columnKind')}
-              onChange={(event) => {
-                setKind(
-                  inboxChannelKindForChannelsSchema.parse(event.target.value),
-                );
-              }}
-              value={kind}
-            >
-              <SelectItem text={t('inboxChannels.kindApi')} value="api" />
-              <SelectItem text={t('inboxChannels.kindEmail')} value="email" />
-            </Select>
-            <Select
-              id="inbox-channel-entity"
-              labelText={t('inboxChannels.columnEntity')}
-              onChange={(event) => {
-                setLegalEntityId(event.target.value);
-              }}
-              value={legalEntityId}
-            >
-              <SelectItem text={t('inboxChannels.entityAny')} value="" />
-              {legalEntities.map((entity) => (
-                <SelectItem
-                  key={entity.id}
-                  text={entity.name}
-                  value={entity.id}
+        <Tile>
+          <Form
+            aria-label={t('inboxChannels.createTitle')}
+            className={styles.createForm!}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void createChannel();
+            }}
+          >
+            <Stack gap={5}>
+              <h2 className={styles.sectionHeading!}>
+                {t('inboxChannels.createTitle')}
+              </h2>
+              {createFailed ? (
+                <InlineNotification
+                  kind="error"
+                  lowContrast
+                  role="alert"
+                  title={t('inboxChannels.createFailed')}
                 />
-              ))}
-            </Select>
-            <TextInput
-              id="inbox-channel-hint-kind"
-              invalid={hintKindInvalid}
-              invalidText={t('inboxChannels.hintKindInvalid')}
-              labelText={t('inboxChannels.columnHintKind')}
-              onChange={(event) => {
-                setHintKind(event.target.value);
-              }}
-              placeholder={t('inboxChannels.hintKindPlaceholder')}
-              value={hintKind}
-            />
-            <div>
-              <Button kind="primary" size="md" type="submit">
-                {t('inboxChannels.create')}
-              </Button>
-            </div>
-          </Stack>
-        </Form>
+              ) : null}
+              <TextInput
+                id="inbox-channel-name"
+                invalid={nameInvalid}
+                invalidText={t('inboxChannels.nameRequired')}
+                labelText={t('inboxChannels.name')}
+                onChange={(event) => {
+                  setName(event.target.value);
+                }}
+                value={name}
+              />
+              <Select
+                id="inbox-channel-kind"
+                helperText={t(
+                  kind === 'email'
+                    ? 'inboxChannels.kindEmailHelp'
+                    : 'inboxChannels.kindApiHelp',
+                )}
+                labelText={t('inboxChannels.columnKind')}
+                onChange={(event) => {
+                  setKind(
+                    inboxChannelKindForChannelsSchema.parse(event.target.value),
+                  );
+                }}
+                value={kind}
+              >
+                <SelectItem text={t('inboxChannels.kindApi')} value="api" />
+                <SelectItem text={t('inboxChannels.kindEmail')} value="email" />
+              </Select>
+              <Select
+                id="inbox-channel-entity"
+                labelText={t('inboxChannels.columnEntity')}
+                onChange={(event) => {
+                  setLegalEntityId(event.target.value);
+                }}
+                value={legalEntityId}
+              >
+                <SelectItem text={t('inboxChannels.entityAny')} value="" />
+                {legalEntities.map((entity) => (
+                  <SelectItem
+                    key={entity.id}
+                    text={entity.name}
+                    value={entity.id}
+                  />
+                ))}
+              </Select>
+              <TextInput
+                id="inbox-channel-hint-kind"
+                invalid={hintKindInvalid}
+                invalidText={t('inboxChannels.hintKindInvalid')}
+                labelText={t('inboxChannels.columnHintKind')}
+                onChange={(event) => {
+                  setHintKind(event.target.value);
+                }}
+                placeholder={t('inboxChannels.hintKindPlaceholder')}
+                value={hintKind}
+              />
+              <div>
+                <Button kind="primary" size="md" type="submit">
+                  {t('inboxChannels.create')}
+                </Button>
+              </div>
+            </Stack>
+          </Form>
+        </Tile>
       ) : null}
       <DataGrid
         columns={columns}
@@ -553,6 +558,7 @@ export default function InboxChannelsPage() {
         emptyLabel={t('inboxChannels.empty')}
         errorLabel={t('inboxChannels.error')}
         rows={rows}
+        search
         size="md"
         state={
           failed
