@@ -44,7 +44,7 @@ export interface WorkspaceMembership {
 }
 
 // Exact match against the version recorded by the migration runner. Bump it to the newest migration id in the same pull request as that migration. Rollback consequence: application code rolled back after the migration is applied makes /ready return 503 on every service until this is bumped again.
-export const DATABASE_MIGRATION_COMPATIBILITY = '20260921.0001';
+export const DATABASE_MIGRATION_COMPATIBILITY = '20260922.0001';
 
 export const PUBLIC_SIGNUP_EDGE_RATE_LIMIT = {
   max: 3,
@@ -194,6 +194,70 @@ export async function transferOwnership(
     organizationId,
     fromUserId,
     toUserId,
+  ]);
+}
+
+// The scope an owner chooses when inviting an admin or member: all entities, or a named set.
+export type InvitationEntityScope =
+  | Readonly<{ mode: 'all' }>
+  | Readonly<{ legalEntityIds: readonly string[]; mode: 'restricted' }>;
+
+export interface WriteInvitationEntityScopeInput {
+  createdBy: string;
+  invitationId: string;
+  organizationId: string;
+  scope: InvitationEntityScope;
+}
+
+// 'unknown-entity' is the only failure the caller translates to a rejected invite.
+export type WriteInvitationEntityScopeResult = 'unknown-entity' | 'written';
+
+// Stores the chosen scope against the invitation id through the definer function, the only writer
+// bap_auth may use in schema app. A restricted scope naming an entity outside the organization is
+// refused, which the invite action turns into a rejected invitation.
+export async function writeInvitationEntityScope(
+  pool: DatabasePool,
+  input: WriteInvitationEntityScopeInput,
+): Promise<WriteInvitationEntityScopeResult> {
+  const legalEntityIds =
+    input.scope.mode === 'restricted' ? [...input.scope.legalEntityIds] : [];
+
+  try {
+    await pool.query(
+      'select auth.write_invitation_entity_scope($1, $2, $3, $4::uuid[], $5)',
+      [
+        input.invitationId,
+        input.organizationId,
+        input.scope.mode,
+        legalEntityIds,
+        input.createdBy,
+      ],
+    );
+    return 'written';
+  } catch (error) {
+    if ((error as { code?: unknown }).code === 'BP008') {
+      return 'unknown-entity';
+    }
+    throw error;
+  }
+}
+
+export interface ApplyInvitationEntityScopeInput {
+  invitationId: string;
+  organizationId: string;
+  userId: string;
+}
+
+// Copies the invitation scope onto the accepted membership and removes the invitation scope, run
+// from the accept-invitation hook so both accept surfaces apply the same grant.
+export async function applyInvitationEntityScope(
+  pool: DatabasePool,
+  input: ApplyInvitationEntityScopeInput,
+): Promise<void> {
+  await pool.query('select auth.apply_invitation_entity_scope($1, $2, $3)', [
+    input.invitationId,
+    input.organizationId,
+    input.userId,
   ]);
 }
 

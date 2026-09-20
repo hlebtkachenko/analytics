@@ -65,9 +65,15 @@ export async function readEntityScope(
      where organization_id = $1 and user_id = $2`,
     [input.organizationId, input.userId],
   );
+  const stored = scope.rows[0];
 
-  // A missing row is the default, so a member is unrestricted until an owner says otherwise.
-  if (scope.rows[0]?.mode !== 'restricted') {
+  // Entity access is granted, never assumed: a member without a stored row reaches no entity.
+  if (stored === undefined) {
+    return { legalEntityIds: [], mode: 'restricted' };
+  }
+
+  // An explicit 'all' row is the only way a non-owner reaches every entity.
+  if (stored.mode !== 'restricted') {
     return { mode: 'all' };
   }
 

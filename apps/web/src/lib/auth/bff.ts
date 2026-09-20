@@ -37,12 +37,27 @@ const organizationIdSchema = z
 const subjectIdSchema = organizationIdSchema;
 const legalEntityIdSchema = z.string().uuid();
 const legalEntityKindSchema = z.enum(['company', 'sole_trader']);
-// Mirrors the entity scope contract in @bap/security, which apps/web must not import.
+// Mirrors the entity scope contract in @bap/security, which apps/web must not import. A resolved
+// scope may be restricted with an empty list (a member with no grant), so reads stay permissive.
 const entityScopeSchema = z.discriminatedUnion('mode', [
   z.object({ mode: z.literal('all') }).strict(),
   z
     .object({
       legalEntityIds: z.array(legalEntityIdSchema).max(MAX_LEGAL_ENTITIES),
+      mode: z.literal('restricted'),
+    })
+    .strict(),
+]);
+// Mirrors the entity scope write contract: granting access needs at least one entity, so a
+// restricted body with an empty list is refused before a resource token is minted for it.
+const entityScopeWriteSchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('all') }).strict(),
+  z
+    .object({
+      legalEntityIds: z
+        .array(legalEntityIdSchema)
+        .min(1)
+        .max(MAX_LEGAL_ENTITIES),
       mode: z.literal('restricted'),
     })
     .strict(),
@@ -733,6 +748,7 @@ export type OrganizationAccess = z.infer<typeof accessResponseSchema>;
 export {
   accessResponseSchema,
   entityScopeSchema,
+  entityScopeWriteSchema,
   legalEntityCreateBodySchema,
   legalEntityIdSchema,
   legalEntityKindSchema,
@@ -1083,7 +1099,7 @@ export async function putMemberEntityScope(
     return subject.failure;
   }
 
-  const body = await readJsonBody(request, entityScopeSchema);
+  const body = await readJsonBody(request, entityScopeWriteSchema);
 
   if ('failure' in body) {
     return body.failure;

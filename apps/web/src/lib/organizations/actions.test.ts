@@ -6,10 +6,15 @@ import {
   acceptOrganizationInvitationAction,
   createOrganizationAction,
   declineOrganizationInvitationAction,
+  inviteMemberWithScopeAction,
 } from './actions';
+
+const ENTITY_ID = '9b7d1c30-6a4b-4d1f-9c2e-7a5f0e3b8d21';
 
 const mocks = vi.hoisted(() => ({
   acceptInvitation: vi.fn(),
+  cancelInvitation: vi.fn(),
+  createInvitation: vi.fn(),
   createOrganization: vi.fn(),
   getAuth: vi.fn(),
   getAuthPool: vi.fn(),
@@ -19,10 +24,12 @@ const mocks = vi.hoisted(() => ({
   rejectInvitation: vi.fn(),
   resolveOrganizationRouteForRequest: vi.fn(),
   revalidatePath: vi.fn(),
+  writeInvitationEntityScope: vi.fn(),
 }));
 
 vi.mock('@bap/db/access', () => ({
   getOrganizationCreationQuota: mocks.getOrganizationCreationQuota,
+  writeInvitationEntityScope: mocks.writeInvitationEntityScope,
 }));
 vi.mock('../auth/server', () => ({
   getAuth: mocks.getAuth,
@@ -56,12 +63,16 @@ describe('organization server actions', () => {
     mocks.getAuth.mockResolvedValue({
       api: {
         acceptInvitation: mocks.acceptInvitation,
+        cancelInvitation: mocks.cancelInvitation,
+        createInvitation: mocks.createInvitation,
         createOrganization: mocks.createOrganization,
         getSession: mocks.getSession,
         rejectInvitation: mocks.rejectInvitation,
       },
     });
     mocks.getAuthPool.mockResolvedValue({});
+    mocks.createInvitation.mockResolvedValue({ id: 'invitation-1' });
+    mocks.writeInvitationEntityScope.mockResolvedValue('written');
     mocks.getOrganizationCreationQuota.mockResolvedValue({
       attributedTotal: 0,
       grantedTotal: 3,
@@ -209,6 +220,79 @@ describe('organization server actions', () => {
     expect(mocks.redirect).toHaveBeenCalledWith(
       '/organizations?result=accept-error',
     );
+  });
+
+  it('creates an invitation and stores its restricted entity scope', async () => {
+    const result = await inviteMemberWithScopeAction({
+      email: 'New@bap.test',
+      organizationId: 'organization-1',
+      role: 'member',
+      scope: { legalEntityIds: [ENTITY_ID], mode: 'restricted' },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(mocks.createInvitation).toHaveBeenCalledWith({
+      body: {
+        email: 'new@bap.test',
+        organizationId: 'organization-1',
+        role: 'member',
+      },
+      headers: expect.any(Headers),
+    });
+    expect(mocks.writeInvitationEntityScope).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        createdBy: 'user-1',
+        invitationId: 'invitation-1',
+        organizationId: 'organization-1',
+        scope: { legalEntityIds: [ENTITY_ID], mode: 'restricted' },
+      },
+    );
+  });
+
+  it('reports a duplicate invitation without writing a scope', async () => {
+    mocks.createInvitation.mockRejectedValue({
+      body: { code: 'USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION' },
+    });
+
+    const result = await inviteMemberWithScopeAction({
+      email: 'guest@bap.test',
+      organizationId: 'organization-1',
+      role: 'member',
+      scope: { mode: 'all' },
+    });
+
+    expect(result).toEqual({ ok: false, reason: 'already-invited' });
+    expect(mocks.writeInvitationEntityScope).not.toHaveBeenCalled();
+  });
+
+  it('cancels the invitation when its scope names an unknown entity', async () => {
+    mocks.writeInvitationEntityScope.mockResolvedValue('unknown-entity');
+
+    const result = await inviteMemberWithScopeAction({
+      email: 'new@bap.test',
+      organizationId: 'organization-1',
+      role: 'admin',
+      scope: { legalEntityIds: [ENTITY_ID], mode: 'restricted' },
+    });
+
+    expect(result).toEqual({ ok: false, reason: 'invalid' });
+    expect(mocks.cancelInvitation).toHaveBeenCalledWith({
+      body: { invitationId: 'invitation-1' },
+      headers: expect.any(Headers),
+    });
+  });
+
+  it('refuses a restricted invite scope with no entity before any auth write', async () => {
+    const result = await inviteMemberWithScopeAction({
+      email: 'new@bap.test',
+      organizationId: 'organization-1',
+      role: 'member',
+      scope: { legalEntityIds: [], mode: 'restricted' },
+    });
+
+    expect(result).toEqual({ ok: false, reason: 'invalid' });
+    expect(mocks.createInvitation).not.toHaveBeenCalled();
   });
 
   it('rejects an unverified direct create action before writes', async () => {

@@ -9,9 +9,11 @@ import { z } from 'zod';
 import {
   getOrganizationCreationQuota,
   transferOwnership,
+  writeInvitationEntityScope,
 } from '@bap/db/access';
 
 import { getAuth, getAuthPool } from '../auth/server';
+import { entityScopeWriteSchema } from '../auth/bff';
 import { formValue, organizationPath, resultPath } from './action-support';
 import { normalizeOrganizationSlug, organizationSlugSchema } from './slug';
 
@@ -53,6 +55,103 @@ export async function transferOwnershipAction(
     return { ok: true };
   } catch {
     return { ok: false };
+  }
+}
+
+const inviteMemberWithScopeInputSchema = z.object({
+  email: z.email().max(254),
+  organizationId: z.string().min(1),
+  role: z.enum(['admin', 'member']),
+  scope: entityScopeWriteSchema,
+});
+
+export type InviteMemberWithScopeResult =
+  | Readonly<{ ok: true }>
+  | Readonly<{
+      ok: false;
+      reason: 'already-invited' | 'already-member' | 'error' | 'invalid';
+    }>;
+
+// Better Auth reports these on invite; both keep the modal open with an inline explanation.
+function invitationErrorCode(error: unknown): string | null {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'body' in error &&
+    typeof (error as { body?: unknown }).body === 'object'
+  ) {
+    const code = (error as { body?: { code?: unknown } }).body?.code;
+    return typeof code === 'string' ? code : null;
+  }
+  return null;
+}
+
+// Creates the invitation and stores the entity scope its acceptance will apply. Owners choose the
+// scope at invite time because entity access is granted, never assumed; the accept hook applies it.
+// The invitation is created first, then its scope; a scope that names an unknown entity cancels the
+// invitation so no half-formed invite survives. Authorization is Better Auth's: the session user
+// must hold the invite permission in this organization.
+export async function inviteMemberWithScopeAction(
+  input: unknown,
+): Promise<InviteMemberWithScopeResult> {
+  const parsed = inviteMemberWithScopeInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, reason: 'invalid' };
+  }
+
+  try {
+    const auth = await getAuth();
+    const requestHeaders = await headers();
+    const session = await auth.api.getSession({ headers: requestHeaders });
+    if (session?.user.emailVerified !== true) {
+      return { ok: false, reason: 'error' };
+    }
+
+    let invitationId: string;
+    try {
+      const invitation = await auth.api.createInvitation({
+        body: {
+          email: parsed.data.email.toLowerCase(),
+          organizationId: parsed.data.organizationId,
+          role: parsed.data.role,
+        },
+        headers: requestHeaders,
+      });
+      const id = (invitation as { id?: unknown }).id;
+      if (typeof id !== 'string' || id.length === 0) {
+        return { ok: false, reason: 'error' };
+      }
+      invitationId = id;
+    } catch (error) {
+      const code = invitationErrorCode(error);
+      if (code === 'USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION') {
+        return { ok: false, reason: 'already-invited' };
+      }
+      if (code === 'USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION') {
+        return { ok: false, reason: 'already-member' };
+      }
+      return { ok: false, reason: 'error' };
+    }
+
+    const written = await writeInvitationEntityScope(await getAuthPool(), {
+      createdBy: session.user.id,
+      invitationId,
+      organizationId: parsed.data.organizationId,
+      scope: parsed.data.scope,
+    });
+
+    if (written === 'unknown-entity') {
+      // Roll the invitation back so it never accepts into a scope that could not be stored.
+      await auth.api.cancelInvitation({
+        body: { invitationId },
+        headers: requestHeaders,
+      });
+      return { ok: false, reason: 'invalid' };
+    }
+
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: 'error' };
   }
 }
 

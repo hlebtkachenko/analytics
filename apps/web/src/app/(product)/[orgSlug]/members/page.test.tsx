@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   cancelInvitation: vi.fn(),
   getSession: vi.fn(),
   inviteMember: vi.fn(),
+  inviteMemberWithScopeAction: vi.fn(),
   listInvitations: vi.fn(),
   listInvitationsClient: vi.fn(),
   listMembers: vi.fn(),
@@ -67,6 +68,7 @@ vi.mock('../../../../lib/organizations/resolver', () => ({
   resolveOrganizationRouteForRequest: mocks.resolveOrganizationRouteForRequest,
 }));
 vi.mock('../../../../lib/organizations/actions', () => ({
+  inviteMemberWithScopeAction: mocks.inviteMemberWithScopeAction,
   transferOwnershipAction: mocks.transferOwnershipAction,
 }));
 
@@ -209,6 +211,7 @@ describe('OrganizationMembersPage', () => {
       error: null,
     });
     mocks.inviteMember.mockResolvedValue({ data: {}, error: null });
+    mocks.inviteMemberWithScopeAction.mockResolvedValue({ ok: true });
     mocks.updateMemberRole.mockResolvedValue({ data: {}, error: null });
     mocks.removeMember.mockResolvedValue({ data: {}, error: null });
     mocks.cancelInvitation.mockResolvedValue({ data: {}, error: null });
@@ -333,7 +336,7 @@ describe('OrganizationMembersPage', () => {
     );
   });
 
-  it('invites a member and re-reads the invitations', async () => {
+  it('invites a member with a chosen entity scope and re-reads the invitations', async () => {
     await renderPage();
 
     fireEvent.click(
@@ -342,22 +345,49 @@ describe('OrganizationMembersPage', () => {
     fireEvent.change(screen.getByLabelText('Email'), {
       target: { value: 'new@bap.test' },
     });
+    // The picker starts empty, so grant one entity to enable the invitation.
+    fireEvent.click(screen.getByLabelText('Placeholder Holding'));
     fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
 
     await screen.findByText('The invitation was sent.');
-    expect(mocks.inviteMember).toHaveBeenCalledWith({
+    expect(mocks.inviteMemberWithScopeAction).toHaveBeenCalledWith({
       email: 'new@bap.test',
       organizationId: 'organization-1',
       role: 'member',
+      scope: { legalEntityIds: [LEGAL_ENTITY_ID], mode: 'restricted' },
     });
     await waitFor(() => {
       expect(mocks.listInvitationsClient).toHaveBeenCalled();
     });
   });
 
+  it('invites a member with all entities when that option is chosen', async () => {
+    await renderPage();
+
+    fireEvent.click(
+      screen.getAllByRole('button', { name: 'Invite member' })[0]!,
+    );
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'new@bap.test' },
+    });
+    fireEvent.change(screen.getByLabelText('Entity access'), {
+      target: { value: 'all' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    await screen.findByText('The invitation was sent.');
+    expect(mocks.inviteMemberWithScopeAction).toHaveBeenCalledWith({
+      email: 'new@bap.test',
+      organizationId: 'organization-1',
+      role: 'member',
+      scope: { mode: 'all' },
+    });
+  });
+
   it('keeps the invite modal open with an inline duplicate error', async () => {
-    mocks.inviteMember.mockResolvedValue({
-      error: { code: 'USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION' },
+    mocks.inviteMemberWithScopeAction.mockResolvedValue({
+      ok: false,
+      reason: 'already-invited',
     });
 
     await renderPage();
@@ -367,6 +397,9 @@ describe('OrganizationMembersPage', () => {
     );
     fireEvent.change(screen.getByLabelText('Email'), {
       target: { value: 'guest@bap.test' },
+    });
+    fireEvent.change(screen.getByLabelText('Entity access'), {
+      target: { value: 'all' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
 

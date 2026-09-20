@@ -1,5 +1,6 @@
 import {
   entityScopeOpenApiSchema,
+  entityScopeRequestSchema as sharedEntityScopeRequestSchema,
   entityScopeSchema,
   legalEntityKindSchema,
   legalEntityNameSchema,
@@ -50,8 +51,9 @@ export type UpdateLegalEntityRequest = z.infer<
   typeof updateLegalEntityRequestSchema
 >;
 
-// The request and the response are the same shape, so a client can read a scope and write it back unchanged.
-export const entityScopeRequestSchema = entityScopeSchema;
+// Reading a scope stays permissive, but writing one must grant access: a restricted scope needs
+// at least one entity, so an empty restricted body is refused with 400.
+export const entityScopeRequestSchema = sharedEntityScopeRequestSchema;
 
 export type EntityScopeRequest = z.infer<typeof entityScopeRequestSchema>;
 

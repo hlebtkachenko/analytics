@@ -429,6 +429,12 @@ describe('application legal entity routes', () => {
       .set('Authorization', 'Bearer caller')
       .send({ legalEntityIds: ['not-a-uuid'], mode: 'restricted' })
       .expect(400);
+    // Entity access is granted, so a restricted scope with no entity is refused before any write.
+    await request(application.getHttpServer())
+      .put('/v1/organizations/organization_1/members/user_2/entity-scope')
+      .set('Authorization', 'Bearer caller')
+      .send({ legalEntityIds: [], mode: 'restricted' })
+      .expect(400);
   });
 
   it('deactivates another member for the owner and audits through the repository', async () => {

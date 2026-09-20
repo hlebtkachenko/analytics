@@ -1,4 +1,5 @@
 import {
+  applyInvitationEntityScope,
   countSoleOwnedOrganizations,
   hasOtherActiveOwner,
   organizationCreationLimitReached,
@@ -353,6 +354,26 @@ export function createBeforeUpdateMemberRoleHook(pool: DatabasePool) {
   };
 }
 
+// Applies the scope stored at invite time onto the freshly accepted membership, covering both
+// accept surfaces through the one Better Auth hook. The member is already created when this runs,
+// so a failure is swallowed rather than breaking acceptance: the member simply starts with no
+// entity access, the safe default, which an owner can grant afterwards.
+export function createAfterAcceptInvitationHook(pool: DatabasePool) {
+  return async ({
+    invitation,
+    member,
+  }: {
+    invitation: { id: string };
+    member: { organizationId: string; userId: string };
+  }): Promise<void> => {
+    await applyInvitationEntityScope(pool, {
+      invitationId: invitation.id,
+      organizationId: member.organizationId,
+      userId: member.userId,
+    }).catch(() => undefined);
+  };
+}
+
 export async function organizationLimitReached(
   pool: DatabasePool,
   user: { id: string },
@@ -630,6 +651,7 @@ async function createAuth() {
         ...organizationCreationConfiguration,
         ac: organizationAccessControl,
         organizationHooks: {
+          afterAcceptInvitation: createAfterAcceptInvitationHook(pool),
           beforeCreateInvitation,
           beforeCreateOrganization,
           beforeUpdateMemberRole: createBeforeUpdateMemberRoleHook(pool),

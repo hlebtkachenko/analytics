@@ -2595,7 +2595,8 @@ describe('PostgreSQL 18 isolation', () => {
     expect(scopes).toEqual({
       owner: { mode: 'all' },
       restricted: { legalEntityIds: [secondEntityId], mode: 'restricted' },
-      unscoped: { mode: 'all' },
+      // Entity access is granted, never assumed: a member without a stored row reaches no entity.
+      unscoped: { legalEntityIds: [], mode: 'restricted' },
     });
 
     // The scope tables are tenant scoped like every other app table.
@@ -2681,7 +2682,7 @@ describe('PostgreSQL 18 isolation', () => {
        values ('member-scope', 'org-1', 'scope-user', 'member')`,
     );
 
-    // A re-invited subject starts unrestricted instead of inheriting the restriction of its former membership.
+    // A re-invited subject starts with no entity access instead of inheriting a former restriction.
     await expect(
       asTenant(apiPool, orgOneOwner, (transaction) =>
         readEntityScope(transaction, {
@@ -2690,7 +2691,7 @@ describe('PostgreSQL 18 isolation', () => {
           userId: 'scope-user',
         }),
       ),
-    ).resolves.toEqual({ mode: 'all' });
+    ).resolves.toEqual({ legalEntityIds: [], mode: 'restricted' });
 
     await storeScope();
     // Becoming owner clears the member's stored scope. Demote user-1 first so the
@@ -2709,6 +2710,107 @@ describe('PostgreSQL 18 isolation', () => {
       "update auth.member set role = 'owner' where id = 'member-1'",
     );
     await authPool.query(`delete from auth."user" where id = 'scope-user'`);
+  });
+
+  it('stores an invitation scope at invite time and applies it on accept', async () => {
+    const invitationId = 'invitation-scope-1';
+    const inviteeId = 'invitee-1';
+    await authPool.query(
+      `insert into auth."user" (id, name, email, email_verified)
+       values ($1, 'Invitee', 'invitee@example.test', true)`,
+      [inviteeId],
+    );
+    await authPool.query(
+      `insert into auth.invitation (id, organization_id, email, status, expires_at, inviter_id)
+       values ($1, 'org-1', 'invitee@example.test', 'pending', now() + interval '2 days', 'user-1')`,
+      [invitationId],
+    );
+
+    // A restricted scope naming a foreign entity is refused, so a forged invite cannot store it.
+    await expect(
+      authPool.query(
+        'select auth.write_invitation_entity_scope($1, $2, $3, $4::uuid[], $5)',
+        [invitationId, 'org-1', 'restricted', [foreignEntityId], 'user-1'],
+      ),
+    ).rejects.toThrow();
+    // A restricted scope with no entity is refused: access is granted, never empty.
+    await expect(
+      authPool.query(
+        'select auth.write_invitation_entity_scope($1, $2, $3, $4::uuid[], $5)',
+        [invitationId, 'org-1', 'restricted', [], 'user-1'],
+      ),
+    ).rejects.toThrow();
+
+    await authPool.query(
+      'select auth.write_invitation_entity_scope($1, $2, $3, $4::uuid[], $5)',
+      [invitationId, 'org-1', 'restricted', [ownedEntityId], 'user-1'],
+    );
+
+    const stored = await rootPool.query<{ mode: string }>(
+      `select scope.mode
+       from app.invitation_entity_scope as scope
+       where scope.invitation_id = $1`,
+      [invitationId],
+    );
+    const storedAccess = await rootPool.query<{ legal_entity_id: string }>(
+      `select legal_entity_id
+       from app.invitation_legal_entity_access
+       where invitation_id = $1`,
+      [invitationId],
+    );
+    expect(stored.rows).toEqual([{ mode: 'restricted' }]);
+    expect(storedAccess.rows).toEqual([{ legal_entity_id: ownedEntityId }]);
+
+    // Accept applies the stored scope onto the new membership and clears the invitation scope.
+    await authPool.query(
+      `insert into auth.member (id, organization_id, user_id, role)
+       values ('member-invitee', 'org-1', $1, 'member')`,
+      [inviteeId],
+    );
+    await authPool.query(
+      'select auth.apply_invitation_entity_scope($1, $2, $3)',
+      [invitationId, 'org-1', inviteeId],
+    );
+
+    const applied = await asTenant(apiPool, orgOneOwner, (transaction) =>
+      readEntityScope(transaction, {
+        organizationId: 'org-1',
+        role: 'member',
+        userId: inviteeId,
+      }),
+    );
+    expect(applied).toEqual({
+      legalEntityIds: [ownedEntityId],
+      mode: 'restricted',
+    });
+
+    const leftover = await rootPool.query<{ total: number }>(
+      `select
+         (select count(*)::int from app.invitation_entity_scope where invitation_id = $1) as total`,
+      [invitationId],
+    );
+    expect(leftover.rows).toEqual([{ total: 0 }]);
+
+    // The cross-schema cascade removes any invitation scope when the invitation itself is deleted.
+    await authPool.query(
+      'select auth.write_invitation_entity_scope($1, $2, $3, $4::uuid[], $5)',
+      [invitationId, 'org-1', 'all', [], 'user-1'],
+    );
+    await authPool.query('delete from auth.invitation where id = $1', [
+      invitationId,
+    ]);
+    const cascaded = await rootPool.query<{ total: number }>(
+      'select count(*)::int as total from app.invitation_entity_scope where invitation_id = $1',
+      [invitationId],
+    );
+    expect(cascaded.rows).toEqual([{ total: 0 }]);
+
+    await authPool.query("delete from auth.member where id = 'member-invitee'");
+    await authPool.query('delete from auth."user" where id = $1', [inviteeId]);
+    // Remove the audit row the apply recorded so the append-only assertion stays exact.
+    await rootPool.query(
+      "delete from app.audit_log where organization_id = 'org-1' and action = 'member_entity_scope.granted'",
+    );
   });
 
   it('grants entity, scope and access writes to the application role and reads to reporting and backup', async () => {

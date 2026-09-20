@@ -46,7 +46,10 @@ import { z } from 'zod';
 
 import { useToast } from '../../../../components/shell/toast';
 import { authClient } from '../../../../lib/auth/client';
-import { transferOwnershipAction } from '../../../../lib/organizations/actions';
+import {
+  inviteMemberWithScopeAction,
+  transferOwnershipAction,
+} from '../../../../lib/organizations/actions';
 import {
   memberEntityScopePath,
   memberStatusPath,
@@ -297,6 +300,13 @@ export default function MembersView({
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<MemberRole>('member');
   const [inviteError, setInviteError] = useState<string | null>(null);
+  // Entity access is granted at invite time, so the picker starts empty and forces a choice.
+  const [inviteScopeMode, setInviteScopeMode] = useState<'all' | 'restricted'>(
+    'restricted',
+  );
+  const [inviteScopeSelection, setInviteScopeSelection] = useState<
+    readonly LegalEntity[]
+  >([]);
 
   const [roleTarget, setRoleTarget] = useState<MemberRow | null>(null);
   const [roleValue, setRoleValue] = useState<MemberRole>('member');
@@ -584,6 +594,8 @@ export default function MembersView({
     setInviteEmail('');
     setInviteRole('member');
     setInviteError(null);
+    setInviteScopeMode('restricted');
+    setInviteScopeSelection([]);
     setInviteOpen(true);
   }
 
@@ -658,31 +670,40 @@ export default function MembersView({
   }
 
   async function submitInvite(): Promise<void> {
-    if (!emailSchema.safeParse(inviteEmail.trim()).success) {
+    const email = inviteEmail.trim();
+    if (!emailSchema.safeParse(email).success) {
       setInviteError(t('members.invite.emailInvalid'));
       return;
     }
+    const scope: EntityScope =
+      inviteScopeMode === 'restricted'
+        ? {
+            legalEntityIds: inviteScopeSelection.map((entity) => entity.id),
+            mode: 'restricted',
+          }
+        : { mode: 'all' };
     setSubmitting(true);
     setInviteError(null);
-    const result = await authClient.organization.inviteMember({
-      email: inviteEmail.trim().toLowerCase(),
+    const result = await inviteMemberWithScopeAction({
+      email: email.toLowerCase(),
       organizationId,
       role: inviteRole,
+      scope,
     });
     setSubmitting(false);
 
-    if (!result.error) {
+    if (result.ok) {
       setInviteOpen(false);
       notify({ kind: 'success', title: t('members.toast.inviteSuccess') });
       await reloadInvitations();
       return;
     }
 
-    if (result.error.code === 'USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION') {
+    if (result.reason === 'already-invited') {
       setInviteError(t('members.invite.alreadyInvited'));
       return;
     }
-    if (result.error.code === 'USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION') {
+    if (result.reason === 'already-member') {
       setInviteError(t('members.invite.alreadyMember'));
       return;
     }
@@ -1409,6 +1430,7 @@ export default function MembersView({
       )}
 
       <Modal
+        hasScrollingContent
         modalHeading={t('members.invite.title')}
         onRequestClose={() => {
           setInviteOpen(false);
@@ -1417,7 +1439,12 @@ export default function MembersView({
           void submitInvite();
         }}
         open={inviteOpen}
-        primaryButtonDisabled={submitting || inviteEmail.trim().length === 0}
+        primaryButtonDisabled={
+          submitting ||
+          inviteEmail.trim().length === 0 ||
+          (inviteScopeMode === 'restricted' &&
+            inviteScopeSelection.length === 0)
+        }
         primaryButtonText={t('members.invite.submit')}
         secondaryButtonText={t('members.invite.cancel')}
         size="sm"
@@ -1448,6 +1475,52 @@ export default function MembersView({
               <SelectItem key={role} text={roleLabels[role]} value={role} />
             ))}
           </Select>
+          <Select
+            id="invite-scope-mode"
+            labelText={t('members.scope.modeLabel')}
+            onChange={(event) => {
+              setInviteScopeMode(
+                event.target.value === 'all' ? 'all' : 'restricted',
+              );
+            }}
+            value={inviteScopeMode}
+          >
+            <SelectItem
+              text={t('members.scope.restricted')}
+              value="restricted"
+            />
+            <SelectItem text={t('members.scope.all')} value="all" />
+          </Select>
+          {inviteScopeMode === 'restricted' ? (
+            <fieldset className={styles.scopeEntities!}>
+              <legend>{t('members.scope.entitiesLabel')}</legend>
+              {orderedLegalEntities.length === 0 ? (
+                <p>{t('members.scope.noEntities')}</p>
+              ) : (
+                <div className={styles.scopeEntityOptions!}>
+                  {orderedLegalEntities.map((entity) => (
+                    <Checkbox
+                      checked={inviteScopeSelection.some(
+                        (selected) => selected.id === entity.id,
+                      )}
+                      id={`invite-scope-entity-${entity.id}`}
+                      key={entity.id}
+                      labelText={entity.name}
+                      onChange={(_event, { checked }) => {
+                        setInviteScopeSelection((current) =>
+                          checked
+                            ? [...current, entity]
+                            : current.filter(
+                                (selected) => selected.id !== entity.id,
+                              ),
+                        );
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </fieldset>
+          ) : null}
         </Stack>
       </Modal>
 
@@ -1499,7 +1572,10 @@ export default function MembersView({
             void submitScope();
           }}
           open
-          primaryButtonDisabled={submitting}
+          primaryButtonDisabled={
+            submitting ||
+            (scopeMode === 'restricted' && scopeSelection.length === 0)
+          }
           primaryButtonText={t('members.scope.submit')}
           secondaryButtonText={t('members.scope.cancel')}
           size="sm"
