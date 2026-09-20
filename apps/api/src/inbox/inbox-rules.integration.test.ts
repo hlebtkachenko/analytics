@@ -29,6 +29,7 @@ import {
   createQueue,
   createQueueClientFromConfiguration,
 } from '../worker/queue.js';
+import { endPools } from '../test-support/end-pools.js';
 import {
   ROUTE_INBOX_ITEM_QUEUE,
   RULE_PROVIDER,
@@ -289,7 +290,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await boss.stop({ graceful: false });
-  await Promise.all([apiPool.end(), migratorPool.end()]);
+  await endPools(apiPool, migratorPool);
   await container.stop();
   await rm(directory, { force: true, recursive: true });
 });

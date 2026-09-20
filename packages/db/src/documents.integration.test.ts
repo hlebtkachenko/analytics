@@ -18,6 +18,7 @@ import {
   withTenantContext,
 } from './index.js';
 import type { TenantContext } from './index.js';
+import { endPools } from './integration-support.js';
 
 const postgresImage =
   'pgvector/pgvector:pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a';
@@ -201,13 +202,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await Promise.all([
-    apiPool.end(),
-    backupPool.end(),
-    migratorPool.end(),
-    reportingPool.end(),
-    rootPool.end(),
-  ]);
+  await endPools(apiPool, backupPool, migratorPool, reportingPool, rootPool);
   await container.stop();
 });
 

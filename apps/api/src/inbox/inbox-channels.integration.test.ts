@@ -32,6 +32,7 @@ import {
 import { channelTenant, resolveChannelAccess } from '../channel-access.js';
 import type { MembershipResolver } from '../membership-resolver.js';
 import { resolveTenantAccess } from '../tenant-access.js';
+import { endPools } from '../test-support/end-pools.js';
 import type { SplitEmailItemJob } from './contract.js';
 import { InboxService } from './inbox.service.js';
 import {
@@ -264,7 +265,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await Promise.all([apiPool.end(), authPool.end(), migratorPool.end()]);
+  await endPools(apiPool, authPool, migratorPool);
   await container.stop();
   await rm(directory, { force: true, recursive: true });
 });

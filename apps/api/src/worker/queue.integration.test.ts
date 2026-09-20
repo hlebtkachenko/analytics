@@ -15,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { SPLIT_EMAIL_ITEM_QUEUE } from '../inbox/contract.js';
 import { sendSplitEmailItem } from '../inbox/inbox-queue.js';
+import { endPools } from '../test-support/end-pools.js';
 import { runTenantJob } from './job-context.js';
 import { createQueue, createQueueClientFromConfiguration } from './queue.js';
 
@@ -134,7 +135,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await boss.stop({ graceful: false });
-  await Promise.all([apiPool.end(), migratorPool.end(), rootPool.end()]);
+  await endPools(apiPool, migratorPool, rootPool);
   await container.stop();
 });
 

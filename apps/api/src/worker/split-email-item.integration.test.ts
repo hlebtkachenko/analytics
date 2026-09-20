@@ -79,6 +79,7 @@ import {
 } from '../inbox/inbox-repository.js';
 import * as fixtures from '../inbox/providers/__fixtures__/index.js';
 import type { BlobScanner, ScanOutcome } from '../scanning/clamd-client.js';
+import { endPools } from '../test-support/end-pools.js';
 import {
   runInboxMaintenance,
   type InboxMaintenanceReport,
@@ -449,7 +450,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await Promise.all([apiPool.end(), migratorPool.end()]);
+  await endPools(apiPool, migratorPool);
   await container.stop();
   await rm(directory, { force: true, recursive: true });
 });

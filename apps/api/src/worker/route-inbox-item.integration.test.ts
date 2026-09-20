@@ -83,6 +83,7 @@ import {
   type InboxRepository,
 } from '../inbox/inbox-repository.js';
 import * as fixtures from '../inbox/providers/__fixtures__/index.js';
+import { endPools } from '../test-support/end-pools.js';
 import { createQueue, createQueueClientFromConfiguration } from './queue.js';
 import { rerunInboxRule } from './rerun-inbox-rule.js';
 import { AUTO_ROUTE_PROVIDER, routeInboxItem } from './route-inbox-item.js';
@@ -348,7 +349,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await boss.stop({ graceful: false });
-  await Promise.all([apiPool.end(), migratorPool.end()]);
+  await endPools(apiPool, migratorPool);
   await container.stop();
   await rm(directory, { force: true, recursive: true });
 });

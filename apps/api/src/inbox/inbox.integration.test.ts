@@ -43,6 +43,7 @@ import {
   readDocument,
 } from '../documents/document-repository.js';
 import { createPartner } from '../documents/partner-repository.js';
+import { endPools } from '../test-support/end-pools.js';
 import { DETECTED_TYPES, inboxItemListQuerySchema } from './contract.js';
 import type {
   PutInboxRoutingTargetRequest,
@@ -293,7 +294,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await Promise.all([apiPool.end(), migratorPool.end()]);
+  await endPools(apiPool, migratorPool);
   await container.stop();
   await rm(directory, { force: true, recursive: true });
 });
