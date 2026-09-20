@@ -167,6 +167,8 @@ afterEach(() => {
 describe('OrganizationMembersPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // jsdom lacks scrollIntoView, which Carbon MultiSelect calls on open.
+    Element.prototype.scrollIntoView = vi.fn();
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       addEventListener: vi.fn(),
       addListener: vi.fn(),
@@ -210,14 +212,91 @@ describe('OrganizationMembersPage', () => {
   it('renders members and pending invitations with an expired label', async () => {
     await renderPage();
 
+    expect(
+      screen.getByRole('heading', { name: 'Active members (2)' }),
+    ).toBeVisible();
     expect(within(rowFor('Ada Owner')).getByText('Owner')).toBeVisible();
     expect(
       within(rowFor('Ben Member')).getByText('All entities'),
     ).toBeVisible();
-    expect(screen.getByText('guest@bap.test')).toBeInTheDocument();
+  });
+
+  it('expands a member with supplementary access details only', async () => {
+    mocks.readMemberEntityScopes.mockResolvedValue(
+      new Map([
+        ['user-2', { legalEntityIds: [LEGAL_ENTITY_ID], mode: 'restricted' }],
+      ]),
+    );
+
+    await renderPage();
+
+    fireEvent.click(
+      within(rowFor('Ben Member')).getByRole('button', {
+        name: 'Expand current row',
+      }),
+    );
+
+    const expandedRow = screen
+      .getByText('A member has read-only access.')
+      .closest('tr');
+    expect(expandedRow).not.toBeNull();
+    expect(within(expandedRow!).getByText('Placeholder Holding')).toBeVisible();
     expect(
-      within(rowFor('stale@bap.test')).getByText('Expired'),
-    ).toBeInTheDocument();
+      within(expandedRow!).queryByText('Ben Member'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(expandedRow!).queryByText('member@bap.test'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('hides inactive members under the default active filter', async () => {
+    mocks.listMembers.mockResolvedValue({
+      members: [owner, { ...member, status: 'inactive' }],
+    });
+
+    await renderPage();
+
+    expect(within(rowFor('Ada Owner')).getByText('Active')).toBeVisible();
+    expect(screen.queryByText('Ben Member')).not.toBeInTheDocument();
+  });
+
+  it('reveals inactive members after staging and applying the status filter', async () => {
+    mocks.listMembers.mockResolvedValue({
+      members: [owner, { ...member, status: 'inactive' }],
+    });
+
+    await renderPage();
+
+    expect(screen.queryByText('Ben Member')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    fireEvent.click(screen.getByLabelText('Active'));
+    fireEvent.click(screen.getByLabelText('Inactive'));
+    // Staging alone must not filter until the panel is applied.
+    expect(screen.queryByText('Ben Member')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    expect(screen.getByText('Ben Member')).toBeVisible();
+    expect(screen.queryByText('Ada Owner')).not.toBeInTheDocument();
+  });
+
+  it('applies and resets the role filter through the panel', async () => {
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    fireEvent.click(screen.getByLabelText('Owner'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    expect(screen.getByText('Ada Owner')).toBeVisible();
+    expect(screen.queryByText('Ben Member')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    expect(screen.getByText('Ada Owner')).toBeVisible();
+    expect(screen.getByText('Ben Member')).toBeVisible();
   });
 
   it('selects the invitations tab from the deep link', async () => {
@@ -229,6 +308,13 @@ describe('OrganizationMembersPage', () => {
       'aria-selected',
       'true',
     );
+    expect(
+      screen.getByRole('heading', { name: 'Pending invitations (2)' }),
+    ).toBeVisible();
+    expect(screen.getByText('guest@bap.test')).toBeInTheDocument();
+    expect(
+      within(rowFor('stale@bap.test')).getByText('Expired'),
+    ).toBeInTheDocument();
   });
 
   it('replaces the query when switching tabs', async () => {
@@ -287,7 +373,11 @@ describe('OrganizationMembersPage', () => {
   it('changes a member role', async () => {
     await renderPage();
 
-    fireEvent.click(within(rowFor('Ben Member')).getByRole('button'));
+    fireEvent.click(
+      within(rowFor('Ben Member')).getByRole('button', {
+        name: 'Actions for Ben Member',
+      }),
+    );
     fireEvent.click(screen.getByText('Change role'));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -299,24 +389,50 @@ describe('OrganizationMembersPage', () => {
     });
   });
 
-  it('removes a member after confirmation', async () => {
+  it('removes a member by marking them inactive over the BFF', async () => {
+    const calls: { body: unknown; method: string | undefined; path: string }[] =
+      [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (path: string, init?: RequestInit) => {
+        calls.push({
+          body:
+            init?.body === undefined
+              ? undefined
+              : JSON.parse(String(init.body)),
+          method: init?.method,
+          path,
+        });
+        return new Response(null, { status: 204 });
+      }),
+    );
+
     await renderPage();
 
-    fireEvent.click(within(rowFor('Ben Member')).getByRole('button'));
+    fireEvent.click(
+      within(rowFor('Ben Member')).getByRole('button', {
+        name: 'Actions for Ben Member',
+      }),
+    );
     fireEvent.click(screen.getByText('Remove'));
     fireEvent.click(screen.getByRole('button', { name: 'Remove member' }));
 
     await screen.findByText('The member was removed.');
-    expect(mocks.removeMember).toHaveBeenCalledWith({
-      memberIdOrEmail: 'member-2',
-      organizationId: 'organization-1',
-    });
+    const put = calls.find((call) => call.method === 'PUT');
+    expect(put?.path).toBe(
+      '/api/bff/application/organizations/organization-1/members/user-2/status',
+    );
+    expect(put?.body).toEqual({ status: 'inactive' });
   });
 
   it('hides remove on the caller row and scope on the owner row', async () => {
     await renderPage();
 
-    fireEvent.click(within(rowFor('Ada Owner')).getByRole('button'));
+    fireEvent.click(
+      within(rowFor('Ada Owner')).getByRole('button', {
+        name: 'Actions for Ada Owner',
+      }),
+    );
 
     expect(screen.getByText('Change role')).toBeInTheDocument();
     expect(screen.queryByText('Remove')).not.toBeInTheDocument();
@@ -343,7 +459,11 @@ describe('OrganizationMembersPage', () => {
 
     await renderPage();
 
-    fireEvent.click(within(rowFor('Ben Member')).getByRole('button'));
+    fireEvent.click(
+      within(rowFor('Ben Member')).getByRole('button', {
+        name: 'Actions for Ben Member',
+      }),
+    );
     fireEvent.click(screen.getByText('Edit entity scope'));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -360,7 +480,11 @@ describe('OrganizationMembersPage', () => {
 
     await renderPage();
 
-    fireEvent.click(within(rowFor('guest@bap.test')).getByRole('button'));
+    fireEvent.click(
+      within(rowFor('guest@bap.test')).getByRole('button', {
+        name: 'Actions for guest@bap.test',
+      }),
+    );
     fireEvent.click(screen.getByText('Resend'));
 
     await screen.findByText('The invitation was resent.');
@@ -371,7 +495,11 @@ describe('OrganizationMembersPage', () => {
       role: 'member',
     });
 
-    fireEvent.click(within(rowFor('guest@bap.test')).getByRole('button'));
+    fireEvent.click(
+      within(rowFor('guest@bap.test')).getByRole('button', {
+        name: 'Actions for guest@bap.test',
+      }),
+    );
     fireEvent.click(screen.getByText('Cancel invitation'));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel invitation' }));
 
@@ -390,7 +518,9 @@ describe('OrganizationMembersPage', () => {
       screen.queryByRole('button', { name: 'Invite member' }),
     ).not.toBeInTheDocument();
     expect(
-      within(rowFor('Ben Member')).queryByRole('button'),
+      within(rowFor('Ben Member')).queryByRole('button', {
+        name: 'Actions for Ben Member',
+      }),
     ).not.toBeInTheDocument();
     expect(mocks.readLegalEntities).not.toHaveBeenCalled();
     expect(mocks.readMemberEntityScopes).not.toHaveBeenCalled();

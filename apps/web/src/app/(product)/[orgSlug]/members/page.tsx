@@ -17,6 +17,11 @@ function asRole(value: string): MemberRole {
   return value === 'owner' || value === 'admin' ? value : 'member';
 }
 
+// A member is active unless the provider reports the inactive status.
+function asStatus(value: string | undefined): 'active' | 'inactive' {
+  return value === 'inactive' ? 'inactive' : 'active';
+}
+
 // A stored date renders as a plain calendar date, consistent with the other lists.
 function isoDate(value: Date | string | null | undefined): string {
   if (value === null || value === undefined) {
@@ -32,6 +37,7 @@ type RawMember = {
   createdAt?: Date | string;
   id: string;
   role: string;
+  status?: string;
   user: { email: string; name: string };
   userId: string;
 };
@@ -51,6 +57,7 @@ function mapMember(member: RawMember): MemberRow {
     joinedAt: isoDate(member.createdAt),
     name: member.user.name,
     role: asRole(member.role),
+    status: asStatus(member.status),
     userId: member.userId,
   };
 }

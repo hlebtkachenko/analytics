@@ -13,6 +13,7 @@ export {
   Download,
   Email,
   Enterprise,
+  Filter,
   Help,
   Launch,
   Light,

@@ -15,6 +15,11 @@ const reviewedImports = {
   'app/(identity)/sign-in/sign-in-form.tsx': ['Login'],
   'app/(identity)/sign-in/two-factor/page.tsx': ['Checkmark'],
   'app/(identity)/sign-up/sign-up-form.tsx': ['UserFollow'],
+  'app/(product)/[orgSlug]/members/members-view.tsx': [
+    'Download',
+    'Filter',
+    'UserFollow',
+  ],
   'app/(product)/account/access/page.tsx': [
     'AiGenerate',
     'DataSet',
@@ -77,6 +82,42 @@ const reviewedCallsites = [
     'Button',
     'UserFollow',
     "{t('signUp.submit')}",
+  ],
+  [
+    'app/(product)/[orgSlug]/members/members-view.tsx',
+    'Button',
+    'UserFollow',
+    "{t('members.list.inviteAction')}",
+  ],
+  [
+    'app/(product)/[orgSlug]/members/members-view.tsx',
+    'Button',
+    'Download',
+    "{t('members.table.exportCsv')}",
+  ],
+  [
+    'app/(product)/[orgSlug]/members/members-view.tsx',
+    'Button',
+    'UserFollow',
+    "{t('members.list.inviteAction')}",
+  ],
+  [
+    'app/(product)/[orgSlug]/members/members-view.tsx',
+    'Button',
+    'UserFollow',
+    "{t('members.list.inviteAction')}",
+  ],
+  [
+    'app/(product)/[orgSlug]/members/members-view.tsx',
+    'Button',
+    'Download',
+    "{t('members.table.exportCsv')}",
+  ],
+  [
+    'app/(product)/[orgSlug]/members/members-view.tsx',
+    'Button',
+    'UserFollow',
+    "{t('members.list.inviteAction')}",
   ],
   [
     'app/(product)/account/access/page.tsx',
@@ -508,6 +549,12 @@ describe('Carbon application icon AST contract', () => {
     );
 
     expect(actualCallsites).toEqual([
+      {
+        attributes: {},
+        file: 'app/(product)/[orgSlug]/members/members-view.tsx',
+        icon: 'Filter',
+        selfClosing: true,
+      },
       {
         attributes: {
           'aria-hidden': 'true',
