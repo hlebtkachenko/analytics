@@ -133,6 +133,13 @@ export function memberEntityScopePath(
   return `${organizationPath(organizationId)}/members/${encodeURIComponent(userId)}/entity-scope`;
 }
 
+export function memberStatusPath(
+  organizationId: string,
+  userId: string,
+): string {
+  return `${organizationPath(organizationId)}/members/${encodeURIComponent(userId)}/status`;
+}
+
 export function datasetPath(organizationId: string, datasetId: string): string {
   return `${datasetsPath(organizationId)}/${encodeURIComponent(datasetId)}`;
 }

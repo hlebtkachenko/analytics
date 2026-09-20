@@ -34,6 +34,7 @@ import { LegalEntityController } from './legal-entity.controller.js';
 import {
   LegalEntityRepository,
   type CreateLegalEntityInput,
+  type SetMemberStatusInput,
   type UpdateLegalEntityInput,
   type WriteMemberEntityScopeInput,
 } from './legal-entity-repository.js';
@@ -58,6 +59,7 @@ describe('application legal entity routes', () => {
   const createCalls: CreateLegalEntityInput[] = [];
   const updateCalls: UpdateLegalEntityInput[] = [];
   const scopeCalls: WriteMemberEntityScopeInput[] = [];
+  const statusCalls: SetMemberStatusInput[] = [];
   const limiter = new SubjectRateLimiter({
     limit: 200,
     maxEntries: 8,
@@ -131,6 +133,19 @@ describe('application legal entity routes', () => {
         ? { ...entity, name: input.name ?? entity.name }
         : null;
     }),
+    setMemberStatus: vi.fn(async (input) => {
+      statusCalls.push(input);
+      if (input.targetUserId === 'stranger') {
+        return { outcome: 'not-found' as const };
+      }
+      if (input.targetUserId === 'owner_2') {
+        return { outcome: 'last-owner' as const };
+      }
+      return {
+        outcome: 'updated' as const,
+        previousStatus: input.status === 'inactive' ? 'active' : 'inactive',
+      };
+    }),
     writeMemberScope: vi.fn(async (input) => {
       scopeCalls.push(input);
       return input.scope.mode === 'restricted' &&
@@ -168,6 +183,7 @@ describe('application legal entity routes', () => {
     createCalls.length = 0;
     updateCalls.length = 0;
     scopeCalls.length = 0;
+    statusCalls.length = 0;
   });
 
   it('lists the entities in the caller scope', async () => {
@@ -415,6 +431,61 @@ describe('application legal entity routes', () => {
       .expect(400);
   });
 
+  it('deactivates another member for the owner and audits through the repository', async () => {
+    const response = await request(application.getHttpServer())
+      .put('/v1/organizations/organization_1/members/user_2/status')
+      .set('Authorization', 'Bearer caller')
+      .send({ status: 'inactive' })
+      .expect(200);
+
+    expect(response.body).toEqual({ status: 'inactive' });
+    expect(statusCalls).toEqual([
+      {
+        organizationId: 'organization_1',
+        role: 'owner',
+        status: 'inactive',
+        targetUserId: 'user_2',
+        userId: 'user_1',
+      },
+    ]);
+  });
+
+  it('lets a member deactivate only their own membership', async () => {
+    // The caller is user_1; a member acting on their own row is allowed to leave.
+    await request(application.getHttpServer())
+      .put('/v1/organizations/organization_3/members/user_1/status')
+      .set('Authorization', 'Bearer caller')
+      .send({ status: 'inactive' })
+      .expect(200);
+    expect(statusCalls).toHaveLength(1);
+
+    // A member acting on another member never reaches the repository.
+    await request(application.getHttpServer())
+      .put('/v1/organizations/organization_3/members/user_2/status')
+      .set('Authorization', 'Bearer caller')
+      .send({ status: 'inactive' })
+      .expect(403);
+    expect(statusCalls).toHaveLength(1);
+  });
+
+  it('translates the repository outcomes and refuses a body outside the contract', async () => {
+    await request(application.getHttpServer())
+      .put('/v1/organizations/organization_1/members/stranger/status')
+      .set('Authorization', 'Bearer caller')
+      .send({ status: 'inactive' })
+      .expect(404);
+    await request(application.getHttpServer())
+      .put('/v1/organizations/organization_1/members/owner_2/status')
+      .set('Authorization', 'Bearer caller')
+      .send({ status: 'inactive' })
+      .expect(409);
+    await request(application.getHttpServer())
+      .put('/v1/organizations/organization_1/members/user_2/status')
+      .set('Authorization', 'Bearer caller')
+      .send({ status: 'banned' })
+      .expect(400);
+  });
+
   it('publishes only the versioned entity and scope routes in OpenAPI', () => {
     const document = SwaggerModule.createDocument(
       application,
@@ -426,6 +497,7 @@ describe('application legal entity routes', () => {
       '/v1/organizations/{organizationId}/legal-entities',
       '/v1/organizations/{organizationId}/legal-entities/{legalEntityId}',
       '/v1/organizations/{organizationId}/members/{userId}/entity-scope',
+      '/v1/organizations/{organizationId}/members/{userId}/status',
     ]);
   });
 });

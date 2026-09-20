@@ -360,17 +360,21 @@ quota table remains SELECT-only for `bap_auth` and schema `app` remains entirely
 outside that role.
 
 Organization creation explicitly makes the creator an `owner` and caps
-membership at 100. The auth before-hook requires `organizationId` on the 10
-installed 1.7.2 fallback endpoints that can bind it. The eleventh,
-`get-active-member`, has no id input and is rejected unconditionally by the hook
-and disabled at the public router. The source inventory is larger than the
-plan's earlier count of 8. Better Auth creation and invitation acceptance may
-update stored `activeOrganizationId`, but no supported BAP operation consumes
-that state as an implicit selector. Public `/organization/set-active` is
-disabled, and `/organization/delete` is disabled because auth-only deletion
-would strand cross-schema data. With the sole-owner account deletion guard, this
-means a sole owner cannot delete either object until ownership is delegated. A
-later operator purge workflow must solve that gap.
+membership at 100. The auth before-hook requires `organizationId` on the
+installed 1.7.2 fallback endpoints that can bind it, and on every one of them it
+also resolves the session and rejects a caller whose `auth.member.status` is
+`inactive`. `get-active-member` has no id input and is rejected unconditionally
+by the hook and disabled at the public router. `/organization/remove-member` and
+`/organization/leave` are disabled outright: a membership is deactivated through
+the member status route, never removed or self-left, so audit history is never
+lost. The source inventory is larger than the plan's earlier count of 8. Better
+Auth creation and invitation acceptance may update stored
+`activeOrganizationId`, but no supported BAP operation consumes that state as an
+implicit selector. Public `/organization/set-active` is disabled, and
+`/organization/delete` is disabled because auth-only deletion would strand
+cross-schema data. With the sole-owner account deletion guard, this means a sole
+owner cannot delete either object until ownership is delegated. A later operator
+purge workflow must solve that gap.
 
 ## Organization routing boundary
 
@@ -417,6 +421,33 @@ call that same resolver; nothing in PostgreSQL enforces it.
 Per-dataset grants no longer exist. `app.data_grants` is dropped, `member` is
 read-only, and dataset and upload visibility depends only on organization
 membership and, above that boundary, entity scope.
+
+## Member status
+
+A membership carries an `active` or `inactive` status on `auth.member`. Inactive
+means zero access everywhere: `auth.resolve_membership` and every membership
+read in `@bap/db/access` filter on `status = 'active'`, so an inactive member is
+denied by the API, the reporting service, the product shell, the workspace
+switcher, and the auth before-hook alike. The row is retained with its name,
+email, role, and join date so audit history never loses who did what.
+
+The status write and its audit must be atomic, and `bap_auth` cannot call
+`app.record_audit`, so this does not go through Better Auth. The
+`SECURITY DEFINER` function
+`auth.set_member_status(subject_user_id, new_status)` is owned by `bap_owner`,
+executable only by `bap_api`, and takes the organization, actor, and role from
+the transaction context, never from an argument. It refuses an empty context, a
+status outside the two values, a non-owner acting on another member, and a
+self-change other than deactivation; it takes a per-organization advisory lock
+and refuses to deactivate the last active owner. The API
+`PUT /organizations/:organizationId/members/:userId/status` route pairs the
+definer call with one
+`app.record_audit('member.deactivated' | 'member.reactivated', 'member', userId, { previous_status, role })`
+in a single tenant transaction. Audit metadata carries no name or email, because
+account erasure rewrites `user_id` and `resource_id` but never `metadata`;
+`app.erase_user` also tombstones the member `resource_id` so an erased subject
+leaves no identifier behind. Demoting the last active owner is refused by the
+`beforeUpdateMemberRole` hook, mirroring the last-owner guard in the definer.
 
 ## Organization and account action boundary
 

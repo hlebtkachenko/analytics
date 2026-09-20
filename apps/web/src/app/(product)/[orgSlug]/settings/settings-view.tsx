@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useToast } from '../../../../components/shell/toast';
 import { authClient } from '../../../../lib/auth/client';
+import { memberStatusPath, mutateJson } from '../../../../lib/datasets/client';
 import {
   normalizeOrganizationSlug,
   organizationSlugSchema,
@@ -80,18 +81,29 @@ export default function SettingsView({
   async function confirmLeave(): Promise<void> {
     setSubmitting(true);
     setLeaveError(null);
-    const result = await authClient.organization.leave({ organizationId });
+    // Leaving is a self-deactivation: the membership row is retained, so audit history never loses who did what.
+    const session = await authClient.getSession();
+    const userId = session.data?.user.id;
+
+    if (userId === undefined) {
+      setSubmitting(false);
+      notify({ kind: 'error', title: t('settings.leave.failure') });
+      return;
+    }
+
+    const result = await mutateJson(memberStatusPath(organizationId, userId), {
+      body: { status: 'inactive' },
+      method: 'PUT',
+    });
     setSubmitting(false);
 
-    if (!result.error) {
+    if (result.ok) {
       router.push('/organizations?result=workspace-left');
       return;
     }
 
-    if (
-      result.error.code ===
-      'YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER'
-    ) {
+    // The API refuses the last active owner with 409, which maps to the existing last-owner message.
+    if (result.status === 409) {
       setLeaveError(t('settings.leave.lastOwner'));
       return;
     }

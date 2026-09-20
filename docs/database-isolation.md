@@ -105,6 +105,19 @@ roles continue to use only the fixed
 `auth.resolve_membership(subject_id, organization_id)` function and gain no slug
 lookup.
 
+`auth.member` carries a `status` column (`active` or `inactive`, defaulting to
+`active` with a CHECK constraint, added by migration `20260920.0001` as a fast
+default with no table rewrite). `auth.resolve_membership`, the route accessor,
+the workspace switcher read, and `countSoleOwnedOrganizations` all filter on
+`status = 'active'`, so an inactive member resolves as no membership everywhere.
+Status changes go through `auth.set_member_status(subject_user_id, new_status)`,
+a `SECURITY DEFINER` function owned by `bap_owner` and executable only by
+`bap_api`. It reads organization, actor, and role from the transaction context,
+refuses an empty context, a status outside the two values, a non-owner acting on
+another member, and a self-change other than deactivation, and under a
+per-organization advisory lock refuses to deactivate the last active owner.
+`bap_api` holds no direct DML on `auth.member`; the definer is the only writer.
+
 Migration `20260831.0004` reserves the newly published literal `/organizations`
 route. It checks for an existing colliding organization before dropping the
 previous stable named constraint, then recreates that constraint with all 16
@@ -124,17 +137,20 @@ no direct execution to runtime roles.
 
 `app.erase_user(text)` is an invoker-rights, fixed-search-path function. The
 eraser role has schema usage, function execution, SELECT/UPDATE on only
-`audit_log.user_id`, `dataset.created_by`, `legal_entity.created_by`,
-`member_entity_scope.updated_by`, `legal_entity_access.created_by`,
-`document.created_by`, `partner.created_by`, and `document_link.created_by`,
-plus SELECT on the two scope tables' `user_id` and DELETE on those two tables so
-a subject's own scope rows disappear. `data_grants.user_id` was removed with
-that table under ADR 0011. It has no other table-wide grant. The database CLI
-connects as `bap_migrator`, sets owner to lock and validate the pending request,
-sets eraser for the app function, returns to owner to consume the request, and
-commits once. A live or unrequested id is refused before eraser role entry.
-`bap_auth` retains zero access to schema `app`, and `bap_api` retains no UPDATE
-on `app.audit_log`.
+`audit_log.user_id`, `audit_log.resource_id`, `dataset.created_by`,
+`legal_entity.created_by`, `member_entity_scope.updated_by`,
+`legal_entity_access.created_by`, `document.created_by`, `partner.created_by`,
+and `document_link.created_by`, plus SELECT on `audit_log.resource_type` to
+target member rows, SELECT on the two scope tables' `user_id`, and DELETE on
+those two tables so a subject's own scope rows disappear. A member action
+records its subject as `audit_log.resource_id`, so erasure tombstones that
+identifier too, keeping the audited action while carrying no name or email in
+`metadata`. `data_grants.user_id` was removed with that table under ADR 0011. It
+has no other table-wide grant. The database CLI connects as `bap_migrator`, sets
+owner to lock and validate the pending request, sets eraser for the app
+function, returns to owner to consume the request, and commits once. A live or
+unrequested id is refused before eraser role entry. `bap_auth` retains zero
+access to schema `app`, and `bap_api` retains no UPDATE on `app.audit_log`.
 
 The public sign-up edge limiter also stays behind `@bap/db`. One statement
 inserts or atomically advances a hashed, namespaced `auth.rate_limit` key before

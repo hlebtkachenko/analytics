@@ -89,6 +89,15 @@ export const organizationAuthSchema = {
     modelName: 'invitation',
   },
   member: {
+    additionalFields: {
+      status: {
+        defaultValue: 'active',
+        fieldName: 'status',
+        input: false,
+        required: false,
+        type: 'string',
+      },
+    },
     fields: {
       createdAt: 'created_at',
       organizationId: 'organization_id',

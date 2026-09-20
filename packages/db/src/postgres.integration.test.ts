@@ -1603,6 +1603,21 @@ describe('PostgreSQL 18 isolation', () => {
        order by table_name, column_name, privilege_type`);
     expect(eraserColumns.rows).toEqual([
       {
+        column_name: 'resource_id',
+        privilege_type: 'SELECT',
+        table_name: 'audit_log',
+      },
+      {
+        column_name: 'resource_id',
+        privilege_type: 'UPDATE',
+        table_name: 'audit_log',
+      },
+      {
+        column_name: 'resource_type',
+        privilege_type: 'SELECT',
+        table_name: 'audit_log',
+      },
+      {
         column_name: 'user_id',
         privilege_type: 'SELECT',
         table_name: 'audit_log',
@@ -1987,6 +2002,222 @@ describe('PostgreSQL 18 isolation', () => {
         "select count(*)::integer as total from app.dataset where created_by = 'user-3'",
       ),
     ).resolves.toMatchObject({ rows: [{ total: 2 }] });
+  });
+
+  describe('member status and audit', () => {
+    const ownerContext: TenantContext = {
+      organizationId: 'ms-org',
+      role: 'owner',
+      userId: 'ms-owner',
+    };
+    const memberContext: TenantContext = {
+      organizationId: 'ms-org',
+      role: 'member',
+      userId: 'ms-member',
+    };
+
+    beforeAll(async () => {
+      await asOwner(async (client) => {
+        await client.query(`
+          insert into auth."user" (id, name, email, email_verified)
+          values
+            ('ms-owner', 'Status Owner', 'ms-owner@example.test', true),
+            ('ms-owner-2', 'Status Co-owner', 'ms-owner-2@example.test', true),
+            ('ms-member', 'Status Member', 'ms-member@example.test', true),
+            ('ms-foreign', 'Status Foreign', 'ms-foreign@example.test', true)
+        `);
+        await client.query(`
+          insert into auth.organization (id, name, slug)
+          values ('ms-org', 'Status Org', 'ms-status'),
+                 ('ms-org-2', 'Status Org Two', 'ms-status-two')
+        `);
+        await client.query(`
+          insert into auth.member (id, organization_id, user_id, role)
+          values
+            ('ms-mem-owner', 'ms-org', 'ms-owner', 'owner'),
+            ('ms-mem-owner-2', 'ms-org', 'ms-owner-2', 'owner'),
+            ('ms-mem-member', 'ms-org', 'ms-member', 'member'),
+            ('ms-mem-foreign', 'ms-org-2', 'ms-foreign', 'owner')
+        `);
+      });
+    });
+
+    afterAll(async () => {
+      await rootPool.query(
+        "delete from app.audit_log where organization_id = 'ms-org'",
+      );
+      await asOwner(async (client) => {
+        await client.query(
+          "delete from auth.member where organization_id in ('ms-org', 'ms-org-2')",
+        );
+        await client.query(
+          "delete from auth.organization where id in ('ms-org', 'ms-org-2')",
+        );
+        await client.query('delete from auth."user" where id like \'ms-%\'');
+      });
+    });
+
+    it('excludes an inactive member from resolve_membership', async () => {
+      await asTenant(apiPool, ownerContext, (transaction) =>
+        transaction.query(
+          "select auth.set_member_status('ms-member', 'inactive')",
+        ),
+      );
+      await expect(
+        resolveMembership(apiPool, {
+          organizationId: 'ms-org',
+          subjectId: 'ms-member',
+        }),
+      ).resolves.toBeNull();
+
+      await asTenant(apiPool, ownerContext, (transaction) =>
+        transaction.query(
+          "select auth.set_member_status('ms-member', 'active')",
+        ),
+      );
+      await expect(
+        resolveMembership(apiPool, {
+          organizationId: 'ms-org',
+          subjectId: 'ms-member',
+        }),
+      ).resolves.toEqual({ emailVerified: true, role: 'member' });
+    });
+
+    it('refuses a status change without context and denies bap_reporting', async () => {
+      await expect(
+        apiPool.query("select auth.set_member_status('ms-member', 'inactive')"),
+      ).rejects.toThrow(/tenant and actor context/);
+      await expect(
+        reportingPool.query(
+          "select auth.set_member_status('ms-member', 'inactive')",
+        ),
+      ).rejects.toThrow(/permission denied/);
+    });
+
+    it('refuses a non-owner acting on another and a self-reactivation', async () => {
+      await expect(
+        asTenant(apiPool, memberContext, (transaction) =>
+          transaction.query(
+            "select auth.set_member_status('ms-owner', 'inactive')",
+          ),
+        ),
+      ).rejects.toThrow(/another member status/);
+      await expect(
+        asTenant(apiPool, memberContext, (transaction) =>
+          transaction.query(
+            "select auth.set_member_status('ms-member', 'active')",
+          ),
+        ),
+      ).rejects.toThrow(/deactivate their own/);
+    });
+
+    it('permits a member to deactivate only their own membership', async () => {
+      const left = await asTenant(apiPool, memberContext, (transaction) =>
+        transaction.query<{ previous_status: string | null }>(
+          "select auth.set_member_status('ms-member', 'inactive') as previous_status",
+        ),
+      );
+      expect(left.rows[0]?.previous_status).toBe('active');
+
+      await asTenant(apiPool, ownerContext, (transaction) =>
+        transaction.query(
+          "select auth.set_member_status('ms-member', 'active')",
+        ),
+      );
+    });
+
+    it('treats another organization member as not found', async () => {
+      const foreign = await asTenant(apiPool, ownerContext, (transaction) =>
+        transaction.query<{ previous_status: string | null }>(
+          "select auth.set_member_status('ms-foreign', 'inactive') as previous_status",
+        ),
+      );
+      expect(foreign.rows[0]?.previous_status).toBeNull();
+    });
+
+    it('refuses to deactivate the last active owner', async () => {
+      await asTenant(apiPool, ownerContext, (transaction) =>
+        transaction.query(
+          "select auth.set_member_status('ms-owner-2', 'inactive')",
+        ),
+      );
+      await expect(
+        asTenant(apiPool, ownerContext, (transaction) =>
+          transaction.query(
+            "select auth.set_member_status('ms-owner', 'inactive')",
+          ),
+        ),
+      ).rejects.toThrow(/last active owner/);
+
+      await asTenant(apiPool, ownerContext, (transaction) =>
+        transaction.query(
+          "select auth.set_member_status('ms-owner-2', 'active')",
+        ),
+      );
+    });
+
+    it('writes a member audit row that never records name or email', async () => {
+      await asTenant(apiPool, ownerContext, async (transaction) => {
+        await transaction.query(
+          "select auth.set_member_status('ms-member', 'inactive')",
+        );
+        await transaction.query(
+          "select app.record_audit('member.deactivated', 'member', 'ms-member', $1::jsonb)",
+          [JSON.stringify({ previous_status: 'active', role: 'owner' })],
+        );
+      });
+
+      const audit = await rootPool.query<{
+        action: string;
+        metadata: Record<string, unknown>;
+        user_id: string;
+      }>(
+        `select action, user_id, metadata
+         from app.audit_log
+         where organization_id = 'ms-org'
+           and resource_type = 'member'
+           and resource_id = 'ms-member'`,
+      );
+      expect(audit.rows).toEqual([
+        {
+          action: 'member.deactivated',
+          metadata: { previous_status: 'active', role: 'owner' },
+          user_id: 'ms-owner',
+        },
+      ]);
+
+      await asTenant(apiPool, ownerContext, (transaction) =>
+        transaction.query(
+          "select auth.set_member_status('ms-member', 'active')",
+        ),
+      );
+    });
+
+    it('tombstones the member audit resource_id on erasure', async () => {
+      // The audit row from the previous test carries resource_id 'ms-member' and actor 'ms-owner'.
+      await recordUserErasureRequest(authPool, 'ms-member');
+      await asOwner((client) =>
+        client.query('delete from auth."user" where id = \'ms-member\''),
+      );
+
+      const result = await executeEraseUser(migratorPool, 'ms-member');
+      expect(result.tombstone).toMatch(/^erased_/);
+
+      const audit = await rootPool.query<{
+        resource_id: string | null;
+        user_id: string;
+      }>(
+        `select user_id, resource_id
+         from app.audit_log
+         where organization_id = 'ms-org'
+           and resource_type = 'member'
+           and action = 'member.deactivated'`,
+      );
+      // The subject was never the actor, so only the resource_id is tombstoned.
+      expect(audit.rows).toEqual([
+        { resource_id: result.tombstone, user_id: 'ms-owner' },
+      ]);
+    });
   });
 
   it('fails closed without tenant context and resets settings after a transaction', async () => {

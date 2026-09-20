@@ -241,6 +241,8 @@ describe('Better Auth resource contract', () => {
         '/delete-user/callback',
         '/organization/delete',
         '/organization/get-active-member',
+        '/organization/leave',
+        '/organization/remove-member',
         '/organization/set-active',
         '/token',
       ].sort(),
@@ -828,7 +830,6 @@ describe('organization creation policy', () => {
       '/organization/invite-member': 'body',
       '/organization/list-invitations': 'query',
       '/organization/list-members': 'query',
-      '/organization/remove-member': 'body',
       '/organization/update': 'body',
       '/organization/update-member-role': 'body',
     });

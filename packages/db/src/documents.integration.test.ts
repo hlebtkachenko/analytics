@@ -220,12 +220,12 @@ describe('documents register isolation', () => {
     const compatibility = await checkMigrationCompatibility(apiPool);
 
     expect(result.applied).toEqual([]);
-    expect(result.currentVersion).toBe('20260916.0001');
-    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260916.0001');
+    expect(result.currentVersion).toBe('20260920.0001');
+    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260920.0001');
     expect(compatibility).toEqual({
       compatible: true,
-      expectedVersion: '20260916.0001',
-      version: '20260916.0001',
+      expectedVersion: '20260920.0001',
+      version: '20260920.0001',
     });
   });
 

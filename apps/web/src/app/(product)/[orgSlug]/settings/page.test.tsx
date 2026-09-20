@@ -8,7 +8,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  leave: vi.fn(),
+  getSession: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error('NEXT_NOT_FOUND');
   }),
@@ -30,8 +30,8 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('../../../../lib/auth/client', () => ({
   authClient: {
+    getSession: mocks.getSession,
     organization: {
-      leave: mocks.leave,
       update: mocks.update,
     },
   },
@@ -88,7 +88,13 @@ describe('OrganizationSettingsPage', () => {
     });
     mocks.readOrganizationAccess.mockResolvedValue(accessFor(true));
     mocks.update.mockResolvedValue({ data: {}, error: null });
-    mocks.leave.mockResolvedValue({ data: {}, error: null });
+    mocks.getSession.mockResolvedValue({ data: { user: { id: 'user-1' } } });
+    // Self-deactivate goes through the members status BFF route; the default is a success.
+    global.fetch = vi.fn(async () => ({
+      json: async () => ({ status: 'inactive' }),
+      ok: true,
+      status: 200,
+    })) as unknown as typeof fetch;
   });
 
   it('prefills the general form for an owner', async () => {
@@ -201,16 +207,20 @@ describe('OrganizationSettingsPage', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('leaves the workspace and navigates to the workspace list', async () => {
+  it('self-deactivates the membership and navigates to the workspace list', async () => {
     await renderPage();
 
     fireEvent.click(screen.getByRole('button', { name: 'Leave workspace' }));
     fireEvent.click(screen.getByRole('button', { name: 'Leave' }));
 
     await waitFor(() => {
-      expect(mocks.leave).toHaveBeenCalledWith({
-        organizationId: 'organization-1',
-      });
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/bff/application/organizations/organization-1/members/user-1/status',
+        expect.objectContaining({
+          body: JSON.stringify({ status: 'inactive' }),
+          method: 'PUT',
+        }),
+      );
     });
     expect(mocks.push).toHaveBeenCalledWith(
       '/organizations?result=workspace-left',
@@ -218,9 +228,12 @@ describe('OrganizationSettingsPage', () => {
   });
 
   it('keeps the leave modal open with an inline sole-owner error', async () => {
-    mocks.leave.mockResolvedValue({
-      error: { code: 'YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER' },
-    });
+    // The API refuses the last active owner with 409.
+    global.fetch = vi.fn(async () => ({
+      json: async () => ({}),
+      ok: false,
+      status: 409,
+    })) as unknown as typeof fetch;
 
     await renderPage();
 

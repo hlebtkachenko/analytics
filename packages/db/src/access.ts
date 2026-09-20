@@ -44,7 +44,7 @@ export interface WorkspaceMembership {
 }
 
 // Exact match against the version recorded by the migration runner. Bump it to the newest migration id in the same pull request as that migration. Rollback consequence: application code rolled back after the migration is applied makes /ready return 503 on every service until this is bumped again.
-export const DATABASE_MIGRATION_COMPATIBILITY = '20260916.0001';
+export const DATABASE_MIGRATION_COMPATIBILITY = '20260920.0001';
 
 export const PUBLIC_SIGNUP_EDGE_RATE_LIMIT = {
   max: 3,
@@ -160,6 +160,7 @@ export async function countSoleOwnedOrganizations(
          from auth.member as other_owner
          where other_owner.organization_id = subject_membership.organization_id
            and 'owner' = any(string_to_array(other_owner.role, ','))
+           and other_owner.status = 'active'
            and other_owner.user_id <> subject_membership.user_id
        )`,
     [userId],
@@ -435,6 +436,45 @@ export async function resolveMembership(
   return { emailVerified: row.email_verified, role: role.data };
 }
 
+// Reads a member's status for the inactive-caller gate; bap_auth holds SELECT on auth.member.
+// null means no membership row, which the gate leaves to Better Auth rather than treating as inactive.
+export async function readMemberStatus(
+  pool: DatabasePool,
+  organizationId: string,
+  userId: string,
+): Promise<'active' | 'inactive' | null> {
+  const result = await pool.query<{ status: string }>(
+    `select status
+     from auth.member
+     where organization_id = $1 and user_id = $2`,
+    [organizationId, userId],
+  );
+  const status = result.rows[0]?.status;
+
+  return status === 'active' || status === 'inactive' ? status : null;
+}
+
+// True when the organization keeps another active owner besides the excluded member.
+export async function hasOtherActiveOwner(
+  pool: DatabasePool,
+  organizationId: string,
+  excludedUserId: string,
+): Promise<boolean> {
+  const result = await pool.query<{ present: boolean }>(
+    `select exists (
+       select 1
+       from auth.member
+       where organization_id = $1
+         and user_id <> $2
+         and status = 'active'
+         and 'owner' = any(string_to_array(role, ','))
+     ) as present`,
+    [organizationId, excludedUserId],
+  );
+
+  return result.rows[0]?.present === true;
+}
+
 // Slug-only lookup for the gated synthetic setup path, never a request-time resolver.
 export async function findOrganizationIdBySlug(
   pool: DatabasePool,
@@ -464,6 +504,7 @@ export async function resolveOrganizationRoute(
        on membership.organization_id = organization.id
      where organization.slug = $1
        and membership.user_id = $2
+       and membership.status = 'active'
      limit 1`,
     [input.organizationSlug, input.subjectId],
   );
@@ -499,6 +540,7 @@ export async function listWorkspaceMemberships(
      inner join auth.member as membership
        on membership.organization_id = organization.id
      where membership.user_id = $1
+       and membership.status = 'active'
      order by organization.name`,
     [subjectId],
   );

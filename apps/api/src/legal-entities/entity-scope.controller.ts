@@ -3,6 +3,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  ForbiddenException,
   Get,
   Inject,
   NotFoundException,
@@ -39,10 +40,15 @@ import {
   entityScopeRequestSchema,
   memberEntityScopeListOpenApiSchema,
   memberEntityScopeListResponseSchema,
+  memberStatusOpenApiSchema,
+  memberStatusRequestSchema,
+  memberStatusResponseSchema,
 } from './contract.js';
 import type {
   EntityScopeRequest,
   MemberEntityScopeListResponse,
+  MemberStatusRequest,
+  MemberStatusResponse,
 } from './contract.js';
 import { LegalEntityRepository } from './legal-entity-repository.js';
 
@@ -156,5 +162,58 @@ export class EntityScopeController {
     }
 
     return entityScopeSchema.parse(body);
+  }
+
+  @Put(':organizationId/members/:userId/status')
+  @UseGuards(ResourceJwtGuard, SubjectRateLimitGuard)
+  @ApiOperation({ summary: 'Activate or deactivate one member' })
+  @ApiBody({ schema: memberStatusOpenApiSchema })
+  @ApiOkResponse({ schema: memberStatusOpenApiSchema })
+  @ApiBadRequestResponse({ description: 'The status is invalid' })
+  @ApiUnauthorizedResponse({ description: 'The resource token is invalid' })
+  @ApiForbiddenResponse({ description: 'Organization access is denied' })
+  @ApiNotFoundResponse({ description: 'The subject is not a member' })
+  @ApiConflictResponse({ description: 'The last active owner cannot leave' })
+  async putMemberStatus(
+    @Param('organizationId', { schema: organizationIdentifierSchema })
+    organizationId: string,
+    @Param('userId', { schema: subjectIdentifierSchema }) userId: string,
+    @Body({ schema: memberStatusRequestSchema }) body: MemberStatusRequest,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<MemberStatusResponse> {
+    // Every member reaches this route; an owner may act on anyone, everyone else only on their own membership.
+    const { access, tenant } = await resolveTenantAccess({
+      memberships: this.memberships,
+      organizationId,
+      request,
+    });
+
+    if (userId !== tenant.userId && !access.capabilities.manageMembers) {
+      throw new ForbiddenException();
+    }
+
+    const result = await this.entities.setMemberStatus({
+      ...tenant,
+      status: body.status,
+      targetUserId: userId,
+    });
+
+    switch (result.outcome) {
+      case 'not-found': {
+        throw new NotFoundException();
+      }
+      case 'forbidden': {
+        throw new ForbiddenException();
+      }
+      case 'last-owner': {
+        throw new ConflictException();
+      }
+      case 'invalid': {
+        throw new BadRequestException();
+      }
+      default: {
+        return memberStatusResponseSchema.parse({ status: body.status });
+      }
+    }
   }
 }

@@ -1,11 +1,14 @@
 import {
   countSoleOwnedOrganizations,
+  hasOtherActiveOwner,
   organizationCreationLimitReached,
   publicSignupEnabled,
   publicSignupInvitationExists,
+  readMemberStatus,
   recordUserErasureRequest,
 } from '@bap/db/access';
 import { admin, jwt, organization, twoFactor } from 'better-auth/plugins';
+import { getSessionFromCtx } from 'better-auth/api';
 import { APIError, betterAuth } from 'better-auth';
 import { createAccessControl } from 'better-auth/plugins/access';
 import { defaultStatements } from 'better-auth/plugins/organization/access';
@@ -68,6 +71,8 @@ export const accountDeletionUnavailableErrorCode =
 export const adminPluginOptions = { schema: adminAuthSchema } as const;
 export const invalidOrganizationSlugErrorCode = 'INVALID_ORGANIZATION_SLUG';
 export const organizationIdRequiredErrorCode = 'ORGANIZATION_ID_REQUIRED';
+export const memberInactiveErrorCode = 'MEMBER_INACTIVE';
+export const lastActiveOwnerErrorCode = 'LAST_ACTIVE_OWNER';
 export const unsupportedActiveOrganizationEndpointErrorCode =
   'ACTIVE_ORGANIZATION_ENDPOINT_DISABLED';
 export const unsupportedActiveOrganizationPath =
@@ -116,7 +121,6 @@ export const organizationIdRequiredPaths = {
   '/organization/invite-member': 'body',
   '/organization/list-invitations': 'query',
   '/organization/list-members': 'query',
-  '/organization/remove-member': 'body',
   '/organization/update': 'body',
   '/organization/update-member-role': 'body',
 } as const;
@@ -256,9 +260,73 @@ export function createAuthBeforeHook(pool: DatabasePool) {
           message: 'An explicit organization id is required.',
         });
       }
+
+      // An inactive member is denied on every organization-scoped path before Better Auth reads its own membership.
+      await rejectInactiveMember(pool, context, input.organizationId);
     }
 
     return undefined;
+  };
+}
+
+// Denies an inactive caller on the organization-scoped paths; a caller with no membership row is left to Better Auth.
+async function rejectInactiveMember(
+  pool: DatabasePool,
+  context: AuthBeforeContext,
+  organizationId: string,
+): Promise<void> {
+  const session = await getSessionFromCtx(
+    context as unknown as Parameters<typeof getSessionFromCtx>[0],
+  ).catch(() => null);
+  const userId = session?.user?.id;
+
+  if (typeof userId !== 'string' || userId.length === 0) {
+    return;
+  }
+
+  const status = await readMemberStatus(pool, organizationId, userId).catch(
+    () => null,
+  );
+
+  if (status === 'inactive') {
+    throw APIError.from('FORBIDDEN', {
+      code: memberInactiveErrorCode,
+      message: 'This membership is inactive.',
+    });
+  }
+}
+
+// Refuses to demote the last active owner, so an organization can never strip itself of every active owner.
+export function createBeforeUpdateMemberRoleHook(pool: DatabasePool) {
+  return async ({
+    member,
+    newRole,
+    organization: targetOrganization,
+  }: {
+    member: { role: string; userId: string };
+    newRole: string;
+    organization: { id: string };
+  }): Promise<void> => {
+    const wasOwner = member.role.split(',').includes('owner');
+    const willBeOwner = newRole.split(',').includes('owner');
+
+    if (!wasOwner || willBeOwner) {
+      return;
+    }
+
+    // A read failure refuses the demotion, which is the safe default for the last-owner guard.
+    const otherActiveOwner = await hasOtherActiveOwner(
+      pool,
+      targetOrganization.id,
+      member.userId,
+    ).catch(() => false);
+
+    if (!otherActiveOwner) {
+      throw APIError.from('BAD_REQUEST', {
+        code: lastActiveOwnerErrorCode,
+        message: 'The last active owner cannot be demoted.',
+      });
+    }
   };
 }
 
@@ -538,7 +606,10 @@ async function createAuth() {
       organization({
         ...organizationCreationConfiguration,
         ac: organizationAccessControl,
-        organizationHooks: { beforeCreateOrganization },
+        organizationHooks: {
+          beforeCreateOrganization,
+          beforeUpdateMemberRole: createBeforeUpdateMemberRoleHook(pool),
+        },
         organizationLimit: (user) => organizationLimitReached(pool, user),
         schema: organizationAuthSchema,
         roles: organizationRoles,

@@ -55,6 +55,28 @@ export const entityScopeRequestSchema = entityScopeSchema;
 
 export type EntityScopeRequest = z.infer<typeof entityScopeRequestSchema>;
 
+// The two member statuses; the request and the response share the shape.
+export const memberStatusValueSchema = z.enum(['active', 'inactive']);
+
+export const memberStatusRequestSchema = z
+  .object({ status: memberStatusValueSchema })
+  .strict();
+
+export type MemberStatusRequest = z.infer<typeof memberStatusRequestSchema>;
+
+export const memberStatusResponseSchema = memberStatusRequestSchema;
+
+export type MemberStatusResponse = z.infer<typeof memberStatusResponseSchema>;
+
+export const memberStatusOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    status: { enum: ['active', 'inactive'], type: 'string' },
+  },
+  required: ['status'],
+  type: 'object',
+};
+
 // One entry per stored scope row: a member without a row is implicitly unrestricted and is left out.
 export const memberEntityScopeListResponseSchema = z
   .object({
