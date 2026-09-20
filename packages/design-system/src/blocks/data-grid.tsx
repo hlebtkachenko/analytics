@@ -533,6 +533,7 @@ export function DataGrid(props: DataGridProps) {
                 <TableBatchAction
                   key={action.id}
                   onClick={() => action.onClick([...selected])}
+                  tabIndex={selectedCount > 0 ? 0 : -1}
                 >
                   {action.label}
                 </TableBatchAction>

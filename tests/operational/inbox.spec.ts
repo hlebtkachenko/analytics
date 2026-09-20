@@ -386,11 +386,6 @@ test.describe
 
   test('the inbox list has no accessibility violations', async ({ page }) => {
     test.skip(password.length === 0, 'BAP_OPERATIONAL_PASSWORD is required.');
-    // The batch bar is aria-hidden while nothing is selected, but DataGrid leaves its action buttons focusable (axe aria-hidden-focus).
-    test.skip(
-      true,
-      'DataGrid renders TableBatchAction without tabIndex -1 under the hidden batch bar (packages/design-system/src/blocks/data-grid.tsx:533).',
-    );
     await openInbox(page);
     await expectNoAccessibilityViolations(page, 'inbox list');
   });
@@ -602,11 +597,6 @@ test.describe
 
   test('the version document page shows the new title', async ({ page }) => {
     test.skip(password.length === 0, 'BAP_OPERATIONAL_PASSWORD is required.');
-    // The version banner puts links inside an InlineNotification, which Carbon refuses, so the page falls into its error boundary.
-    test.skip(
-      true,
-      'A document with supersedesDocumentId or supersededByDocumentId crashes with "component should have no interactive child nodes" (apps/web/src/app/(product)/documents/[documentId]/page.tsx:600).',
-    );
     await openDocument(page, versionDocumentIdForPage);
     await expect(
       page.getByRole('heading', {

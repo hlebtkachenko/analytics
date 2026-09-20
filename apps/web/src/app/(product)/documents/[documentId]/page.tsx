@@ -591,12 +591,13 @@ export default function DocumentDetailPage() {
           </h2>
           {detail.supersedesDocumentId === null &&
           detail.supersededByDocumentId === null ? null : (
-            <InlineNotification
-              hideCloseButton
-              kind="info"
-              lowContrast
-              title={t('documents.versionBanner')}
-            >
+            <>
+              <InlineNotification
+                hideCloseButton
+                kind="info"
+                lowContrast
+                subtitle={t('documents.versionBanner')}
+              />
               <Stack gap={3}>
                 {detail.supersedesDocumentId === null ? null : (
                   <Link
@@ -619,7 +620,7 @@ export default function DocumentDetailPage() {
                   </Link>
                 )}
               </Stack>
-            </InlineNotification>
+            </>
           )}
           {detail.files.length === 0 ? (
             <p>{t('documents.originalsNone')}</p>

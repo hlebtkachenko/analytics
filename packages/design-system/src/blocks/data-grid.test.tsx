@@ -83,6 +83,22 @@ describe('DataGrid', () => {
     expect(onSelectionChange).toHaveBeenCalledWith(['1']);
   });
 
+  it('hides the batch action bar from focus until a row is selected', () => {
+    render(
+      <DataGrid
+        batchActions={[{ id: 'archive', label: 'Archive', onClick: vi.fn() }]}
+        columns={columns}
+        rows={rows}
+        selection="multi"
+      />,
+    );
+    const action = screen.getByText('Archive').closest('button') as HTMLElement;
+    expect(action).toHaveAttribute('tabindex', '-1');
+    const firstBodyRow = screen.getAllByRole('row')[1] as HTMLElement;
+    fireEvent.click(within(firstBodyRow).getByRole('checkbox'));
+    expect(action).toHaveAttribute('tabindex', '0');
+  });
+
   it('freezes a pinned column with a sticky left offset', () => {
     const pinnedColumns: readonly GridColumn[] = [
       { key: 'name', header: 'Name', pinned: true, width: 200 },

@@ -460,6 +460,38 @@ describe('DocumentDetailPage', () => {
     ).toBeVisible();
   });
 
+  it('shows the version banner as text and links to the related versions', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respond({
+        extra: {
+          supersededByDocumentId: LINK_ID,
+          supersedesDocumentId: OTHER_DOCUMENT_ID,
+        },
+      }),
+    );
+
+    renderDetailPage();
+
+    expect(await screen.findByText('Version history')).toBeVisible();
+    expect(
+      screen.getByRole('link', {
+        name: 'This document replaces an earlier version',
+      }),
+    ).toHaveAttribute(
+      'href',
+      `/api/bff/application/organizations/organization_1/documents/${OTHER_DOCUMENT_ID}`,
+    );
+    expect(
+      screen.getByRole('link', {
+        name: 'A newer version replaces this document',
+      }),
+    ).toHaveAttribute(
+      'href',
+      `/api/bff/application/organizations/organization_1/documents/${LINK_ID}`,
+    );
+  });
+
   it('hides every manage action from an account without the capability', async () => {
     vi.stubGlobal('fetch', respond({ manageDocuments: false }));
 
