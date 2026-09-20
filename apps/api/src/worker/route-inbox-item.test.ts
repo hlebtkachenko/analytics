@@ -49,6 +49,8 @@ interface FixtureOptions {
   attempt?: { last_attempt: Date | null; last_touch: Date | null };
   membership?: Record<string, unknown>[];
   scope?: { granted: string[]; mode: string };
+  // The skip definer raises: the item left review between the two transactions.
+  skipRefused?: boolean;
 }
 
 interface Fixture {
@@ -136,8 +138,17 @@ function fixture(options: FixtureOptions = {}): Fixture {
         return { rows: options.authorRow ?? [{ created_by: 'user-1' }] };
       }
 
-      if (text.includes('from app.inbox_routing_target where')) {
+      if (text.includes('from app.list_inbox_routing_targets() where')) {
         return { rows: options.authorRow ?? [] };
+      }
+
+      if (
+        options.skipRefused === true &&
+        text.includes('app.record_inbox_automation_skip')
+      ) {
+        throw new Error(
+          'Inbox automation skips name an item in review of the current organization',
+        );
       }
 
       if (text.includes('last_attempt')) {
@@ -260,7 +271,7 @@ describe('routeInboxItem author resolution', () => {
     expect(context.contexts).toEqual([AUTOMATION_SUBJECT, 'user-7']);
     expect(
       context.queries.find((query) =>
-        query.text.includes('from app.inbox_routing_target where'),
+        query.text.includes('from app.list_inbox_routing_targets() where'),
       )?.values,
     ).toEqual(['pdf']);
     expect(repository.finishRouteInTransaction).toHaveBeenLastCalledWith(
@@ -280,7 +291,6 @@ describe('routeInboxItem author resolution', () => {
       { membership: [{ email_verified: true, role: 'member' }] },
     ],
     ['an erased tombstone', { authorRow: [{ created_by: 'erased_1' }] }],
-    ['a rule that is gone', { authorRow: [] }],
   ])(
     'records rule_author_unavailable and does not throw for %s',
     async (_name, options) => {
@@ -299,6 +309,23 @@ describe('routeInboxItem author resolution', () => {
       expect(documents.createDocumentInTransaction).not.toHaveBeenCalled();
     },
   );
+
+  it('refuses a rule that was disabled or deleted after the enqueue, writing nothing', async () => {
+    const context = fixture({ authorRow: [] });
+
+    expect(await context.run()).toEqual({
+      kind: 'refused',
+      reason: 'rule_unavailable',
+    });
+    expect(context.contexts).toEqual([AUTOMATION_SUBJECT]);
+    expect(
+      context.queries.find((query) =>
+        query.text.includes('from app.inbox_rule where id = $1'),
+      )?.text,
+    ).toContain('and enabled and deleted_at is null');
+    expect(skipCalls(context.queries)).toEqual([]);
+    expect(await jobCount(context.metrics, 'completed')).toBe(1);
+  });
 
   it('records the skip for a platform target default that has no editor', async () => {
     const context = fixture({ authorRow: [] });
@@ -319,6 +346,28 @@ describe('routeInboxItem author resolution', () => {
     expect(skipCalls(context.queries)).toHaveLength(1);
     expect(repository.insertExtraction).not.toHaveBeenCalled();
     expect(documents.createDocumentInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('checks the scope before the missing field, so a restricted author leaves no attempt row', async () => {
+    repository.loadRouteSuggestion.mockResolvedValueOnce(
+      composed({ kind: null }, ['kind']),
+    );
+    const context = fixture({ scope: { granted: [], mode: 'restricted' } });
+
+    expect(await context.run()).toEqual({ kind: 'author_unavailable' });
+    expect(repository.insertExtraction).not.toHaveBeenCalled();
+    expect(skipCalls(context.queries)).toHaveLength(1);
+  });
+
+  it('refuses instead of retrying when the skip definer finds the item gone from review', async () => {
+    const context = fixture({ membership: [], skipRefused: true });
+
+    expect(await context.run()).toEqual({
+      kind: 'refused',
+      reason: 'item_unavailable',
+    });
+    expect(await jobCount(context.metrics, 'completed')).toBe(1);
+    expect(await jobCount(context.metrics, 'failed')).toBe(0);
   });
 
   it('passes a restricted scope that admits the entity to the document create', async () => {

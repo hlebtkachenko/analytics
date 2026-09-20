@@ -262,6 +262,7 @@ async function bootstrap(): Promise<void> {
       for (const job of jobs) {
         await runJob(async () => {
           await rerunInboxRule({
+            blobs,
             data: job.data,
             enqueueRerunInboxRule: (rerun) => sendRerunInboxRule(queue, rerun),
             enqueueRouteInboxItem: (route) => sendRouteInboxItem(queue, route),

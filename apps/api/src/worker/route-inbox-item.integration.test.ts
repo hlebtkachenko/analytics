@@ -714,7 +714,7 @@ describe('route_inbox_item', () => {
     ).toEqual(['sniff', RULE_PROVIDER]);
   });
 
-  it('routes a target default as the account that saved the target', async () => {
+  it('routes a target default with auto always as the account that saved the target, with no rule at all', async () => {
     await putRoutingTarget(apiPool, {
       ...admin,
       body: {
@@ -730,17 +730,14 @@ describe('route_inbox_item', () => {
       detectedType: 'image',
     });
 
-    // The intake pass decides the target default only after a rule matched; this one asks for nothing itself.
-    await rule({
-      detectedType: 'image',
-      name: 'Scans to the admin',
-      setAssigneeId: admin.userId,
-    });
-
     try {
       const response = await upload(owner, unique(fixtures.png()), 'scan.png');
       const job = await enqueuedRouteJob(response.item.id);
       expect(job.ruleId).toBeNull();
+      // No rule matched, so the intake wrote no rule row; the target default asked on its own.
+      expect(
+        (await extractionsOf(response.item.id)).map((row) => row.provider),
+      ).toEqual(['sniff']);
 
       expect(await runRoute(job)).toMatchObject({ kind: 'routed' });
       const after = await detail(response.item.id);
@@ -779,6 +776,7 @@ describe('rerun_inbox_rule', () => {
   ): Promise<ReturnType<typeof rerunInboxRule>> {
     return rerunInboxRule({
       batchSize,
+      blobs: store,
       data,
       enqueueRerunInboxRule: (job) => sendRerunInboxRule(boss, job),
       enqueueRouteInboxItem: (job) => sendRouteInboxItem(boss, job),
@@ -881,5 +879,39 @@ describe('rerun_inbox_rule', () => {
     const again = await runRerun(job, 10);
     expect(again.appliedItemIds).toEqual([]);
     expect(again.skippedItemIds).toEqual([items[0], items[2]]);
+  });
+
+  it('keeps the intake matches and their kind when a later rule reruns on the same item', async () => {
+    await discardEverythingInReview();
+    const first = await rule({
+      detectedType: 'pdf',
+      name: 'Contracts first',
+      setDocumentKind: 'contract',
+    });
+    const itemId = (await upload(owner, unique(fixtures.pdf()), 'both.pdf'))
+      .item.id;
+    const second = await rule({
+      detectedType: 'pdf',
+      name: 'Entity later',
+      setDocumentKind: 'agreement',
+      setLegalEntityId: entityA,
+    });
+
+    const report = await runRerun(
+      {
+        organizationId: owner.organizationId,
+        ruleId: second?.id ?? '',
+        userId: owner.userId,
+      },
+      10,
+    );
+    expect(report.appliedItemIds).toEqual([itemId]);
+
+    const after = await detail(itemId);
+    expect(after?.item.legalEntityId).toBe(entityA);
+    expect(after?.extraction?.draft).toMatchObject({
+      kind: 'contract',
+      matchedRuleIds: [first?.id, second?.id],
+    });
   });
 });

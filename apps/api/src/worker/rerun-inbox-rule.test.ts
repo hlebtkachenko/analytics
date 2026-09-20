@@ -2,6 +2,7 @@ import type { DatabasePool } from '@bap/db/pool';
 import type { PoolClient } from 'pg';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { BlobStore } from '../blobs/blob-store.js';
 import type {
   RerunInboxRuleJob,
   RouteInboxItemJob,
@@ -15,6 +16,7 @@ import { WorkerMetrics } from './worker-metrics.js';
 const repository = vi.hoisted(() => ({
   applyInboxRules: vi.fn(),
   loadItem: vi.fn(),
+  loadItemFiles: vi.fn(async () => []),
   loadMatchedRuleIds: vi.fn<
     (transaction: unknown, itemId: string) => Promise<string[]>
   >(async () => []),
@@ -83,6 +85,7 @@ function fixture(candidates: string[], touched: string[] = []): Fixture {
     run: (batchSize, cursor) =>
       rerunInboxRule({
         ...(batchSize === undefined ? {} : { batchSize }),
+        blobs: {} as BlobStore,
         data: {
           ...(cursor === undefined ? {} : { cursor }),
           organizationId: ORGANIZATION,
@@ -255,6 +258,7 @@ describe('rerunInboxRule', () => {
   it('refuses a payload without the rule', async () => {
     await expect(
       rerunInboxRule({
+        blobs: {} as BlobStore,
         data: { organizationId: ORGANIZATION, userId: 'user-1' },
         enqueueRerunInboxRule: async () => undefined,
         enqueueRouteInboxItem: async () => undefined,

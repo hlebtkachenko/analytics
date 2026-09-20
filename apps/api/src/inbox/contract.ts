@@ -758,8 +758,14 @@ export const RULE_PROVIDER = 'rule';
 export const RULE_PROVIDER_VERSION = '2026-09-17.1';
 
 export const ruleDraftSchema = z
-  .object({ matchedRuleIds: z.array(inboxRuleIdentifierSchema) })
+  .object({
+    kind: z.string().nullable().default(null),
+    matchedRuleIds: z.array(inboxRuleIdentifierSchema),
+    partnerId: z.string().nullable().default(null),
+  })
   .passthrough();
+
+export type RuleDraft = z.infer<typeof ruleDraftSchema>;
 
 // A lowercase @domain suffix or a full address; the matcher compares the sender or its suffix from the @.
 export const senderPatternSchema = z
@@ -931,13 +937,10 @@ export type UpdateInboxRuleRequest = z.infer<
   typeof updateInboxRuleRequestSchema
 >;
 
-// The full ordered id list of the live rules; the first id becomes priority 1.
+// The full ordered id list of the live rules; the first id becomes priority 1. Disabled rules hold slots too.
 export const orderInboxRulesRequestSchema = z
   .object({
-    ruleIds: z
-      .array(inboxRuleIdentifierSchema)
-      .min(1)
-      .max(MAX_ENABLED_INBOX_RULES * 2),
+    ruleIds: z.array(inboxRuleIdentifierSchema).min(1).max(1000),
   })
   .strict()
   .refine((body) => new Set(body.ruleIds).size === body.ruleIds.length, {
@@ -1623,7 +1626,7 @@ export const orderInboxRulesBodyOpenApiSchema = {
   properties: {
     ruleIds: {
       items: uuidProperty,
-      maxItems: MAX_ENABLED_INBOX_RULES * 2,
+      maxItems: 1000,
       minItems: 1,
       type: 'array',
     },

@@ -88,18 +88,24 @@ export function senderMatches(pattern: string, sender: string | null): boolean {
   return at >= 0 && lowered.slice(at) === pattern;
 }
 
-function keywordMatches(keyword: string, facts: RuleFacts): boolean {
+// The lowercased keyword sources, computed once per pass rather than once per rule.
+function keywordSources(facts: RuleFacts): string[] {
+  return [facts.filename, facts.hintText, facts.text]
+    .filter((text): text is string => text !== null)
+    .map((text) => text.toLowerCase());
+}
+
+function keywordMatches(keyword: string, sources: readonly string[]): boolean {
   const needle = keyword.toLowerCase();
 
-  return [facts.filename, facts.hintText, facts.text].some(
-    (text) => text !== null && text.toLowerCase().includes(needle),
-  );
+  return sources.some((text) => text.includes(needle));
 }
 
 // Every non-null condition must hold.
 export function ruleMatches(
   rule: InboxRuleDefinition,
   facts: RuleFacts,
+  sources: readonly string[] = keywordSources(facts),
 ): boolean {
   if (rule.channelId !== null && rule.channelId !== facts.channelId) {
     return false;
@@ -112,7 +118,7 @@ export function ruleMatches(
     return false;
   }
 
-  if (rule.keyword !== null && !keywordMatches(rule.keyword, facts)) {
+  if (rule.keyword !== null && !keywordMatches(rule.keyword, sources)) {
     return false;
   }
 
@@ -124,12 +130,13 @@ export function evaluateRules(
   facts: RuleFacts,
 ): RuleEvaluation {
   const ordered = [...rules].sort((a, b) => a.priority - b.priority);
+  const sources = keywordSources(facts);
   const fields: RuleEvaluation['fields'] = { ...EMPTY_FIELDS };
   const matched: InboxRuleDefinition[] = [];
   let autoRouteRuleId: string | null = null;
 
   for (const rule of ordered) {
-    if (!ruleMatches(rule, facts)) {
+    if (!ruleMatches(rule, facts, sources)) {
       continue;
     }
 

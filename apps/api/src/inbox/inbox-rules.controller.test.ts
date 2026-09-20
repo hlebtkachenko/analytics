@@ -391,6 +391,7 @@ describe('application inbox rules routes', () => {
 
     expect(response.body).toMatchObject({ createdBy: 'user_1', paused: false });
     expect(calls.adoptRule?.[0]).toEqual({
+      legalEntityIds: null,
       organizationId: 'organization_2',
       role: 'admin',
       ruleId: RULE_ID,

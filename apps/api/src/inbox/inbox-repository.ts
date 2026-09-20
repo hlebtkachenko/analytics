@@ -61,6 +61,7 @@ import type {
   ProviderOutput,
   PutInboxRoutingTargetRequest,
   RouteInboxItemJob,
+  RuleDraft,
   UpdateInboxChannelRequest,
   UpdateInboxHintsRequest,
   UpdateInboxRuleRequest,
@@ -199,6 +200,11 @@ export interface RulePassResult {
 }
 
 export interface RuleSelector extends TenantContext {
+  ruleId: string;
+}
+
+// Adoption re-checks the rule's targets against the adopter's scope, exactly like a create or a patch.
+export interface AdoptRuleInput extends EntityScopeSelector {
   ruleId: string;
 }
 
@@ -584,15 +590,14 @@ function toRoutingTarget(row: RoutingTargetRow): RoutingTarget {
   };
 }
 
-const ROUTING_TARGET_COLUMNS = `t.detected_type, t.destination, t.document_kind, t.default_legal_entity_id, t.partner_policy,
-          t.auto, t.auto_threshold::text as auto_threshold, t.default_assignee_id, t.required_fields`;
-
-// The organization's own rows; a channel context sees none and gets the platform defaults.
+// The one read path of the targets: the definer serves the organization's rows to every principal, the channel included.
 async function loadRoutingTargetOverrides(
   transaction: PoolClient,
 ): Promise<RoutingTargetOverrides> {
   const result = await transaction.query<RoutingTargetRow>(
-    `select ${ROUTING_TARGET_COLUMNS} from app.inbox_routing_target as t`,
+    `select detected_type, destination, document_kind, default_legal_entity_id, partner_policy,
+            auto, auto_threshold::text as auto_threshold, default_assignee_id, required_fields
+       from app.list_inbox_routing_targets()`,
   );
   const overrides: RoutingTargetOverrides = {};
 
@@ -1015,11 +1020,17 @@ async function loadRulesById(
   return result.rows.map(toRuleDefinition);
 }
 
-// The newest rule extraction names the rules that matched; a rerun skips a rule already in that list.
-export async function loadMatchedRuleIds(
+const EMPTY_RULE_DRAFT: RuleDraft = {
+  kind: null,
+  matchedRuleIds: [],
+  partnerId: null,
+};
+
+// The newest rule extraction's draft: the rules that matched and the merged kind and partner a rerun keeps.
+async function loadPreviousRuleDraft(
   transaction: PoolClient,
   itemId: string,
-): Promise<string[]> {
+): Promise<RuleDraft> {
   const result = await transaction.query<{ draft: unknown }>(
     `select draft
        from app.inbox_item_extraction
@@ -1030,7 +1041,15 @@ export async function loadMatchedRuleIds(
   );
   const parsed = ruleDraftSchema.safeParse(result.rows[0]?.draft);
 
-  return parsed.success ? parsed.data.matchedRuleIds : [];
+  return parsed.success ? parsed.data : EMPTY_RULE_DRAFT;
+}
+
+// The newest rule extraction names the rules that matched; a rerun skips a rule already in that list.
+export async function loadMatchedRuleIds(
+  transaction: PoolClient,
+  itemId: string,
+): Promise<string[]> {
+  return (await loadPreviousRuleDraft(transaction, itemId)).matchedRuleIds;
 }
 
 // The auto-route decision of the spec, conditions (a) to (e), taken inside the same transaction as the matcher.
@@ -1092,26 +1111,16 @@ function decideAutoRoute(input: {
 
 // The rule pass: reads the live rules through the definer, applies the actions under hint precedence, writes one
 // rule extraction row and the rule_matched event, discards synchronously on a discard rule, and decides the route job.
+// The route decision runs even without a match: a target default that asks enqueues on its own, with no rule row.
 export async function applyInboxRules(
   transaction: PoolClient,
   input: RulePassInput,
 ): Promise<RulePassResult> {
-  const nothing: RulePassResult = {
-    discarded: false,
-    matchedRuleIds: [],
-    routeJob: null,
-  };
-  // The rules first: an organization without rules pays one definer call and nothing else.
   const live = await loadLiveRules(transaction);
   const rules =
     input.ruleIds === undefined
       ? live
       : live.filter((rule) => input.ruleIds?.includes(rule.id));
-
-  if (rules.length === 0) {
-    return nothing;
-  }
-
   const item = await loadItem(transaction, input.itemId, null);
 
   if (item === null) {
@@ -1133,8 +1142,50 @@ export async function applyInboxRules(
     text: input.text,
   });
 
+  // A rerun merges with the newest rule row: its matches stay listed and its kind and partner keep first-writer-wins.
+  const previous =
+    input.ruleIds === undefined
+      ? EMPTY_RULE_DRAFT
+      : await loadPreviousRuleDraft(transaction, item.id);
+  const previousRules = await loadRulesById(
+    transaction,
+    previous.matchedRuleIds,
+  );
+  const latest = await loadLatestExtraction(transaction, item.id);
+  const target = routingTargetFor(
+    item.detectedType,
+    await loadRoutingTargetOverrides(transaction),
+  );
+  const composed = composeDocumentDraft(
+    { ...item, primaryFilename },
+    evaluation.discard === null
+      ? [...previousRules, ...evaluation.matched]
+      : [],
+    target,
+  );
+  const decision =
+    evaluation.discard === null
+      ? decideAutoRoute({
+          autoRouteRuleId: evaluation.autoRouteRuleId,
+          confidence: item.confidence ?? 0,
+          latestIssueCount: latest?.issues.length ?? 0,
+          missing: composed.missing,
+          resolvedKind: composed.draft.kind,
+          target,
+        })
+      : { job: null, reason: null };
+  const routeJob: RouteInboxItemJob | null =
+    decision.job === null
+      ? null
+      : {
+          itemId: item.id,
+          organizationId: input.organizationId,
+          ruleId: evaluation.autoRouteRuleId,
+        };
+
+  // Without a match the target default alone decides the route, and the item keeps its rows untouched.
   if (evaluation.matched.length === 0) {
-    return nothing;
+    return { discarded: false, matchedRuleIds: [], routeJob };
   }
 
   // A hint a person set and the standing channel hint copied at intake both outrank every rule action.
@@ -1144,9 +1195,14 @@ export async function applyInboxRules(
     fields.legalEntityId !== null &&
     item.legalEntityId === null &&
     item.hintLegalEntityId === null;
-  const kindFromRule = fields.documentKind !== null && item.hintKind === null;
+  const kindFromRule =
+    fields.documentKind !== null &&
+    item.hintKind === null &&
+    previous.kind === null;
   const partnerFromRule =
-    fields.partnerId !== null && item.hintPartnerId === null;
+    fields.partnerId !== null &&
+    item.hintPartnerId === null &&
+    previous.partnerId === null;
   const assigneeFromRule =
     fields.assigneeId !== null && item.assigneeId === null;
 
@@ -1169,30 +1225,15 @@ export async function applyInboxRules(
     (entityFromRule ? (fields.legalEntityId?.value ?? null) : null);
   const partnerId =
     item.hintPartnerId ??
+    previous.partnerId ??
     (partnerFromRule ? (fields.partnerId?.value ?? null) : null);
-  const matchedRuleIds = evaluation.matched.map((rule) => rule.id);
+  const matchedRuleIds = [
+    ...new Set([
+      ...previous.matchedRuleIds,
+      ...evaluation.matched.map((rule) => rule.id),
+    ]),
+  ];
   const reasons = ruleReasons({ applied, evaluation });
-  const latest = await loadLatestExtraction(transaction, item.id);
-  const target = routingTargetFor(
-    item.detectedType,
-    await loadRoutingTargetOverrides(transaction),
-  );
-  const composed = composeDocumentDraft(
-    { ...item, primaryFilename },
-    evaluation.discard === null ? evaluation.matched : [],
-    target,
-  );
-  const decision =
-    evaluation.discard === null
-      ? decideAutoRoute({
-          autoRouteRuleId: evaluation.autoRouteRuleId,
-          confidence: item.confidence ?? 0,
-          latestIssueCount: latest?.issues.length ?? 0,
-          missing: composed.missing,
-          resolvedKind: composed.draft.kind,
-          target,
-        })
-      : { job: null, reason: null };
 
   if (decision.reason !== null) {
     reasons.push({ evidence: decision.reason, step: 'rule', weight: 1 });
@@ -1208,7 +1249,10 @@ export async function applyInboxRules(
         confidence: item.hintKind !== null ? 1 : (item.confidence ?? 0),
         detectedType: item.hintKind ?? item.detectedType ?? 'unknown',
         draft: {
-          kind: item.hintKind ?? (kindFromRule ? composed.draft.kind : null),
+          kind:
+            item.hintKind ??
+            previous.kind ??
+            (kindFromRule ? composed.draft.kind : null),
           matchedRuleIds,
           partnerId,
         },
@@ -1274,18 +1318,7 @@ export async function applyInboxRules(
     return { discarded: true, matchedRuleIds, routeJob: null };
   }
 
-  return {
-    discarded: false,
-    matchedRuleIds,
-    routeJob:
-      decision.job === null
-        ? null
-        : {
-            itemId: item.id,
-            organizationId: input.organizationId,
-            ruleId: evaluation.autoRouteRuleId,
-          },
-  };
+  return { discarded: false, matchedRuleIds, routeJob };
 }
 
 export class QuotaExceededError extends Error {
@@ -2629,6 +2662,23 @@ export async function updateRule(
       return null;
     }
 
+    // Enabling counts against the same cap as a create, under the same per-organization lock.
+    if (body.enabled === true) {
+      await transaction.query('select pg_advisory_xact_lock(hashtext($1))', [
+        `inbox_rule:${input.organizationId}`,
+      ]);
+      const counted = await transaction.query<{ enabled: number }>(
+        `select count(*) filter (where enabled and id <> $1)::int as enabled
+           from app.inbox_rule
+          where deleted_at is null`,
+        [input.ruleId],
+      );
+
+      if ((counted.rows[0]?.enabled ?? 0) >= MAX_ENABLED_INBOX_RULES) {
+        throw new RuleLimitError();
+      }
+    }
+
     let updated: { rowCount: number | null };
 
     try {
@@ -2772,9 +2822,18 @@ export async function orderRules(
 // The caller becomes the author; the trigger refuses any other created_by, so this is the only way it moves.
 export async function adoptRule(
   pool: DatabasePool,
-  input: RuleSelector,
+  input: AdoptRuleInput,
 ): Promise<InboxRule | null> {
   return runInTenantContext(pool, input, async (transaction) => {
+    const current = await loadRule(transaction, input.ruleId);
+
+    if (
+      current === null ||
+      !(await ruleTargetsVisible(transaction, input, current))
+    ) {
+      return null;
+    }
+
     const adopted = await transaction.query(
       `update app.inbox_rule
           set created_by = $2, updated_at = now()
@@ -2796,7 +2855,7 @@ export async function adoptRule(
 }
 
 export abstract class InboxRepository implements ChannelPrincipalReader {
-  abstract adoptRule(input: RuleSelector): Promise<InboxRule | null>;
+  abstract adoptRule(input: AdoptRuleInput): Promise<InboxRule | null>;
   abstract assignItem(input: AssignItemInput): Promise<InboxItemDetail | null>;
   abstract createChannel(
     input: CreateChannelInput,
@@ -2866,7 +2925,7 @@ export class DatabaseInboxRepository
 {
   private poolPromise: Promise<DatabasePool> | undefined;
 
-  async adoptRule(input: RuleSelector): Promise<InboxRule | null> {
+  async adoptRule(input: AdoptRuleInput): Promise<InboxRule | null> {
     return adoptRule(await this.getPool(), input);
   }
 

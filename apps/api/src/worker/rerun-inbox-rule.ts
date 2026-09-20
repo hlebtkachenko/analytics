@@ -1,17 +1,22 @@
+import { text as readText } from 'node:stream/consumers';
+
 import type { DatabasePool } from '@bap/db/pool';
 import type { PoolClient } from 'pg';
 
+import type { BlobStore } from '../blobs/blob-store.js';
 import {
   HUMAN_TOUCH_EVENT_KINDS,
   RERUN_INBOX_RULE_QUEUE,
 } from '../inbox/contract.js';
 import type {
+  InboxItem,
   RerunInboxRuleJob,
   RouteInboxItemJob,
 } from '../inbox/contract.js';
 import {
   applyInboxRules,
   loadItem,
+  loadItemFiles,
   loadMatchedRuleIds,
 } from '../inbox/inbox-repository.js';
 import { rerunInboxRuleJobPayloadSchema, runTenantJob } from './job-context.js';
@@ -26,6 +31,7 @@ const CONTEXT = 'rerun_inbox_rule';
 export interface RerunInboxRuleOptions {
   // Tests walk with a smaller batch; production keeps the constant.
   batchSize?: number;
+  blobs: BlobStore;
   data: unknown;
   enqueueRerunInboxRule: (job: RerunInboxRuleJob) => Promise<void>;
   enqueueRouteInboxItem: (job: RouteInboxItemJob) => Promise<void>;
@@ -82,6 +88,20 @@ async function listCandidates(
   }));
 }
 
+// The keyword source of a text item, the stored body the intake read from disk; already under MAX_TEXT_BYTES.
+async function readItemText(
+  transaction: PoolClient,
+  blobs: BlobStore,
+  item: InboxItem,
+): Promise<string | null> {
+  if (item.payloadKind !== 'text') {
+    return null;
+  }
+
+  const file = (await loadItemFiles(transaction, item.id))[0];
+  return file === undefined ? null : readText(blobs.open(file.storageKey));
+}
+
 // One item per transaction: the row lock re-checks review and untouched, the newest rule row skips a repeat.
 async function applyToItem(
   options: RerunInboxRuleOptions,
@@ -108,18 +128,19 @@ async function applyToItem(
         return { routeJob: null, skipped: true };
       }
 
+      // The pass merges with the newest rule row itself: the earlier matches and their fields stay.
       const pass = await applyInboxRules(transaction, {
         ...tenant,
         itemId,
         ruleIds: [payload.ruleId],
-        text: null,
+        text: await readItemText(transaction, options.blobs, item),
       });
 
       // Only the rule itself asks for the route here; a target default asked at intake, or will at its own pass.
       return {
         routeJob:
           pass.routeJob?.ruleId === payload.ruleId ? pass.routeJob : null,
-        skipped: pass.matchedRuleIds.length === 0,
+        skipped: !pass.matchedRuleIds.includes(payload.ruleId),
       };
     },
   });

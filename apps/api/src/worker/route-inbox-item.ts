@@ -53,6 +53,7 @@ export type RouteRefusal =
   | 'already_attempted'
   | 'destination_refused'
   | 'item_unavailable'
+  | 'rule_unavailable'
   | 'snoozed'
   | 'status'
   | 'user_decided';
@@ -63,7 +64,7 @@ export type RouteInboxItemOutcome =
   | { kind: 'refused'; reason: RouteRefusal }
   | { kind: 'routed'; documentId: string };
 
-// The item and the author the read-only transaction found; null when the item is no longer in review.
+// The item and the author the read-only transaction found; a refusal when the item or the rule is gone.
 interface AuthorLookup {
   author: string | null;
   item: InboxItem;
@@ -85,22 +86,25 @@ async function inTransaction<T>(
   }
 }
 
-// The rule's author, or the editor of the organization's target row; a platform default has no editor.
-async function readAuthor(
+// The rule's author while the rule is live; null once the rule was disabled or deleted after the enqueue.
+async function readRuleAuthor(
   transaction: PoolClient,
-  payload: RouteInboxItemJobPayload,
+  ruleId: string,
+): Promise<string | null> {
+  const rule = await transaction.query<{ created_by: string }>(
+    'select created_by from app.inbox_rule where id = $1 and enabled and deleted_at is null',
+    [ruleId],
+  );
+  return rule.rows[0]?.created_by ?? null;
+}
+
+// The editor of the organization's target row, through the same definer as the pass; a platform default has none.
+async function readTargetEditor(
+  transaction: PoolClient,
   item: InboxItem,
 ): Promise<string | null> {
-  if (payload.ruleId !== null) {
-    const rule = await transaction.query<{ created_by: string }>(
-      'select created_by from app.inbox_rule where id = $1',
-      [payload.ruleId],
-    );
-    return rule.rows[0]?.created_by ?? null;
-  }
-
   const target = await transaction.query<{ updated_by: string }>(
-    'select updated_by from app.inbox_routing_target where detected_type = $1',
+    'select updated_by from app.list_inbox_routing_targets() where detected_type = $1',
     [knownDetectedType(item.detectedType)],
   );
   return target.rows[0]?.updated_by ?? null;
@@ -235,6 +239,14 @@ async function routeAsAuthor(
   // The hints are re-read from the locked row and win per field inside the composer.
   const files = await loadItemFiles(transaction, item.id);
   const composed = await loadRouteSuggestion(transaction, item, files);
+  const scope = await readEntityScope(transaction, tenant);
+  const legalEntityId = composed.draft.legalEntityId;
+
+  // The scope check comes first: an author outside the entity leaves no attempt row behind.
+  if (legalEntityId !== null && !scopeAdmits(scope, legalEntityId)) {
+    return { kind: 'author_unavailable' };
+  }
+
   const missing = composed.missing[0] ?? null;
 
   if (missing !== null) {
@@ -246,13 +258,6 @@ async function routeAsAuthor(
       },
     ]);
     return { field: missing, issue: 'missing_required_field', kind: 'failed' };
-  }
-
-  const scope = await readEntityScope(transaction, tenant);
-  const legalEntityId = composed.draft.legalEntityId ?? '';
-
-  if (!scopeAdmits(scope, legalEntityId)) {
-    return { kind: 'author_unavailable' };
   }
 
   const parsed = createDocumentRequestSchema.safeParse(
@@ -354,25 +359,27 @@ export async function routeInboxItem(
 
   try {
     // Organization-wide read, never through readEntityScope: a fake subject's scope default would be unrestricted.
-    const lookup = await inTransaction<AuthorLookup | null>(
+    const lookup = await inTransaction<AuthorLookup | RouteRefusal>(
       options.pool,
       automation,
       async (transaction) => {
         const item = await loadItem(transaction, payload.itemId, null);
 
         if (item === null || item.status !== 'needs_review') {
-          return null;
+          return 'item_unavailable';
         }
 
-        return { author: await readAuthor(transaction, payload, item), item };
+        if (payload.ruleId === null) {
+          return { author: await readTargetEditor(transaction, item), item };
+        }
+
+        const author = await readRuleAuthor(transaction, payload.ruleId);
+        return author === null ? 'rule_unavailable' : { author, item };
       },
     );
 
-    if (lookup === null) {
-      return finish(options, payload, {
-        kind: 'refused',
-        reason: 'item_unavailable',
-      });
+    if (typeof lookup === 'string') {
+      return finish(options, payload, { kind: 'refused', reason: lookup });
     }
 
     const author = await resolveAuthor(
@@ -396,12 +403,20 @@ export async function routeInboxItem(
 
     // The one write the automation subject has: a failed event with no actor, through the definer.
     if (outcome.kind === 'author_unavailable') {
-      await inTransaction(options.pool, automation, (transaction) =>
-        transaction.query('select app.record_inbox_automation_skip($1, $2)', [
-          payload.itemId,
-          AUTHOR_UNAVAILABLE_REASON,
-        ]),
-      );
+      try {
+        await inTransaction(options.pool, automation, (transaction) =>
+          transaction.query('select app.record_inbox_automation_skip($1, $2)', [
+            payload.itemId,
+            AUTHOR_UNAVAILABLE_REASON,
+          ]),
+        );
+      } catch {
+        // The item left review between the two transactions: the definer refused, nothing to retry.
+        return finish(options, payload, {
+          kind: 'refused',
+          reason: 'item_unavailable',
+        });
+      }
     }
 
     return finish(options, payload, outcome);

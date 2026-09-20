@@ -26,7 +26,6 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
-  ApiServiceUnavailableResponse,
   ApiUnauthorizedResponse,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
@@ -109,7 +108,11 @@ export class InboxRulesController {
   @Post(':organizationId/inbox/rules')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ResourceJwtGuard, SubjectRateLimitGuard)
-  @ApiOperation({ summary: 'Create a rule at the lowest priority' })
+  @ApiOperation({
+    description:
+      'applyToExisting is best effort: the rule is created even when its rerun on existing items cannot be queued.',
+    summary: 'Create a rule at the lowest priority',
+  })
   @ApiBody({ schema: createInboxRuleBodyOpenApiSchema })
   @ApiCreatedResponse({ schema: inboxRuleOpenApiSchema })
   @ApiBadRequestResponse({ description: 'The rule is unusable' })
@@ -119,9 +122,6 @@ export class InboxRulesController {
   @ApiUnprocessableEntityResponse({
     description:
       'The enabled rule limit is reached, or an invoice kind cannot auto-route',
-  })
-  @ApiServiceUnavailableResponse({
-    description: 'The rerun on existing items could not be queued',
   })
   async createRule(
     @Param('organizationId', { schema: organizationIdentifierSchema })
@@ -152,7 +152,8 @@ export class InboxRulesController {
   @ApiForbiddenResponse(forbidden)
   @ApiNotFoundResponse(ruleNotFound)
   @ApiUnprocessableEntityResponse({
-    description: 'An invoice kind cannot auto-route',
+    description:
+      'The enabled rule limit is reached, or an invoice kind cannot auto-route',
   })
   async updateRule(
     @Param('organizationId', { schema: organizationIdentifierSchema })
@@ -236,16 +237,22 @@ export class InboxRulesController {
   @ApiOkResponse({ schema: inboxRuleOpenApiSchema })
   @ApiUnauthorizedResponse(unauthorized)
   @ApiForbiddenResponse(forbidden)
-  @ApiNotFoundResponse({ description: 'The rule is not visible' })
+  @ApiNotFoundResponse(ruleNotFound)
   async adoptRule(
     @Param('organizationId', { schema: organizationIdentifierSchema })
     organizationId: string,
     @Param('ruleId', { schema: inboxRuleIdentifierSchema }) ruleId: string,
     @Req() request: AuthenticatedRequest,
   ): Promise<InboxRule> {
-    const { tenant } = await this.manage(organizationId, request);
+    const { entityScope, tenant } = await this.manage(organizationId, request);
 
-    return this.rule(this.inbox.adoptRule({ ...tenant, ruleId }));
+    return this.rule(
+      this.inbox.adoptRule({
+        ...tenant,
+        legalEntityIds: allowedEntityIds(entityScope),
+        ruleId,
+      }),
+    );
   }
 
   // Null is a rule, an entity or a partner the caller cannot see; a refused value is bad input.

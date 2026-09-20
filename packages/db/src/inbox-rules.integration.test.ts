@@ -370,20 +370,23 @@ describe('inbox rules', () => {
     from pg_proc as function
     inner join pg_namespace as namespace on namespace.oid = function.pronamespace
     where function.oid in (
+      'app.list_inbox_routing_targets()'::regprocedure,
       'app.list_inbox_rules()'::regprocedure,
       'app.record_inbox_automation_skip(uuid, text)'::regprocedure
     )
     order by function_name`);
     expect(functions.rows).toEqual(
-      ['app.list_inbox_rules', 'app.record_inbox_automation_skip'].map(
-        (functionName) => ({
-          function_name: functionName,
-          grantees: ['bap_api', 'bap_owner'],
-          owner: 'bap_owner',
-          proconfig: ['search_path=pg_catalog, app'],
-          prosecdef: true,
-        }),
-      ),
+      [
+        'app.list_inbox_routing_targets',
+        'app.list_inbox_rules',
+        'app.record_inbox_automation_skip',
+      ].map((functionName) => ({
+        function_name: functionName,
+        grantees: ['bap_api', 'bap_owner'],
+        owner: 'bap_owner',
+        proconfig: ['search_path=pg_catalog, app'],
+        prosecdef: true,
+      })),
     );
 
     const policies = await rootPool.query<{
@@ -1085,6 +1088,59 @@ describe('inbox rules', () => {
         ),
       ),
     ).resolves.toMatchObject({ rows: [{ id: foreignRuleId }] });
+  });
+
+  it('serves the routing targets to a channel through the definer and never through the table', async () => {
+    await asTenant(apiPool, orgOneOwner, (transaction) =>
+      transaction.query(
+        `insert into app.inbox_routing_target
+           (organization_id, detected_type, destination, document_kind, default_legal_entity_id, auto, created_by)
+         values ('org-1', 'pdf', 'documents', 'other', $1, 'always', 'user-1')`,
+        [ownedEntityId],
+      ),
+    );
+    await rootPool.query(
+      `insert into app.inbox_routing_target
+         (organization_id, detected_type, destination, document_kind, auto, created_by, updated_by)
+       values ('org-2', 'pdf', 'discard', null, 'never', 'user-2', 'user-2')`,
+    );
+
+    await expect(
+      apiPool.query('select * from app.list_inbox_routing_targets()'),
+    ).rejects.toMatchObject({ code: '42501' });
+    await expect(
+      asTenant(apiPool, orgOneChannel, (transaction) =>
+        transaction.query('select id from app.inbox_routing_target'),
+      ),
+    ).resolves.toMatchObject({ rowCount: 0 });
+
+    const listed = await asTenant(apiPool, orgOneChannel, (transaction) =>
+      transaction.query<Record<string, unknown>>(
+        'select * from app.list_inbox_routing_targets()',
+      ),
+    );
+    expect(listed.rows).toEqual([
+      {
+        auto: 'always',
+        auto_threshold: null,
+        default_assignee_id: null,
+        default_legal_entity_id: ownedEntityId,
+        destination: 'documents',
+        detected_type: 'pdf',
+        document_kind: 'other',
+        partner_policy: 'match_only',
+        required_fields: [],
+        updated_by: 'user-1',
+      },
+    ]);
+    expect(Object.keys(listed.rows[0] ?? {})).not.toContain('created_by');
+    await expect(
+      asTenant(apiPool, orgTwoAutomation, (transaction) =>
+        transaction.query<{ updated_by: string }>(
+          'select updated_by from app.list_inbox_routing_targets()',
+        ),
+      ),
+    ).resolves.toMatchObject({ rows: [{ updated_by: 'user-2' }] });
   });
 
   it('records an automation skip on an item in review of the current organization only', async () => {

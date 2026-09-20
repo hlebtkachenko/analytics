@@ -406,6 +406,109 @@ describe('inbox rules', () => {
     ]);
   });
 
+  it('sets the entity and writes the rule_matched row on an API channel intake', async () => {
+    const channel = await createChannel(apiPool, {
+      ...owner,
+      body: { kind: 'api', name: 'Plain API channel' },
+    });
+    const channelId = channel?.id ?? '';
+    const created = await rule({
+      channelId,
+      name: 'API channel rule',
+      setDocumentKind: 'contract',
+      setLegalEntityId: entityA,
+    });
+    const bytes = uniquePdf();
+    const path = join(store.temporaryDirectory(), `${counter}-api-rule.pdf`);
+    await writeFile(path, bytes);
+    const response = await service.intakeFile({
+      ...channelTenant(owner.organizationId, channelId),
+      channelId,
+      externalId: 'api-rule-1',
+      file: { originalname: 'api-rule.pdf', path, size: bytes.length },
+      origin: 'abcdef02',
+    });
+    const detail = await readItem(apiPool, {
+      ...owner,
+      ...allEntities,
+      itemId: response.itemId,
+    });
+
+    expect(detail?.item.legalEntityId).toBe(entityA);
+    expect(detail?.extraction).toMatchObject({
+      legalEntityId: entityA,
+      provider: RULE_PROVIDER,
+    });
+    expect(detail?.extraction?.draft).toMatchObject({
+      kind: 'contract',
+      matchedRuleIds: [created?.id],
+    });
+    expect(
+      detail?.events.map((event) => [event.kind, event.actorUserId]),
+    ).toEqual([
+      ['received', null],
+      ['classified', null],
+      ['rule_matched', null],
+    ]);
+  });
+
+  it('enqueues the route for a target default an API channel intake sees through the definer, with no rule', async () => {
+    const channel = await createChannel(apiPool, {
+      ...owner,
+      body: { kind: 'api', name: 'Target default channel' },
+    });
+    const channelId = channel?.id ?? '';
+    await putRoutingTarget(apiPool, {
+      ...owner,
+      body: {
+        auto: 'always',
+        autoThreshold: null,
+        defaultAssigneeId: null,
+        defaultLegalEntityId: entityB,
+        destination: 'documents',
+        documentKind: 'other',
+        partnerPolicy: 'match_only',
+        requiredFields: [],
+      },
+      detectedType: 'pdf',
+    });
+
+    try {
+      const bytes = uniquePdf();
+      const path = join(store.temporaryDirectory(), `${counter}-target.pdf`);
+      await writeFile(path, bytes);
+      const response = await service.intakeFile({
+        ...channelTenant(owner.organizationId, channelId),
+        channelId,
+        externalId: 'target-default-1',
+        file: { originalname: 'target.pdf', path, size: bytes.length },
+        origin: 'abcdef03',
+      });
+      const detail = await readItem(apiPool, {
+        ...owner,
+        ...allEntities,
+        itemId: response.itemId,
+      });
+
+      // No rule row: the sniff stays the newest extraction and the target default alone asked for the route.
+      expect(detail?.extraction?.provider).toBe(SNIFF_PROVIDER);
+      expect(detail?.routingTarget.defaultLegalEntityId).toBe(entityB);
+      const jobs = await apiPool.query<{ data: RouteInboxItemJob }>(
+        'select data from pgboss.job where name = $1 and singleton_key = $2',
+        [ROUTE_INBOX_ITEM_QUEUE, response.itemId],
+      );
+      expect(jobs.rows.map((row) => row.data)).toEqual([
+        {
+          itemId: response.itemId,
+          organizationId: owner.organizationId,
+          ruleId: null,
+        },
+      ]);
+    } finally {
+      await deleteRoutingTarget(apiPool, { ...owner, detectedType: 'pdf' });
+    }
+  });
+
   it('discards synchronously on a discard rule with the rule as the decider', async () => {
     const created = await rule({
       keyword: 'newsletter',
@@ -462,6 +565,7 @@ describe('inbox rules', () => {
     // Adoption moves the author to the caller, so the rule runs again.
     const adopted = await adoptRule(apiPool, {
       ...owner,
+      ...allEntities,
       ruleId: created?.id ?? '',
     });
     expect(adopted).toMatchObject({ createdBy: owner.userId, paused: false });

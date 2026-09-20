@@ -44,6 +44,7 @@ import type {
 import {
   InboxRepository,
   QuotaExceededError,
+  type AdoptRuleInput,
   type AssignItemInput,
   type BlobRecord,
   type ChannelSelector,
@@ -680,7 +681,7 @@ export class InboxService {
   async createRule(input: CreateRuleInput): Promise<InboxRule | null> {
     const created = await this.inbox.createRule(input);
 
-    // Enqueued after the commit, as the creator; a lost job is the creator's to retry from the page.
+    // Enqueued after the commit, as the creator; the rule stands either way and a lost rerun is logged, not a 503.
     if (created !== null && input.body.applyToExisting) {
       try {
         await this.queue.enqueueRerunInboxRule({
@@ -692,7 +693,6 @@ export class InboxService {
         this.logger.error(
           `Enqueue of rerun_inbox_rule failed for rule ${created.id}.`,
         );
-        throw new ServiceUnavailableException();
       }
     }
 
@@ -730,7 +730,7 @@ export class InboxService {
     return this.inbox.orderRules(input);
   }
 
-  adoptRule(input: RuleSelector): Promise<InboxRule | null> {
+  adoptRule(input: AdoptRuleInput): Promise<InboxRule | null> {
     return this.inbox.adoptRule(input);
   }
 

@@ -1,5 +1,5 @@
 -- Inbox rules (Phase 1b-rules): per organization routing rules, the corrections a route records,
--- the foreign key inbox_item.decided_by_rule_id waited for, two definers and the system subject guard.
+-- the foreign key inbox_item.decided_by_rule_id waited for, three definers and the system subject guard.
 -- The rule author is the principal: a rule runs only while its author is a verified owner or admin.
 
 -- One routing rule: closed condition columns, closed action columns, no jsonb; soft deleted, never removed.
@@ -322,6 +322,62 @@ $$;
 ALTER FUNCTION app.list_inbox_rules() OWNER TO bap_owner;
 REVOKE ALL ON FUNCTION app.list_inbox_rules() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.list_inbox_rules() TO bap_api;
+
+-- FORCE row level security applies to the definer too: list_inbox_routing_targets runs as bap_owner.
+CREATE POLICY inbox_routing_target_maintenance_select ON app.inbox_routing_target FOR SELECT
+  TO bap_owner USING (true);
+
+-- The one read path of the routing targets: the organization's own rows for every principal, the channel included,
+-- so an email child or an API intake decides the auto-route against the same targets a member sees.
+-- updated_by is the account the target default routes as; it is a subject id, never tenant content.
+CREATE OR REPLACE FUNCTION app.list_inbox_routing_targets()
+RETURNS TABLE (
+  detected_type text,
+  destination text,
+  document_kind text,
+  default_legal_entity_id uuid,
+  partner_policy text,
+  auto text,
+  auto_threshold numeric,
+  default_assignee_id text,
+  required_fields text[],
+  updated_by text
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, app
+AS $$
+DECLARE
+  -- Tenant identity is derived from the transaction context and never from an argument.
+  context_organization_id text := current_setting('bap.organization_id', true);
+BEGIN
+  IF coalesce(context_organization_id, '') = '' THEN
+    RAISE EXCEPTION 'Inbox routing targets require tenant context'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  RETURN QUERY
+    SELECT
+      target.detected_type,
+      target.destination,
+      target.document_kind,
+      target.default_legal_entity_id,
+      target.partner_policy,
+      target.auto,
+      target.auto_threshold,
+      target.default_assignee_id,
+      target.required_fields,
+      target.updated_by
+    FROM app.inbox_routing_target AS target
+    WHERE target.organization_id = context_organization_id
+    ORDER BY target.detected_type;
+END;
+$$;
+
+ALTER FUNCTION app.list_inbox_routing_targets() OWNER TO bap_owner;
+REVOKE ALL ON FUNCTION app.list_inbox_routing_targets() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.list_inbox_routing_targets() TO bap_api;
 
 -- The only write the read-only automation subject has: one failed event with no actor on an item still in review.
 -- The function body is the tenant boundary; inbox_event_maintenance_insert already admits bap_owner.

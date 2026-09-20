@@ -607,10 +607,7 @@ export const updateInboxRuleRequestSchema = inboxRuleConditionsSchema
 
 export const putInboxRuleOrderRequestSchema = z
   .object({
-    ruleIds: z
-      .array(identifierSchema)
-      .min(1)
-      .max(MAX_ENABLED_INBOX_RULES * 2),
+    ruleIds: z.array(identifierSchema).min(1).max(1000),
   })
   .strict()
   .refine((body) => new Set(body.ruleIds).size === body.ruleIds.length);
