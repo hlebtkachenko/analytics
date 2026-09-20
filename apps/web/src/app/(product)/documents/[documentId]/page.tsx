@@ -62,6 +62,7 @@ import {
   vatModeLabelKeys,
 } from '../../../../lib/documents/labels.ts';
 import { inboxBlobDownloadPath } from '../../../../lib/inbox/client';
+import { inboxStatusLabelKeys } from '../../../../lib/inbox/labels.ts';
 import { useOrganizationAccess } from '../../../../lib/organizations/use-organization-access';
 import { useOrganizationSelection } from '../../../../lib/organizations/use-organization-selection';
 import styles from './page.module.scss';
@@ -588,16 +589,48 @@ export default function DocumentDetailPage() {
           <h2 id="document-originals-heading">
             {t('documents.originalsTitle')}
           </h2>
-          {detail.originals.files.length === 0 ? (
+          {detail.supersedesDocumentId === null &&
+          detail.supersededByDocumentId === null ? null : (
+            <InlineNotification
+              hideCloseButton
+              kind="info"
+              lowContrast
+              title={t('documents.versionBanner')}
+            >
+              <Stack gap={3}>
+                {detail.supersedesDocumentId === null ? null : (
+                  <Link
+                    href={documentPath(
+                      organizationId,
+                      detail.supersedesDocumentId,
+                    )}
+                  >
+                    {t('documents.supersedesLink')}
+                  </Link>
+                )}
+                {detail.supersededByDocumentId === null ? null : (
+                  <Link
+                    href={documentPath(
+                      organizationId,
+                      detail.supersededByDocumentId,
+                    )}
+                  >
+                    {t('documents.supersededByLink')}
+                  </Link>
+                )}
+              </Stack>
+            </InlineNotification>
+          )}
+          {detail.files.length === 0 ? (
             <p>{t('documents.originalsNone')}</p>
           ) : (
             <ul aria-label={t('documents.originalsTitle')}>
-              {detail.originals.files.map((file) => (
+              {detail.files.map((file) => (
                 <li key={file.blobId}>
                   <Link
                     href={inboxBlobDownloadPath(organizationId, file.blobId)}
                   >
-                    {file.originalFilename ??
+                    {file.filename ??
                       t('documents.originalFile', {
                         position: String(file.position),
                       })}
@@ -606,22 +639,18 @@ export default function DocumentDetailPage() {
               ))}
             </ul>
           )}
-          {detail.originals.items.map((item) => (
-            <div className={styles.actions!} key={item.itemId}>
+          {detail.inboxItems.map((item) => (
+            <div className={styles.actions!} key={item.id}>
               <span>
-                {t(
-                  item.role === 'creator'
-                    ? 'documents.originalCreator'
-                    : 'documents.originalAttached',
-                )}
+                {t(inboxStatusLabelKeys[item.status])} · {item.receivedAt}
               </span>
               <Link
                 href={withOrganization(
-                  `/inbox/${encodeURIComponent(item.itemId)}`,
+                  `/inbox/${encodeURIComponent(item.id)}`,
                   organization.slug,
                 )}
               >
-                {item.itemId}
+                {item.id}
               </Link>
             </div>
           ))}

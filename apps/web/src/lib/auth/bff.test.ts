@@ -1221,10 +1221,13 @@ const documentDetail = {
   attributes: {},
   document: documentSummary,
   event: null,
+  files: [],
+  inboxItems: [],
   invoice: null,
   issues: [],
   links: [],
-  originals: { files: [], items: [] },
+  supersededByDocumentId: null,
+  supersedesDocumentId: null,
 };
 
 describe('getDocuments', () => {
@@ -1611,6 +1614,7 @@ const inboxItem = {
   hintLinkDocumentId: null,
   hintPartnerId: null,
   hintText: null,
+  humanTouched: false,
   id: INBOX_ITEM_ID,
   legalEntityId: null,
   origin: null,
@@ -1926,8 +1930,7 @@ describe('inbox item reads and writes', () => {
             candidates: [
               {
                 documentDate: '2026-09-01',
-                documentId: DATASET_ID,
-                partnerId: null,
+                id: DATASET_ID,
                 reference: 'REF-9',
                 totalAmount: '10.0000',
               },

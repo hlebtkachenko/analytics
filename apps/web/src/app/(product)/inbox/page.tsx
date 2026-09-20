@@ -46,6 +46,7 @@ import type {
 } from '../../../lib/inbox/contract.ts';
 import {
   inboxBulkActionLabelKeys,
+  inboxBulkRefusalCodeLabelKeys,
   inboxConfidenceBandLabelKeys,
   inboxDiscardReasonLabelKeys,
   inboxItemState,
@@ -245,7 +246,7 @@ export default function InboxPage() {
         : pending.action === 'snooze'
           ? { snoozedUntil: new Date(bulkSnoozedUntil).toISOString() }
           : pending.action === 'discard'
-            ? { discardReason: bulkReason }
+            ? { reason: bulkReason }
             : {}),
     };
     setBulkBusy(true);
@@ -270,10 +271,16 @@ export default function InboxPage() {
         setPending({ action, ids });
       },
     }));
-  const refusedIds =
-    bulkResult?.results
-      .filter((entry) => entry.status === 'refused')
-      .map((entry) => entry.itemId) ?? [];
+  const refused =
+    bulkResult?.results.filter((entry) => entry.status === 'refused') ?? [];
+  const refusedIds = refused.map((entry) => entry.itemId);
+  const refusedSummary = refused
+    .map((entry) =>
+      entry.code === undefined
+        ? entry.itemId
+        : `${entry.itemId} (${t(inboxBulkRefusalCodeLabelKeys[entry.code])})`,
+    )
+    .join(', ');
 
   // The first file names the item; the rest are counted, e.g. "invoice.pdf +2".
   function fileLabel(primaryFilename: string | null, fileCount: number) {
@@ -510,7 +517,7 @@ export default function InboxPage() {
             ? {}
             : {
                 subtitle: t('inbox.bulkRefused', {
-                  ids: refusedIds.join(', '),
+                  ids: refusedSummary,
                 }),
               })}
           title={t('inbox.bulkResult', {

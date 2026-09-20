@@ -162,8 +162,11 @@ const detail = {
       severity: 'warning',
     },
   ],
+  files: [],
+  inboxItems: [],
   links: [],
-  originals: { files: [], items: [] },
+  supersededByDocumentId: null,
+  supersedesDocumentId: null,
 };
 
 const LINK_ID = '00000000-0000-4000-8000-000000000050';
@@ -196,10 +199,10 @@ function capabilities(manageDocuments: boolean) {
 }
 
 type RouterOptions = Readonly<{
+  extra?: Record<string, unknown>;
   linkStatus?: number;
   links?: unknown[];
   manageDocuments?: boolean;
-  originals?: unknown;
 }>;
 
 function respond(options: RouterOptions = {}) {
@@ -243,9 +246,7 @@ function respond(options: RouterOptions = {}) {
       return Response.json({
         ...detail,
         links: options.links ?? [],
-        ...(options.originals === undefined
-          ? {}
-          : { originals: options.originals }),
+        ...(options.extra ?? {}),
       });
     }
 
@@ -402,14 +403,30 @@ describe('DocumentDetailPage', () => {
     vi.stubGlobal(
       'fetch',
       respond({
-        originals: {
+        extra: {
           files: [
-            { blobId: BLOB_ID, originalFilename: 'scan.pdf', position: 1 },
-            { blobId: OTHER_DOCUMENT_ID, originalFilename: null, position: 2 },
+            {
+              blobId: BLOB_ID,
+              byteSize: 3,
+              filename: 'scan.pdf',
+              mediaType: 'application/pdf',
+              position: 1,
+            },
+            {
+              blobId: OTHER_DOCUMENT_ID,
+              byteSize: 3,
+              filename: null,
+              mediaType: 'application/pdf',
+              position: 2,
+            },
           ],
-          items: [
-            { itemId: ITEM_ID, role: 'creator' },
-            { itemId: LINK_ID, role: 'attached' },
+          inboxItems: [
+            {
+              channelKind: 'upload',
+              id: ITEM_ID,
+              receivedAt: '2026-09-02T00:00:00.000Z',
+              status: 'routed',
+            },
           ],
         },
       }),
@@ -427,12 +444,10 @@ describe('DocumentDetailPage', () => {
       'href',
       `/api/bff/application/organizations/organization_1/inbox/blobs/${OTHER_DOCUMENT_ID}/download`,
     );
-    expect(screen.getByText('Created from item')).toBeVisible();
     expect(screen.getByRole('link', { name: ITEM_ID })).toHaveAttribute(
       'href',
       `/inbox/${ITEM_ID}?organization=organization-1`,
     );
-    expect(screen.getByText('Attached from item')).toBeVisible();
   });
 
   it('says so when no original file is stored', async () => {

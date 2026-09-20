@@ -459,8 +459,7 @@ describe('inbox action contracts', () => {
         candidates: [
           {
             documentDate: '2026-09-01',
-            documentId: ENTITY_ID,
-            partnerId: null,
+            id: ENTITY_ID,
             reference: null,
             totalAmount: '10.0000',
           },
@@ -504,8 +503,8 @@ describe('inbox action contracts', () => {
     expect(
       bulkInboxItemsRequestSchema.safeParse({
         action: 'discard',
-        discardReason: 'spam',
         itemIds: ids,
+        reason: 'spam',
       }).success,
     ).toBe(true);
     expect(
@@ -546,6 +545,9 @@ describe('inbox action contracts', () => {
     expect(parsed.success).toBe(true);
     expect(
       inboxItemListQuerySchema.safeParse({ confidence: 'unknown' }).success,
+    ).toBe(true);
+    expect(
+      inboxItemListQuerySchema.safeParse({ confidence: 'bogus' }).success,
     ).toBe(false);
   });
 });

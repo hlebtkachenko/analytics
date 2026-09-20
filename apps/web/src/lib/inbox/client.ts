@@ -118,6 +118,57 @@ export async function routeInboxItemToDocument(
   }
 }
 
+export type AttachInboxItemOutcome =
+  | Readonly<{ kind: 'attached' }>
+  | Readonly<{ kind: 'not_found' }>
+  | Readonly<{ code: 'blob_already_attached' | 'not_open'; kind: 'conflict' }>
+  | Readonly<{ kind: 'failed' }>;
+
+// A 404 names the item or the document, and a 409 names why the item cannot take the document; the page tells them apart.
+export async function attachInboxItem(
+  organizationId: string,
+  itemId: string,
+  documentId: string,
+): Promise<AttachInboxItemOutcome> {
+  let response: Response;
+  try {
+    response = await fetch(
+      inboxItemActionPath(organizationId, itemId, 'attach'),
+      {
+        body: JSON.stringify({ documentId }),
+        cache: 'no-store',
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      },
+    );
+  } catch {
+    return { kind: 'failed' };
+  }
+  if (response.status === 404) {
+    return { kind: 'not_found' };
+  }
+  if (response.status === 409) {
+    let code: unknown;
+    try {
+      code = ((await response.json()) as { code?: unknown }).code;
+    } catch {
+      return { kind: 'failed' };
+    }
+    return code === 'not_open' || code === 'blob_already_attached'
+      ? { code, kind: 'conflict' }
+      : { kind: 'failed' };
+  }
+  if (!response.ok) {
+    return { kind: 'failed' };
+  }
+  try {
+    inboxItemDetailSchema.parse(await response.json());
+    return { kind: 'attached' };
+  } catch {
+    return { kind: 'failed' };
+  }
+}
+
 // The answer is per id with HTTP 200 whatever the mix, so the page counts it rather than trusting a status.
 export async function bulkInboxItems(
   organizationId: string,

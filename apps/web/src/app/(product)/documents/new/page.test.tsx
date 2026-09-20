@@ -74,10 +74,13 @@ const createdDetail = {
     version: 1,
   },
   event: null,
+  files: [],
+  inboxItems: [],
   invoice: null,
   issues: [],
   links: [],
-  originals: { files: [], items: [] },
+  supersededByDocumentId: null,
+  supersedesDocumentId: null,
 };
 
 const posted: { body?: unknown; path?: string } = {};

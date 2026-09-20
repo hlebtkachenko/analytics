@@ -127,8 +127,13 @@ export const inboxIssueCodeSchema = z.enum([
   'reference_conflict',
   ...inboxUnprocessableReasonSchema.options,
 ]);
-// The three bands the list filter names; the API owns the thresholds.
-export const inboxConfidenceBandSchema = z.enum(['low', 'medium', 'high']);
+// The four bands the list filter names; the API owns the thresholds.
+export const inboxConfidenceBandSchema = z.enum([
+  'low',
+  'medium',
+  'high',
+  'unknown',
+]);
 export const providerStepSchema = z.enum(['sniff', 'hint', 'rule', 'manual']);
 
 export const tokenSchema = z.string().regex(TOKEN_PATTERN);
@@ -159,6 +164,8 @@ export const inboxItemSchema = inboxHintsSchema
     detectedType: tokenSchema.nullable(),
     documentId: identifierSchema.nullable(),
     duplicateOfItemId: identifierSchema.nullable(),
+    // A person set a hint, assigned, restored, reopened or unrouted it: the automation leaves it alone.
+    humanTouched: z.boolean(),
     id: identifierSchema,
     legalEntityId: identifierSchema.nullable(),
     // The credential display prefix that pushed the item; never what was pushed.
@@ -406,8 +413,6 @@ export const inboxItemDetailSchema = z
 export const inboxItemListEntrySchema = inboxItemSchema
   .extend({
     fileCount: z.number().int().min(0),
-    // A person set a hint, assigned, restored, reopened or unrouted it: the automation leaves it alone.
-    humanTouched: z.boolean(),
     primaryFilename: z.string().min(1).max(255).nullable(),
   })
   .strict();
@@ -432,10 +437,14 @@ const csvStatusSchema = z
       .max(inboxItemStatusSchema.options.length),
   );
 
+// The literal that filters the list to unassigned items.
+export const INBOX_ASSIGNEE_NONE = 'none';
+
 export const inboxItemListQuerySchema = z
   .object({
-    // The literal `none` selects unassigned items; the pattern already admits it.
-    assigneeId: subjectIdentifierSchema.optional(),
+    assigneeId: z
+      .union([z.literal(INBOX_ASSIGNEE_NONE), subjectIdentifierSchema])
+      .optional(),
     confidence: inboxConfidenceBandSchema.optional(),
     detectedType: tokenSchema.optional(),
     issue: inboxIssueCodeSchema.optional(),
@@ -478,8 +487,7 @@ export const routeInboxItemToDocumentRequestSchema = z
 export const inboxDuplicateCandidateSchema = z
   .object({
     documentDate: documentDateSchema,
-    documentId: identifierSchema,
-    partnerId: identifierSchema.nullable(),
+    id: identifierSchema,
     reference: z.string().nullable(),
     totalAmount: decimalStringSchema.nullable(),
   })
@@ -514,9 +522,9 @@ export const bulkInboxItemsRequestSchema = z
   .object({
     action: inboxBulkActionSchema,
     assigneeId: subjectIdentifierSchema.nullable().optional(),
-    discardReason: inboxDiscardReasonSchema.optional(),
     itemIds: z.array(identifierSchema).min(1).max(MAX_INBOX_BULK_ITEMS),
-    snoozedUntil: z.iso.datetime().optional(),
+    reason: inboxDiscardReasonSchema.optional(),
+    snoozedUntil: z.iso.datetime().nullable().optional(),
   })
   .strict()
   .refine((body) => new Set(body.itemIds).size === body.itemIds.length)
@@ -524,15 +532,25 @@ export const bulkInboxItemsRequestSchema = z
     (body) =>
       (body.assigneeId !== undefined) === (body.action === 'assign') &&
       (body.snoozedUntil !== undefined) === (body.action === 'snooze') &&
-      (body.discardReason !== undefined) === (body.action === 'discard'),
+      (body.reason !== undefined) === (body.action === 'discard'),
   );
+
+// Why one id of a bulk request was refused; the single-item routes answer the same cases by status.
+export const inboxBulkRefusalCodeSchema = z.enum([
+  'not_found',
+  'not_open',
+  'invalid',
+  'reference_conflict',
+  'duplicate_probable',
+  'missing_required_field',
+]);
 
 export const bulkInboxItemsResponseSchema = z
   .object({
     results: z.array(
       z
         .object({
-          code: z.string().min(1).max(64).optional(),
+          code: inboxBulkRefusalCodeSchema.optional(),
           itemId: identifierSchema,
           status: z.enum(['ok', 'refused']),
         })
@@ -861,6 +879,7 @@ export type BulkInboxItemsResponse = z.infer<
   typeof bulkInboxItemsResponseSchema
 >;
 export type InboxBulkAction = z.infer<typeof inboxBulkActionSchema>;
+export type InboxBulkRefusalCode = z.infer<typeof inboxBulkRefusalCodeSchema>;
 export type InboxConfidenceBand = z.infer<typeof inboxConfidenceBandSchema>;
 export type InboxDuplicateCandidate = z.infer<
   typeof inboxDuplicateCandidateSchema

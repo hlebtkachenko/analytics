@@ -1,6 +1,7 @@
 import type { StatusTagType } from '../documents/labels.ts';
 import type {
   InboxBulkAction,
+  InboxBulkRefusalCode,
   InboxConfidenceBand,
   InboxCorrectionField,
   InboxCorrectionSource,
@@ -117,6 +118,7 @@ export const inboxConfidenceBandLabelKeys: Readonly<
   high: 'inbox.confidenceHigh',
   low: 'inbox.confidenceLow',
   medium: 'inbox.confidenceMedium',
+  unknown: 'inbox.confidenceUnknown',
 };
 
 export const inboxBulkActionLabelKeys: Readonly<
@@ -126,6 +128,17 @@ export const inboxBulkActionLabelKeys: Readonly<
   assign: 'inbox.bulkAssign',
   discard: 'inbox.bulkDiscard',
   snooze: 'inbox.bulkSnooze',
+};
+
+export const inboxBulkRefusalCodeLabelKeys: Readonly<
+  Record<InboxBulkRefusalCode, string>
+> = {
+  duplicate_probable: 'inbox.bulkRefusalDuplicateProbable',
+  invalid: 'inbox.bulkRefusalInvalid',
+  missing_required_field: 'inbox.bulkRefusalMissingRequiredField',
+  not_found: 'inbox.bulkRefusalNotFound',
+  not_open: 'inbox.bulkRefusalNotOpen',
+  reference_conflict: 'inbox.bulkRefusalReferenceConflict',
 };
 
 // The state colour of a row: settled by a route or a discard, touched by a person, or untouched so far.

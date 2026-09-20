@@ -300,14 +300,16 @@ describe('InboxPage', () => {
     await waitFor(() => {
       expect(screen.getByText('1 of 2 items done.')).toBeVisible();
     });
-    expect(screen.getByText(`Refused: ${OTHER_ITEM_ID}`)).toBeVisible();
+    expect(
+      screen.getByText(`Refused: ${OTHER_ITEM_ID} (not open)`),
+    ).toBeVisible();
     const bulkCall = fetchMock.mock.calls.find((call) =>
       String(call[0]).endsWith('/inbox/items/bulk'),
     )!;
     expect(JSON.parse(String((bulkCall[1] as RequestInit).body))).toEqual({
       action: 'discard',
-      discardReason: 'spam',
       itemIds: [ITEM_ID, OTHER_ITEM_ID],
+      reason: 'spam',
     });
     // The list is reread after the action.
     expect(itemRequests(fetchMock).length).toBeGreaterThan(1);

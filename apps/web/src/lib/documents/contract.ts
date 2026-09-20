@@ -290,26 +290,51 @@ export const documentLinkSchema = z
   })
   .strict();
 
-// The files on the document and the inbox items that brought them: the one that created it, the ones attached later.
-export const documentOriginalsSchema = z
+// The original bytes behind the document: one row per attached blob, in document order.
+export const documentFileSchema = z
   .object({
-    files: z.array(
-      z
-        .object({
-          blobId: identifierSchema,
-          originalFilename: z.string().min(1).max(255).nullable(),
-          position: z.number().int().min(1),
-        })
-        .strict(),
-    ),
-    items: z.array(
-      z
-        .object({
-          itemId: identifierSchema,
-          role: z.enum(['creator', 'attached']),
-        })
-        .strict(),
-    ),
+    blobId: identifierSchema,
+    byteSize: z.number().int().positive(),
+    filename: z.string().min(1).max(255).nullable(),
+    mediaType: z.string().min(1).max(255),
+    position: z.number().int().min(1),
+  })
+  .strict();
+
+// The inbox channel kinds a document's inbox items may carry; mirrors @bap/db's inboxChannelKinds.
+const documentInboxChannelKindSchema = z.enum([
+  'upload',
+  'email',
+  'api',
+  'mcp',
+  'money_s3',
+  'pohoda',
+  'isdoc',
+  'bank_file',
+  'bank_api',
+  'fakturoid',
+  'idoklad',
+  'isds',
+  'drive',
+]);
+
+// The inbox item statuses; mirrors @bap/db's inboxItemStatuses.
+const documentInboxItemStatusSchema = z.enum([
+  'received',
+  'processing',
+  'needs_review',
+  'routed',
+  'discarded',
+  'failed',
+]);
+
+// Every inbox item pointing at the document: the one that created it and every one attached later.
+export const documentInboxItemSchema = z
+  .object({
+    channelKind: documentInboxChannelKindSchema,
+    id: identifierSchema,
+    receivedAt: z.iso.datetime(),
+    status: documentInboxItemStatusSchema,
   })
   .strict();
 
@@ -318,10 +343,13 @@ export const documentDetailSchema = z
     attributes: z.record(attributeKeySchema, attributeValueSchema),
     document: documentSummarySchema,
     event: economicEventSchema.nullable(),
+    files: z.array(documentFileSchema),
+    inboxItems: z.array(documentInboxItemSchema),
     invoice: invoiceSchema.nullable(),
     issues: z.array(dataIssueSchema),
     links: z.array(documentLinkSchema),
-    originals: documentOriginalsSchema,
+    supersededByDocumentId: identifierSchema.nullable(),
+    supersedesDocumentId: identifierSchema.nullable(),
   })
   .strict();
 
@@ -369,8 +397,13 @@ const csvStatusSchema = z
       .max(documentStatusSchema.options.length),
   );
 
+export const DOCUMENT_CURRENT_FILTERS = ['true', 'false', 'all'] as const;
+export const documentCurrentFilterSchema = z.enum(DOCUMENT_CURRENT_FILTERS);
+
 export const documentListQuerySchema = z
   .object({
+    // Superseded versions are hidden unless asked for.
+    current: documentCurrentFilterSchema.default('true'),
     dateFrom: documentDateSchema.optional(),
     dateTo: documentDateSchema.optional(),
     kind: csvKindSchema.optional(),
@@ -799,7 +832,10 @@ export type DataIssue = z.infer<typeof dataIssueSchema>;
 export type DocumentAnalyticsResponse = z.infer<
   typeof documentAnalyticsResponseSchema
 >;
+export type DocumentCurrentFilter = z.infer<typeof documentCurrentFilterSchema>;
 export type DocumentDetail = z.infer<typeof documentDetailSchema>;
+export type DocumentFile = z.infer<typeof documentFileSchema>;
+export type DocumentInboxItem = z.infer<typeof documentInboxItemSchema>;
 export type DocumentKind = z.infer<typeof documentKindSchema>;
 export type DocumentLinkKind = z.infer<typeof documentLinkKindSchema>;
 export type DocumentListResponse = z.infer<typeof documentListResponseSchema>;

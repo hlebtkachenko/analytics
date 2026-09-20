@@ -56,6 +56,7 @@ const inboxItem = {
   hintLinkDocumentId: null,
   hintPartnerId: null,
   hintText: null,
+  humanTouched: false,
   id: ITEM_ID,
   legalEntityId: null,
   origin: null,
@@ -700,8 +701,7 @@ describe('InboxItemPage', () => {
             candidates: [
               {
                 documentDate: '2026-09-01',
-                documentId: DOCUMENT_ID,
-                partnerId: null,
+                id: DOCUMENT_ID,
                 reference: 'REF-9',
                 totalAmount: '10.0000',
               },
@@ -745,8 +745,7 @@ describe('InboxItemPage', () => {
       candidates: [
         {
           documentDate: '2026-09-01',
-          documentId: DOCUMENT_ID,
-          partnerId: null,
+          id: DOCUMENT_ID,
           reference: 'REF-9',
           totalAmount: null,
         },

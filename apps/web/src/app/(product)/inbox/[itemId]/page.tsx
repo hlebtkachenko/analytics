@@ -43,6 +43,7 @@ import type {
 } from '../../../../lib/documents/contract.ts';
 import { documentKindLabelKeys } from '../../../../lib/documents/labels.ts';
 import {
+  attachInboxItem,
   inboxBlobDownloadPath,
   inboxBlobInlinePath,
   inboxItemActionPath,
@@ -405,8 +406,26 @@ export default function InboxItemPage() {
 
   async function attachToDocument(documentId: string): Promise<void> {
     setConflict(undefined);
-    if (await write('attach', { documentId })) {
+    setBusy(true);
+    setWriteFailed(false);
+    const outcome = await attachInboxItem(organizationId, itemId, documentId);
+    setBusy(false);
+    if (outcome.kind === 'attached') {
+      setRefreshCount((count) => count + 1);
       notify({ kind: 'success', title: t('inbox.attached') });
+    } else if (outcome.kind === 'not_found') {
+      notify({ kind: 'error', title: t('inbox.attachNotFound') });
+    } else if (outcome.kind === 'conflict') {
+      notify({
+        kind: 'error',
+        title: t(
+          outcome.code === 'not_open'
+            ? 'inbox.attachNotOpen'
+            : 'inbox.attachAlreadyAttached',
+        ),
+      });
+    } else {
+      setWriteFailed(true);
     }
   }
 
@@ -1091,9 +1110,9 @@ export default function InboxItemPage() {
             <p>{t('inbox.duplicateProbableHelp')}</p>
             <ul aria-label={t('inbox.duplicateCandidates')}>
               {conflict.candidates.map((candidate) => (
-                <li className={styles.actions!} key={candidate.documentId}>
-                  <Link href={documentHref(candidate.documentId)}>
-                    {candidate.reference ?? candidate.documentId}
+                <li className={styles.actions!} key={candidate.id}>
+                  <Link href={documentHref(candidate.id)}>
+                    {candidate.reference ?? candidate.id}
                   </Link>
                   <span>
                     {candidate.documentDate}
@@ -1105,7 +1124,7 @@ export default function InboxItemPage() {
                     disabled={busy}
                     kind="tertiary"
                     onClick={() => {
-                      void attachToDocument(candidate.documentId);
+                      void attachToDocument(candidate.id);
                     }}
                     size="sm"
                     type="button"
@@ -1134,7 +1153,7 @@ export default function InboxItemPage() {
                   // Any listed candidate satisfies the acknowledgement; the first stands for the answer.
                   void submitRoute({
                     ...pendingRoute,
-                    acknowledgeDuplicateOf: conflict.candidates[0]!.documentId,
+                    acknowledgeDuplicateOf: conflict.candidates[0]!.id,
                   });
                 }}
                 type="button"
