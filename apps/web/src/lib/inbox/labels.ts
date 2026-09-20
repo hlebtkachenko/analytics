@@ -1,8 +1,11 @@
 import type { StatusTagType } from '../documents/labels.ts';
 import type {
+  InboxBulkAction,
+  InboxConfidenceBand,
   InboxCorrectionField,
   InboxCorrectionSource,
   InboxDiscardReason,
+  InboxItemListEntry,
   InboxItemStatus,
   InboxRoutingAutoPolicy,
   InboxRoutingDestination,
@@ -106,4 +109,48 @@ export const inboxStatusFilterLabelKeys: Readonly<
   needs_review: 'inbox.filterNeedsReview',
   routed: 'inbox.filterRouted',
   unprocessed: 'inbox.filterUnprocessed',
+};
+
+export const inboxConfidenceBandLabelKeys: Readonly<
+  Record<InboxConfidenceBand, string>
+> = {
+  high: 'inbox.confidenceHigh',
+  low: 'inbox.confidenceLow',
+  medium: 'inbox.confidenceMedium',
+};
+
+export const inboxBulkActionLabelKeys: Readonly<
+  Record<InboxBulkAction, string>
+> = {
+  approve: 'inbox.bulkApprove',
+  assign: 'inbox.bulkAssign',
+  discard: 'inbox.bulkDiscard',
+  snooze: 'inbox.bulkSnooze',
+};
+
+// The state colour of a row: settled by a route or a discard, touched by a person, or untouched so far.
+export type InboxItemState = 'discarded' | 'routed' | 'touched' | 'untouched';
+
+export function inboxItemState(entry: InboxItemListEntry): InboxItemState {
+  if (entry.status === 'routed' || entry.status === 'discarded') {
+    return entry.status;
+  }
+  return entry.humanTouched ? 'touched' : 'untouched';
+}
+
+export const inboxItemStateLabelKeys: Readonly<Record<InboxItemState, string>> =
+  {
+    discarded: 'inbox.stateDiscarded',
+    routed: 'inbox.stateRouted',
+    touched: 'inbox.stateTouched',
+    untouched: 'inbox.stateUntouched',
+  };
+
+export const inboxItemStateTagTypes: Readonly<
+  Record<InboxItemState, StatusTagType | 'red'>
+> = {
+  discarded: 'red',
+  routed: 'green',
+  touched: 'blue',
+  untouched: 'gray',
 };

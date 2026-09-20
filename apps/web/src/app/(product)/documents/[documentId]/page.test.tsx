@@ -163,6 +163,7 @@ const detail = {
     },
   ],
   links: [],
+  originals: { files: [], items: [] },
 };
 
 const LINK_ID = '00000000-0000-4000-8000-000000000050';
@@ -198,6 +199,7 @@ type RouterOptions = Readonly<{
   linkStatus?: number;
   links?: unknown[];
   manageDocuments?: boolean;
+  originals?: unknown;
 }>;
 
 function respond(options: RouterOptions = {}) {
@@ -238,7 +240,13 @@ function respond(options: RouterOptions = {}) {
     }
 
     if (input.includes('/documents/')) {
-      return Response.json({ ...detail, links: options.links ?? [] });
+      return Response.json({
+        ...detail,
+        links: options.links ?? [],
+        ...(options.originals === undefined
+          ? {}
+          : { originals: options.originals }),
+      });
     }
 
     return new Response(null, { status: 404 });
@@ -386,6 +394,55 @@ describe('DocumentDetailPage', () => {
       await screen.findByText('The link could not be saved.'),
     ).toBeVisible();
     expect(screen.queryByText('The status could not be updated.')).toBeNull();
+  });
+
+  it('lists the original files with their download links and the source items', async () => {
+    const BLOB_ID = '00000000-0000-4000-8000-000000000070';
+    const ITEM_ID = '00000000-0000-4000-8000-000000000071';
+    vi.stubGlobal(
+      'fetch',
+      respond({
+        originals: {
+          files: [
+            { blobId: BLOB_ID, originalFilename: 'scan.pdf', position: 1 },
+            { blobId: OTHER_DOCUMENT_ID, originalFilename: null, position: 2 },
+          ],
+          items: [
+            { itemId: ITEM_ID, role: 'creator' },
+            { itemId: LINK_ID, role: 'attached' },
+          ],
+        },
+      }),
+    );
+
+    renderDetailPage();
+
+    expect(
+      await screen.findByRole('link', { name: 'scan.pdf' }),
+    ).toHaveAttribute(
+      'href',
+      `/api/bff/application/organizations/organization_1/inbox/blobs/${BLOB_ID}/download`,
+    );
+    expect(screen.getByRole('link', { name: 'File 2' })).toHaveAttribute(
+      'href',
+      `/api/bff/application/organizations/organization_1/inbox/blobs/${OTHER_DOCUMENT_ID}/download`,
+    );
+    expect(screen.getByText('Created from item')).toBeVisible();
+    expect(screen.getByRole('link', { name: ITEM_ID })).toHaveAttribute(
+      'href',
+      `/inbox/${ITEM_ID}?organization=organization-1`,
+    );
+    expect(screen.getByText('Attached from item')).toBeVisible();
+  });
+
+  it('says so when no original file is stored', async () => {
+    vi.stubGlobal('fetch', respond());
+
+    renderDetailPage();
+
+    expect(
+      await screen.findByText('No original file is stored for this document.'),
+    ).toBeVisible();
   });
 
   it('hides every manage action from an account without the capability', async () => {

@@ -77,6 +77,7 @@ const createdDetail = {
   invoice: null,
   issues: [],
   links: [],
+  originals: { files: [], items: [] },
 };
 
 const posted: { body?: unknown; path?: string } = {};

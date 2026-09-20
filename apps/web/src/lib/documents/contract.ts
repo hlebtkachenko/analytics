@@ -290,6 +290,29 @@ export const documentLinkSchema = z
   })
   .strict();
 
+// The files on the document and the inbox items that brought them: the one that created it, the ones attached later.
+export const documentOriginalsSchema = z
+  .object({
+    files: z.array(
+      z
+        .object({
+          blobId: identifierSchema,
+          originalFilename: z.string().min(1).max(255).nullable(),
+          position: z.number().int().min(1),
+        })
+        .strict(),
+    ),
+    items: z.array(
+      z
+        .object({
+          itemId: identifierSchema,
+          role: z.enum(['creator', 'attached']),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
 export const documentDetailSchema = z
   .object({
     attributes: z.record(attributeKeySchema, attributeValueSchema),
@@ -298,6 +321,7 @@ export const documentDetailSchema = z
     invoice: invoiceSchema.nullable(),
     issues: z.array(dataIssueSchema),
     links: z.array(documentLinkSchema),
+    originals: documentOriginalsSchema,
   })
   .strict();
 

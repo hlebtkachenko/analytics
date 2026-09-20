@@ -16,6 +16,7 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import {
+  bulkInboxItemsRequestSchema,
   correctionReasonsSchema,
   createInboxChannelRequestSchema,
   createInboxRuleRequestSchema,
@@ -26,11 +27,14 @@ import {
   inboxDecidedByKindSchema,
   inboxEventKindSchema,
   inboxEventReasonSchema,
+  inboxIssueCodeSchema,
+  inboxItemListQuerySchema,
   inboxItemStatusSchema,
   inboxPayloadKindSchema,
   inboxRoutingAutoPolicySchema,
   inboxRoutingDestinationSchema,
   inboxRoutingPartnerPolicySchema,
+  inboxRouteConflictSchema,
   inboxRoutingTargetSchema,
   inboxRuleSchema,
   inboxSettingsSchema,
@@ -72,6 +76,12 @@ describe('inbox contract enums', () => {
   it('names the automation reason and the rule provider step', () => {
     expect(inboxEventReasonSchema.options).toContain('rule_author_unavailable');
     expect(providerStepSchema.options).toContain('rule');
+  });
+
+  it('names the attached event and the probable duplicate issue', () => {
+    expect(inboxEventKindSchema.options).toContain('attached');
+    expect(inboxIssueCodeSchema.options).toContain('duplicate_probable');
+    expect(inboxEventReasonSchema.options).not.toContain('duplicate_probable');
   });
 });
 
@@ -431,6 +441,111 @@ describe('inbox correction contract', () => {
         ...body,
         correctionReasons: { legalEntityId: 'Wrong entity.' },
       }).success,
+    ).toBe(false);
+  });
+});
+
+// The two 409 bodies a route can answer, the bulk body, and the three list filters.
+describe('inbox action contracts', () => {
+  it('reads both route conflicts by code and nothing else', () => {
+    expect(
+      inboxRouteConflictSchema.safeParse({
+        code: 'reference_conflict',
+        documentId: ENTITY_ID,
+      }).success,
+    ).toBe(true);
+    expect(
+      inboxRouteConflictSchema.safeParse({
+        candidates: [
+          {
+            documentDate: '2026-09-01',
+            documentId: ENTITY_ID,
+            partnerId: null,
+            reference: null,
+            totalAmount: '10.0000',
+          },
+        ],
+        code: 'duplicate_probable',
+      }).success,
+    ).toBe(true);
+    expect(
+      inboxRouteConflictSchema.safeParse({
+        candidates: [],
+        code: 'duplicate_probable',
+      }).success,
+    ).toBe(false);
+    expect(
+      inboxRouteConflictSchema.safeParse({ code: 'blob_quarantined' }).success,
+    ).toBe(false);
+  });
+
+  it('routes with the version and acknowledgement ids beside the draft', () => {
+    const parsed = routeInboxItemToDocumentRequestSchema.safeParse({
+      acknowledgeDuplicateOf: ENTITY_ID,
+      document: {
+        currencyCode: 'CZK',
+        documentDate: '2026-09-01',
+        kind: 'contract',
+        legalEntityId: ENTITY_ID,
+        title: 'Placeholder contract',
+      },
+      fileBlobIds: [BLOB_ID],
+      supersedesDocumentId: ENTITY_ID,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('requires the field of the bulk action, refuses the others, and caps the ids', () => {
+    const ids = [BLOB_ID];
+    expect(
+      bulkInboxItemsRequestSchema.safeParse({ action: 'approve', itemIds: ids })
+        .success,
+    ).toBe(true);
+    expect(
+      bulkInboxItemsRequestSchema.safeParse({
+        action: 'discard',
+        discardReason: 'spam',
+        itemIds: ids,
+      }).success,
+    ).toBe(true);
+    expect(
+      bulkInboxItemsRequestSchema.safeParse({ action: 'discard', itemIds: ids })
+        .success,
+    ).toBe(false);
+    expect(
+      bulkInboxItemsRequestSchema.safeParse({
+        action: 'approve',
+        itemIds: ids,
+        snoozedUntil: '2026-09-20T00:00:00.000Z',
+      }).success,
+    ).toBe(false);
+    expect(
+      bulkInboxItemsRequestSchema.safeParse({
+        action: 'approve',
+        itemIds: [BLOB_ID, BLOB_ID],
+      }).success,
+    ).toBe(false);
+    expect(
+      bulkInboxItemsRequestSchema.safeParse({
+        action: 'approve',
+        itemIds: Array.from(
+          { length: 101 },
+          (_, index) =>
+            `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+        ),
+      }).success,
+    ).toBe(false);
+  });
+
+  it('filters the list by issue, assignee and confidence band', () => {
+    const parsed = inboxItemListQuerySchema.safeParse({
+      assigneeId: 'none',
+      confidence: 'high',
+      issue: 'reference_conflict',
+    });
+    expect(parsed.success).toBe(true);
+    expect(
+      inboxItemListQuerySchema.safeParse({ confidence: 'unknown' }).success,
     ).toBe(false);
   });
 });

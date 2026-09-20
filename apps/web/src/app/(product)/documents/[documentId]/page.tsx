@@ -4,6 +4,7 @@ import {
   Button,
   ComboBox,
   InlineNotification,
+  Link,
   Select,
   SelectItem,
   Stack,
@@ -36,6 +37,7 @@ import {
   formatAmount,
   sendJson,
   sendWithoutContent,
+  withOrganization,
 } from '../../../../lib/documents/client';
 import {
   documentDetailSchema,
@@ -59,6 +61,7 @@ import {
   invoiceLineKindLabelKeys,
   vatModeLabelKeys,
 } from '../../../../lib/documents/labels.ts';
+import { inboxBlobDownloadPath } from '../../../../lib/inbox/client';
 import { useOrganizationAccess } from '../../../../lib/organizations/use-organization-access';
 import { useOrganizationSelection } from '../../../../lib/organizations/use-organization-selection';
 import styles from './page.module.scss';
@@ -578,6 +581,50 @@ export default function DocumentDetailPage() {
               </TableContainer>
             </>
           )}
+        </Stack>
+      </section>
+      <section aria-labelledby="document-originals-heading">
+        <Stack gap={5}>
+          <h2 id="document-originals-heading">
+            {t('documents.originalsTitle')}
+          </h2>
+          {detail.originals.files.length === 0 ? (
+            <p>{t('documents.originalsNone')}</p>
+          ) : (
+            <ul aria-label={t('documents.originalsTitle')}>
+              {detail.originals.files.map((file) => (
+                <li key={file.blobId}>
+                  <Link
+                    href={inboxBlobDownloadPath(organizationId, file.blobId)}
+                  >
+                    {file.originalFilename ??
+                      t('documents.originalFile', {
+                        position: String(file.position),
+                      })}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+          {detail.originals.items.map((item) => (
+            <div className={styles.actions!} key={item.itemId}>
+              <span>
+                {t(
+                  item.role === 'creator'
+                    ? 'documents.originalCreator'
+                    : 'documents.originalAttached',
+                )}
+              </span>
+              <Link
+                href={withOrganization(
+                  `/inbox/${encodeURIComponent(item.itemId)}`,
+                  organization.slug,
+                )}
+              >
+                {item.itemId}
+              </Link>
+            </div>
+          ))}
         </Stack>
       </section>
       <section aria-labelledby="document-links-heading">

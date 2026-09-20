@@ -1,4 +1,11 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const navigation = { search: '' };
@@ -14,6 +21,7 @@ import InboxPage from './page';
 
 const LEGAL_ENTITY_ID = '9b7d1c30-6a4b-4d1f-9c2e-7a5f0e3b8d21';
 const ITEM_ID = '00000000-0000-4000-8000-000000000050';
+const OTHER_ITEM_ID = '00000000-0000-4000-8000-000000000051';
 
 const legalEntities = {
   legalEntities: [
@@ -47,6 +55,7 @@ const inboxItem = {
   hintLinkDocumentId: null,
   hintPartnerId: null,
   hintText: null,
+  humanTouched: false,
   id: ITEM_ID,
   legalEntityId: LEGAL_ENTITY_ID,
   origin: null,
@@ -81,7 +90,7 @@ function respondWith(
   manageDocuments = true,
   manageOrganization = false,
 ) {
-  return vi.fn(async (input: string) => {
+  return vi.fn(async (input: string, init?: RequestInit) => {
     if (input === '/api/auth/organization/list') {
       return Response.json([
         {
@@ -99,6 +108,16 @@ function respondWith(
     }
     if (input.endsWith('/legal-entities')) {
       return Response.json(legalEntities);
+    }
+    if (input.endsWith('/inbox/items/bulk')) {
+      const body = JSON.parse(String(init?.body)) as { itemIds: string[] };
+      return Response.json({
+        results: body.itemIds.map((itemId, index) =>
+          index === 0
+            ? { itemId, status: 'ok' }
+            : { code: 'not_open', itemId, status: 'refused' },
+        ),
+      });
     }
     if (input.includes('/inbox/items')) {
       return Response.json({
@@ -200,6 +219,107 @@ describe('InboxPage', () => {
       'href',
       '/inbox/rules?organization=organization-1',
     );
+  });
+
+  it('restores the issue, assignee and confidence filters from the URL and round-trips a change', async () => {
+    navigation.search =
+      '?filter=all&issue=reference_conflict&assigneeId=none&confidence=low';
+    const fetchMock = respondWith([inboxItem]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderInboxPage();
+    await screen.findByText('Placeholder Holding');
+
+    expect(itemRequests(fetchMock)[0]).toBe(
+      '/api/bff/application/organizations/organization_1/inbox/items?status=received%2Cprocessing%2Cneeds_review%2Cfailed&issue=reference_conflict&assigneeId=none&confidence=low&page=1&pageSize=25',
+    );
+    expect(screen.getByLabelText('Issue')).toHaveValue('reference_conflict');
+    expect(screen.getByLabelText('Confidence')).toHaveValue('low');
+
+    fireEvent.change(screen.getByLabelText('Confidence'), {
+      target: { value: 'high' },
+    });
+    fireEvent.change(screen.getByLabelText('Assignee'), {
+      target: { value: 'user_2' },
+    });
+    fireEvent.keyDown(screen.getByLabelText('Assignee'), { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(itemRequests(fetchMock).at(-1)).toBe(
+        '/api/bff/application/organizations/organization_1/inbox/items?status=received%2Cprocessing%2Cneeds_review%2Cfailed&issue=reference_conflict&assigneeId=user_2&confidence=high&page=1&pageSize=25',
+      );
+    });
+    expect(window.location.search).toContain('confidence=high');
+    expect(window.location.search).toContain('assigneeId=user_2');
+  });
+
+  it('colours the state from the status and the human touch', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respondWith([
+        inboxItem,
+        { ...inboxItem, humanTouched: true, id: OTHER_ITEM_ID },
+        {
+          ...inboxItem,
+          id: '00000000-0000-4000-8000-000000000052',
+          status: 'routed',
+        },
+      ]),
+    );
+
+    renderInboxPage();
+
+    await screen.findAllByText('Placeholder Holding');
+    const table = screen.getByRole('table');
+    expect(within(table).getByText('Untouched')).toBeVisible();
+    expect(within(table).getByText('User-touched')).toBeVisible();
+    // The status tag says Routed too, so the state tag is the second one on that row.
+    expect(within(table).getAllByText('Routed')).toHaveLength(2);
+  });
+
+  it('runs a bulk action on the selected rows and reports the refused ids', async () => {
+    const fetchMock = respondWith([
+      inboxItem,
+      { ...inboxItem, id: OTHER_ITEM_ID },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderInboxPage();
+    await screen.findAllByText('Placeholder Holding');
+
+    fireEvent.click(screen.getByLabelText('Select all rows'));
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Discard' });
+    expect(within(dialog).getByText('2 items selected.')).toBeVisible();
+    fireEvent.change(within(dialog).getByLabelText('Discard reason'), {
+      target: { value: 'spam' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Discard' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('1 of 2 items done.')).toBeVisible();
+    });
+    expect(screen.getByText(`Refused: ${OTHER_ITEM_ID}`)).toBeVisible();
+    const bulkCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).endsWith('/inbox/items/bulk'),
+    )!;
+    expect(JSON.parse(String((bulkCall[1] as RequestInit).body))).toEqual({
+      action: 'discard',
+      discardReason: 'spam',
+      itemIds: [ITEM_ID, OTHER_ITEM_ID],
+    });
+    // The list is reread after the action.
+    expect(itemRequests(fetchMock).length).toBeGreaterThan(1);
+  });
+
+  it('hides the selection and the bulk actions without the manage capability', async () => {
+    vi.stubGlobal('fetch', respondWith([inboxItem], false));
+
+    renderInboxPage();
+    await screen.findByText('Placeholder Holding');
+
+    expect(screen.queryByLabelText('Select all rows')).toBeNull();
   });
 
   it('shows the empty state and hides the drop zone without the manage capability', async () => {

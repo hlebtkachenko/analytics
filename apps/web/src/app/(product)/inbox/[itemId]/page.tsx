@@ -2,9 +2,11 @@
 
 import {
   Button,
+  ComboBox,
   Form,
   InlineNotification,
   Link,
+  Modal,
   Select,
   SelectItem,
   Stack,
@@ -25,18 +27,27 @@ import { useTranslation } from 'react-i18next';
 import PageContainer from '../../../../components/page-container';
 import { useToast } from '../../../../components/shell/toast';
 import { getJson, isAbortError } from '../../../../lib/datasets/client';
-import { sendJson, withOrganization } from '../../../../lib/documents/client';
+import {
+  documentsPath,
+  sendJson,
+  withOrganization,
+} from '../../../../lib/documents/client';
 import {
   createDocumentRequestSchema,
   documentKindSchema,
+  documentListResponseSchema,
 } from '../../../../lib/documents/contract.ts';
-import type { DocumentKind } from '../../../../lib/documents/contract.ts';
+import type {
+  DocumentKind,
+  DocumentSummary,
+} from '../../../../lib/documents/contract.ts';
 import { documentKindLabelKeys } from '../../../../lib/documents/labels.ts';
 import {
   inboxBlobDownloadPath,
   inboxBlobInlinePath,
   inboxItemActionPath,
   inboxItemPath,
+  routeInboxItemToDocument,
 } from '../../../../lib/inbox/client';
 import type { InboxItemAction } from '../../../../lib/inbox/client';
 import {
@@ -49,6 +60,8 @@ import type {
   InboxCorrectionField,
   InboxDiscardReason,
   InboxItemDetail,
+  InboxRouteConflict,
+  RouteInboxItemToDocumentRequest,
   UpdateInboxHintsRequest,
 } from '../../../../lib/inbox/contract.ts';
 import {
@@ -196,6 +209,15 @@ export default function InboxItemPage() {
     useState<InboxDiscardReason>('irrelevant');
   const [assigneeId, setAssigneeId] = useState('');
   const [snoozedUntil, setSnoozedUntil] = useState('');
+  // The route the API refused with a named conflict, kept so a choice can resend it with one more field.
+  const [pendingRoute, setPendingRoute] =
+    useState<RouteInboxItemToDocumentRequest>();
+  const [conflict, setConflict] = useState<InboxRouteConflict>();
+  const [attachQuery, setAttachQuery] = useState('');
+  const [attachTargetId, setAttachTargetId] = useState('');
+  const [attachCandidates, setAttachCandidates] = useState<DocumentSummary[]>(
+    [],
+  );
 
   // The result carries the read it answered, so a reload never shows another item.
   const detailKey = `${organizationId}:${itemId}:${String(refreshCount)}`;
@@ -236,6 +258,33 @@ export default function InboxItemPage() {
       controller.abort();
     };
   }, [detailKey, itemId, organizationId]);
+
+  // The documents list BFF with a search term, the same picker the document page uses for a link.
+  useEffect(() => {
+    if (organizationId.length === 0 || attachQuery.trim().length === 0) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const query = new URLSearchParams({
+      page: '1',
+      pageSize: '25',
+      q: attachQuery.trim(),
+    });
+    void getJson(documentsPath(organizationId, query), controller.signal)
+      .then((payload) => documentListResponseSchema.parse(payload))
+      .then((payload) => {
+        setAttachCandidates(payload.documents);
+      })
+      .catch((error: unknown) => {
+        if (!isAbortError(error)) {
+          setAttachCandidates([]);
+        }
+      });
+    return () => {
+      controller.abort();
+    };
+  }, [attachQuery, organizationId]);
 
   const suggested =
     detail === undefined
@@ -321,13 +370,51 @@ export default function InboxItemPage() {
         correctionReasons[correctionFields[key]] = reason;
       }
     }
-    await write('route/document', {
+    await submitRoute({
       ...(Object.keys(correctionReasons).length === 0
         ? {}
         : { correctionReasons }),
       document: parsed.data,
       fileBlobIds: detail.files.map((file) => file.blobId),
     });
+  }
+
+  // A 409 names a conflict the person resolves here; every other answer is a route or a failure.
+  async function submitRoute(
+    body: RouteInboxItemToDocumentRequest,
+  ): Promise<void> {
+    setBusy(true);
+    setWriteFailed(false);
+    setConflict(undefined);
+    const outcome = await routeInboxItemToDocument(
+      organizationId,
+      itemId,
+      body,
+    );
+    setBusy(false);
+    if (outcome.kind === 'routed') {
+      setPendingRoute(undefined);
+      setRefreshCount((count) => count + 1);
+    } else if (outcome.kind === 'conflict') {
+      setPendingRoute(body);
+      setConflict(outcome.conflict);
+    } else {
+      setWriteFailed(true);
+    }
+  }
+
+  async function attachToDocument(documentId: string): Promise<void> {
+    setConflict(undefined);
+    if (await write('attach', { documentId })) {
+      notify({ kind: 'success', title: t('inbox.attached') });
+    }
+  }
+
+  function documentHref(id: string): string {
+    return withOrganization(
+      `/documents/${encodeURIComponent(id)}`,
+      organization.slug,
+    );
   }
 
   // The rule page reads these to prefill its create modal from what the person just decided.
@@ -418,12 +505,7 @@ export default function InboxItemPage() {
               </Link>
             )}
             {item.documentId === null ? null : (
-              <Link
-                href={withOrganization(
-                  `/documents/${encodeURIComponent(item.documentId)}`,
-                  organization.slug,
-                )}
-              >
+              <Link href={documentHref(item.documentId)}>
                 {t('inbox.openDocument')}
               </Link>
             )}
@@ -682,6 +764,37 @@ export default function InboxItemPage() {
                     title={t('inbox.draftInvalid')}
                   />
                 ) : null}
+                {conflict?.code === 'reference_conflict' &&
+                pendingRoute !== undefined ? (
+                  <Stack gap={3}>
+                    <InlineNotification
+                      hideCloseButton
+                      kind="warning"
+                      lowContrast
+                      role="alert"
+                      subtitle={t('inbox.referenceConflictHelp')}
+                      title={t('inbox.referenceConflict')}
+                    />
+                    <div className={styles.actions!}>
+                      <Link href={documentHref(conflict.documentId)}>
+                        {t('inbox.openDocument')}
+                      </Link>
+                      <Button
+                        disabled={busy}
+                        kind="secondary"
+                        onClick={() => {
+                          void submitRoute({
+                            ...pendingRoute,
+                            supersedesDocumentId: conflict.documentId,
+                          });
+                        }}
+                        type="button"
+                      >
+                        {t('inbox.registerNewVersion')}
+                      </Button>
+                    </div>
+                  </Stack>
+                ) : null}
                 <Select
                   id="inbox-draft-entity"
                   labelText={t('inbox.draftEntity')}
@@ -775,6 +888,49 @@ export default function InboxItemPage() {
                 <div className={styles.actions!}>
                   <Button disabled={busy} type="submit">
                     {t('inbox.routeToDocument')}
+                  </Button>
+                </div>
+              </Stack>
+            </Form>
+          ) : null}
+
+          {canManage && open ? (
+            <Form
+              aria-label={t('inbox.attachTitle')}
+              onSubmit={(event) => {
+                event.preventDefault();
+                void attachToDocument(attachTargetId);
+              }}
+            >
+              <Stack gap={5}>
+                <h2>{t('inbox.attachTitle')}</h2>
+                <p>{t('inbox.attachHelp')}</p>
+                <ComboBox
+                  id="inbox-attach-target"
+                  items={attachCandidates}
+                  itemToString={(candidate) =>
+                    candidate === null ? '' : candidate.title
+                  }
+                  onChange={(change) => {
+                    setAttachTargetId(change.selectedItem?.id ?? '');
+                  }}
+                  onInputChange={(value) => {
+                    setAttachQuery(value);
+                  }}
+                  selectedItem={
+                    attachCandidates.find(
+                      (candidate) => candidate.id === attachTargetId,
+                    ) ?? null
+                  }
+                  titleText={t('inbox.attachTarget')}
+                />
+                <div className={styles.actions!}>
+                  <Button
+                    disabled={busy || attachTargetId.length === 0}
+                    kind="secondary"
+                    type="submit"
+                  >
+                    {t('inbox.attach')}
                   </Button>
                 </div>
               </Stack>
@@ -922,6 +1078,73 @@ export default function InboxItemPage() {
           </section>
         </Stack>
       )}
+      {conflict?.code === 'duplicate_probable' && pendingRoute !== undefined ? (
+        <Modal
+          modalHeading={t('inbox.duplicateProbable')}
+          onRequestClose={() => {
+            setConflict(undefined);
+          }}
+          open
+          passiveModal
+        >
+          <Stack gap={5}>
+            <p>{t('inbox.duplicateProbableHelp')}</p>
+            <ul aria-label={t('inbox.duplicateCandidates')}>
+              {conflict.candidates.map((candidate) => (
+                <li className={styles.actions!} key={candidate.documentId}>
+                  <Link href={documentHref(candidate.documentId)}>
+                    {candidate.reference ?? candidate.documentId}
+                  </Link>
+                  <span>
+                    {candidate.documentDate}
+                    {candidate.totalAmount === null
+                      ? ''
+                      : `, ${candidate.totalAmount}`}
+                  </span>
+                  <Button
+                    disabled={busy}
+                    kind="tertiary"
+                    onClick={() => {
+                      void attachToDocument(candidate.documentId);
+                    }}
+                    size="sm"
+                    type="button"
+                  >
+                    {t('inbox.attachToCandidate')}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            <div className={styles.actions!}>
+              <Button
+                disabled={busy}
+                kind="danger--tertiary"
+                onClick={() => {
+                  setConflict(undefined);
+                  void write('discard', { reason: 'duplicate' });
+                }}
+                type="button"
+              >
+                {t('inbox.discardAsDuplicate')}
+              </Button>
+              <Button
+                disabled={busy}
+                kind="secondary"
+                onClick={() => {
+                  // Any listed candidate satisfies the acknowledgement; the first stands for the answer.
+                  void submitRoute({
+                    ...pendingRoute,
+                    acknowledgeDuplicateOf: conflict.candidates[0]!.documentId,
+                  });
+                }}
+                type="button"
+              >
+                {t('inbox.routeAnyway')}
+              </Button>
+            </div>
+          </Stack>
+        </Modal>
+      ) : null}
     </PageContainer>
   );
 }

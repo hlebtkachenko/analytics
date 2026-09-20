@@ -20,6 +20,9 @@ import {
 } from '../documents/contract.ts';
 import {
   assignInboxItemRequestSchema,
+  attachInboxItemRequestSchema,
+  bulkInboxItemsRequestSchema,
+  bulkInboxItemsResponseSchema,
   createInboxChannelRequestSchema,
   createInboxRuleRequestSchema,
   discardInboxItemRequestSchema,
@@ -28,6 +31,7 @@ import {
   inboxItemDetailSchema,
   inboxItemListQuerySchema,
   inboxItemListResponseSchema,
+  inboxRouteConflictSchema,
   inboxRoutingTargetListResponseSchema,
   inboxRoutingTargetSchema,
   inboxRuleListResponseSchema,
@@ -773,6 +777,8 @@ type ApplicationJsonCall = Readonly<{
   errorCode: string;
   // A problem code from this closed list is passed through beside the error code; nothing else of the body is.
   passthroughCodes?: z.ZodEnum<Record<string, string>>;
+  // A 409 body of this closed shape is passed through whole, since the page acts on the ids it names.
+  passthroughConflict?: z.ZodType<Record<string, unknown>>;
   method: 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT';
   operation: string;
   path: string;
@@ -816,6 +822,13 @@ async function callApplicationJson(
     // An upstream fault is not a refusal, so it is recorded rather than passed through silently.
     if (response.status >= 500) {
       return upstreamFailure(call.operation, 'unreachable');
+    }
+
+    if (call.passthroughConflict !== undefined && response.status === 409) {
+      const conflict = await problemBody(response, call.passthroughConflict);
+      if (conflict !== undefined) {
+        return jsonResponse({ error: call.errorCode, ...conflict }, 409);
+      }
     }
 
     const code =
@@ -872,6 +885,21 @@ async function problemCode(
       ? (body as { code?: unknown }).code
       : undefined,
   );
+  return parsed.success ? parsed.data : undefined;
+}
+
+// The whole problem body, validated against the closed shape; undefined when it is anything else.
+async function problemBody<T>(
+  response: Response,
+  schema: z.ZodType<T>,
+): Promise<T | undefined> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return undefined;
+  }
+  const parsed = schema.safeParse(body);
   return parsed.success ? parsed.data : undefined;
 }
 
@@ -1644,6 +1672,15 @@ function inboxItemListQuery(
   if (query.detectedType !== undefined) {
     outbound.set('detectedType', query.detectedType);
   }
+  if (query.issue !== undefined) {
+    outbound.set('issue', query.issue);
+  }
+  if (query.assigneeId !== undefined) {
+    outbound.set('assigneeId', query.assigneeId);
+  }
+  if (query.confidence !== undefined) {
+    outbound.set('confidence', query.confidence);
+  }
   outbound.set('page', String(query.page));
   outbound.set('pageSize', String(query.pageSize));
 
@@ -1784,6 +1821,7 @@ export async function getInboxItem(
 type InboxItemWrite = Readonly<{
   action:
     | 'assign'
+    | 'attach'
     | 'discard'
     | 'hints'
     | 'process'
@@ -1792,6 +1830,7 @@ type InboxItemWrite = Readonly<{
     | 'route/undo'
     | 'snooze';
   bodySchema: z.ZodType | null;
+  conflictSchema?: z.ZodType<Record<string, unknown>>;
   method: 'PATCH' | 'POST';
   operation: string;
 }>;
@@ -1835,6 +1874,9 @@ async function writeInboxItem(
       errorCode: 'inbox_item_rejected',
       method: write.method,
       operation: write.operation,
+      ...(write.conflictSchema === undefined
+        ? {}
+        : { passthroughConflict: write.conflictSchema }),
       path: `inbox/items/${encodeURIComponent(selected.value)}/${write.action}`,
       schema: inboxItemDetailSchema,
       successStatus: 200,
@@ -1902,8 +1944,65 @@ export async function postInboxItemRouteDocument(
     {
       action: 'route/document',
       bodySchema: routeInboxItemToDocumentRequestSchema,
+      conflictSchema: inboxRouteConflictSchema,
       method: 'POST',
       operation: 'postInboxItemRouteDocument',
+    },
+    fetchImplementation,
+  );
+}
+
+export async function postInboxItemAttach(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  itemId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  return await writeInboxItem(
+    auth,
+    request,
+    organizationId,
+    itemId,
+    {
+      action: 'attach',
+      bodySchema: attachInboxItemRequestSchema,
+      method: 'POST',
+      operation: 'postInboxItemAttach',
+    },
+    fetchImplementation,
+  );
+}
+
+// One request per page of ids; the answer names every id, so a refusal never hides another.
+export async function postInboxItemsBulk(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const parsed = await readJsonBody(request, bulkInboxItemsRequestSchema);
+
+  if ('failure' in parsed) {
+    return parsed.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      body: parsed.data,
+      errorCode: 'inbox_bulk_rejected',
+      method: 'POST',
+      operation: 'postInboxItemsBulk',
+      path: 'inbox/items/bulk',
+      schema: bulkInboxItemsResponseSchema,
+      successStatus: 200,
     },
     fetchImplementation,
   );

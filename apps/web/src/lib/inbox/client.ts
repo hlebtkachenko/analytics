@@ -1,5 +1,8 @@
 import { organizationPath } from '../datasets/client';
 import {
+  bulkInboxItemsResponseSchema,
+  inboxItemDetailSchema,
+  inboxRouteConflictSchema,
   inboxRoutingTargetSchema,
   inboxRuleListResponseSchema,
   inboxRuleRefusalCodeSchema,
@@ -8,13 +11,17 @@ import {
   inboxUploadResponseSchema,
 } from './contract.ts';
 import type {
+  BulkInboxItemsRequest,
+  BulkInboxItemsResponse,
   CreateInboxRuleRequest,
+  InboxRouteConflict,
   InboxRoutingTarget,
   InboxRule,
   InboxRuleRefusalCode,
   InboxSettings,
   PutInboxRoutingTargetRequest,
   PutInboxRuleOrderRequest,
+  RouteInboxItemToDocumentRequest,
   UpdateInboxRuleRequest,
   UpdateInboxSettingsRequest,
 } from './contract.ts';
@@ -40,8 +47,13 @@ export function inboxItemPath(organizationId: string, itemId: string): string {
   return `${inboxItemsPath(organizationId)}/${encodeURIComponent(itemId)}`;
 }
 
+export function inboxItemsBulkPath(organizationId: string): string {
+  return `${inboxItemsPath(organizationId)}/bulk`;
+}
+
 export type InboxItemAction =
   | 'assign'
+  | 'attach'
   | 'discard'
   | 'hints'
   | 'process'
@@ -56,6 +68,71 @@ export function inboxItemActionPath(
   action: InboxItemAction,
 ): string {
   return `${inboxItemPath(organizationId, itemId)}/${action}`;
+}
+
+export type RouteOutcome =
+  | Readonly<{ kind: 'routed' }>
+  | Readonly<{ conflict: InboxRouteConflict; kind: 'conflict' }>
+  | Readonly<{ kind: 'failed' }>;
+
+// A route may answer 409 with a named conflict the page must resolve, so it is not folded into a failure.
+export async function routeInboxItemToDocument(
+  organizationId: string,
+  itemId: string,
+  body: RouteInboxItemToDocumentRequest,
+): Promise<RouteOutcome> {
+  let response: Response;
+  try {
+    response = await fetch(
+      inboxItemActionPath(organizationId, itemId, 'route/document'),
+      {
+        body: JSON.stringify(body),
+        cache: 'no-store',
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      },
+    );
+  } catch {
+    return { kind: 'failed' };
+  }
+  if (response.status === 409) {
+    try {
+      const conflict = inboxRouteConflictSchema.safeParse(
+        await response.json(),
+      );
+      return conflict.success
+        ? { conflict: conflict.data, kind: 'conflict' }
+        : { kind: 'failed' };
+    } catch {
+      return { kind: 'failed' };
+    }
+  }
+  if (!response.ok) {
+    return { kind: 'failed' };
+  }
+  try {
+    inboxItemDetailSchema.parse(await response.json());
+    return { kind: 'routed' };
+  } catch {
+    return { kind: 'failed' };
+  }
+}
+
+// The answer is per id with HTTP 200 whatever the mix, so the page counts it rather than trusting a status.
+export async function bulkInboxItems(
+  organizationId: string,
+  body: BulkInboxItemsRequest,
+): Promise<BulkInboxItemsResponse> {
+  const response = await fetch(inboxItemsBulkPath(organizationId), {
+    body: JSON.stringify(body),
+    cache: 'no-store',
+    headers: { 'content-type': 'application/json' },
+    method: 'POST',
+  });
+  if (!response.ok) {
+    throw new Error('Request failed.');
+  }
+  return bulkInboxItemsResponseSchema.parse(await response.json());
 }
 
 export function inboxChannelsPath(organizationId: string): string {
