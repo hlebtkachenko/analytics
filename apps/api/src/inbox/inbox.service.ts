@@ -377,7 +377,7 @@ export class InboxService {
         throw new BadRequestException();
       }
 
-      return await this.receive({
+      const result = await this.receive({
         ...input,
         channelId: null,
         channelKind: 'upload',
@@ -388,6 +388,13 @@ export class InboxService {
         size: file.data.size,
         temporaryPath: file.data.temporaryPath,
       });
+
+      // The strict response contract refuses the replay and route-job fields the receive result carries.
+      return {
+        duplicateOfItemId: result.duplicateOfItemId,
+        files: result.files,
+        item: result.item,
+      };
     } catch (error) {
       // Covers a refusal before receive took over; after it the file is already gone and this is a no-op.
       if (received?.path !== undefined) {

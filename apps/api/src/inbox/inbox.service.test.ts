@@ -29,6 +29,7 @@ import {
   createBlobDirectories,
   FilesystemBlobStore,
 } from '../blobs/blob-store.js';
+import { inboxUploadResponseSchema } from './contract.js';
 import type {
   InboxItem,
   InboxItemDetail,
@@ -368,6 +369,8 @@ describe('InboxService', () => {
     });
 
     expect(response.item).toEqual(item);
+    // The controller parses the response with the strict contract, so an extra key would be a 500.
+    expect(inboxUploadResponseSchema.parse(response)).toEqual(response);
     const input = received[0];
     expect(input).toMatchObject({
       byteSize: bytes.length,
