@@ -41,6 +41,8 @@ import type {
 import { InboxService } from '../inbox/inbox.service.js';
 import {
   adoptRule,
+  approveItem,
+  attachItem,
   assignItem,
   createChannel,
   createRule,
@@ -64,6 +66,7 @@ import {
   readProviderInput,
   receiveIntake,
   recordExtraction,
+  reopenEmailItem,
   restoreItem,
   revokeCredential,
   routeToDocument,
@@ -401,6 +404,8 @@ beforeAll(async () => {
   store = new FilesystemBlobStore(directory);
   const repository: InboxRepository = {
     adoptRule: (input) => adoptRule(apiPool, input),
+    approveItem: (input) => approveItem(apiPool, input),
+    attachItem: (input) => attachItem(apiPool, input),
     assignItem: (input) => assignItem(apiPool, input),
     createRule: (input) => createRule(apiPool, input),
     deleteRule: (input) => deleteRule(apiPool, input),
@@ -424,6 +429,7 @@ beforeAll(async () => {
     readProviderInput: (input) => readProviderInput(apiPool, input),
     receiveIntake: (input) => receiveIntake(apiPool, input),
     recordExtraction: (input) => recordExtraction(apiPool, input),
+    reopenEmailItem: (input) => reopenEmailItem(apiPool, input),
     restoreItem: (input) => restoreItem(apiPool, input),
     revokeCredential: (input) => revokeCredential(apiPool, input),
     routeToDocument: (input) => routeToDocument(apiPool, input),

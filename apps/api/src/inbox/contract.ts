@@ -70,10 +70,39 @@ export const DETECTED_TYPES = [
 // Issues a provider may raise in Phase 0: the taxonomy is stored whole, only these are produced.
 export const INBOX_ISSUE_CODES = [
   'duplicate_exact',
+  'duplicate_probable',
   'entity_unresolved',
   'missing_required_field',
   'reference_conflict',
   ...inboxUnprocessableReasons,
+] as const;
+
+// The list's confidence bands: closed names, so the OpenAPI enum never carries a number pair.
+export const INBOX_CONFIDENCE_BANDS = [
+  'low',
+  'medium',
+  'high',
+  'unknown',
+] as const;
+export const INBOX_CONFIDENCE_MEDIUM_FROM = 0.5;
+export const INBOX_CONFIDENCE_HIGH_FROM = 0.9;
+// The literal that filters the list to unassigned items.
+export const INBOX_ASSIGNEE_NONE = 'none';
+export const INBOX_BULK_ACTIONS = [
+  'assign',
+  'snooze',
+  'discard',
+  'approve',
+] as const;
+export const MAX_INBOX_BULK_ITEMS = 100;
+// Why one id of a bulk request was refused; the single-item routes answer the same cases by status.
+export const INBOX_BULK_REFUSAL_CODES = [
+  'not_found',
+  'not_open',
+  'invalid',
+  'reference_conflict',
+  'duplicate_probable',
+  'missing_required_field',
 ] as const;
 
 export const PROVIDER_STEPS = ['sniff', 'hint', 'rule', 'manual'] as const;
@@ -183,6 +212,8 @@ export const inboxItemSchema = inboxHintsSchema
     detectedType: tokenSchema.nullable(),
     documentId: documentIdentifierSchema.nullable(),
     duplicateOfItemId: inboxItemIdentifierSchema.nullable(),
+    // A person wrote one of HUMAN_TOUCH_EVENT_KINDS on the item; the automation yields to such an item.
+    humanTouched: z.boolean(),
     id: inboxItemIdentifierSchema,
     legalEntityId: legalEntityIdentifierSchema.nullable(),
     // The credential display prefix that pushed the item; never what was pushed.
@@ -472,7 +503,13 @@ export type InboxItemDetail = z.infer<typeof inboxItemDetailSchema>;
 
 export const inboxItemListQuerySchema = z
   .object({
+    assigneeId: z
+      .union([z.literal(INBOX_ASSIGNEE_NONE), subjectIdentifierSchema])
+      .optional(),
+    confidence: z.enum(INBOX_CONFIDENCE_BANDS).optional(),
     detectedType: tokenSchema.optional(),
+    // Matches the issues of the newest extraction only.
+    issue: inboxIssueCodeSchema.optional(),
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce
       .number()
@@ -540,10 +577,14 @@ export type CorrectionReasons = z.infer<typeof correctionReasonsSchema>;
 
 export const routeInboxItemToDocumentRequestSchema = z
   .object({
+    // The candidate the person saw in the duplicate_probable refusal and chose to route past.
+    acknowledgeDuplicateOf: documentIdentifierSchema.optional(),
     correctionReasons: correctionReasonsSchema.optional(),
     document: createDocumentRequestSchema,
     // The item's blobs in the order the document should keep them; every item file must be named once.
     fileBlobIds: z.array(blobIdentifierSchema).min(1).max(MAX_INBOX_FILES),
+    // The current document of the reference_conflict refusal; the new document becomes its next version.
+    supersedesDocumentId: documentIdentifierSchema.optional(),
   })
   .strict()
   .refine(
@@ -556,6 +597,84 @@ export const routeInboxItemToDocumentRequestSchema = z
 
 export type RouteInboxItemToDocumentRequest = z.infer<
   typeof routeInboxItemToDocumentRequestSchema
+>;
+
+// A probable duplicate the fingerprint found: what the person needs to tell a re-issue from a repeat.
+export const duplicateCandidateSchema = z
+  .object({
+    documentDate: z.iso.date(),
+    id: documentIdentifierSchema,
+    reference: z.string().nullable(),
+    totalAmount: z.string().nullable(),
+  })
+  .strict();
+
+export type DuplicateCandidate = z.infer<typeof duplicateCandidateSchema>;
+
+export const attachInboxItemRequestSchema = z
+  .object({ documentId: documentIdentifierSchema })
+  .strict();
+
+export type AttachInboxItemRequest = z.infer<
+  typeof attachInboxItemRequestSchema
+>;
+
+// One action over up to a page of ids; the field of the action is required and every other one refused.
+export const bulkInboxItemsRequestSchema = z
+  .object({
+    action: z.enum(INBOX_BULK_ACTIONS),
+    assigneeId: subjectIdentifierSchema.nullable().optional(),
+    itemIds: z
+      .array(inboxItemIdentifierSchema)
+      .min(1)
+      .max(MAX_INBOX_BULK_ITEMS)
+      .refine((ids) => new Set(ids).size === ids.length, {
+        message: 'itemIds must not repeat an item.',
+      }),
+    reason: inboxDiscardReasonSchema.optional(),
+    snoozedUntil: z.iso.datetime().nullable().optional(),
+  })
+  .strict()
+  .superRefine((body, context) => {
+    const expected = {
+      approve: null,
+      assign: 'assigneeId',
+      discard: 'reason',
+      snooze: 'snoozedUntil',
+    }[body.action];
+
+    for (const field of ['assigneeId', 'reason', 'snoozedUntil'] as const) {
+      if ((body[field] !== undefined) !== (field === expected)) {
+        context.addIssue({
+          code: 'custom',
+          message:
+            field === expected
+              ? `${field} is required for ${body.action}.`
+              : `${field} is not accepted for ${body.action}.`,
+          path: [field],
+        });
+      }
+    }
+  });
+
+export type BulkInboxItemsRequest = z.infer<typeof bulkInboxItemsRequestSchema>;
+
+export const bulkInboxItemsResponseSchema = z
+  .object({
+    results: z.array(
+      z
+        .object({
+          code: z.enum(INBOX_BULK_REFUSAL_CODES).optional(),
+          itemId: inboxItemIdentifierSchema,
+          status: z.enum(['ok', 'refused']),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
+export type BulkInboxItemsResponse = z.infer<
+  typeof bulkInboxItemsResponseSchema
 >;
 
 export const discardInboxItemRequestSchema = z
@@ -1002,6 +1121,7 @@ export const inboxItemOpenApiSchema = {
     detectedType: nullable(tokenProperty),
     documentId: nullable(uuidProperty),
     duplicateOfItemId: nullable(uuidProperty),
+    humanTouched: { type: 'boolean' },
     id: uuidProperty,
     legalEntityId: nullable(uuidProperty),
     origin: { maxLength: 255, minLength: 1, nullable: true, type: 'string' },
@@ -1031,6 +1151,7 @@ export const inboxItemOpenApiSchema = {
     'hintLinkDocumentId',
     'hintPartnerId',
     'hintText',
+    'humanTouched',
     'id',
     'legalEntityId',
     'origin',
@@ -1337,6 +1458,7 @@ export const updateInboxHintsBodyOpenApiSchema = {
 export const routeInboxItemToDocumentBodyOpenApiSchema = {
   additionalProperties: false,
   properties: {
+    acknowledgeDuplicateOf: uuidProperty,
     correctionReasons: {
       additionalProperties: false,
       properties: Object.fromEntries(
@@ -1358,8 +1480,93 @@ export const routeInboxItemToDocumentBodyOpenApiSchema = {
       minItems: 1,
       type: 'array',
     },
+    supersedesDocumentId: uuidProperty,
   },
   required: ['document', 'fileBlobIds'],
+  type: 'object',
+};
+
+// The two refusals the route can answer with 409 beside the generic conflict; the browser reads the code.
+export const routeInboxItemConflictOpenApiSchema = {
+  oneOf: [
+    {
+      additionalProperties: true,
+      properties: {
+        code: { enum: ['reference_conflict'], type: 'string' },
+        documentId: uuidProperty,
+      },
+      required: ['code', 'documentId'],
+      type: 'object',
+    },
+    {
+      additionalProperties: true,
+      properties: {
+        candidates: {
+          items: {
+            additionalProperties: false,
+            properties: {
+              documentDate: { format: 'date', type: 'string' },
+              id: uuidProperty,
+              reference: { nullable: true, type: 'string' },
+              totalAmount: { nullable: true, type: 'string' },
+            },
+            required: ['documentDate', 'id', 'reference', 'totalAmount'],
+            type: 'object',
+          },
+          type: 'array',
+        },
+        code: { enum: ['duplicate_probable'], type: 'string' },
+      },
+      required: ['candidates', 'code'],
+      type: 'object',
+    },
+  ],
+};
+
+export const attachInboxItemBodyOpenApiSchema = {
+  additionalProperties: false,
+  properties: { documentId: uuidProperty },
+  required: ['documentId'],
+  type: 'object',
+};
+
+export const bulkInboxItemsBodyOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    action: { enum: [...INBOX_BULK_ACTIONS], type: 'string' },
+    assigneeId: { nullable: true, type: 'string' },
+    itemIds: {
+      items: uuidProperty,
+      maxItems: MAX_INBOX_BULK_ITEMS,
+      minItems: 1,
+      type: 'array',
+      uniqueItems: true,
+    },
+    reason: { enum: [...INBOX_DISCARD_REASONS], type: 'string' },
+    snoozedUntil: nullable(dateTimeProperty),
+  },
+  required: ['action', 'itemIds'],
+  type: 'object',
+};
+
+export const bulkInboxItemsResponseOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    results: {
+      items: {
+        additionalProperties: false,
+        properties: {
+          code: { enum: [...INBOX_BULK_REFUSAL_CODES], type: 'string' },
+          itemId: uuidProperty,
+          status: { enum: ['ok', 'refused'], type: 'string' },
+        },
+        required: ['itemId', 'status'],
+        type: 'object',
+      },
+      type: 'array',
+    },
+  },
+  required: ['results'],
   type: 'object',
 };
 

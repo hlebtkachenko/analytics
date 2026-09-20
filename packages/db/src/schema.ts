@@ -285,6 +285,7 @@ export const inboxEventKinds = [
   'assigned',
   'hint_added',
   'failed',
+  'attached',
 ] as const;
 export type InboxEventKind = (typeof inboxEventKinds)[number];
 

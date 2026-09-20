@@ -63,6 +63,7 @@ const UNKNOWN_BLOB_ID = 'b1924385-60ce-4da1-b298-d560e4c1b3a6';
 const PNG_BLOB_ID = 'c2a35496-71df-4eb2-8309-e671f5d2c4b7';
 const QUARANTINED_BLOB_ID = 'd3b46507-82e0-4fc3-9410-f782a6e3d5c8';
 const SHA256 = 'c'.repeat(64);
+const DOCUMENT_ID = 'e4c57618-93f1-4ad4-a521-093c7b4e6d09';
 
 const item: InboxItem = {
   assigneeId: null,
@@ -82,6 +83,7 @@ const item: InboxItem = {
   hintLinkDocumentId: null,
   hintPartnerId: null,
   hintText: null,
+  humanTouched: false,
   id: ITEM_ID,
   legalEntityId: null,
   origin: null,
@@ -161,6 +163,9 @@ describe('application inbox routes', () => {
       if (header === 'Bearer caller') {
         return { issuedAt: 1_800_000_000, subject: 'user_1' };
       }
+      if (header === 'Bearer channel') {
+        return { issuedAt: 1_800_000_000, subject: `channel_${ITEM_ID}` };
+      }
       throw new Error('invalid');
     }),
     verifyToken: vi.fn(),
@@ -192,6 +197,14 @@ describe('application inbox routes', () => {
 
   const service = {
     assignItem: record('assignItem', byItem),
+    attachItem: record('attachItem', byItem),
+    bulk: record('bulk', (input: { body: { itemIds: string[] } }) => ({
+      results: input.body.itemIds.map((itemId) =>
+        itemId === ITEM_ID
+          ? { itemId, status: 'ok' }
+          : { code: 'not_found', itemId, status: 'refused' },
+      ),
+    })),
     discardItem: record('discardItem', byItem),
     listItems: record('listItems', () => ({
       items: [listEntry],
@@ -234,7 +247,34 @@ describe('application inbox routes', () => {
     process: record('process', byItem),
     readItem: record('readItem', byItem),
     restoreItem: record('restoreItem', byItem),
-    routeToDocument: record('routeToDocument', byItem),
+    routeToDocument: record(
+      'routeToDocument',
+      (input: {
+        body: { document: { reference?: string } };
+        itemId: string;
+      }) => {
+        if (input.body.document.reference === 'taken') {
+          throw new ConflictException({
+            code: 'reference_conflict',
+            documentId: DOCUMENT_ID,
+          });
+        }
+        if (input.body.document.reference === 'seen') {
+          throw new ConflictException({
+            candidates: [
+              {
+                documentDate: '2026-09-01',
+                id: DOCUMENT_ID,
+                reference: 'seen',
+                totalAmount: '10.00',
+              },
+            ],
+            code: 'duplicate_probable',
+          });
+        }
+        return byItem(input);
+      },
+    ),
     snoozeItem: record('snoozeItem', byItem),
     undoRoute: record('undoRoute', byItem),
     updateHints: record('updateHints', byItem),
@@ -334,7 +374,10 @@ describe('application inbox routes', () => {
   it('lists items with the scope and parses the filters', async () => {
     const response = await authorized('get', '/inbox/items')
       .query({
+        assigneeId: 'none',
+        confidence: 'low',
         detectedType: 'pdf',
+        issue: 'duplicate_probable',
         page: '2',
         pageSize: '10',
         status: 'needs_review,routed',
@@ -350,12 +393,19 @@ describe('application inbox routes', () => {
     expect(calls.listItems?.[0]).toMatchObject({
       legalEntityIds: null,
       query: {
+        assigneeId: 'none',
+        confidence: 'low',
         detectedType: 'pdf',
+        issue: 'duplicate_probable',
         page: 2,
         pageSize: 10,
         status: ['needs_review', 'routed'],
       },
     });
+    await authorized('get', '/inbox/items')
+      .query({ confidence: '0.5' })
+      .expect(400);
+    await authorized('get', '/inbox/items').query({ issue: 'x' }).expect(400);
 
     entityScope = { legalEntityIds: [ENTITY_ID], mode: 'restricted' };
     await request(application.getHttpServer())
@@ -441,9 +491,58 @@ describe('application inbox routes', () => {
       itemId: ITEM_ID,
     });
 
+    await authorized('post', `/inbox/items/${ITEM_ID}/route/document`)
+      .send({
+        acknowledgeDuplicateOf: DOCUMENT_ID,
+        document: documentBody,
+        fileBlobIds: [BLOB_ID],
+        supersedesDocumentId: DOCUMENT_ID,
+      })
+      .expect(200);
+    expect(calls.routeToDocument?.[1]).toMatchObject({
+      body: {
+        acknowledgeDuplicateOf: DOCUMENT_ID,
+        supersedesDocumentId: DOCUMENT_ID,
+      },
+    });
+
+    // The two refusals carry their code and detail in the problem body, so the browser can offer a choice.
+    const conflict = await authorized(
+      'post',
+      `/inbox/items/${ITEM_ID}/route/document`,
+    )
+      .send({
+        document: { ...documentBody, reference: 'taken' },
+        fileBlobIds: [BLOB_ID],
+      })
+      .expect(409);
+    expect(conflict.body).toMatchObject({
+      code: 'reference_conflict',
+      documentId: DOCUMENT_ID,
+      status: 409,
+    });
+    const duplicate = await authorized(
+      'post',
+      `/inbox/items/${ITEM_ID}/route/document`,
+    )
+      .send({
+        document: { ...documentBody, reference: 'seen' },
+        fileBlobIds: [BLOB_ID],
+      })
+      .expect(409);
+    expect(duplicate.body).toMatchObject({
+      candidates: [{ id: DOCUMENT_ID, reference: 'seen' }],
+      code: 'duplicate_probable',
+    });
+
     for (const body of [
       { document: documentBody },
       { document: documentBody, fileBlobIds: [] },
+      {
+        document: documentBody,
+        fileBlobIds: [BLOB_ID],
+        supersedesDocumentId: 'not-a-uuid',
+      },
       { document: documentBody, fileBlobIds: [BLOB_ID, BLOB_ID] },
       {
         document: { ...documentBody, kind: 'issued_invoice' },
@@ -484,6 +583,90 @@ describe('application inbox routes', () => {
     });
   });
 
+  it('attaches to a document and runs a bulk action with per-id results', async () => {
+    await authorized('post', `/inbox/items/${ITEM_ID}/attach`)
+      .send({ documentId: DOCUMENT_ID })
+      .expect(200);
+    expect(calls.attachItem?.[0]).toMatchObject({
+      documentId: DOCUMENT_ID,
+      itemId: ITEM_ID,
+    });
+    await authorized('post', `/inbox/items/${ITEM_ID}/attach`)
+      .send({})
+      .expect(400);
+    await authorized('post', `/inbox/items/${UNKNOWN_ITEM_ID}/attach`)
+      .send({ documentId: DOCUMENT_ID })
+      .expect(404);
+
+    const bulk = await authorized('post', '/inbox/items/bulk')
+      .send({
+        action: 'assign',
+        assigneeId: 'user_2',
+        itemIds: [ITEM_ID, UNKNOWN_ITEM_ID],
+      })
+      .expect(200);
+    expect(bulk.body).toEqual({
+      results: [
+        { itemId: ITEM_ID, status: 'ok' },
+        { code: 'not_found', itemId: UNKNOWN_ITEM_ID, status: 'refused' },
+      ],
+    });
+    await authorized('post', '/inbox/items/bulk')
+      .send({ action: 'approve', itemIds: [ITEM_ID] })
+      .expect(200);
+
+    // The field of the action is required and every other one refused; the id list is bounded and distinct.
+    for (const body of [
+      { action: 'assign', itemIds: [ITEM_ID] },
+      { action: 'approve', assigneeId: null, itemIds: [ITEM_ID] },
+      { action: 'snooze', itemIds: [ITEM_ID], reason: 'spam' },
+      { action: 'discard', itemIds: [ITEM_ID], snoozedUntil: null },
+      { action: 'discard', itemIds: [ITEM_ID, ITEM_ID], reason: 'spam' },
+      { action: 'discard', itemIds: [], reason: 'spam' },
+      {
+        action: 'discard',
+        itemIds: Array.from({ length: 101 }, (_, index) =>
+          UNKNOWN_ITEM_ID.replace(/.{3}$/, String(index).padStart(3, '0')),
+        ),
+        reason: 'spam',
+      },
+    ]) {
+      await authorized('post', '/inbox/items/bulk').send(body).expect(400);
+    }
+  });
+
+  it('refuses a channel subject on every write route with 403', async () => {
+    const channel = (method: 'patch' | 'post', path: string) =>
+      request(application.getHttpServer())
+        [method](`/v1/organizations/organization_1${path}`)
+        .set('Authorization', 'Bearer channel');
+
+    await channel('patch', `/inbox/items/${ITEM_ID}/hints`)
+      .send({ hintText: 'x' })
+      .expect(403);
+    await channel('post', `/inbox/items/${ITEM_ID}/process`).expect(403);
+    await channel('post', `/inbox/items/${ITEM_ID}/route/document`)
+      .send({ document: documentBody, fileBlobIds: [BLOB_ID] })
+      .expect(403);
+    await channel('post', `/inbox/items/${ITEM_ID}/route/undo`).expect(403);
+    await channel('post', `/inbox/items/${ITEM_ID}/attach`)
+      .send({ documentId: DOCUMENT_ID })
+      .expect(403);
+    await channel('post', '/inbox/items/bulk')
+      .send({ action: 'approve', itemIds: [ITEM_ID] })
+      .expect(403);
+    await channel('post', `/inbox/items/${ITEM_ID}/discard`)
+      .send({ reason: 'spam' })
+      .expect(403);
+    await channel('post', `/inbox/items/${ITEM_ID}/assign`)
+      .send({ assigneeId: null })
+      .expect(403);
+    await channel('post', `/inbox/items/${ITEM_ID}/snooze`)
+      .send({ snoozedUntil: null })
+      .expect(403);
+    expect(Object.keys(calls)).toEqual([]);
+  });
+
   it('refuses every write to a member and every route to a stranger', async () => {
     const member = (method: 'patch' | 'post', path: string) =>
       request(application.getHttpServer())
@@ -498,6 +681,12 @@ describe('application inbox routes', () => {
       .send({ document: documentBody, fileBlobIds: [BLOB_ID] })
       .expect(403);
     await member('post', `/inbox/items/${ITEM_ID}/route/undo`).expect(403);
+    await member('post', `/inbox/items/${ITEM_ID}/attach`)
+      .send({ documentId: DOCUMENT_ID })
+      .expect(403);
+    await member('post', '/inbox/items/bulk')
+      .send({ action: 'approve', itemIds: [ITEM_ID] })
+      .expect(403);
     await member('post', `/inbox/items/${ITEM_ID}/discard`)
       .send({ reason: 'spam' })
       .expect(403);
@@ -607,8 +796,10 @@ describe('application inbox routes', () => {
       '/v1/organizations/{organizationId}/inbox/blobs/{blobId}/download',
       '/v1/organizations/{organizationId}/inbox/blobs/{blobId}/inline',
       '/v1/organizations/{organizationId}/inbox/items',
+      '/v1/organizations/{organizationId}/inbox/items/bulk',
       '/v1/organizations/{organizationId}/inbox/items/{itemId}',
       '/v1/organizations/{organizationId}/inbox/items/{itemId}/assign',
+      '/v1/organizations/{organizationId}/inbox/items/{itemId}/attach',
       '/v1/organizations/{organizationId}/inbox/items/{itemId}/discard',
       '/v1/organizations/{organizationId}/inbox/items/{itemId}/hints',
       '/v1/organizations/{organizationId}/inbox/items/{itemId}/process',

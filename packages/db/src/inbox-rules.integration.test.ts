@@ -345,12 +345,12 @@ describe('inbox rules', () => {
     const compatibility = await checkMigrationCompatibility(apiPool);
 
     expect(result.applied).toEqual([]);
-    expect(result.currentVersion).toBe('20260917.0005');
-    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260917.0005');
+    expect(result.currentVersion).toBe('20260917.0006');
+    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260917.0006');
     expect(compatibility).toEqual({
       compatible: true,
-      expectedVersion: '20260917.0005',
-      version: '20260917.0005',
+      expectedVersion: '20260917.0006',
+      version: '20260917.0006',
     });
 
     const functions = await rootPool.query<{
@@ -500,6 +500,32 @@ describe('inbox rules', () => {
       ),
     ).resolves.toMatchObject({
       rows: [{ condeferrable: true, condeferred: true }],
+    });
+  });
+
+  it('accepts the attached event kind and still refuses an unknown one', async () => {
+    const inserted = await asTenant(apiPool, orgOneOwner, (transaction) =>
+      transaction.query<{ id: string }>(
+        `insert into app.inbox_event (organization_id, item_id, kind, actor_user_id)
+         values ('org-1', $1, 'attached', 'user-1') returning id`,
+        [reviewItemId],
+      ),
+    );
+    expect(inserted.rowCount).toBe(1);
+    await rootPool.query('delete from app.inbox_event where id = $1', [
+      inserted.rows[0]?.id,
+    ]);
+    await expect(
+      asTenant(apiPool, orgOneOwner, (transaction) =>
+        transaction.query(
+          `insert into app.inbox_event (organization_id, item_id, kind, actor_user_id)
+           values ('org-1', $1, 'merged', 'user-1')`,
+          [reviewItemId],
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'inbox_event_kind_check',
     });
   });
 

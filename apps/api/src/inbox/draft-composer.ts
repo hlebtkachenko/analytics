@@ -141,3 +141,15 @@ export function composeDocumentDraft(
 
   return { draft, missing, sources };
 }
+
+// The composed draft as the create body the documents contract parses; a null partner is left out, not sent.
+export function toCreateDocumentBody(draft: ComposedDocumentDraft): unknown {
+  return {
+    currencyCode: draft.currencyCode,
+    documentDate: draft.documentDate,
+    kind: draft.kind,
+    legalEntityId: draft.legalEntityId,
+    ...(draft.partnerId === null ? {} : { partnerId: draft.partnerId }),
+    title: draft.title,
+  };
+}

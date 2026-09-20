@@ -8,6 +8,7 @@ import { createDocumentRequestSchema } from '../documents/contract.js';
 import type { CreateDocumentRequest } from '../documents/contract.js';
 import {
   createDocumentInTransaction,
+  documentTotalOf,
   isDuplicateDocumentReference,
 } from '../documents/document-repository.js';
 import {
@@ -15,8 +16,10 @@ import {
   ROUTE_INBOX_ITEM_QUEUE,
 } from '../inbox/contract.js';
 import type { InboxItem, ProviderIssue } from '../inbox/contract.js';
+import { toCreateDocumentBody } from '../inbox/draft-composer.js';
 import type { ComposedDocument } from '../inbox/draft-composer.js';
 import {
+  findDuplicateCandidates,
   finishRouteInTransaction,
   insertExtraction,
   loadItem,
@@ -174,17 +177,6 @@ function refusal(item: InboxItem): RouteRefusal | null {
   return null;
 }
 
-function toCreateBody(draft: ComposedDocument['draft']): unknown {
-  return {
-    currencyCode: draft.currencyCode,
-    documentDate: draft.documentDate,
-    kind: draft.kind,
-    legalEntityId: draft.legalEntityId,
-    ...(draft.partnerId === null ? {} : { partnerId: draft.partnerId }),
-    title: draft.title,
-  };
-}
-
 // Every attempt leaves its row: the composed draft, the reasons of the newest earlier extraction, and any issue.
 async function recordAttempt(
   transaction: PoolClient,
@@ -261,7 +253,7 @@ async function routeAsAuthor(
   }
 
   const parsed = createDocumentRequestSchema.safeParse(
-    toCreateBody(composed.draft),
+    toCreateDocumentBody(composed.draft),
   );
 
   if (!parsed.success) {
@@ -274,6 +266,30 @@ async function routeAsAuthor(
       },
     ]);
     return { field, issue: 'missing_required_field', kind: 'failed' };
+  }
+
+  // A probable duplicate is a person's call, the same as a taken reference: the item stays in review.
+  const candidates =
+    parsed.data.partnerId === undefined
+      ? []
+      : await findDuplicateCandidates(transaction, {
+          documentDate: parsed.data.documentDate,
+          excludeDocumentId: null,
+          legalEntityIds: scope.mode === 'all' ? null : scope.legalEntityIds,
+          organizationId: tenant.organizationId,
+          partnerId: parsed.data.partnerId,
+          reference: parsed.data.reference ?? null,
+          totalAmount: documentTotalOf(parsed.data),
+        });
+
+  if (candidates.length > 0) {
+    await recordAttempt(transaction, tenant, item, composed, [
+      {
+        code: 'duplicate_probable',
+        message: `Probable duplicate of ${candidates.map((candidate) => candidate.id).join(', ')}.`,
+      },
+    ]);
+    return { field: null, issue: 'duplicate_probable', kind: 'failed' };
   }
 
   const created = await createDocumentOrConflict(
