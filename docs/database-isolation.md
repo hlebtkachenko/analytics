@@ -457,6 +457,20 @@ and `bap_reporting` and `bap_backup` get SELECT on both.
 `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
 `20260917.0005`.
 
+Migration `20260917.0006` adds the actions layer of 1b-actions.
+`inbox_event_kind_check` (`20260916.0001_inbox.sql:254-257`) gains `attached`,
+the event kind an item's route to an existing document writes instead of
+`routed`. No new table, no new column, and no policy change: the attach route
+writes only `app.document_file`, gated by `document_file_insert`
+(`20260916.0001_inbox.sql:477-482`, `app.role_can_write()`), and
+`app.inbox_item`, where `inbox_item_channel_update`
+(`20260917.0001_inbox_channels.sql:356-371`) already keeps a channel subject out
+of `document_id` and the decided-by columns; the versioning, fingerprint, and
+bulk routes below write only `app.document`, `app.economic_event`,
+`app.data_issue`, and `app.inbox_item` the same way, through policies this
+migration does not touch. `DATABASE_MIGRATION_COMPATIBILITY` in
+`packages/db/src/access.ts` is now `20260917.0006`.
+
 ## Tenant policy contract
 
 Every future tenant table must include:

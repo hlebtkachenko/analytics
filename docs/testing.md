@@ -291,6 +291,33 @@ the spec is independent of run order. The demo prints the analytics URL with the
 summary block and opens it when the host has an `open` command.
 `pnpm demo:documents:down` removes that stack with its volumes.
 
+```sh
+pnpm demo:inbox
+pnpm demo:inbox:down
+```
+
+`pnpm demo:inbox` reuses the same `scripts/demo-lib.sh` steps as the other two
+demos, disposable secrets, stack reset and rebuild, the three accounts, and the
+quota grant, then runs `tests/operational/inbox.spec.ts` with the list reporter.
+The spec seeds one legal entity, one partner, an API channel and a credential
+through the real BFF routes, then posts a PDF, a PNG, a CSV, a text payload and
+the same PDF a second time through the channel's items route, so the exact
+duplicate is discarded at arrival. Its narrated browser proof covers the list
+with the discarded duplicate, the item page with the sniffed type and reasons, a
+hint set, the CSV routed to Documents as `other`, the Original panel on that
+document, the text payload discarded and restored, the PNG item attached to the
+CSV document with the Original panel then showing two files and undo returning
+the PNG item to review, a second document routed with the same reference getting
+the 409 and "Register as new version" with the version banner appearing, a third
+document with the same partner and total hitting the duplicate dialog and being
+discarded as `duplicate`, a bulk assign on two items, a rule created on the
+rules page that auto-routes a new item as `decidedByKind = 'rule'`, and an axe
+check with no violation on the list, the item page and the document page.
+`pnpm demo:inbox:down` removes that stack with its volumes.
+`tests/operational/inbox.spec.ts` joins the explicit list in
+`.github/workflows/operational-proof.yml` before `zz-sign-out.spec.ts`, and the
+workflow's `timeout-minutes` rises to 15 for the extra proof.
+
 The scheduled and manually runnable GitHub Actions operational proof creates a
 disposable local Compose stack, creates a gated synthetic account plus a
 synthetic admin and member of the same organization, completes a browser sign-in

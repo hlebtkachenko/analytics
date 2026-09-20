@@ -76,12 +76,23 @@ between the four values.
 The schema carries a version chain: `version` (default `1`),
 `supersedes_document_id`, and `is_current` (default `true`), with a partial
 unique index so only the current version of a kind can claim a given `reference`
-inside a legal entity. No API route sets `version`, `supersedes_document_id`, or
-clears `is_current` today; every document is created and stays at version 1. A
-re-versioning endpoint is explicitly out of scope (see Out of scope below). The
-only way to relate an old document to a correction today is a generic
-`document_link` of kind `supersedes`, which does not touch `version` or
-`is_current`.
+inside a legal entity. Routing an inbox item to Documents with
+`supersedesDocumentId` naming the current row that holds the reference writes
+the chain in one transaction: the old row's `is_current` flips to `false`, the
+new row is inserted with `version = old.version + 1` and
+`supersedes_document_id = old.id`, and the old row's `economic_event` (its lines
+cascade) and unresolved `data_issue` rows are deleted, the same deletes a
+re-derive already does; the old row keeps its invoice content, files, and links.
+Undo of a version route and an ordinary delete of a current version share one
+path: deleting the row restores its predecessor, flipping `is_current` back to
+`true` and re-deriving its event, and both undo and delete refuse (409) a
+document that is not the current version, since a later version exists and
+orphaning the chain would follow otherwise. The documents list filters on
+`current=true|false|all` (default `true`), and the detail page shows a
+"Superseded by version N" banner on a non-current row and a "Supersedes version
+N" line on the row that replaced it. The only way to relate two documents that
+do not share a reference is still a generic `document_link` of kind
+`supersedes`, which does not touch `version` or `is_current`.
 
 ## Derivation
 
@@ -278,26 +289,48 @@ document's originals live in `app.document_file`, ordered `blob_id` rows
 pointing at the durable blob register, not a single upload reference or a
 duplicated content hash.
 
+Before creating a document, the route transaction checks two conflicts. A
+reference hit, an existing current row of the same kind and reference in the
+target legal entity, answers 409 unless `supersedesDocumentId` names it, the
+versioning path above. A fingerprint hit, an existing current document for the
+same partner sharing either the `reference` or a `totalAmount` and a
+`documentDate` within 3 days, is checked organization-wide within the caller's
+allowed entities rather than entity-scoped, because `app.partner` is
+organization-wide (see Tenancy above); it answers 409 with the matching
+candidates unless `acknowledgeDuplicateOf` names one of them. Either refusal
+first writes a manual extraction row carrying the conflict as an issue in the
+same transaction, so the inbox item shows the reason once the caller reads it
+back. Attach-to-existing, `POST .../items/:itemId/attach`, skips document
+creation entirely: it inserts one `app.document_file` row per item file onto an
+existing document from `max(position) + 1` onward and routes the item to that
+document the same way a create does, so attaching the same blob twice is refused
+(409) instead of duplicated. The document detail page's "Original" panel lists
+every `app.document_file` row on the document with a link to its blob, and every
+`app.inbox_item` row that named the document, routed and attached alike, so a
+document with more than one original file or more than one source item is
+visible there.
+
 Every route below is mounted under `organizations/:organizationId/...`, is
 versioned `v1`, and is guarded the same way as the document routes above; see
 [the inbox foundation spec](../.ai/specs/2026-09-16-inbox-foundation.md) and
 [the inbox plan](planning/inbox.md) for the full design.
 
-| Method | Path                                  | Capability        | Success | Failure                                                                  |
-| ------ | ------------------------------------- | ----------------- | ------- | ------------------------------------------------------------------------ |
-| POST   | `/inbox/uploads`                      | `manageDocuments` | 201     | 401, 403 (also a restricted scope), 413 (quota)                          |
-| GET    | `/inbox/items`                        | `readDocuments`   | 200     | 401, 403                                                                 |
-| GET    | `/inbox/items/:itemId`                | `readDocuments`   | 200     | 401, 403, 404                                                            |
-| PATCH  | `/inbox/items/:itemId/hints`          | `manageDocuments` | 200     | 401, 403, 404                                                            |
-| POST   | `/inbox/items/:itemId/process`        | `manageDocuments` | 200     | 401, 403, 404, 409 (already routed)                                      |
-| POST   | `/inbox/items/:itemId/route/document` | `manageDocuments` | 200     | 401, 403, 404, 409 (already routed)                                      |
-| POST   | `/inbox/items/:itemId/route/undo`     | `manageDocuments` | 200     | 401, 403, 404, 409 (not routed)                                          |
-| POST   | `/inbox/items/:itemId/discard`        | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or already discarded)                         |
-| POST   | `/inbox/items/:itemId/restore`        | `manageDocuments` | 200     | 401, 403, 404, 409 (not discarded)                                       |
-| POST   | `/inbox/items/:itemId/assign`         | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or discarded)                                 |
-| POST   | `/inbox/items/:itemId/snooze`         | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or discarded)                                 |
-| GET    | `/inbox/blobs/:blobId/download`       | `readDocuments`   | 200     | 401, 403, 404, 409 (`blob_quarantined`)                                  |
-| GET    | `/inbox/blobs/:blobId/inline`         | `readDocuments`   | 200     | 401, 403, 404, 409 (`blob_quarantined`), 415 (media type not inlineable) |
+| Method | Path                                  | Capability        | Success | Failure                                                                               |
+| ------ | ------------------------------------- | ----------------- | ------- | ------------------------------------------------------------------------------------- |
+| POST   | `/inbox/uploads`                      | `manageDocuments` | 201     | 401, 403 (also a restricted scope), 413 (quota)                                       |
+| GET    | `/inbox/items`                        | `readDocuments`   | 200     | 401, 403                                                                              |
+| GET    | `/inbox/items/:itemId`                | `readDocuments`   | 200     | 401, 403, 404                                                                         |
+| PATCH  | `/inbox/items/:itemId/hints`          | `manageDocuments` | 200     | 401, 403, 404                                                                         |
+| POST   | `/inbox/items/:itemId/process`        | `manageDocuments` | 200     | 401, 403, 404, 409 (already routed)                                                   |
+| POST   | `/inbox/items/:itemId/route/document` | `manageDocuments` | 200     | 401, 403, 404, 409 (already routed, `reference_conflict`, `duplicate_probable`)       |
+| POST   | `/inbox/items/:itemId/attach`         | `manageDocuments` | 200     | 401, 403, 404 (item or document not visible), 409 (not open, `blob_already_attached`) |
+| POST   | `/inbox/items/:itemId/route/undo`     | `manageDocuments` | 200     | 401, 403, 404, 409 (not routed)                                                       |
+| POST   | `/inbox/items/:itemId/discard`        | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or already discarded)                                      |
+| POST   | `/inbox/items/:itemId/restore`        | `manageDocuments` | 200     | 401, 403, 404, 409 (not discarded)                                                    |
+| POST   | `/inbox/items/:itemId/assign`         | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or discarded)                                              |
+| POST   | `/inbox/items/:itemId/snooze`         | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or discarded)                                              |
+| GET    | `/inbox/blobs/:blobId/download`       | `readDocuments`   | 200     | 401, 403, 404, 409 (`blob_quarantined`)                                               |
+| GET    | `/inbox/blobs/:blobId/inline`         | `readDocuments`   | 200     | 401, 403, 404, 409 (`blob_quarantined`), 415 (media type not inlineable)              |
 
 [ADR 0016](adr/0016-channel-principal.md) adds the channel principal and its
 routes, also mounted under `organizations/:organizationId/...` and versioned
@@ -452,8 +485,6 @@ the wall clock milliseconds they took.
   for that roadmap.
 - Table-driven rule overrides per organization or per legal entity; rules live
   in code, keyed only by `RULE_SET_VERSION`.
-- A re-versioning endpoint; the `version`, `supersedes_document_id`, and
-  `is_current` columns exist in the schema but no route writes them.
 - Bank matching or settlement beyond the generic `document_link`.
 - Reporting API reads of documents or economic events.
 - A dedicated content table for `credit_note`; it is a register kind today with
