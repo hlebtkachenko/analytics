@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   ConflictException,
   ForbiddenException,
+  NotFoundException,
   PayloadTooLargeException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -1218,6 +1219,73 @@ describe('inbox actions', () => {
     expect(restored?.event?.lines.length).toBeGreaterThan(0);
   });
 
+  it('rolls back a version route when the new document cannot be created', async () => {
+    const gamma = await upload(
+      creator,
+      Buffer.from('gamma invoice bytes'),
+      'gamma.txt',
+    );
+    // A distinct total so the duplicate-by-amount check never matches another test's fixture.
+    const original = await route(
+      gamma.item.id,
+      invoiceBody('SUP-2026-99', {
+        invoice: {
+          lines: [
+            {
+              baseAmount: '7000.0000',
+              category: 'services',
+              description: 'placeholder service line',
+              vatAmount: '1470.0000',
+              vatMode: 'standard',
+              vatRate: '21.00',
+            },
+          ],
+        },
+      }),
+    );
+    const originalDocumentId = original?.item.documentId ?? '';
+    expect(originalDocumentId).not.toBe('');
+
+    // A partner that exists but belongs to another organization, invisible to this tenant context.
+    const foreignPartner = await createPartner(apiPool, {
+      ...stranger,
+      ...allEntities,
+      countryCode: 'CZ',
+      legalEntityId: null,
+      name: 'Foreign Supplier',
+      registrationNumber: 'CD-000000',
+      vatNumber: 'CZ00000000',
+    });
+
+    const delta = await upload(
+      creator,
+      Buffer.from('delta invoice bytes'),
+      'delta.txt',
+    );
+
+    await expect(
+      route(
+        delta.item.id,
+        invoiceBody('SUP-2026-99', { partnerId: foreignPartner?.id ?? '' }),
+        { supersedesDocumentId: originalDocumentId },
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    // The old document was flipped to superseded before the failed create; the rollback must undo that too.
+    const stillCurrent = await readDocument(apiPool, {
+      ...creator,
+      ...allEntities,
+      documentId: originalDocumentId,
+    });
+    expect(stillCurrent?.document).toMatchObject({
+      hasEvent: true,
+      isCurrent: true,
+      version: 1,
+    });
+    expect(stillCurrent?.supersededByDocumentId).toBeNull();
+    expect(stillCurrent?.event?.lines.length).toBeGreaterThan(0);
+  });
+
   it('flags a probable duplicate by partner and lets an acknowledged route proceed', async () => {
     // Same partner and total within three days, another reference and kind: a hit by the second rule.
     const nearby = invoiceBody('SUP-2026-2', {
@@ -1437,6 +1505,117 @@ describe('inbox actions', () => {
       status: 'routed',
     });
     expect(detail?.extraction?.provider).toBe('manual');
+  });
+
+  it('deletes a current version directly: the predecessor is restored, its stale issue clears, and an attached item un-routes', async () => {
+    const epsilon = await upload(
+      creator,
+      Buffer.from('epsilon invoice bytes'),
+      'epsilon.txt',
+    );
+    // A distinct total so the duplicate-by-amount check never matches another test's fixture.
+    const distinctInvoice = {
+      invoice: {
+        lines: [
+          {
+            baseAmount: '5000.0000',
+            category: 'services',
+            description: 'placeholder service line',
+            vatAmount: '1050.0000',
+            vatMode: 'standard',
+            vatRate: '21.00',
+          },
+        ],
+      },
+    };
+    const first = await route(
+      epsilon.item.id,
+      invoiceBody('SUP-2026-77', distinctInvoice),
+    );
+    const predecessorId = first?.item.documentId ?? '';
+    expect(predecessorId).not.toBe('');
+
+    // An unresolved issue on the predecessor, the way a rule run might leave one.
+    await asTenant(creator, (transaction) =>
+      transaction.query(
+        `insert into app.data_issue (organization_id, document_id, code, severity)
+         values ($1, $2, 'total_mismatch', 'warning')`,
+        [creator.organizationId, predecessorId],
+      ),
+    );
+
+    const zeta = await upload(
+      creator,
+      Buffer.from('zeta invoice bytes'),
+      'zeta.txt',
+    );
+    const second = await route(
+      zeta.item.id,
+      invoiceBody('SUP-2026-77', distinctInvoice),
+      { supersedesDocumentId: predecessorId },
+    );
+    const supersedingId = second?.item.documentId ?? '';
+    expect(supersedingId).not.toBe('');
+
+    const clearedIssues = await asTenant(creator, (transaction) =>
+      transaction.query(
+        `select 1 from app.data_issue where document_id = $1 and resolved_at is null`,
+        [predecessorId],
+      ),
+    );
+    expect(clearedIssues.rowCount).toBe(0);
+
+    const eta = await upload(
+      creator,
+      Buffer.from('eta invoice bytes'),
+      'eta.txt',
+    );
+    await service.attachItem({
+      ...creator,
+      ...allEntities,
+      documentId: supersedingId,
+      itemId: eta.item.id,
+    });
+
+    const deleted = await deleteDocument(apiPool, {
+      ...creator,
+      ...allEntities,
+      documentId: supersedingId,
+    });
+    expect(deleted).toBe(true);
+
+    const restored = await readDocument(apiPool, {
+      ...creator,
+      ...allEntities,
+      documentId: predecessorId,
+    });
+    expect(restored?.document).toMatchObject({
+      hasEvent: true,
+      isCurrent: true,
+      version: 1,
+    });
+    expect(restored?.supersededByDocumentId).toBeNull();
+    expect(restored?.event?.lines.length).toBeGreaterThan(0);
+
+    const creatorItem = await readItem(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: zeta.item.id,
+    });
+    expect(creatorItem?.item).toMatchObject({
+      documentId: null,
+      status: 'needs_review',
+    });
+
+    const attachedItem = await readItem(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: eta.item.id,
+    });
+    expect(attachedItem?.item).toMatchObject({
+      documentId: null,
+      status: 'needs_review',
+    });
   });
 
   it('filters the list by issue, assignee and confidence band and reports the human touch', async () => {

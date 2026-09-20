@@ -88,11 +88,12 @@ path: deleting the row restores its predecessor, flipping `is_current` back to
 `true` and re-deriving its event, and both undo and delete refuse (409) a
 document that is not the current version, since a later version exists and
 orphaning the chain would follow otherwise. The documents list filters on
-`current=true|false|all` (default `true`), and the detail page shows a
-"Superseded by version N" banner on a non-current row and a "Supersedes version
-N" line on the row that replaced it. The only way to relate two documents that
-do not share a reference is still a generic `document_link` of kind
-`supersedes`, which does not touch `version` or `is_current`.
+`current=true|false|all` (default `true`), and the detail page shows an "A newer
+version replaces this document" banner with a link on a non-current row, and a
+"This document replaces an earlier version" line on the row that replaced it.
+The only way to relate two documents that do not share a reference is still a
+generic `document_link` of kind `supersedes`, which does not touch `version` or
+`is_current`.
 
 ## Derivation
 
@@ -298,14 +299,15 @@ same partner sharing either the `reference` or a `totalAmount` and a
 allowed entities rather than entity-scoped, because `app.partner` is
 organization-wide (see Tenancy above); it answers 409 with the matching
 candidates unless `acknowledgeDuplicateOf` names one of them. Either refusal
-first writes a manual extraction row carrying the conflict as an issue in the
-same transaction, so the inbox item shows the reason once the caller reads it
-back. Attach-to-existing, `POST .../items/:itemId/attach`, skips document
-creation entirely: it inserts one `app.document_file` row per item file onto an
-existing document from `max(position) + 1` onward and routes the item to that
-document the same way a create does, so attaching the same blob twice is refused
-(409) instead of duplicated. The document detail page's "Original" panel lists
-every `app.document_file` row on the document with a link to its blob, and every
+first writes a manual extraction row carrying the conflict as an issue in its
+own transaction after the route's transaction rolls back, so the inbox item
+shows the reason once the caller reads it back. Attach-to-existing,
+`POST .../items/:itemId/attach`, skips document creation entirely: it inserts
+one `app.document_file` row per item file onto an existing document from
+`max(position) + 1` onward and routes the item to that document the same way a
+create does, so attaching the same blob twice is refused (409) instead of
+duplicated. The document detail page's "Original" panel lists every
+`app.document_file` row on the document with a link to its blob, and every
 `app.inbox_item` row that named the document, routed and attached alike, so a
 document with more than one original file or more than one source item is
 visible there.

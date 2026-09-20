@@ -1234,7 +1234,7 @@ describe('getDocuments', () => {
   it('rebuilds the query from validated values only', async () => {
     const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe(
-        `http://api:3001/v1/organizations/org_1/documents?legalEntityId=${LEGAL_ENTITY_ID}&kind=received_invoice&status=registered&page=2&pageSize=50&sort=title&order=asc`,
+        `http://api:3001/v1/organizations/org_1/documents?current=true&legalEntityId=${LEGAL_ENTITY_ID}&kind=received_invoice&status=registered&page=2&pageSize=50&sort=title&order=asc`,
       );
       expect(init?.headers).toEqual({
         authorization: 'Bearer resource-token',
@@ -1262,7 +1262,7 @@ describe('getDocuments', () => {
   it('applies the contract defaults when the browser asks for nothing', async () => {
     const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
       expect(String(input)).toBe(
-        'http://api:3001/v1/organizations/org_1/documents?page=1&pageSize=25&sort=documentDate&order=desc',
+        'http://api:3001/v1/organizations/org_1/documents?current=true&page=1&pageSize=25&sort=documentDate&order=desc',
       );
       return Response.json(documentList);
     });
@@ -1270,6 +1270,25 @@ describe('getDocuments', () => {
     const response = await getDocuments(
       auth,
       datasetRequest('documents'),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+  });
+
+  it('forwards an explicit current filter to the API', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/documents?current=all&page=1&pageSize=25&sort=documentDate&order=desc',
+      );
+      return Response.json(documentList);
+    });
+
+    const response = await getDocuments(
+      auth,
+      datasetRequest('documents?current=all'),
       'org_1',
       fetchImplementation,
     );

@@ -354,7 +354,7 @@ export class InboxController {
   })
   @ApiConflictResponse({
     description:
-      'The item is not open, or a blob is already on the document (blob_already_attached)',
+      'The item is not open, has no files (no_files), or a blob is already on the document (blob_already_attached)',
   })
   async attachItem(
     @Param('organizationId', { schema: organizationIdentifierSchema })

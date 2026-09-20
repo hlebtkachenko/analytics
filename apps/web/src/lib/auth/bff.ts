@@ -1198,6 +1198,7 @@ function documentListQuery(
 ): string {
   const outbound = new URLSearchParams();
 
+  outbound.set('current', query.current);
   if (query.legalEntityId !== undefined) {
     outbound.set('legalEntityId', query.legalEntityId);
   }

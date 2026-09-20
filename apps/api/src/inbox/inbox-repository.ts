@@ -33,6 +33,7 @@ import {
   createDocumentInTransaction,
   deleteDocumentInTransaction,
   documentTotalOf,
+  isDuplicateDocumentReference,
 } from '../documents/document-repository.js';
 import { entityFilter } from '../documents/sql.js';
 import {
@@ -1686,6 +1687,9 @@ export async function checkRoutePreconditions(
     ) {
       throw new BadRequestException();
     }
+  } else if (input.acknowledgeDuplicateOf !== undefined) {
+    // No partner means the duplicate check never ran, so an acknowledgement names a candidate that cannot exist.
+    throw new BadRequestException();
   }
 
   return current === null
@@ -1946,7 +1950,8 @@ async function routeInTransaction(
   });
 
   if (created === null) {
-    return null;
+    // A superseded row was already flipped, so a null here must abort the transaction, not commit a dangling document.
+    throw new NotFoundException();
   }
 
   await insertExtraction(transaction, input, before.id, input.extraction);
@@ -2090,6 +2095,12 @@ export async function attachItem(
     }
 
     const files = await loadItemFiles(transaction, before.id);
+
+    // Nothing to add: attaching zero files would route the item without ever joining the document.
+    if (files.length === 0) {
+      throw new ConflictException('no_files');
+    }
+
     const blobIds = files.map((file) => file.blobId);
     const present = await transaction.query(
       'select 1 from app.document_file where document_id = $1 and blob_id = any($2::uuid[])',
@@ -2258,10 +2269,21 @@ export async function undoRoute(
     // This item created the document: the delete path removes it. Otherwise the item was attached to a document
     // another item created, so only the rows this item brought go and the document stays.
     if (document.inbox_item_id === before.id) {
-      const deleted = await deleteDocumentInTransaction(transaction, {
-        ...input,
-        documentId: before.documentId,
-      });
+      let deleted: boolean;
+
+      try {
+        deleted = await deleteDocumentInTransaction(transaction, {
+          ...input,
+          documentId: before.documentId,
+        });
+      } catch (error) {
+        // The restored predecessor's reference can now collide with a current document; answer the same as a route.
+        if (isDuplicateDocumentReference(error)) {
+          throw new ConflictException();
+        }
+
+        throw error;
+      }
 
       if (!deleted) {
         return null;
