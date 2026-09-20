@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared steps of the local demos, sourced by scripts/demo-tenancy.sh and scripts/demo-documents.sh and never run on its own: environment, compose helpers, disposable secrets, stack, accounts, and quota.
+# Shared steps of the local demos, sourced by scripts/demo-tenancy.sh, scripts/demo-documents.sh and scripts/demo-inbox.sh and never run on its own: environment, compose helpers, disposable secrets, stack, accounts, and quota.
 
 repository_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repository_root"
