@@ -123,6 +123,19 @@ function asDiscardReason(value: string): InboxDiscardReason {
   return parsed.success ? parsed.data : 'irrelevant';
 }
 
+// The lowercased `@domain` suffix of a sender, full address or `Name <address>`; null without an `@`.
+function senderDomain(sender: string | null): string | null {
+  if (sender === null) {
+    return null;
+  }
+  const at = sender.lastIndexOf('@');
+  if (at === -1) {
+    return null;
+  }
+  const domain = sender.slice(at + 1).replace(/>+$/, '');
+  return domain.length === 0 ? null : `@${domain.toLowerCase()}`;
+}
+
 // A blank field is an absent field; the contract trims whatever is actually sent.
 function optional(value: string): string | undefined {
   return value.trim().length === 0 ? undefined : value;
@@ -331,6 +344,7 @@ export default function InboxItemPage() {
     };
     set('channelId', decided.channelId);
     set('detectedType', decided.detectedType);
+    set('sender', senderDomain(decided.sender));
     if (decided.status === 'discarded') {
       const discardedEvent = [...detail.events]
         .reverse()

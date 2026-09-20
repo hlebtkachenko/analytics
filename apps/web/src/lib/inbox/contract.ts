@@ -389,7 +389,8 @@ export const inboxItemDetailSchema = z
     events: z.array(inboxEventSchema),
     extraction: inboxExtractionSchema.nullable(),
     files: z.array(inboxItemFileSchema),
-    item: inboxItemSchema,
+    // The item plus its sender: shown only on the detail, never in the list.
+    item: inboxItemSchema.extend({ sender: z.string().nullable() }).strict(),
     // The effective target of the item's detected type, so the setting is visible on the item the day it lands.
     routingTarget: inboxRoutingTargetSchema,
   })

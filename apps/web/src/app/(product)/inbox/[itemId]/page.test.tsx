@@ -62,6 +62,7 @@ const inboxItem = {
   payloadKind: 'file',
   receivedAt: '2026-09-16T08:00:00.000Z',
   routedAt: null,
+  sender: null,
   snoozedUntil: null,
   status: 'needs_review',
   updatedAt: '2026-09-16T08:00:00.000Z',
@@ -570,6 +571,29 @@ describe('InboxItemPage', () => {
       organization: 'organization-1',
     });
     expect(screen.queryByRole('list', { name: 'Corrections' })).toBeNull();
+  });
+
+  it('carries the lowercased sender domain on the create-a-rule link', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respondWith({
+        events: [],
+        extraction: null,
+        files: [file('application/pdf')],
+        item: {
+          ...inboxItem,
+          documentId: DOCUMENT_ID,
+          sender: 'Someone <person@Example.org>',
+          status: 'routed',
+        },
+      }),
+    );
+
+    renderItemPage();
+
+    const link = await screen.findByRole('link', { name: 'Create a rule' });
+    const href = new URL(link.getAttribute('href')!, 'https://bap.invalid');
+    expect(href.searchParams.get('sender')).toBe('@example.org');
   });
 
   it('offers undo and the document link once the item is routed', async () => {

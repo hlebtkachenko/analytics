@@ -461,7 +461,8 @@ export const inboxItemDetailSchema = z
     events: z.array(inboxEventSchema),
     extraction: inboxExtractionSchema.nullable(),
     files: z.array(inboxItemFileSchema),
-    item: inboxItemSchema,
+    // The item plus its sender: shown only on the detail, never in the list.
+    item: inboxItemSchema.extend({ sender: z.string().nullable() }).strict(),
     // The effective target of the item's detected type, so the setting is visible on the item the day it lands.
     routingTarget: inboxRoutingTargetSchema,
   })
@@ -1259,6 +1260,17 @@ export const inboxCorrectionOpenApiSchema = {
   type: 'object',
 };
 
+// The item plus its sender: shown only on the detail, never in the list.
+const inboxItemDetailItemOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    ...inboxItemOpenApiSchema.properties,
+    sender: { nullable: true, type: 'string' },
+  },
+  required: [...inboxItemOpenApiSchema.required, 'sender'],
+  type: 'object',
+};
+
 export const inboxItemDetailOpenApiSchema = {
   additionalProperties: false,
   properties: {
@@ -1266,7 +1278,7 @@ export const inboxItemDetailOpenApiSchema = {
     events: { items: inboxEventOpenApiSchema, type: 'array' },
     extraction: { ...inboxExtractionOpenApiSchema, nullable: true },
     files: { items: inboxItemFileOpenApiSchema, type: 'array' },
-    item: inboxItemOpenApiSchema,
+    item: inboxItemDetailItemOpenApiSchema,
     routingTarget: inboxRoutingTargetOpenApiSchema,
   },
   required: [

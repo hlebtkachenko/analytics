@@ -1635,7 +1635,7 @@ const inboxDetail = {
   events: [],
   extraction: null,
   files: [inboxFile],
-  item: inboxItem,
+  item: { ...inboxItem, sender: null },
   routingTarget: {
     auto: 'never',
     autoThreshold: null,
@@ -1823,7 +1823,12 @@ describe('inbox item reads and writes', () => {
       });
       return Response.json({
         ...inboxDetail,
-        item: { ...inboxItem, documentId: DATASET_ID, status: 'routed' },
+        item: {
+          ...inboxItem,
+          documentId: DATASET_ID,
+          sender: null,
+          status: 'routed',
+        },
       });
     });
 
@@ -1871,7 +1876,7 @@ describe('inbox item reads and writes', () => {
       expect(JSON.parse(String(init?.body))).toEqual({ reason: 'spam' });
       return Response.json({
         ...inboxDetail,
-        item: { ...inboxItem, status: 'discarded' },
+        item: { ...inboxItem, sender: null, status: 'discarded' },
       });
     });
 

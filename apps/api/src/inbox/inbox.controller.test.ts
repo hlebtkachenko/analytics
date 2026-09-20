@@ -135,7 +135,7 @@ const detail: InboxItemDetail = {
     reasons: [{ evidence: 'placeholder', step: 'sniff', weight: 1 }],
   },
   files: [file],
-  item,
+  item: { ...item, sender: null },
   routingTarget: routingTargetFor('pdf'),
 };
 
