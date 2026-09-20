@@ -179,9 +179,17 @@ export interface RouteToDocumentInput extends ReadItemInput {
 
 export interface RulePassInput extends TenantContext {
   itemId: string;
+  // A rerun narrows the pass to one rule; absent means every live rule of the organization.
+  ruleIds?: readonly string[];
   // The body text of a text payload, read outside the transaction; null for every other item.
   text: string | null;
 }
+
+// Who decided a route: the person, the rule that asked, or the editor of the target default that asked.
+export type RouteDecision =
+  | { kind: 'rule'; ruleId: string }
+  | { kind: 'target_default'; userId: string }
+  | { kind: 'user'; userId: string };
 
 export interface RulePassResult {
   discarded: boolean;
@@ -491,7 +499,7 @@ export async function loadItemFiles(
   return result.rows.map(toFile);
 }
 
-async function loadLatestExtraction(
+export async function loadLatestExtraction(
   transaction: PoolClient,
   itemId: string,
 ): Promise<InboxExtraction | null> {
@@ -1003,7 +1011,7 @@ async function loadRulesById(
 }
 
 // The newest rule extraction names the rules that matched; a rerun skips a rule already in that list.
-async function loadMatchedRuleIds(
+export async function loadMatchedRuleIds(
   transaction: PoolClient,
   itemId: string,
 ): Promise<string[]> {
@@ -1089,7 +1097,11 @@ export async function applyInboxRules(
     routeJob: null,
   };
   // The rules first: an organization without rules pays one definer call and nothing else.
-  const rules = await loadLiveRules(transaction);
+  const live = await loadLiveRules(transaction);
+  const rules =
+    input.ruleIds === undefined
+      ? live
+      : live.filter((rule) => input.ruleIds?.includes(rule.id));
 
   if (rules.length === 0) {
     return nothing;
@@ -1530,17 +1542,7 @@ export async function routeToDocument(
     }
 
     // The suggestion is computed from the pre-route state, before the manual row becomes the newest extraction.
-    const suggested = composeDocumentDraft(
-      { ...before, primaryFilename: files[0]?.originalFilename ?? null },
-      await loadRulesById(
-        transaction,
-        await loadMatchedRuleIds(transaction, before.id),
-      ),
-      routingTargetFor(
-        before.detectedType,
-        await loadRoutingTargetOverrides(transaction),
-      ),
-    );
+    const suggested = await loadRouteSuggestion(transaction, before, files);
 
     const created = await createDocumentInTransaction(transaction, {
       ...input,
@@ -1563,42 +1565,87 @@ export async function routeToDocument(
       title: input.document.title,
     });
 
-    const documentId = created.document.id;
-    await transaction.query(
-      `insert into app.document_file (document_id, organization_id, blob_id, position, created_by)
-       select $1, $2, blob_id, position, $4
-         from unnest($3::uuid[]) with ordinality as file(blob_id, position)`,
-      [documentId, input.organizationId, [...input.fileBlobIds], input.userId],
-    );
-    await transaction.query(
-      `update app.inbox_item
-          set document_id = $2,
-              legal_entity_id = $3,
-              status = 'routed',
-              decided_by_kind = 'user',
-              decided_by_user_id = $4,
-              routed_at = now(),
-              updated_at = now()
-        where id = $1`,
-      [before.id, documentId, created.document.legalEntityId, input.userId],
-    );
-    await appendEvent(transaction, input, before.id, 'routed');
-    await transaction.query(
-      "select app.record_audit('inbox_item.routed', 'inbox_item', $1, $2::jsonb)",
-      [
-        before.id,
-        JSON.stringify({
-          decidedByKind: 'user',
-          documentId,
-          kind: input.document.kind,
-          ruleId: null,
-        }),
-      ],
+    await finishRouteInTransaction(
+      transaction,
+      input,
+      before,
+      created.document,
+      input.fileBlobIds,
+      { kind: 'user', userId: input.userId },
     );
 
     const after = await loadItem(transaction, before.id, input.legalEntityIds);
     return after === null ? null : loadDetail(transaction, after);
   });
+}
+
+// The draft a route suggests: the hints, the rules the newest rule extraction named, and the effective target.
+export async function loadRouteSuggestion(
+  transaction: PoolClient,
+  item: InboxItem,
+  files: readonly ItemFileRecord[],
+): Promise<ReturnType<typeof composeDocumentDraft>> {
+  return composeDocumentDraft(
+    { ...item, primaryFilename: files[0]?.originalFilename ?? null },
+    await loadRulesById(
+      transaction,
+      await loadMatchedRuleIds(transaction, item.id),
+    ),
+    routingTargetFor(
+      item.detectedType,
+      await loadRoutingTargetOverrides(transaction),
+    ),
+  );
+}
+
+// The rows every route writes once the document exists: its files, the item's decision, the event and the audit entry.
+export async function finishRouteInTransaction(
+  transaction: PoolClient,
+  input: TenantContext,
+  item: InboxItem,
+  document: { id: string; kind: string; legalEntityId: string },
+  fileBlobIds: readonly string[],
+  decision: RouteDecision,
+): Promise<void> {
+  await transaction.query(
+    `insert into app.document_file (document_id, organization_id, blob_id, position, created_by)
+     select $1, $2, blob_id, position, $4
+       from unnest($3::uuid[]) with ordinality as file(blob_id, position)`,
+    [document.id, input.organizationId, [...fileBlobIds], input.userId],
+  );
+  await transaction.query(
+    `update app.inbox_item
+        set document_id = $2,
+            legal_entity_id = $3,
+            status = 'routed',
+            decided_by_kind = $4,
+            decided_by_rule_id = $5,
+            decided_by_user_id = $6,
+            routed_at = now(),
+            updated_at = now()
+      where id = $1`,
+    [
+      item.id,
+      document.id,
+      document.legalEntityId,
+      decision.kind,
+      decision.kind === 'rule' ? decision.ruleId : null,
+      decision.kind === 'rule' ? null : decision.userId,
+    ],
+  );
+  await appendEvent(transaction, input, item.id, 'routed');
+  await transaction.query(
+    "select app.record_audit('inbox_item.routed', 'inbox_item', $1, $2::jsonb)",
+    [
+      item.id,
+      JSON.stringify({
+        decidedByKind: decision.kind,
+        documentId: document.id,
+        kind: document.kind,
+        ruleId: decision.kind === 'rule' ? decision.ruleId : null,
+      }),
+    ],
+  );
 }
 
 // One row per suggested field the person changed; a field nothing suggested has no source and gets no row.

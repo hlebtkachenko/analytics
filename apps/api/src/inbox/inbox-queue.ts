@@ -53,7 +53,14 @@ export async function sendRouteInboxItem(
   });
 }
 
-// One rerun per rule at a time; the self-requeue with a cursor is sent after the previous job completes.
+// One walk per rule at a time. The exclusive policy would drop a same-key send while the job is still active,
+// so a continuation keys on the cursor it resumes from: each batch sends its own successor exactly once.
+export function rerunInboxRuleSingletonKey(job: RerunInboxRuleJob): string {
+  return job.cursor === undefined
+    ? job.ruleId
+    : `${job.ruleId}:${job.cursor.itemId}`;
+}
+
 export async function sendRerunInboxRule(
   client: PgBoss,
   job: RerunInboxRuleJob,
@@ -61,7 +68,7 @@ export async function sendRerunInboxRule(
   await client.send(RERUN_INBOX_RULE_QUEUE, job, {
     retryDelay: SPLIT_EMAIL_ITEM_RETRY_DELAY_SECONDS,
     retryLimit: SPLIT_EMAIL_ITEM_RETRY_LIMIT,
-    singletonKey: job.ruleId,
+    singletonKey: rerunInboxRuleSingletonKey(job),
   });
 }
 
