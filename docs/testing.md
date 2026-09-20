@@ -260,11 +260,13 @@ pnpm demo:tenancy:down
 
 `pnpm demo:tenancy` is the same proof as a one-command local demo. It creates
 the disposable secrets, resets and rebuilds the stack on the CI ports, creates
-the owner, admin, and member accounts with one generated disposable password,
-grants the organization quota, runs the legal entity spec with the list
-reporter, and then prints the URLs, the three addresses, the password, and the
-organization slug while leaving the stack running for manual exploration.
-`pnpm demo:tenancy:down` removes it with its volumes.
+the owner, admin, and member accounts with the fixed local-only password
+`Members-Review-2026`, grants the organization quota, runs the legal entity spec
+with the list reporter, and then prints the URLs, the three addresses, the
+password, and the organization slug while leaving the stack running for manual
+exploration. `pnpm demo:tenancy:down` removes it with its volumes. This fixed
+password comes from `scripts/demo-lib.sh` and is shared by `pnpm demo:tenancy`,
+`pnpm demo:documents`, and `pnpm demo:inbox` alike.
 
 ```sh
 pnpm demo:documents

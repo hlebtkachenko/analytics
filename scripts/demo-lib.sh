@@ -81,8 +81,8 @@ demo_start_stack() {
   curl --fail --silent --show-error "$BAP_OPERATIONAL_BASE_URL/health" >/dev/null
   printf 'The stack answers /health.\n'
 
-  # Disposable and local only: the password is printed at the end so the stack can be explored by hand.
-  BAP_OPERATIONAL_PASSWORD=$(openssl rand -base64 24 | tr -d '\n')
+  # Fixed local-only password for the disposable demo stack, overridable by the environment.
+  BAP_OPERATIONAL_PASSWORD=${BAP_OPERATIONAL_PASSWORD:-Members-Review-2026}
   export BAP_OPERATIONAL_PASSWORD
 }
 
