@@ -5,6 +5,7 @@ import {
   Button,
   Checkbox,
   DataTable,
+  DataTableSkeleton,
   IconButton,
   InlineNotification,
   Modal,
@@ -36,7 +37,6 @@ import {
   Tabs,
   Tag,
   TextInput,
-  Tile,
 } from '@bap/design-system/react';
 import { Download, Filter, UserFollow } from '@bap/design-system/icons';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -304,6 +304,8 @@ export default function MembersView({
   const [removeTarget, setRemoveTarget] = useState<MemberRow | null>(null);
   const [cancelTarget, setCancelTarget] = useState<InvitationRow | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [invitationsLoading, setInvitationsLoading] = useState(false);
 
   // Applied filters feed the visible rows and the dismissible-tag row. Members
   // default to the active status; invitations only filter by role.
@@ -590,44 +592,54 @@ export default function MembersView({
   }
 
   async function reloadMembers(): Promise<void> {
-    const result = await authClient.organization.listMembers({
-      query: { limit: 100, organizationId },
-    });
-    const parsed = memberListSchema.safeParse(result.data);
-    if (!parsed.success) {
-      return;
+    setMembersLoading(true);
+    try {
+      const result = await authClient.organization.listMembers({
+        query: { limit: 100, organizationId },
+      });
+      const parsed = memberListSchema.safeParse(result.data);
+      if (!parsed.success) {
+        return;
+      }
+      setMembers(
+        parsed.data.members.map((member) => ({
+          email: member.user.email,
+          id: member.id,
+          joinedAt: isoDate(member.createdAt),
+          name: member.user.name,
+          role: asRole(member.role),
+          status: asStatus(member.status),
+          userId: member.userId,
+        })),
+      );
+    } finally {
+      setMembersLoading(false);
     }
-    setMembers(
-      parsed.data.members.map((member) => ({
-        email: member.user.email,
-        id: member.id,
-        joinedAt: isoDate(member.createdAt),
-        name: member.user.name,
-        role: asRole(member.role),
-        status: asStatus(member.status),
-        userId: member.userId,
-      })),
-    );
   }
 
   async function reloadInvitations(): Promise<void> {
-    const result = await authClient.organization.listInvitations({
-      query: { organizationId },
-    });
-    const parsed = invitationListSchema.safeParse(result.data);
-    if (!parsed.success) {
-      return;
+    setInvitationsLoading(true);
+    try {
+      const result = await authClient.organization.listInvitations({
+        query: { organizationId },
+      });
+      const parsed = invitationListSchema.safeParse(result.data);
+      if (!parsed.success) {
+        return;
+      }
+      setInvitations(
+        parsed.data
+          .filter((invitation) => invitation.status === 'pending')
+          .map((invitation) => ({
+            email: invitation.email,
+            expiresAt: isoDate(invitation.expiresAt),
+            id: invitation.id,
+            role: asRole(invitation.role),
+          })),
+      );
+    } finally {
+      setInvitationsLoading(false);
     }
-    setInvitations(
-      parsed.data
-        .filter((invitation) => invitation.status === 'pending')
-        .map((invitation) => ({
-          email: invitation.email,
-          expiresAt: isoDate(invitation.expiresAt),
-          id: invitation.id,
-          role: asRole(invitation.role),
-        })),
-    );
   }
 
   async function submitInvite(): Promise<void> {
@@ -947,21 +959,11 @@ export default function MembersView({
           </TabList>
           <TabPanels>
             <TabPanel className={styles.tabPanel!}>
-              {members.length === 0 ? (
-                <Tile>
-                  <p>{t('members.list.empty')}</p>
-                  {canManageMembers ? (
-                    <Button
-                      onClick={() => {
-                        openInvite();
-                      }}
-                      renderIcon={UserFollow}
-                      type="button"
-                    >
-                      {t('members.list.inviteAction')}
-                    </Button>
-                  ) : null}
-                </Tile>
+              {membersLoading ? (
+                <DataTableSkeleton
+                  columnCount={memberHeaders.length}
+                  rowCount={5}
+                />
               ) : (
                 <DataTable headers={memberHeaders} isSortable rows={memberRows}>
                   {({
@@ -1065,7 +1067,9 @@ export default function MembersView({
                             {pageRows.length === 0 ? (
                               <TableRow>
                                 <TableCell colSpan={headers.length + 2}>
-                                  {t('members.table.noResults')}
+                                  {members.length === 0
+                                    ? t('members.list.empty')
+                                    : t('members.table.noResults')}
                                 </TableCell>
                               </TableRow>
                             ) : null}
@@ -1181,21 +1185,11 @@ export default function MembersView({
               )}
             </TabPanel>
             <TabPanel className={styles.tabPanel!}>
-              {invitations.length === 0 ? (
-                <Tile>
-                  <p>{t('members.invitations.empty')}</p>
-                  {canManageMembers ? (
-                    <Button
-                      onClick={() => {
-                        openInvite();
-                      }}
-                      renderIcon={UserFollow}
-                      type="button"
-                    >
-                      {t('members.list.inviteAction')}
-                    </Button>
-                  ) : null}
-                </Tile>
+              {invitationsLoading ? (
+                <DataTableSkeleton
+                  columnCount={invitationHeaders.length}
+                  rowCount={5}
+                />
               ) : (
                 <DataTable
                   headers={invitationHeaders}
@@ -1303,7 +1297,9 @@ export default function MembersView({
                             {pageRows.length === 0 ? (
                               <TableRow>
                                 <TableCell colSpan={headers.length + 1}>
-                                  {t('members.table.noResults')}
+                                  {invitations.length === 0
+                                    ? t('members.invitations.empty')
+                                    : t('members.table.noResults')}
                                 </TableCell>
                               </TableRow>
                             ) : null}

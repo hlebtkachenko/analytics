@@ -86,20 +86,8 @@ const reviewedCallsites = [
   [
     'app/(product)/[orgSlug]/members/members-view.tsx',
     'Button',
-    'UserFollow',
-    "{t('members.list.inviteAction')}",
-  ],
-  [
-    'app/(product)/[orgSlug]/members/members-view.tsx',
-    'Button',
     'Download',
     "{t('members.table.exportCsv')}",
-  ],
-  [
-    'app/(product)/[orgSlug]/members/members-view.tsx',
-    'Button',
-    'UserFollow',
-    "{t('members.list.inviteAction')}",
   ],
   [
     'app/(product)/[orgSlug]/members/members-view.tsx',
