@@ -11,6 +11,7 @@ import {
   resolveMembership,
   resolveOrganizationRoute,
   setOrganizationQuota,
+  transferOwnership,
 } from './access.js';
 import type { DatabasePool } from './pool.js';
 
@@ -504,4 +505,17 @@ describe('organization accessors', () => {
       );
     },
   );
+
+  it('transfers ownership through the definer function', async () => {
+    const query = vi.fn(async () => ({ rows: [] }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(
+      transferOwnership(pool, 'organization-1', 'user-1', 'user-2'),
+    ).resolves.toBeUndefined();
+    expect(query).toHaveBeenCalledWith(
+      'select auth.transfer_ownership($1, $2, $3)',
+      ['organization-1', 'user-1', 'user-2'],
+    );
+  });
 });

@@ -6,13 +6,55 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
-import { getOrganizationCreationQuota } from '@bap/db/access';
+import {
+  getOrganizationCreationQuota,
+  transferOwnership,
+} from '@bap/db/access';
 
 import { getAuth, getAuthPool } from '../auth/server';
 import { formValue, organizationPath, resultPath } from './action-support';
 import { normalizeOrganizationSlug, organizationSlugSchema } from './slug';
 
 const invitationInputIdSchema = z.object({ invitationId: z.string().min(1) });
+
+const transferOwnershipInputSchema = z.object({
+  organizationId: z.string().min(1),
+  toUserId: z.string().min(1),
+});
+
+export type TransferOwnershipResult =
+  Readonly<{ ok: true }> | Readonly<{ ok: false }>;
+
+// Hands ownership to another active member and demotes the caller to admin. Authorization
+// is enforced in the database function: the caller is bound to the session user as the
+// from-owner, so a non-owner caller is refused inside the transaction.
+export async function transferOwnershipAction(
+  input: unknown,
+): Promise<TransferOwnershipResult> {
+  const parsed = transferOwnershipInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false };
+  }
+
+  try {
+    const auth = await getAuth();
+    const requestHeaders = await headers();
+    const session = await auth.api.getSession({ headers: requestHeaders });
+    if (session?.user.emailVerified !== true) {
+      return { ok: false };
+    }
+
+    await transferOwnership(
+      await getAuthPool(),
+      parsed.data.organizationId,
+      session.user.id,
+      parsed.data.toUserId,
+    );
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+}
 
 // Better Auth answers a slug collision with this code, the only failure the create page names.
 function isSlugTakenError(error: unknown): boolean {

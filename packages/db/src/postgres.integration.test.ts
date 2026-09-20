@@ -23,6 +23,7 @@ import {
   resolveOrganizationRoute,
   runMigrations,
   setOrganizationQuota,
+  transferOwnership,
   withTenantContext,
 } from './index.js';
 import type { TenantContext } from './index.js';
@@ -1062,7 +1063,7 @@ describe('PostgreSQL 18 isolation', () => {
       asOwner((client) =>
         client.query(`
           insert into auth.member (id, organization_id, user_id, role)
-          values ('schema-invalid-member', 'schema-org', 'schema-grantor', 'owner,admin')
+          values ('schema-invalid-member', 'schema-org', 'schema-grantor', 'member,admin')
         `),
       ),
     ).rejects.toThrow(/member_role_check/);
@@ -1753,14 +1754,16 @@ describe('PostgreSQL 18 isolation', () => {
         values
           ('lifecycle-member-sole', 'lifecycle-sole-org', 'lifecycle-owner', 'owner'),
           ('lifecycle-member-shared-a', 'lifecycle-shared-org', 'lifecycle-owner', 'owner'),
-          ('lifecycle-member-shared-b', 'lifecycle-shared-org', 'lifecycle-coowner', 'owner')
+          ('lifecycle-member-shared-b', 'lifecycle-shared-org', 'lifecycle-coowner', 'member')
       `);
     });
 
     try {
+      // One owner per organization now, so both organizations count; a non-owner
+      // co-member never disqualifies the owner's sole ownership.
       await expect(
         countSoleOwnedOrganizations(authPool, 'lifecycle-owner'),
-      ).resolves.toBe(1);
+      ).resolves.toBe(2);
       await expect(
         countSoleOwnedOrganizations(authPool, 'lifecycle-coowner'),
       ).resolves.toBe(0);
@@ -2035,7 +2038,7 @@ describe('PostgreSQL 18 isolation', () => {
           insert into auth.member (id, organization_id, user_id, role)
           values
             ('ms-mem-owner', 'ms-org', 'ms-owner', 'owner'),
-            ('ms-mem-owner-2', 'ms-org', 'ms-owner-2', 'owner'),
+            ('ms-mem-owner-2', 'ms-org', 'ms-owner-2', 'admin'),
             ('ms-mem-member', 'ms-org', 'ms-member', 'member'),
             ('ms-mem-foreign', 'ms-org-2', 'ms-foreign', 'owner')
         `);
@@ -2217,6 +2220,132 @@ describe('PostgreSQL 18 isolation', () => {
       expect(audit.rows).toEqual([
         { resource_id: result.tombstone, user_id: 'ms-owner' },
       ]);
+    });
+  });
+
+  describe('single owner and ownership transfer', () => {
+    beforeAll(async () => {
+      await asOwner(async (client) => {
+        await client.query(`
+          insert into auth."user" (id, name, email, email_verified)
+          values
+            ('so-owner', 'Sole Owner', 'so-owner@example.test', true),
+            ('so-member', 'Sole Member', 'so-member@example.test', true),
+            ('so-second', 'Sole Second', 'so-second@example.test', true)
+        `);
+        await client.query(`
+          insert into auth.organization (id, name, slug)
+          values ('so-org', 'Sole Org', 'so-org')
+        `);
+        await client.query(`
+          insert into auth.member (id, organization_id, user_id, role)
+          values
+            ('so-mem-owner', 'so-org', 'so-owner', 'owner'),
+            ('so-mem-member', 'so-org', 'so-member', 'member'),
+            ('so-mem-second', 'so-org', 'so-second', 'admin')
+        `);
+      });
+    });
+
+    afterAll(async () => {
+      await rootPool.query(
+        "delete from app.audit_log where organization_id = 'so-org'",
+      );
+      await asOwner(async (client) => {
+        await client.query(
+          "delete from auth.member where organization_id = 'so-org'",
+        );
+        await client.query("delete from auth.organization where id = 'so-org'");
+        await client.query('delete from auth."user" where id like \'so-%\'');
+      });
+    });
+
+    it('refuses a second active owner on insert', async () => {
+      await expect(
+        asOwner((client) =>
+          client.query(`
+            insert into auth.member (id, organization_id, user_id, role)
+            values ('so-mem-extra', 'so-org', 'so-member', 'owner')
+          `),
+        ),
+      ).rejects.toThrow(/only one active owner/);
+    });
+
+    it('refuses promoting a second active owner on update', async () => {
+      await expect(
+        asOwner((client) =>
+          client.query(
+            "update auth.member set role = 'owner' where id = 'so-mem-second'",
+          ),
+        ),
+      ).rejects.toThrow(/only one active owner/);
+    });
+
+    it('refuses a transfer from a caller who is not the owner', async () => {
+      await expect(
+        transferOwnership(authPool, 'so-org', 'so-second', 'so-member'),
+      ).rejects.toThrow(/current owner/);
+    });
+
+    it('refuses a transfer to an inactive member', async () => {
+      await asTenant(
+        apiPool,
+        { organizationId: 'so-org', role: 'owner', userId: 'so-owner' },
+        (transaction) =>
+          transaction.query(
+            "select auth.set_member_status('so-member', 'inactive')",
+          ),
+      );
+      await expect(
+        transferOwnership(authPool, 'so-org', 'so-owner', 'so-member'),
+      ).rejects.toThrow(/active member/);
+      await asTenant(
+        apiPool,
+        { organizationId: 'so-org', role: 'owner', userId: 'so-owner' },
+        (transaction) =>
+          transaction.query(
+            "select auth.set_member_status('so-member', 'active')",
+          ),
+      );
+    });
+
+    it('swaps the roles and audits the transfer in one transaction', async () => {
+      await transferOwnership(authPool, 'so-org', 'so-owner', 'so-member');
+
+      const roles = await rootPool.query<{ role: string; user_id: string }>(
+        `select user_id, role
+         from auth.member
+         where organization_id = 'so-org'
+           and user_id in ('so-owner', 'so-member')
+         order by user_id`,
+      );
+      expect(roles.rows).toEqual([
+        { role: 'owner', user_id: 'so-member' },
+        { role: 'admin', user_id: 'so-owner' },
+      ]);
+
+      const audit = await rootPool.query<{
+        action: string;
+        metadata: Record<string, unknown>;
+        resource_id: string | null;
+        user_id: string;
+      }>(
+        `select action, user_id, resource_id, metadata
+         from app.audit_log
+         where organization_id = 'so-org'
+           and action = 'organization.ownership_transferred'`,
+      );
+      expect(audit.rows).toEqual([
+        {
+          action: 'organization.ownership_transferred',
+          metadata: { from_user_id: 'so-owner', to_user_id: 'so-member' },
+          resource_id: 'so-member',
+          user_id: 'so-owner',
+        },
+      ]);
+
+      // Restore the original owner so re-runs and later assertions see a clean org.
+      await transferOwnership(authPool, 'so-org', 'so-member', 'so-owner');
     });
   });
 
@@ -2564,10 +2693,21 @@ describe('PostgreSQL 18 isolation', () => {
     ).resolves.toEqual({ mode: 'all' });
 
     await storeScope();
+    // Becoming owner clears the member's stored scope. Demote user-1 first so the
+    // single-owner invariant holds, then restore it; raw updates add no audit rows.
+    await authPool.query(
+      "update auth.member set role = 'admin' where id = 'member-1'",
+    );
     await authPool.query(
       "update auth.member set role = 'owner' where id = 'member-scope'",
     );
     expect(await storedRows()).toEqual({ access: 0, scopes: 0 });
+    await authPool.query(
+      "update auth.member set role = 'admin' where id = 'member-scope'",
+    );
+    await authPool.query(
+      "update auth.member set role = 'owner' where id = 'member-1'",
+    );
     await authPool.query(`delete from auth."user" where id = 'scope-user'`);
   });
 

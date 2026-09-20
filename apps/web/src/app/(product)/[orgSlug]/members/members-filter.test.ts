@@ -60,6 +60,7 @@ describe('memberMatchesFilters', () => {
 
 describe('memberRowActionIds', () => {
   const owned = {
+    callerIsOwner: true,
     canManageEntityAccess: true,
     canManageMembers: true,
     currentUserId: 'user-caller',
@@ -88,9 +89,27 @@ describe('memberRowActionIds', () => {
   it('offers nothing to manage without the capability', () => {
     const readOnly = {
       ...owned,
+      callerIsOwner: false,
       canManageEntityAccess: false,
       canManageMembers: false,
     };
     expect(memberRowActionIds(member, readOnly)).toEqual([]);
+  });
+
+  it('offers ownership transfer only to the owner and only for an active non-owner', () => {
+    expect(memberRowActionIds(member, owned)).toContain('transfer-ownership');
+    // The owner never transfers ownership to the owner row.
+    expect(memberRowActionIds(owner, owned)).not.toContain(
+      'transfer-ownership',
+    );
+    // An inactive member cannot receive ownership.
+    expect(memberRowActionIds(inactive, owned)).not.toContain(
+      'transfer-ownership',
+    );
+    // A non-owner caller never sees the action.
+    const admin = { ...owned, callerIsOwner: false };
+    expect(memberRowActionIds(member, admin)).not.toContain(
+      'transfer-ownership',
+    );
   });
 });

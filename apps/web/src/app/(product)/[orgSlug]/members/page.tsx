@@ -91,6 +91,7 @@ export default async function OrganizationMembersPage({
   const capabilities = access?.capabilities;
   const canManageMembers = capabilities?.manageMembers ?? false;
   const canManageEntityAccess = capabilities?.manageEntityAccess ?? false;
+  const callerIsOwner = access?.role === 'owner';
 
   const [memberResult, invitationResult] = await Promise.allSettled([
     auth.api.listMembers({
@@ -134,6 +135,7 @@ export default async function OrganizationMembersPage({
   return (
     <PageContainer>
       <MembersView
+        callerIsOwner={callerIsOwner}
         canManageEntityAccess={canManageEntityAccess}
         canManageMembers={canManageMembers}
         currentUserId={session?.user.id ?? null}

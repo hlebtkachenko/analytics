@@ -24,22 +24,26 @@ import {
   adminPluginOptions,
   authLoggerConfiguration,
   authRateLimitRules,
+  beforeCreateInvitation,
   beforeCreateOrganization,
   cookieSecureForOrigin,
   createAccountDeletionBeforeHook,
   createAuthBeforeHook,
+  createBeforeUpdateMemberRoleHook,
   createPublicSignUpBeforeHook,
   createInvitationSender,
   createPasswordResetSender,
   createVerificationSender,
   customSyntheticUser,
   invalidOrganizationSlugErrorCode,
+  lastActiveOwnerErrorCode,
   loadAuthEnvironment,
   organizationCreationConfiguration,
   organizationIdRequiredErrorCode,
   organizationIdRequiredPaths,
   organizationLimitReached,
   organizationRoles,
+  ownerRoleNotAssignableErrorCode,
   publicSignUpAllowed,
   publicSignUpErrorCode,
   readAuthSecret,
@@ -1138,6 +1142,74 @@ describe('organization creation policy', () => {
       expect(database.organization).toHaveLength(1);
       expect(database.organization[0]?.id).toBe(organization.id);
     }
+  });
+});
+
+describe('owner role assignment policy', () => {
+  function poolWithQuery(query: ReturnType<typeof vi.fn>): DatabasePool {
+    return { query } as unknown as DatabasePool;
+  }
+
+  it('refuses an invitation that would grant the owner role', async () => {
+    for (const role of ['owner', 'owner,admin']) {
+      await expect(
+        beforeCreateInvitation({ invitation: { role } }),
+      ).rejects.toMatchObject({
+        body: { code: ownerRoleNotAssignableErrorCode },
+      });
+    }
+  });
+
+  it('allows an invitation that grants an assignable role', async () => {
+    for (const role of ['admin', 'member']) {
+      await expect(
+        beforeCreateInvitation({ invitation: { role } }),
+      ).resolves.toBeUndefined();
+    }
+  });
+
+  it('refuses a role change to owner without reading the database', async () => {
+    const query = vi.fn();
+    const hook = createBeforeUpdateMemberRoleHook(poolWithQuery(query));
+
+    await expect(
+      hook({
+        member: { role: 'member', userId: 'user-2' },
+        newRole: 'owner',
+        organization: { id: 'organization-1' },
+      }),
+    ).rejects.toMatchObject({
+      body: { code: ownerRoleNotAssignableErrorCode },
+    });
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('still refuses to demote the last active owner', async () => {
+    const query = vi.fn(async () => ({ rows: [{ present: false }] }));
+    const hook = createBeforeUpdateMemberRoleHook(poolWithQuery(query));
+
+    await expect(
+      hook({
+        member: { role: 'owner', userId: 'user-1' },
+        newRole: 'admin',
+        organization: { id: 'organization-1' },
+      }),
+    ).rejects.toMatchObject({
+      body: { code: lastActiveOwnerErrorCode },
+    });
+  });
+
+  it('allows demoting an owner while another active owner remains', async () => {
+    const query = vi.fn(async () => ({ rows: [{ present: true }] }));
+    const hook = createBeforeUpdateMemberRoleHook(poolWithQuery(query));
+
+    await expect(
+      hook({
+        member: { role: 'owner', userId: 'user-1' },
+        newRole: 'admin',
+        organization: { id: 'organization-1' },
+      }),
+    ).resolves.toBeUndefined();
   });
 });
 

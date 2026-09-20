@@ -73,6 +73,7 @@ export const invalidOrganizationSlugErrorCode = 'INVALID_ORGANIZATION_SLUG';
 export const organizationIdRequiredErrorCode = 'ORGANIZATION_ID_REQUIRED';
 export const memberInactiveErrorCode = 'MEMBER_INACTIVE';
 export const lastActiveOwnerErrorCode = 'LAST_ACTIVE_OWNER';
+export const ownerRoleNotAssignableErrorCode = 'OWNER_ROLE_NOT_ASSIGNABLE';
 export const unsupportedActiveOrganizationEndpointErrorCode =
   'ACTIVE_ORGANIZATION_ENDPOINT_DISABLED';
 export const unsupportedActiveOrganizationPath =
@@ -296,6 +297,25 @@ async function rejectInactiveMember(
   }
 }
 
+// Owner is never a freely assignable role: it is granted only at organization creation and moves only through ownership transfer.
+export function assertRoleAssignable(role: string): void {
+  if (role.split(',').includes('owner')) {
+    throw APIError.from('BAD_REQUEST', {
+      code: ownerRoleNotAssignableErrorCode,
+      message: 'The owner role cannot be assigned.',
+    });
+  }
+}
+
+// Rejects an invitation that would grant the owner role before Better Auth writes it.
+export async function beforeCreateInvitation({
+  invitation,
+}: {
+  invitation: { role: string };
+}): Promise<void> {
+  assertRoleAssignable(invitation.role);
+}
+
 // Refuses to demote the last active owner, so an organization can never strip itself of every active owner.
 export function createBeforeUpdateMemberRoleHook(pool: DatabasePool) {
   return async ({
@@ -307,6 +327,9 @@ export function createBeforeUpdateMemberRoleHook(pool: DatabasePool) {
     newRole: string;
     organization: { id: string };
   }): Promise<void> => {
+    // Owner is never assignable through a role change; ownership moves only through transfer.
+    assertRoleAssignable(newRole);
+
     const wasOwner = member.role.split(',').includes('owner');
     const willBeOwner = newRole.split(',').includes('owner');
 
@@ -607,6 +630,7 @@ async function createAuth() {
         ...organizationCreationConfiguration,
         ac: organizationAccessControl,
         organizationHooks: {
+          beforeCreateInvitation,
           beforeCreateOrganization,
           beforeUpdateMemberRole: createBeforeUpdateMemberRoleHook(pool),
         },

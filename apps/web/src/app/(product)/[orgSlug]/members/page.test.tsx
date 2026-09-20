@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
   resolveOrganizationRouteForRequest: vi.fn(),
   search: '',
+  transferOwnershipAction: vi.fn(),
   updateMemberRole: vi.fn(),
 }));
 
@@ -64,6 +65,9 @@ vi.mock('../../../../lib/organizations/entities', () => ({
 }));
 vi.mock('../../../../lib/organizations/resolver', () => ({
   resolveOrganizationRouteForRequest: mocks.resolveOrganizationRouteForRequest,
+}));
+vi.mock('../../../../lib/organizations/actions', () => ({
+  transferOwnershipAction: mocks.transferOwnershipAction,
 }));
 
 import { ToastProvider } from '../../../../components/shell/toast';
@@ -137,6 +141,7 @@ function accessFor(role: 'admin' | 'member' | 'owner') {
       useAi: true,
     },
     organizationId: 'organization-1',
+    role,
   };
 }
 
@@ -207,6 +212,7 @@ describe('OrganizationMembersPage', () => {
     mocks.updateMemberRole.mockResolvedValue({ data: {}, error: null });
     mocks.removeMember.mockResolvedValue({ data: {}, error: null });
     mocks.cancelInvitation.mockResolvedValue({ data: {}, error: null });
+    mocks.transferOwnershipAction.mockResolvedValue({ ok: true });
   });
 
   it('renders members and pending invitations with an expired label', async () => {
@@ -387,6 +393,54 @@ describe('OrganizationMembersPage', () => {
       organizationId: 'organization-1',
       role: 'member',
     });
+  });
+
+  it('never offers owner as an assignable invite role', async () => {
+    await renderPage();
+
+    fireEvent.click(
+      screen.getAllByRole('button', { name: 'Invite member' })[0]!,
+    );
+    const select = document.getElementById('invite-role')!;
+    expect(within(select).getByText('Admin')).toBeTruthy();
+    expect(within(select).getByText('Member')).toBeTruthy();
+    expect(within(select).queryByText('Owner')).toBeNull();
+  });
+
+  it('transfers ownership to an active member', async () => {
+    await renderPage();
+
+    fireEvent.click(
+      within(rowFor('Ben Member')).getByRole('button', {
+        name: 'Actions for Ben Member',
+      }),
+    );
+    fireEvent.click(screen.getByText('Transfer ownership'));
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer ownership' }));
+
+    await screen.findByText('Ownership was transferred.');
+    expect(mocks.transferOwnershipAction).toHaveBeenCalledWith({
+      organizationId: 'organization-1',
+      toUserId: 'user-2',
+    });
+  });
+
+  it('never offers ownership transfer to a non-owner caller', async () => {
+    mocks.resolveOrganizationRouteForRequest.mockResolvedValue({
+      id: 'organization-1',
+      name: 'Organization One',
+      role: 'admin',
+      slug: 'organization-one',
+    });
+    mocks.readOrganizationAccess.mockResolvedValue(accessFor('admin'));
+
+    await renderPage();
+
+    expect(
+      within(rowFor('Ben Member')).queryByRole('button', {
+        name: 'Actions for Ben Member',
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it('removes a member by marking them inactive over the BFF', async () => {

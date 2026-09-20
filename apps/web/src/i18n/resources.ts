@@ -514,6 +514,7 @@ export const resources = {
           reactivate: 'Reactivate',
           remove: 'Remove',
           resend: 'Resend',
+          transferOwnership: 'Transfer ownership',
         },
         cancelInvite: {
           body: 'This cancels the pending invitation. The address can be invited again later.',
@@ -629,6 +630,13 @@ export const resources = {
           resendSuccess: 'The invitation was resent.',
           roleSuccess: 'The member role was updated.',
           scopeSuccess: 'Entity access was updated.',
+          transferSuccess: 'Ownership was transferred.',
+        },
+        transfer: {
+          body: 'This makes {{name}} the owner and changes your role to admin. You keep admin access but no longer control ownership.',
+          cancel: 'Cancel',
+          confirm: 'Transfer ownership',
+          title: 'Transfer ownership to {{name}}',
         },
       },
       reference: {

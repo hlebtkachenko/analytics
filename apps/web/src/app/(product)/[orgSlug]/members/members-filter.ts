@@ -18,6 +18,7 @@ export type MemberFilterSelection = Readonly<{
 }>;
 
 export type MemberActionCapabilities = Readonly<{
+  callerIsOwner: boolean;
   canManageEntityAccess: boolean;
   canManageMembers: boolean;
   currentUserId: string | null;
@@ -62,6 +63,14 @@ export function memberRowActionIds(
   const ids: string[] = [];
   if (capabilities.canManageMembers) {
     ids.push('change-role');
+  }
+  // Only the sitting owner may hand ownership to another active, non-owner member.
+  if (
+    capabilities.callerIsOwner &&
+    member.role !== 'owner' &&
+    member.status === 'active'
+  ) {
+    ids.push('transfer-ownership');
   }
   // The API answers 409 for an owner target, so the owner is always all entities.
   if (

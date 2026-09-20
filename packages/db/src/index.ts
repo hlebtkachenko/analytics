@@ -17,6 +17,7 @@ export {
   resolveMembership,
   resolveOrganizationRoute,
   setOrganizationQuota,
+  transferOwnership,
 } from './access.js';
 export type {
   MembershipResolution,

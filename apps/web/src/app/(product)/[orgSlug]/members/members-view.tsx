@@ -46,6 +46,7 @@ import { z } from 'zod';
 
 import { useToast } from '../../../../components/shell/toast';
 import { authClient } from '../../../../lib/auth/client';
+import { transferOwnershipAction } from '../../../../lib/organizations/actions';
 import {
   memberEntityScopePath,
   memberStatusPath,
@@ -166,6 +167,7 @@ type TableAction = Readonly<{
 }>;
 
 type MembersViewProperties = Readonly<{
+  callerIsOwner: boolean;
   canManageEntityAccess: boolean;
   canManageMembers: boolean;
   currentUserId: string | null;
@@ -179,7 +181,10 @@ type MembersViewProperties = Readonly<{
   workspaceName: string;
 }>;
 
-const assignableRoles: readonly MemberRole[] = ['owner', 'admin', 'member'];
+// Owner is never assignable through invite or a role change; ownership moves only through transfer.
+const assignableRoles: readonly MemberRole[] = ['admin', 'member'];
+// Every role a listed member can hold, used only by the role filter columns.
+const filterableRoles: readonly MemberRole[] = ['owner', 'admin', 'member'];
 const pageSizeChoices: number[] = [10, 25, 50];
 
 const emailSchema = z.email().max(254);
@@ -259,6 +264,7 @@ function downloadCsv(
 }
 
 export default function MembersView({
+  callerIsOwner,
   canManageEntityAccess,
   canManageMembers,
   currentUserId,
@@ -302,6 +308,7 @@ export default function MembersView({
   );
 
   const [removeTarget, setRemoveTarget] = useState<MemberRow | null>(null);
+  const [transferTarget, setTransferTarget] = useState<MemberRow | null>(null);
   const [cancelTarget, setCancelTarget] = useState<InvitationRow | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [membersLoading, setMembersLoading] = useState(false);
@@ -399,7 +406,7 @@ export default function MembersView({
   // Filter category items shared by the panel columns and the applied-tag row.
   const roleItems = useMemo<FilterItem[]>(
     () =>
-      assignableRoles.map((role) => ({
+      filterableRoles.map((role) => ({
         id: role,
         label: t(`members.roles.${role}`),
       })),
@@ -519,8 +526,16 @@ export default function MembersView({
           setRemoveTarget(member);
         },
       },
+      'transfer-ownership': {
+        id: 'transfer-ownership',
+        label: t('members.actions.transferOwnership'),
+        onClick: () => {
+          setTransferTarget(member);
+        },
+      },
     };
     return memberRowActionIds(member, {
+      callerIsOwner,
       canManageEntityAccess,
       canManageMembers,
       currentUserId,
@@ -758,6 +773,30 @@ export default function MembersView({
 
     if (result.status === 409) {
       notify({ kind: 'error', title: t('members.remove.lastOwner') });
+      return;
+    }
+    notify({ kind: 'error', title: t('members.toast.failure') });
+  }
+
+  // Transfer hands ownership to the target and demotes the caller to admin server-side.
+  async function confirmTransfer(): Promise<void> {
+    const target = transferTarget;
+    if (target === null) {
+      return;
+    }
+    setSubmitting(true);
+    const result = await transferOwnershipAction({
+      organizationId,
+      toUserId: target.userId,
+    });
+    setSubmitting(false);
+    setTransferTarget(null);
+
+    if (result.ok) {
+      notify({ kind: 'success', title: t('members.toast.transferSuccess') });
+      await reloadMembers();
+      // The caller is now admin, so re-render the shell to drop owner-only controls.
+      router.refresh();
       return;
     }
     notify({ kind: 'error', title: t('members.toast.failure') });
@@ -1533,6 +1572,27 @@ export default function MembersView({
           size="xs"
         >
           <p>{t('members.remove.body')}</p>
+        </Modal>
+      ) : null}
+
+      {transferTarget !== null ? (
+        <Modal
+          modalHeading={t('members.transfer.title', {
+            name: transferTarget.name,
+          })}
+          onRequestClose={() => {
+            setTransferTarget(null);
+          }}
+          onRequestSubmit={() => {
+            void confirmTransfer();
+          }}
+          open
+          primaryButtonDisabled={submitting}
+          primaryButtonText={t('members.transfer.confirm')}
+          secondaryButtonText={t('members.transfer.cancel')}
+          size="xs"
+        >
+          <p>{t('members.transfer.body', { name: transferTarget.name })}</p>
         </Modal>
       ) : null}
 
