@@ -28,6 +28,10 @@ const textFilename = `placeholder-note-${runSuffix}.txt`;
 const ruledPdfFilename = `placeholder-ruled-${runSuffix}.pdf`;
 const csvDocumentTitle = `Placeholder tabular document ${runSuffix}`;
 
+// Fixed real-world filenames the drop zone must accept as-is: diacritics, spaces and a plus sign.
+const dropZonePdfFilename = 'ABA-SMLOUVA+O+NÁJMU+BYTU.pdf';
+const dropZonePngFilename = 'Snímek obrazovky 2026-09-17 v 21.50.37.png';
+
 const organizationPath = `/api/bff/application/organizations/${organizationId}`;
 const partnersPath = `${organizationPath}/partners`;
 const legalEntitiesPath = `${organizationPath}/legal-entities`;
@@ -686,6 +690,59 @@ test.describe
         fullPage: true,
         path: 'test-results/inbox-item.png',
       });
+    });
+  });
+
+  test('a PDF and a PNG are dropped through the drop zone and appear in the inbox', async ({
+    page,
+  }) => {
+    test.skip(password.length === 0, 'BAP_OPERATIONAL_PASSWORD is required.');
+    test.setTimeout(120_000);
+
+    await test.step('drop both files, see them received, then find both rows in the list', async () => {
+      await openInbox(page);
+      await page.getByLabel('Drop files here or choose files').setInputFiles([
+        {
+          buffer: pdfBytes(`drop-zone-${runSuffix}`),
+          mimeType: 'application/pdf',
+          name: dropZonePdfFilename,
+        },
+        {
+          buffer: pngBytes(`drop-zone-${runSuffix}`),
+          mimeType: 'image/png',
+          name: dropZonePngFilename,
+        },
+      ]);
+
+      const uploadResults = page.getByRole('table', {
+        name: 'Upload results',
+      });
+      const pdfReceivedLink = uploadResults
+        .getByRole('row')
+        .filter({ hasText: dropZonePdfFilename })
+        .getByRole('link', { name: 'Received' });
+      const pngReceivedLink = uploadResults
+        .getByRole('row')
+        .filter({ hasText: dropZonePngFilename })
+        .getByRole('link', { name: 'Received' });
+      await expect(pdfReceivedLink).toBeVisible();
+      await expect(pngReceivedLink).toBeVisible();
+
+      // The filename alone is not a unique row key on a re-run, so the item id from the link is used instead.
+      const pdfHref = await pdfReceivedLink.getAttribute('href');
+      const pngHref = await pngReceivedLink.getAttribute('href');
+      const pdfDropItemId = /\/inbox\/([^/?]+)/.exec(pdfHref ?? '')![1]!;
+      const pngDropItemId = /\/inbox\/([^/?]+)/.exec(pngHref ?? '')![1]!;
+
+      // An earlier test left the filter on "routed", which would hide a plain received item.
+      await page.getByLabel('Status', { exact: true }).selectOption('all');
+      const dataGrid = page.getByRole('table', { name: 'Inbox items' });
+      await expect(
+        dataGrid.locator(`a[href*="/inbox/${pdfDropItemId}"]`),
+      ).toBeVisible();
+      await expect(
+        dataGrid.locator(`a[href*="/inbox/${pngDropItemId}"]`),
+      ).toBeVisible();
     });
   });
 });

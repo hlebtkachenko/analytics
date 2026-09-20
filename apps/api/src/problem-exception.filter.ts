@@ -6,6 +6,7 @@ import {
   type ExceptionFilter,
 } from '@nestjs/common';
 
+import type { ApplicationLogger } from './logger.js';
 import type { AuthenticatedRequest, HttpResponse } from './request-context.js';
 
 const problemDetails: Record<
@@ -79,6 +80,8 @@ function problemExtension(exception: unknown): Record<string, unknown> {
 
 @Catch()
 export class ProblemExceptionFilter implements ExceptionFilter {
+  constructor(private readonly logger?: ApplicationLogger) {}
+
   catch(exception: unknown, host: ArgumentsHost): void {
     const response = host.switchToHttp().getResponse<HttpResponse>();
     const request = host.switchToHttp().getRequest<AuthenticatedRequest>();
@@ -86,6 +89,17 @@ export class ProblemExceptionFilter implements ExceptionFilter {
       exception instanceof HttpException
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
+
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      this.logger?.error({
+        errorMessage:
+          exception instanceof Error ? exception.message : String(exception),
+        errorName: exception instanceof Error ? exception.name : 'UnknownError',
+        requestId: request.requestId,
+        route: request.route?.path,
+      });
+    }
+
     const problem = problemDetails[status] ?? {
       detail: 'The service could not complete the request',
       slug:
