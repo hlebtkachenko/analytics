@@ -1,6 +1,7 @@
 import {
   applyInvitationEntityScope,
   countSoleOwnedOrganizations,
+  createNotification,
   hasOtherActiveOwner,
   organizationCreationLimitReached,
   publicSignupEnabled,
@@ -362,14 +363,24 @@ export function createAfterAcceptInvitationHook(pool: DatabasePool) {
   return async ({
     invitation,
     member,
+    user,
+    organization,
   }: {
-    invitation: { id: string };
+    invitation: { id: string; inviterId: string };
     member: { organizationId: string; userId: string };
+    user: { name: string };
+    organization: { name: string; slug: string };
   }): Promise<void> => {
     await applyInvitationEntityScope(pool, {
       invitationId: invitation.id,
       organizationId: member.organizationId,
       userId: member.userId,
+    }).catch(() => undefined);
+    void createNotification(pool, {
+      userId: invitation.inviterId,
+      kind: 'member.joined',
+      title: `${user.name} joined ${organization.name}`,
+      href: `/${organization.slug}/members`,
     }).catch(() => undefined);
   };
 }

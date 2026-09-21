@@ -28,6 +28,7 @@ import {
   beforeCreateOrganization,
   cookieSecureForOrigin,
   createAccountDeletionBeforeHook,
+  createAfterAcceptInvitationHook,
   createAuthBeforeHook,
   createBeforeUpdateMemberRoleHook,
   createPublicSignUpBeforeHook,
@@ -1210,6 +1211,53 @@ describe('owner role assignment policy', () => {
         organization: { id: 'organization-1' },
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('invitation acceptance notification', () => {
+  function poolWithQuery(query: ReturnType<typeof vi.fn>): DatabasePool {
+    return { query } as unknown as DatabasePool;
+  }
+
+  const acceptedInvitation = {
+    invitation: { id: 'invitation-1', inviterId: 'inviter-1' },
+    member: { organizationId: 'organization-1', userId: 'user-2' },
+    user: { name: 'New Member' },
+    organization: { name: 'Acme', slug: 'acme' },
+  };
+
+  it('notifies the inviter that the member joined', async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('apply_invitation_entity_scope')) return { rows: [] };
+      if (sql.includes('insert into auth.notification')) return { rows: [] };
+      throw new Error(`unexpected query: ${sql}`);
+    });
+    const hook = createAfterAcceptInvitationHook(poolWithQuery(query));
+
+    await hook(acceptedInvitation);
+
+    const notificationCall = query.mock.calls.find(([sql]) =>
+      (sql as string).includes('insert into auth.notification'),
+    ) as unknown as [string, unknown[]] | undefined;
+    expect(notificationCall?.[1]).toEqual([
+      'inviter-1',
+      'member.joined',
+      'New Member joined Acme',
+      '/acme/members',
+    ]);
+  });
+
+  it('swallows a notification failure and still resolves', async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('apply_invitation_entity_scope')) return { rows: [] };
+      if (sql.includes('insert into auth.notification')) {
+        throw new Error('notification insert failed');
+      }
+      throw new Error(`unexpected query: ${sql}`);
+    });
+    const hook = createAfterAcceptInvitationHook(poolWithQuery(query));
+
+    await expect(hook(acceptedInvitation)).resolves.toBeUndefined();
   });
 });
 
