@@ -67,13 +67,14 @@ describe('OrganizationsPage', () => {
     mocks.listUserInvitations.mockResolvedValue([]);
   });
 
-  it('lists the caller workspaces with their role', async () => {
+  it('lists an owned workspace under My workspaces', async () => {
     mocks.listWorkspaceMemberships.mockResolvedValue([
       {
         id: 'organization-1',
         name: 'Placeholder Holding',
         slug: 'placeholder-holding',
         role: 'owner',
+        status: 'active',
         createdAt: new Date('2026-09-01T00:00:00.000Z'),
       },
     ]);
@@ -81,17 +82,39 @@ describe('OrganizationsPage', () => {
     await renderPage();
 
     expect(screen.getByRole('heading', { name: 'Workspaces' })).toBeVisible();
-    const table = screen.getByRole('table');
-    expect(within(table).getByText('Placeholder Holding')).toBeVisible();
-    expect(within(table).getByText('Owner')).toBeVisible();
+    expect(
+      screen.getByRole('heading', { name: 'My workspaces' }),
+    ).toBeVisible();
+    expect(screen.getByText('Placeholder Holding')).toBeVisible();
   });
 
-  it('shows the get-started checklist when the caller has no workspace', async () => {
+  it('lists a non-owner membership under Member of with its status', async () => {
+    mocks.listWorkspaceMemberships.mockResolvedValue([
+      {
+        id: 'organization-2',
+        name: 'Client Books',
+        slug: 'client-books',
+        role: 'member',
+        status: 'inactive',
+        createdAt: new Date('2026-09-01T00:00:00.000Z'),
+      },
+    ]);
+
     await renderPage();
 
-    expect(screen.getByText('Get started')).toBeVisible();
-    expect(screen.getByText('Create a workspace')).toBeVisible();
-    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Member of' })).toBeVisible();
+    const table = screen.getAllByRole('table')[1]!;
+    expect(within(table).getByText('Client Books')).toBeVisible();
+    expect(within(table).getByText('Inactive')).toBeVisible();
+  });
+
+  it('shows the empty owned state when the caller owns no workspace', async () => {
+    await renderPage();
+
+    expect(screen.getByText('You do not own a workspace yet.')).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Create workspace' }),
+    ).toBeVisible();
   });
 
   it('lists pending invitations with accept and decline actions', async () => {

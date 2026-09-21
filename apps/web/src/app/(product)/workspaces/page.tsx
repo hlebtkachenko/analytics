@@ -46,6 +46,7 @@ export default async function OrganizationsPage() {
       name: membership.name,
       slug: membership.slug,
       role: membership.role,
+      status: membership.status,
       created: isoDate(membership.createdAt),
     }));
   } catch {

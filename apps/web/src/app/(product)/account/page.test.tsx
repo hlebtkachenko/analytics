@@ -68,6 +68,7 @@ describe('AccountPage', () => {
         name: 'Organization One',
         role: 'owner',
         slug: 'organization-one',
+        status: 'active',
       },
     ]);
     mocks.updateUser.mockResolvedValue({ data: {}, error: null });

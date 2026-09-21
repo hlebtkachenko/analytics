@@ -31,12 +31,15 @@ export default async function AccountPage() {
       await getAuthPool(),
       session.user.id,
     );
-    workspaces = memberships.map((membership) => ({
-      id: membership.id,
-      name: membership.name,
-      role: membership.role,
-      slug: membership.slug,
-    }));
+    // Only active memberships are enterable, so the account switcher hides inactive ones.
+    workspaces = memberships
+      .filter((membership) => membership.status === 'active')
+      .map((membership) => ({
+        id: membership.id,
+        name: membership.name,
+        role: membership.role,
+        slug: membership.slug,
+      }));
   } catch {
     // A failed read renders an empty workspace list rather than the whole page failing.
   }

@@ -1,0 +1,127 @@
+@use '@bap/design-system/tokens/colors.scss' as colors;
+
+.section {
+  margin-block-end: 2rem;
+}
+
+// The hero and the upsell row sit side by side and stack on narrow widths.
+.row {
+  display: flex;
+  gap: 1rem;
+  align-items: stretch;
+}
+
+@media (max-width: 42rem) {
+  .row {
+    flex-direction: column;
+  }
+}
+
+// Gradient "Build" hero that starts workspace creation.
+.hero {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 1.5rem;
+  flex: 0 0 20rem;
+  min-block-size: 12rem;
+  padding: 1.5rem;
+  background-image: linear-gradient(
+    135deg,
+    #{colors.$blue-60},
+    #{colors.$purple-60}
+  );
+  color: var(--cds-text-on-color, #ffffff);
+
+  &:hover {
+    background-image: linear-gradient(
+      135deg,
+      #{colors.$blue-70},
+      #{colors.$purple-70}
+    );
+  }
+}
+
+@media (max-width: 42rem) {
+  .hero {
+    flex: 1 1 auto;
+  }
+}
+
+.heroBody {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.heroTitle {
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.heroSubtitle {
+  font-size: 0.875rem;
+  line-height: 1.4;
+  max-inline-size: 16rem;
+}
+
+.heroCta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+// A horizontally scrolling row of advisory upsell tiles.
+.upsellRow {
+  display: flex;
+  gap: 1rem;
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  overflow-x: auto;
+  padding-block-end: 0.5rem;
+}
+
+.upsellTile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 0 0 15rem;
+  min-block-size: 12rem;
+}
+
+.upsellTag {
+  align-self: flex-start;
+}
+
+.upsellTitle {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.upsellDescription {
+  flex: 1 1 auto;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--cds-text-secondary);
+}
+
+.upsellLink {
+  margin-block-start: auto;
+}
+
+// Screen-reader-only heading text that labels the section landmark.
+.visuallyHidden {
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  padding: 0;
+  white-space: nowrap;
+  border: 0;
+}

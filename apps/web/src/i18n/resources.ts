@@ -772,6 +772,21 @@ export const resources = {
           unavailable: 'The workspace could not be created.',
           urlPreview: 'Address: {{url}}',
         },
+        filter: {
+          apply: 'Apply',
+          filter: 'Filter',
+          filterRole: 'Role',
+          filterStatus: 'Status',
+          reset: 'Reset',
+          roleAdmin: 'Admin',
+          roleMember: 'Member',
+        },
+        hero: {
+          cta: 'Start building',
+          subtitle:
+            'Create a workspace to bring your entities, documents and analytics together.',
+          title: 'Build',
+        },
         invitations: {
           accept: 'Accept',
           acceptFailure: 'The invitation could not be accepted.',
@@ -796,14 +811,56 @@ export const resources = {
           columnName: 'Name',
           columnRole: 'Your role',
           columnSlug: 'Slug',
+          columnStatus: 'Status',
           createAction: 'Create workspace',
+          emptyOwned: 'You do not own a workspace yet.',
           emptyTitle: 'You do not belong to a workspace yet.',
+          leaveAction: 'Leave workspace',
           leftSuccess: 'You left the workspace.',
           loadError: 'Your workspaces could not be loaded.',
+          memberTitle: 'Member of',
+          membersAction: 'Members',
+          myTitle: 'My workspaces',
+          openAction: 'Open workspace',
           roleAdmin: 'Admin',
           roleMember: 'Member',
           roleOwner: 'Owner',
+          settingsAction: 'Settings',
           title: 'Workspaces',
+        },
+        status: {
+          active: 'Active',
+          inactive: 'Inactive',
+        },
+        upsell: {
+          audit: {
+            description:
+              'Keep evidence organized and close the year with confidence.',
+            learnMore: 'Learn more',
+            tag: 'New',
+            title: 'Audit Readiness',
+          },
+          cashflow: {
+            description:
+              'Project runway and spot shortfalls before they happen.',
+            learnMore: 'Learn more',
+            tag: 'Popular',
+            title: 'Cashflow Forecasting',
+          },
+          finance: {
+            description:
+              'Work with advisors on budgets, reporting and strategy.',
+            learnMore: 'Learn more',
+            tag: 'Popular',
+            title: 'Finance Advisory',
+          },
+          tax: {
+            description:
+              'Find deductions and plan ahead to lower your tax bill.',
+            learnMore: 'Learn more',
+            tag: 'New',
+            title: 'Tax Optimization',
+          },
         },
       },
     },
