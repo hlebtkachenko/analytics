@@ -646,6 +646,7 @@ export const resources = {
         columnDate: 'Received',
         columnMessage: 'Notification',
         empty: 'You have no notifications yet.',
+        sectionTitle: 'All notifications',
         title: 'Notifications',
       },
       reference: {

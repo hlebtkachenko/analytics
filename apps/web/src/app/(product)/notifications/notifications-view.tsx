@@ -76,43 +76,46 @@ export default function NotificationsView({
   }));
 
   return (
-    <DataGrid
-      columns={columns}
-      emptyLabel={t('notifications.empty')}
-      onRowClick={(row) => {
-        if (typeof row.href === 'string' && row.href.length > 0) {
-          router.push(row.href as Route);
-        }
-      }}
-      rowActions={(row) => [
-        {
-          id: 'dismiss',
-          isDelete: true,
-          label: t('shell.notifications.dismiss'),
-          onClick: () => {
-            void dismissNotificationAction(String(row.id)).then(() => {
-              router.refresh();
-            });
+    <>
+      <h1>{t('notifications.title')}</h1>
+      <DataGrid
+        columns={columns}
+        emptyLabel={t('notifications.empty')}
+        onRowClick={(row) => {
+          if (typeof row.href === 'string' && row.href.length > 0) {
+            router.push(row.href as Route);
+          }
+        }}
+        rowActions={(row) => [
+          {
+            id: 'dismiss',
+            isDelete: true,
+            label: t('shell.notifications.dismiss'),
+            onClick: () => {
+              void dismissNotificationAction(String(row.id)).then(() => {
+                router.refresh();
+              });
+            },
           },
-        },
-      ]}
-      rows={rows}
-      size="sm"
-      state={rows.length === 0 ? 'empty' : 'ready'}
-      title={t('notifications.title')}
-      toolbarActions={[
-        {
-          disabled: !hasUnread,
-          id: 'mark-all-read',
-          kind: 'ghost',
-          label: t('shell.notifications.markAllRead'),
-          onClick: () => {
-            void markNotificationsReadAction().then(() => {
-              router.refresh();
-            });
+        ]}
+        rows={rows}
+        size="sm"
+        state={rows.length === 0 ? 'empty' : 'ready'}
+        title={t('notifications.sectionTitle')}
+        toolbarActions={[
+          {
+            disabled: !hasUnread,
+            id: 'mark-all-read',
+            kind: 'ghost',
+            label: t('shell.notifications.markAllRead'),
+            onClick: () => {
+              void markNotificationsReadAction().then(() => {
+                router.refresh();
+              });
+            },
           },
-        },
-      ]}
-    />
+        ]}
+      />
+    </>
   );
 }

@@ -321,6 +321,7 @@ function ShellChrome({
             expanded={openPanel === 'notifications'}
             invitationCount={invitationCount}
             notifications={notifications}
+            unreadCount={unreadCount}
           />
           <HelpPanel
             expanded={openPanel === 'help'}

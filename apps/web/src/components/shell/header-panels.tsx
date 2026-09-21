@@ -23,6 +23,7 @@ import { authClient } from '../../lib/auth/client';
 import {
   dismissNotificationAction,
   markNotificationReadAction,
+  markNotificationsReadAction,
 } from '../../lib/notifications/actions';
 import {
   NotificationSeverityIcon,
@@ -236,10 +237,12 @@ export function NotificationsPanel({
   expanded,
   invitationCount,
   notifications,
+  unreadCount,
 }: PanelProperties &
   Readonly<{
     invitationCount: number;
     notifications: readonly NotificationRow[];
+    unreadCount: number;
   }>) {
   const { t } = useTranslation();
   const router = useRouter();
@@ -258,9 +261,20 @@ export function NotificationsPanel({
     <HeaderPanel className={styles.notificationsPanel!} expanded={expanded}>
       {expanded ? (
         <div className={styles.panel!}>
-          <h2 className={styles.panelHeading!}>
-            {t('shell.notifications.title')}
-          </h2>
+          <div className={styles.notificationsHeader!}>
+            <h2 className={styles.panelHeading!}>
+              {t('shell.notifications.title')}
+            </h2>
+            <Button
+              disabled={unreadCount === 0 || isPending}
+              kind="ghost"
+              onClick={() => runAction(markNotificationsReadAction)}
+              size="sm"
+              type="button"
+            >
+              {t('shell.notifications.markAllRead')}
+            </Button>
+          </div>
           {invitationCount > 0 ? (
             <Link className={styles.link!} href="/workspaces">
               {t('shell.invitations.action', { count: invitationCount })}
