@@ -25,6 +25,7 @@ export {
   Search,
   Security,
   Send,
+  Settings,
   Switcher,
   Upload,
   UserAvatar,

@@ -339,6 +339,7 @@ describe('Carbon catalog', () => {
       'Search',
       'Security',
       'Send',
+      'Settings',
       'Switcher',
       'Upload',
       'UserAvatar',
