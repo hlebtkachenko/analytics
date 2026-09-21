@@ -22,14 +22,6 @@
   flex: 0 0 auto;
 }
 
-// While searching, hide the brand and primary nav so the field starts at the
-// navigation rail edge and its dropdown aligns to the content grid instead of
-// overlaying the nav item.
-.searching :global(.cds--header__name),
-.searching :global(.cds--header__nav) {
-  display: none;
-}
-
 // The active area reads as pure white on the dark header, not the dimmer token.
 :global(.cds--header__menu-item--current) {
   color: #ffffff;
