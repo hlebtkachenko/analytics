@@ -87,20 +87,8 @@ const reviewedCallsites = [
   [
     'app/(product)/[orgSlug]/members/members-view.tsx',
     'Button',
-    'Download',
-    "{t('members.table.exportCsv')}",
-  ],
-  [
-    'app/(product)/[orgSlug]/members/members-view.tsx',
-    'Button',
     'UserFollow',
     "{t('members.list.inviteAction')}",
-  ],
-  [
-    'app/(product)/[orgSlug]/members/members-view.tsx',
-    'Button',
-    'Download',
-    "{t('members.table.exportCsv')}",
   ],
   [
     'app/(product)/[orgSlug]/members/members-view.tsx',
@@ -542,6 +530,12 @@ describe('Carbon application icon AST contract', () => {
         attributes: {},
         file: 'app/(product)/[orgSlug]/members/members-view.tsx',
         icon: 'Filter',
+        selfClosing: true,
+      },
+      {
+        attributes: {},
+        file: 'app/(product)/[orgSlug]/members/members-view.tsx',
+        icon: 'Download',
         selfClosing: true,
       },
       {

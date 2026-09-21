@@ -136,6 +136,18 @@ function FilterButton({
   );
 }
 
+// The toolbar export control: an icon-only download button.
+function ExportButton({
+  label,
+  onClick,
+}: Readonly<{ label: string; onClick: () => void }>) {
+  return (
+    <IconButton kind="ghost" label={label} onClick={onClick} type="button">
+      <Download />
+    </IconButton>
+  );
+}
+
 export type MemberRole = 'admin' | 'member' | 'owner';
 export type MemberStatus = 'active' | 'inactive';
 
@@ -1080,14 +1092,10 @@ export default function MembersView({
                               resetLabel={t('members.table.resetFilters')}
                               staged={memberStaged}
                             />
-                            <Button
-                              kind="ghost"
+                            <ExportButton
+                              label={t('members.table.exportCsv')}
                               onClick={exportMembersCsv}
-                              renderIcon={Download}
-                              type="button"
-                            >
-                              {t('members.table.exportCsv')}
-                            </Button>
+                            />
                             {canManageMembers ? (
                               <Button
                                 onClick={() => {
@@ -1317,14 +1325,10 @@ export default function MembersView({
                               resetLabel={t('members.table.resetFilters')}
                               staged={invitationStaged}
                             />
-                            <Button
-                              kind="ghost"
+                            <ExportButton
+                              label={t('members.table.exportCsv')}
                               onClick={exportInvitationsCsv}
-                              renderIcon={Download}
-                              type="button"
-                            >
-                              {t('members.table.exportCsv')}
-                            </Button>
+                            />
                             {canManageMembers ? (
                               <Button
                                 onClick={() => {
