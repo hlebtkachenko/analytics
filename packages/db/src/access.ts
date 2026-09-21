@@ -45,6 +45,8 @@ export interface WorkspaceMembership {
   role: MembershipRole;
   status: MembershipStatus;
   createdAt: Date;
+  joinedAt: Date;
+  memberCount: number;
 }
 
 // Exact match against the version recorded by the migration runner. Bump it to the newest migration id in the same pull request as that migration. Rollback consequence: application code rolled back after the migration is applied makes /ready return 503 on every service until this is bumped again.
@@ -620,9 +622,15 @@ export async function listWorkspaceMemberships(
     role: string;
     status: string;
     created_at: Date;
+    joined_at: Date;
+    member_count: number | string;
   }>(
     `select organization.id, organization.name, organization.slug,
-            membership.role, membership.status, organization.created_at
+            membership.role, membership.status, organization.created_at,
+            membership.created_at as joined_at,
+            (select count(*) from auth.member as counted
+              where counted.organization_id = organization.id
+                and counted.status = 'active')::int as member_count
      from auth.organization as organization
      inner join auth.member as membership
        on membership.organization_id = organization.id
@@ -646,6 +654,8 @@ export async function listWorkspaceMemberships(
       role: role.data,
       status: status.data,
       createdAt: row.created_at,
+      joinedAt: row.joined_at,
+      memberCount: Number(row.member_count),
     });
   }
 

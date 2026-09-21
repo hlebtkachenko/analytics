@@ -376,6 +376,7 @@ describe('organization accessors', () => {
 
   it('lists the caller workspaces with their own role and status in one query', async () => {
     const createdAt = new Date('2026-09-01T00:00:00.000Z');
+    const joinedAt = new Date('2026-09-05T00:00:00.000Z');
     const query = vi.fn(async () => ({
       rows: [
         {
@@ -385,6 +386,8 @@ describe('organization accessors', () => {
           role: 'owner',
           status: 'active',
           created_at: createdAt,
+          joined_at: joinedAt,
+          member_count: 4,
         },
         {
           id: 'organization-3',
@@ -393,6 +396,9 @@ describe('organization accessors', () => {
           role: 'member',
           status: 'inactive',
           created_at: createdAt,
+          joined_at: joinedAt,
+          // pg can hand back the count as a string; the row builder coerces it.
+          member_count: '2',
         },
         {
           id: 'organization-2',
@@ -401,6 +407,8 @@ describe('organization accessors', () => {
           role: 'legacy-role',
           status: 'active',
           created_at: createdAt,
+          joined_at: joinedAt,
+          member_count: 1,
         },
       ],
     }));
@@ -415,6 +423,8 @@ describe('organization accessors', () => {
         role: 'owner',
         status: 'active',
         createdAt,
+        joinedAt,
+        memberCount: 4,
       },
       {
         id: 'organization-3',
@@ -423,6 +433,8 @@ describe('organization accessors', () => {
         role: 'member',
         status: 'inactive',
         createdAt,
+        joinedAt,
+        memberCount: 2,
       },
     ]);
     expect(query).toHaveBeenCalledWith(
