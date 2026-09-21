@@ -1,5 +1,4 @@
 import { getOrganizationCreationQuota } from '@bap/db/access';
-import { Button } from '@bap/design-system/react';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
@@ -27,14 +26,10 @@ export default async function NewOrganizationPage() {
   const remaining = quota?.remainingTotal ?? 0;
 
   const title = await translate('workspaces.create.title');
-  const back = await translate('workspaces.create.back');
 
   return (
     <PageContainer>
       <h1>{title}</h1>
-      <Button href="/workspaces" kind="ghost">
-        {back}
-      </Button>
       <CreateWorkspaceWizard
         initialName={session.user.name}
         remaining={remaining}

@@ -758,7 +758,6 @@ export const resources = {
       },
       workspaces: {
         create: {
-          back: 'Back to workspaces',
           entity: {
             failure: 'The legal entity could not be created.',
             kindCompany: 'Company',
