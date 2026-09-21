@@ -48,52 +48,61 @@ unselected (all). Title reflects the active status filter ("Active members (N)",
 ### C. Member status and audit (full stack, per critical advisor)
 
 Storage
-- Add `status text NOT NULL DEFAULT 'active' CHECK (status IN
-  ('active','inactive'))` to the Better-Auth-owned `auth.member` table. Declare
-  it to Better Auth as `member.additionalFields.status` (`fieldName: 'status'`,
-  `type: 'string'`, `input: false`, `defaultValue: 'active'`). Mirror in
+
+- Add
+  `status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive'))`
+  to the Better-Auth-owned `auth.member` table. Declare it to Better Auth as
+  `member.additionalFields.status` (`fieldName: 'status'`, `type: 'string'`,
+  `input: false`, `defaultValue: 'active'`). Mirror in
   `packages/db/src/schema.ts` and `apps/web/src/lib/auth/models.ts`.
 - No app-side status table. Every access resolver already reads `auth.member`.
 
 Semantics
+
 - Active: full access per role and entity scope.
 - Inactive: zero access everywhere (API, worker, product shell, switcher, Better
   Auth org endpoints). Row retained with name, email, role, joined, entity
   scope. Owner may Reactivate; nobody reactivates self.
 - "Remove" becomes "Deactivate"; no product path hard-deletes a membership.
-  Settings "Leave workspace" becomes self-deactivate. `/organization/remove-member`
-  and `/organization/leave` are disabled.
+  Settings "Leave workspace" becomes self-deactivate.
+  `/organization/remove-member` and `/organization/leave` are disabled.
 
 Write path (status and audit must be atomic; `bap_auth` cannot call
 `app.record_audit`, so this cannot go through Better Auth)
-- New `SECURITY DEFINER` function `auth.set_member_status(subject_user_id text,
-  new_status text) RETURNS text`, owner `bap_owner`, `SET search_path =
-  pg_catalog, auth`, `REVOKE ALL FROM PUBLIC`, `GRANT EXECUTE TO bap_api`. Org
-  and actor from `current_setting('bap.organization_id'|'bap.user_id'|'bap.role')`,
-  never arguments. Rules: fail on empty org/actor context; status in
+
+- New `SECURITY DEFINER` function
+  `auth.set_member_status(subject_user_id text, new_status text) RETURNS text`,
+  owner `bap_owner`, `SET search_path = pg_catalog, auth`,
+  `REVOKE ALL FROM PUBLIC`, `GRANT EXECUTE TO bap_api`. Org and actor from
+  `current_setting('bap.organization_id'|'bap.user_id'|'bap.role')`, never
+  arguments. Rules: fail on empty org/actor context; status in
   ('active','inactive'); subject != actor requires role owner; subject == actor
   allows only 'inactive'; `pg_advisory_xact_lock(hashtext(org_id))` then refuse
-  to deactivate the last active owner (role test `'owner' = any(string_to_array(
-  role, ','))`); missing row in this org means not found.
+  to deactivate the last active owner (role test
+  `'owner' = any(string_to_array( role, ','))`); missing row in this org means
+  not found.
 - New API endpoint `PUT /organizations/:organizationId/members/:userId/status`
   body `{ status }`, owner-or-self guard, one `runInTenantContext` transaction:
-  `select auth.set_member_status($1,$2)` then `select app.record_audit(
-  'member.deactivated'|'member.reactivated', 'member', $1, $2::jsonb)` with
-  metadata `{ previous_status, role }` and nothing else. Shape it like
+  `select auth.set_member_status($1,$2)` then
+  `select app.record_audit( 'member.deactivated'|'member.reactivated', 'member', $1, $2::jsonb)`
+  with metadata `{ previous_status, role }` and nothing else. Shape it like
   `writeMemberEntityScope` in
   `apps/api/src/legal-entities/legal-entity-repository.ts`.
 - Web: `memberStatusPath` beside `memberEntityScopePath`; `mutateJson` PUT like
   `submitScope`. Replace the `authClient.organization.removeMember` call.
 
 Audit
-- Only `member.deactivated` / `member.reactivated`, metadata `{ previous_status,
-  role }`. Never name or email (account erasure rewrites `user_id` and
-  `resource_id` but not `metadata`, so PII in metadata would survive erasure).
+
+- Only `member.deactivated` / `member.reactivated`, metadata
+  `{ previous_status, role }`. Never name or email (account erasure rewrites
+  `user_id` and `resource_id` but not `metadata`, so PII in metadata would
+  survive erasure).
 - Extend `app.erase_user` to tombstone `audit_log.resource_id` for
   `resource_type = 'member'`, and widen the eraser column grant from `(user_id)`
   to `(user_id, resource_id)`.
 
 Safeguards (all required; each is a workspace-lockout or access hole otherwise)
+
 - `auth.resolve_membership` gets `AND m.status = 'active'`; the membership reads
   in `packages/db/src/access.ts` (product route, switcher, and
   `countSoleOwnedOrganizations`) get `status = 'active'` predicates.
@@ -108,10 +117,11 @@ Safeguards (all required; each is a workspace-lockout or access hole otherwise)
   member, inactive: reactivate instead".
 
 Migration
+
 - One forward-only additive migration
-  `packages/db/drizzle/20260920.0001_member_status.sql`: ADD COLUMN status
-  (fast default, no rewrite) + CHECK; `CREATE OR REPLACE` `resolve_membership`
-  with the status predicate then re-state OWNER/REVOKE/GRANT; add
+  `packages/db/drizzle/20260920.0001_member_status.sql`: ADD COLUMN status (fast
+  default, no rewrite) + CHECK; `CREATE OR REPLACE` `resolve_membership` with
+  the status predicate then re-state OWNER/REVOKE/GRANT; add
   `set_member_status`; the `erase_user` tombstone and grant change. Never drop,
   rename, or retype an existing `auth.member` column; never add RLS to any
   `auth` table; never grant `bap_api` DML on `auth.member`; never write
