@@ -449,6 +449,13 @@ describe('OrganizationMembersPage', () => {
       }),
     );
     fireEvent.click(screen.getByText('Transfer ownership'));
+    // The confirm button stays disabled until the workspace name is typed exactly.
+    expect(
+      screen.getByRole('button', { name: 'Transfer ownership' }),
+    ).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Workspace name'), {
+      target: { value: 'Organization One' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Transfer ownership' }));
 
     await screen.findByText('Ownership was transferred.');

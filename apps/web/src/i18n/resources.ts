@@ -637,6 +637,8 @@ export const resources = {
           body: 'This makes {{name}} the owner and changes your role to admin. You keep admin access but no longer control ownership.',
           cancel: 'Cancel',
           confirm: 'Transfer ownership',
+          confirmLabel: 'Workspace name',
+          confirmPrompt: 'Type {{name}} to confirm. Pasting is disabled.',
           title: 'Transfer ownership to {{name}}',
         },
       },

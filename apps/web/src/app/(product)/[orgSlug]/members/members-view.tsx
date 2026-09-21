@@ -331,6 +331,8 @@ export default function MembersView({
 
   const [removeTarget, setRemoveTarget] = useState<MemberRow | null>(null);
   const [transferTarget, setTransferTarget] = useState<MemberRow | null>(null);
+  // The typed workspace name that must match before a transfer can be confirmed.
+  const [transferConfirmName, setTransferConfirmName] = useState('');
   const [cancelTarget, setCancelTarget] = useState<InvitationRow | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [membersLoading, setMembersLoading] = useState(false);
@@ -550,8 +552,10 @@ export default function MembersView({
       },
       'transfer-ownership': {
         id: 'transfer-ownership',
+        isDelete: true,
         label: t('members.actions.transferOwnership'),
         onClick: () => {
+          setTransferConfirmName('');
           setTransferTarget(member);
         },
       },
@@ -824,6 +828,7 @@ export default function MembersView({
     });
     setSubmitting(false);
     setTransferTarget(null);
+    setTransferConfirmName('');
 
     if (result.ok) {
       notify({ kind: 'success', title: t('members.toast.transferSuccess') });
@@ -1665,22 +1670,43 @@ export default function MembersView({
 
       {transferTarget !== null ? (
         <Modal
+          danger
           modalHeading={t('members.transfer.title', {
             name: transferTarget.name,
           })}
           onRequestClose={() => {
             setTransferTarget(null);
+            setTransferConfirmName('');
           }}
           onRequestSubmit={() => {
             void confirmTransfer();
           }}
           open
-          primaryButtonDisabled={submitting}
+          primaryButtonDisabled={
+            submitting || transferConfirmName.trim() !== workspaceName
+          }
           primaryButtonText={t('members.transfer.confirm')}
           secondaryButtonText={t('members.transfer.cancel')}
-          size="xs"
+          size="sm"
         >
-          <p>{t('members.transfer.body', { name: transferTarget.name })}</p>
+          <Stack gap={5}>
+            <p>{t('members.transfer.body', { name: transferTarget.name })}</p>
+            <TextInput
+              autoComplete="off"
+              helperText={t('members.transfer.confirmPrompt', {
+                name: workspaceName,
+              })}
+              id="transfer-confirm-name"
+              labelText={t('members.transfer.confirmLabel')}
+              onChange={(event) => {
+                setTransferConfirmName(event.target.value);
+              }}
+              onPaste={(event) => {
+                event.preventDefault();
+              }}
+              value={transferConfirmName}
+            />
+          </Stack>
         </Modal>
       ) : null}
 
