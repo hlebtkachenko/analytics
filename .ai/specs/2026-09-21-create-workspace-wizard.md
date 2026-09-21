@@ -39,9 +39,10 @@ Does not:
   validation as the old `createOrganizationAction`, but it returns a result
   instead of redirecting:
   `Promise<{ ok: true; id: string; slug: string } | { ok: false; reason: 'slug-taken' | 'quota-exhausted' | 'invalid' | 'error' }>`.
-  The created organization id and slug come from the `auth.api.createOrganization`
-  result; `revalidatePath('/workspaces')` on success. Input is validated with the
-  existing `organizationSlugSchema` at the boundary.
+  The created organization id and slug come from the
+  `auth.api.createOrganization` result; `revalidatePath('/workspaces')` on
+  success. Input is validated with the existing `organizationSlugSchema` at the
+  boundary.
 - `createOrganizationAction` and `WorkspaceForm` become fully unused (only that
   form and its tests referenced them). Both are removed with their tests.
 - New client component `create-workspace-wizard.tsx` under
@@ -88,8 +89,8 @@ the upstream error body.
   forced `all` scope when no entity exists.
 - `apps/web/src/app/(product)/workspaces/new/page.test.tsx`: updated for the
   wizard (quota gating still replaces the wizard at zero quota).
-- Gate: `pnpm --filter @bap/web typecheck && pnpm --filter @bap/web lint &&
-  pnpm --filter @bap/web test`.
+- Gate:
+  `pnpm --filter @bap/web typecheck && pnpm --filter @bap/web lint && pnpm --filter @bap/web test`.
 
 ## Open questions
 

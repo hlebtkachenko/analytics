@@ -56,20 +56,20 @@ customer, employee, company, transaction, or analytics data.**
 Everything is off by default; turn on only what the page needs.
 
 - Density and look: `size` (`xs`–`xl`, default `sm`), `zebra`, `wrapCells`.
-- Header layout: `titleInline` renders the `title` (and `description`) on the same
-  row as the toolbar (title left, controls right) instead of stacked above it;
-  needs both a `title` and a toolbar. Default is the stacked layout.
+- Header layout: `titleInline` renders the `title` (and `description`) on the
+  same row as the toolbar (title left, controls right) instead of stacked above
+  it; needs both a `title` and a toolbar. Default is the stacked layout.
 - Sorting: `sortable`, `multiSort` (shift-click), `initialSort`, `lockSort`
   (fixed order, non-interactive).
 - Selection: `selection` (`none`/`single`/`multi`), `batchActions` (text-only,
   needs `multi`), `selectAllScope` (`page`/`all`), `onSelectionChange`.
 - Search: `search`, `searchPlacement` (`toolbar`/`persistent`). Pass `onSearch`
   to switch client filtering to server search.
-- Faceted filter: `filters` (`GridFilterGroup[]`) renders a toolbar funnel with a
-  count badge over a staged checkbox popover (Reset/Apply). A row passes when, for
-  each group with a selection, `String(row[group.key])` is in that selection;
-  applied on top of search before pagination. Selection is owned internally
-  unless you pass `filterValues` + `onFilterChange` to control it.
+- Faceted filter: `filters` (`GridFilterGroup[]`) renders a toolbar funnel with
+  a count badge over a staged checkbox popover (Reset/Apply). A row passes when,
+  for each group with a selection, `String(row[group.key])` is in that
+  selection; applied on top of search before pagination. Selection is owned
+  internally unless you pass `filterValues` + `onFilterChange` to control it.
 - Pagination: `pagination`, `paginationMode` (`client`/`server`), `pageSize`,
   `pageSizes`. Server mode needs `page`, `totalItems`, `onPageChange`.
 - Rows: `rowNumbers`, `onRowClick`, `reorderableRows` (+

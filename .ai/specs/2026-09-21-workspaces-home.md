@@ -31,16 +31,16 @@ Does not:
 ## Design
 
 - `packages/db/src/access.ts`: `WorkspaceMembership` gains
-  `status: MembershipStatus` (`z.enum(['active','inactive'])`). The query selects
-  `membership.status` and no longer filters by it. Invalid status parses are
-  dropped like invalid roles.
+  `status: MembershipStatus` (`z.enum(['active','inactive'])`). The query
+  selects `membership.status` and no longer filters by it. Invalid status parses
+  are dropped like invalid roles.
 - `apps/web/src/app/(product)/account/page.tsx`: the shared function now returns
   inactive rows, so this consumer filters to `status === 'active'` to keep its
   existing switcher behaviour (an inactive workspace is not enterable).
 - `apps/web/src/app/(product)/workspaces/page.tsx`: `WorkspaceRow` gains
   `status`; the page maps `membership.status` onto each row.
-- `workspace-list.tsx`: rebuilt into build section, owner table, member table.
-  A local `FilterButton` (funnel `IconButton` + count badge + Carbon `Popover`)
+- `workspace-list.tsx`: rebuilt into build section, owner table, member table. A
+  local `FilterButton` (funnel `IconButton` + count badge + Carbon `Popover`)
   and `workspace-filter-flyout.tsx` mirror the members look. Pure predicate
   `workspaceMatchesFilters` lives in `workspace-filter.ts`, unit tested.
 - `workspace-build-section.tsx` + `.module.scss`: gradient hero `ClickableTile`
@@ -61,9 +61,8 @@ enums.
 - `packages/db/src/access.test.ts`: the list snapshot carries `status`.
 - `workspace-filter.test.ts`: the predicate matches every non-empty category.
 - `icon-contract.test.tsx`: the new import, callsite and direct-icon entries.
-- Gate: `pnpm --filter @bap/db typecheck && pnpm --filter @bap/db test &&
-  pnpm --filter @bap/web typecheck && pnpm --filter @bap/web lint &&
-  pnpm --filter @bap/web test`.
+- Gate:
+  `pnpm --filter @bap/db typecheck && pnpm --filter @bap/db test && pnpm --filter @bap/web typecheck && pnpm --filter @bap/web lint && pnpm --filter @bap/web test`.
 
 ## Design review revision
 
@@ -94,4 +93,5 @@ Live review pass on top of the above:
 ## Open questions
 
 None. The brief called the workspaces page the only caller of
-`listWorkspaceMemberships`; `account/page.tsx` is a second caller, handled above.
+`listWorkspaceMemberships`; `account/page.tsx` is a second caller, handled
+above.

@@ -12,9 +12,9 @@ notification and nothing but pending invitations can ever appear in the panel.
 
 Add a real, persistent per-user notification inbox, surfaced in the existing
 header `HeaderPanel`. Any server code path raises one by calling
-`createNotification(pool, { userId, kind, title, href })`. The badge shows unread
-notifications plus pending invitations. One real emit point ships: when an
-invitation is accepted, the inviter is notified that the member joined.
+`createNotification(pool, { userId, kind, title, href })`. The badge shows
+unread notifications plus pending invitations. One real emit point ships: when
+an invitation is accepted, the inviter is notified that the member joined.
 
 Does not:
 
@@ -60,21 +60,42 @@ Service in `packages/db/src/access.ts` (exported from `index.ts`), scoped by
 
 ```ts
 export interface NotificationRow {
-  id: string; userId: string; kind: string; title: string;
-  href: string | null; readAt: Date | null; createdAt: Date;
+  id: string;
+  userId: string;
+  kind: string;
+  title: string;
+  href: string | null;
+  readAt: Date | null;
+  createdAt: Date;
 }
 export interface CreateNotificationInput {
-  userId: string; kind: string; title: string; href?: string | null;
+  userId: string;
+  kind: string;
+  title: string;
+  href?: string | null;
 }
-export function createNotification(pool: Pool, input: CreateNotificationInput): Promise<void>;
-export function listNotifications(pool: Pool, userId: string, limit?: number): Promise<NotificationRow[]>; // default limit 20
-export function countUnreadNotifications(pool: Pool, userId: string): Promise<number>;
-export function markNotificationsRead(pool: Pool, userId: string): Promise<number>; // marks all unread for the user
+export function createNotification(
+  pool: Pool,
+  input: CreateNotificationInput,
+): Promise<void>;
+export function listNotifications(
+  pool: Pool,
+  userId: string,
+  limit?: number,
+): Promise<NotificationRow[]>; // default limit 20
+export function countUnreadNotifications(
+  pool: Pool,
+  userId: string,
+): Promise<number>;
+export function markNotificationsRead(
+  pool: Pool,
+  userId: string,
+): Promise<number>; // marks all unread for the user
 ```
 
-Bump `DATABASE_MIGRATION_COMPATIBILITY` (`access.ts`) to `'20260922.0003'` in the
-same change. Migrate the live DB before restarting api/reporting/worker, else
-`/ready` returns 503.
+Bump `DATABASE_MIGRATION_COMPATIBILITY` (`access.ts`) to `'20260922.0003'` in
+the same change. Migrate the live DB before restarting api/reporting/worker,
+else `/ready` returns 503.
 
 ### Web
 
@@ -99,17 +120,16 @@ same change. Migrate the live DB before restarting api/reporting/worker, else
 
 ### Emit point
 
-In `createAfterAcceptInvitationHook` (`apps/web/src/lib/auth/server.ts`), after a
-successful accept, call
-`createNotification(pool, { userId: invitation.inviterId, kind: 'member.joined',
-title: '<user.name> joined <organization.name>', href: '/<organization.slug>/members' })`
+In `createAfterAcceptInvitationHook` (`apps/web/src/lib/auth/server.ts`), after
+a successful accept, call
+`createNotification(pool, { userId: invitation.inviterId, kind: 'member.joined', title: '<user.name> joined <organization.name>', href: '/<organization.slug>/members' })`
 wrapped in `.catch(() => undefined)` like `applyInvitationEntityScope`. Covers
 both accept surfaces through the one hook.
 
 ## Tests
 
-- `packages/db/src/access.test.ts` (fake-pool): each of the four functions issues
-  SQL containing `user_id = $1`.
+- `packages/db/src/access.test.ts` (fake-pool): each of the four functions
+  issues SQL containing `user_id = $1`.
 - `packages/db/src/postgres.integration.test.ts`: `auth.notification` ACL is
   `bap_auth` DML + `bap_backup` SELECT + `bap_owner` ALL (default privileges).
 - `apps/web/src/lib/auth/server.test.ts`: accept hook creates a notification for
