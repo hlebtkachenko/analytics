@@ -8,6 +8,7 @@ export const moduleLabels: Readonly<Record<string, string>> = {
   documents: 'Documents',
   entities: 'Entities',
   members: 'Members',
+  notifications: 'Notifications',
   settings: 'Settings',
   workspaces: 'Workspaces',
 };

@@ -9,6 +9,12 @@ describe('buildTrail', () => {
     ]);
   });
 
+  it('labels the notifications module rather than its raw segment', () => {
+    expect(buildTrail(['(product)', 'notifications'])).toEqual([
+      { current: true, href: '/notifications', label: 'Notifications' },
+    ]);
+  });
+
   it('scopes a child label by its parent module', () => {
     expect(buildTrail(['documents', 'new']).at(-1)?.label).toBe('New document');
     expect(buildTrail(['workspaces', 'new']).at(-1)?.label).toBe(

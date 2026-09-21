@@ -50,6 +50,7 @@ describe('organization slugs', () => {
       'assistant',
       'audit',
       'workspaces',
+      'notifications',
     ]);
   });
 

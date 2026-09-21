@@ -1,0 +1,18 @@
+.message {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+}
+
+.title {
+  font-weight: 600;
+}
+
+.body {
+  color: var(--cds-text-secondary);
+}

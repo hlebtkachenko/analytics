@@ -34,5 +34,6 @@
   { "slug": "settings", "valid": false },
   { "slug": "assistant", "valid": false },
   { "slug": "audit", "valid": false },
-  { "slug": "workspaces", "valid": false }
+  { "slug": "workspaces", "valid": false },
+  { "slug": "notifications", "valid": false }
 ]
