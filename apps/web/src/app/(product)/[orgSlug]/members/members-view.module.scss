@@ -127,6 +127,20 @@
   }
 }
 
+// Screen-reader-only header text so the action and detail columns are not empty.
+.visuallyHidden {
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  padding: 0;
+  white-space: nowrap;
+  border: 0;
+}
+
 .scopeEntities {
   padding: 0;
   border: 0;

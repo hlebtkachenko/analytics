@@ -215,13 +215,15 @@ test.describe.serial('workspace legal entities and entity scope', () => {
       name: `Entity access for ${memberEmail}`,
     });
     await expect(scopeDialog).toBeVisible();
-    await scopeDialog.getByLabel('Entity access').selectOption('restricted');
-    const entityField = scopeDialog.getByRole('combobox', {
-      name: 'Legal entities',
-    });
-    await entityField.click();
-    await page.getByRole('option', { exact: true, name: companyName }).click();
-    await entityField.click();
+    // The mode Select shares its label with the dialog region, so match the control exactly.
+    await scopeDialog
+      .getByLabel('Entity access', { exact: true })
+      .selectOption('restricted');
+    // Entities are a checkbox list keyed by name, not a combobox. Carbon overlays the
+    // hidden input with its label, so the click is forced onto the labelled control.
+    await scopeDialog
+      .getByRole('checkbox', { exact: true, name: companyName })
+      .check({ force: true });
     await scopeDialog.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByText('Entity access was updated.')).toBeVisible();
     await expect(scopeDialog).toBeHidden();

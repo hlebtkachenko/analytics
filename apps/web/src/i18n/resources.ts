@@ -614,6 +614,7 @@ export const resources = {
           noResults: 'No rows match the current search and filters.',
           resetFilters: 'Reset filters',
           rowActions: 'Row actions',
+          rowDetail: 'Row detail',
           searchInvitations: 'Search invitations',
           searchMembers: 'Search members',
         },

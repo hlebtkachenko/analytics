@@ -6,7 +6,7 @@ import { expect, test as publicTest } from '@playwright/test';
 import type { APIResponse, Page, Response } from '@playwright/test';
 
 import { test } from './authenticated-test';
-import { postSignInProbe, signInThroughForm } from './sign-in';
+import { postSignInProbe } from './sign-in';
 
 const execFileAsync = promisify(execFile);
 const mailpitUrl =
@@ -498,6 +498,10 @@ test('proves invitation-only registration, acceptance, and membership management
     await expect(inviteDialog).toBeVisible();
     await inviteDialog.getByLabel('Email').fill(email);
     await inviteDialog.getByLabel('Role').selectOption('member');
+    // Invitation now grants entity access; the all-entities mode enables the primary button.
+    await inviteDialog
+      .getByLabel('Entity access', { exact: true })
+      .selectOption('all');
     await inviteDialog.getByRole('button', { name: 'Send invitation' }).click();
     await expect(page.getByText('The invitation was sent.')).toBeVisible();
     await expect(inviteDialog).toBeHidden();
@@ -676,50 +680,19 @@ test('proves invitation-only registration, acceptance, and membership management
     await verificationRedirect.completed;
     verificationRedirect = undefined;
 
-    await recipientPage.goto('/account/access');
-    const signedOutPromise = recipientPage.waitForResponse(
-      (response) =>
-        response.request().method() === 'POST' &&
-        new URL(response.url()).pathname === '/api/auth/sign-out',
+    // The welcome page confirms the verified name and lists the pending invitation for inline acceptance.
+    await expect(recipientPage.getByLabel('Display name')).toHaveValue(
+      body.name,
     );
-    await recipientPage.getByRole('button', { name: 'Sign out' }).click();
-    expect((await signedOutPromise).ok()).toBe(true);
-    await expect(recipientPage).toHaveURL(/\/sign-in$/);
-    await signInThroughForm(recipientPage, email, password);
-    // A plain sign-in lands on the workspace list: no membership yet, one pending invitation.
-    await expect(recipientPage).toHaveURL(/\/organizations$/);
     await expect(
-      recipientPage.getByRole('heading', { name: 'Workspaces' }),
-    ).toBeVisible();
-    await expect(
-      recipientPage.getByText('You do not belong to a workspace yet.'),
-    ).toBeVisible();
-    await expect(
-      recipientPage
-        .getByRole('region', { name: 'Invitations for you' })
-        .getByRole('cell', { name: 'BAP Operational' }),
-    ).toBeVisible();
-
-    await navigateToSensitivePath(recipientPage, `/invitation/${invitationId}`);
-    await expect(
-      recipientPage.getByText('Organization: BAP Operational'),
-    ).toBeVisible();
-    await expect(recipientPage.getByText('Role: member')).toBeVisible();
-    const accept = recipientPage.getByRole('button', {
-      name: 'Accept invitation',
+      recipientPage.getByRole('link', { name: 'Continue to BAP' }),
+    ).toHaveAttribute('href', '/access');
+    const invitationForm = recipientPage.getByRole('form', {
+      name: 'BAP Operational',
     });
-    await expect(accept.locator('svg.cds--btn__icon')).toHaveAttribute(
-      'aria-hidden',
-      'true',
-    );
-    const acceptedPromise = recipientPage.waitForResponse(
-      (response) =>
-        response.request().method() === 'POST' &&
-        new URL(response.url()).pathname ===
-          '/api/auth/organization/accept-invitation',
-    );
-    await accept.click();
-    expect((await acceptedPromise).ok()).toBe(true);
+    await expect(invitationForm).toBeVisible();
+    await invitationForm.getByRole('button', { name: 'Accept' }).click();
+    // Accepting is a server action that lands the new member on the workspace list.
     await expect
       .poll(() => new URL(recipientPage.url()).pathname, {
         message: 'Invitation acceptance did not reach the workspace list.',

@@ -1104,7 +1104,11 @@ export default function MembersView({
                         <Table {...getTableProps()}>
                           <TableHead>
                             <TableRow>
-                              <TableExpandHeader id={expandHeaderProps.id} />
+                              <TableExpandHeader id={expandHeaderProps.id}>
+                                <span className={styles.visuallyHidden!}>
+                                  {t('members.table.rowDetail')}
+                                </span>
+                              </TableExpandHeader>
                               {headers.map((header) => {
                                 const { key, ...headerProps } = getHeaderProps({
                                   header,
@@ -1118,9 +1122,11 @@ export default function MembersView({
                                   </TableHeader>
                                 );
                               })}
-                              <TableHeader
-                                aria-label={t('members.table.rowActions')}
-                              />
+                              <TableHeader>
+                                <span className={styles.visuallyHidden!}>
+                                  {t('members.table.rowActions')}
+                                </span>
+                              </TableHeader>
                             </TableRow>
                           </TableHead>
                           <TableBody>
@@ -1348,9 +1354,11 @@ export default function MembersView({
                                   </TableHeader>
                                 );
                               })}
-                              <TableHeader
-                                aria-label={t('members.table.rowActions')}
-                              />
+                              <TableHeader>
+                                <span className={styles.visuallyHidden!}>
+                                  {t('members.table.rowActions')}
+                                </span>
+                              </TableHeader>
                             </TableRow>
                           </TableHead>
                           <TableBody>
