@@ -779,7 +779,6 @@ export const resources = {
           roleMember: 'Member',
         },
         hero: {
-          cta: 'Create workspace',
           subtitle:
             'Create a workspace to bring your entities, documents and analytics together.',
           title: 'Create',

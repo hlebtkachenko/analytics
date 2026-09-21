@@ -32,8 +32,7 @@ export default function WorkspaceBuildSection() {
             </p>
           </div>
           <span className={styles.heroCta!}>
-            {t('workspaces.hero.cta')}
-            <ArrowRight />
+            <ArrowRight aria-hidden="true" />
           </span>
         </ClickableTile>
         <div className={styles.upsellRow!}>

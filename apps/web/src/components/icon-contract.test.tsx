@@ -34,6 +34,7 @@ const reviewedImports = {
     'ArrowRight',
     'Launch',
   ],
+  'app/(product)/workspaces/workspace-list.tsx': ['Add'],
   'app/invitation/[invitationId]/invitation-client.tsx': ['Checkmark'],
   'components/datasets/dataset-chat.tsx': ['Send'],
   'components/datasets/dataset-export.tsx': ['Download'],
@@ -159,6 +160,12 @@ const reviewedCallsites = [
     'Link',
     'Launch',
     '{t(`workspaces.upsell.${key}.learnMore`)}',
+  ],
+  [
+    'app/(product)/workspaces/workspace-list.tsx',
+    'Button',
+    'Add',
+    "{t('workspaces.list.createAction')}",
   ],
   [
     'app/invitation/[invitationId]/invitation-client.tsx',
@@ -548,7 +555,7 @@ describe('Carbon application icon AST contract', () => {
         selfClosing: true,
       },
       {
-        attributes: {},
+        attributes: { 'aria-hidden': 'true' },
         file: 'app/(product)/workspaces/workspace-build-section.tsx',
         icon: 'ArrowRight',
         selfClosing: true,

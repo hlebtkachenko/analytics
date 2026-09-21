@@ -7,6 +7,7 @@ import type {
   GridRow,
 } from '@bap/design-system/blocks';
 import { Button, InlineNotification, Tag } from '@bap/design-system/react';
+import { Add } from '@bap/design-system/icons';
 import type { Route } from 'next';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef } from 'react';
@@ -68,8 +69,6 @@ const toastByResult = {
     kind: 'success',
   },
 } as const;
-
-const pageSizeChoices = [10, 25, 50] as const;
 
 export default function WorkspaceList({
   invitations,
@@ -209,6 +208,15 @@ export default function WorkspaceList({
     joined: workspace.joined,
   }));
 
+  const statusFilterGroup: GridFilterGroup = {
+    heading: t('workspaces.filter.filterStatus'),
+    key: 'status',
+    options: [
+      { id: 'active', label: t('workspaces.status.active') },
+      { id: 'inactive', label: t('workspaces.status.inactive') },
+    ],
+  };
+  const ownedFilters: readonly GridFilterGroup[] = [statusFilterGroup];
   const memberFilters: readonly GridFilterGroup[] = [
     {
       heading: t('workspaces.filter.filterRole'),
@@ -218,14 +226,7 @@ export default function WorkspaceList({
         { id: 'member', label: t('workspaces.filter.roleMember') },
       ],
     },
-    {
-      heading: t('workspaces.filter.filterStatus'),
-      key: 'status',
-      options: [
-        { id: 'active', label: t('workspaces.status.active') },
-        { id: 'inactive', label: t('workspaces.status.inactive') },
-      ],
-    },
+    statusFilterGroup,
   ];
 
   const invitationColumns: readonly GridColumn[] = [
@@ -272,6 +273,7 @@ export default function WorkspaceList({
           onClick={() => {
             router.push('/workspaces/new');
           }}
+          renderIcon={Add}
           type="button"
         >
           {t('workspaces.list.createAction')}
@@ -304,14 +306,11 @@ export default function WorkspaceList({
           <DataGrid
             columns={ownedColumns}
             emptyLabel={t('workspaces.list.emptyOwned')}
+            filters={ownedFilters}
             initialSort={[{ direction: 'ASC', key: 'name' }]}
             onRowClick={(row) => {
               openWorkspace(String(row.slug));
             }}
-            pageSize={10}
-            pageSizes={pageSizeChoices}
-            pagination
-            paginationMode="client"
             rowActions={(row) => [
               {
                 id: 'open',
@@ -337,9 +336,11 @@ export default function WorkspaceList({
             ]}
             rows={ownedRows}
             search
+            searchPlacement="persistent"
             size="sm"
             sortable
             title={t('workspaces.list.myTitle')}
+            titleInline
           />
 
           <DataGrid
@@ -349,10 +350,6 @@ export default function WorkspaceList({
             onRowClick={(row) => {
               openWorkspace(String(row.slug));
             }}
-            pageSize={10}
-            pageSizes={pageSizeChoices}
-            pagination
-            paginationMode="client"
             rowActions={(row) => [
               {
                 id: 'open',
@@ -372,9 +369,11 @@ export default function WorkspaceList({
             ]}
             rows={memberRows}
             search
+            searchPlacement="persistent"
             size="sm"
             sortable
             title={t('workspaces.list.joinedTitle')}
+            titleInline
           />
         </>
       )}
