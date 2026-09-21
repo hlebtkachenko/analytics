@@ -6,8 +6,8 @@ import { redirect } from 'next/navigation';
 import PageContainer from '../../../../components/page-container';
 import { translate } from '../../../../i18n/server';
 import { getAuth, getAuthPool } from '../../../../lib/auth/server';
+import CreateWorkspaceWizard from './create-workspace-wizard';
 import styles from './page.module.scss';
-import WorkspaceForm from './workspace-form';
 
 export default async function NewOrganizationPage({
   searchParams,
@@ -36,8 +36,6 @@ export default async function NewOrganizationPage({
     remaining,
   });
   const quotaExhausted = await translate('workspaces.create.quotaExhausted');
-  const slugTaken = await translate('workspaces.create.slugTaken');
-  const unavailable = await translate('workspaces.create.unavailable');
 
   return (
     <PageContainer>
@@ -46,28 +44,6 @@ export default async function NewOrganizationPage({
         {back}
       </Button>
       <p>{quotaRemaining}</p>
-      {result === 'slug-taken' ? (
-        <div className={styles.notification}>
-          <InlineNotification
-            hideCloseButton
-            kind="error"
-            lowContrast
-            role="alert"
-            title={slugTaken}
-          />
-        </div>
-      ) : null}
-      {result === 'error' ? (
-        <div className={styles.notification}>
-          <InlineNotification
-            hideCloseButton
-            kind="error"
-            lowContrast
-            role="alert"
-            title={unavailable}
-          />
-        </div>
-      ) : null}
       {remaining === 0 || result === 'quota-exhausted' ? (
         <div className={styles.notification}>
           <InlineNotification
@@ -78,7 +54,7 @@ export default async function NewOrganizationPage({
           />
         </div>
       ) : (
-        <WorkspaceForm initialName={session.user.name} />
+        <CreateWorkspaceWizard initialName={session.user.name} />
       )}
     </PageContainer>
   );

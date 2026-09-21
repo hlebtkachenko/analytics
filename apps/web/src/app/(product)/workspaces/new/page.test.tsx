@@ -2,10 +2,12 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  createOrganizationAction: vi.fn(),
+  createWorkspaceAction: vi.fn(),
   getOrganizationCreationQuota: vi.fn(),
   getSession: vi.fn(),
+  inviteMemberWithScopeAction: vi.fn(),
   pool: {},
+  push: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error('NEXT_REDIRECT');
   }),
@@ -19,10 +21,14 @@ vi.mock('../../../../lib/auth/server', () => ({
   getAuthPool: async () => mocks.pool,
 }));
 vi.mock('../../../../lib/organizations/actions', () => ({
-  createOrganizationAction: mocks.createOrganizationAction,
+  createWorkspaceAction: mocks.createWorkspaceAction,
+  inviteMemberWithScopeAction: mocks.inviteMemberWithScopeAction,
 }));
 vi.mock('next/headers', () => ({ headers: async () => new Headers() }));
-vi.mock('next/navigation', () => ({ redirect: mocks.redirect }));
+vi.mock('next/navigation', () => ({
+  redirect: mocks.redirect,
+  useRouter: () => ({ push: mocks.push }),
+}));
 
 import { I18nProvider } from '../../../../i18n/client-provider';
 import NewOrganizationPage from './page';
@@ -62,7 +68,7 @@ describe('NewOrganizationPage', () => {
     expect(slug).toHaveValue('revised-workspace');
   });
 
-  it('replaces the form with one message at zero quota', async () => {
+  it('replaces the wizard with one message at zero quota', async () => {
     mocks.getOrganizationCreationQuota.mockResolvedValue({
       attributedTotal: 1,
       grantedTotal: 1,
@@ -79,21 +85,7 @@ describe('NewOrganizationPage', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows an inline error when the address is already taken', async () => {
-    mocks.getOrganizationCreationQuota.mockResolvedValue({
-      attributedTotal: 0,
-      grantedTotal: 1,
-      remainingTotal: 1,
-    });
-
-    await renderPage('slug-taken');
-
-    expect(
-      screen.getByText('That workspace address is already taken.'),
-    ).toBeVisible();
-  });
-
-  it('replaces the form with the quota-exhausted marker even with remaining quota', async () => {
+  it('replaces the wizard with the quota-exhausted marker even with remaining quota', async () => {
     mocks.getOrganizationCreationQuota.mockResolvedValue({
       attributedTotal: 1,
       grantedTotal: 3,
