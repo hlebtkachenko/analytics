@@ -50,14 +50,16 @@ test('walks the Carbon workspace loop through explicit member-scoped actions', a
   });
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
-  await page.goto('/organizations');
-  await expect(page.getByRole('heading', { name: 'Workspaces' })).toBeVisible();
+  await page.goto('/workspaces');
+  await expect(
+    page.getByRole('heading', { exact: true, name: 'Workspaces' }),
+  ).toBeVisible();
   // The seeded workspace is a Carbon DataGrid row, not a link.
   await expect(
     page.getByRole('cell', { name: 'BAP Operational' }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Create workspace' }).click();
-  await expect(page).toHaveURL(/\/organizations\/new$/);
+  await expect(page).toHaveURL(/\/workspaces\/new$/);
   await expect(page.getByText('Remaining of granted quota: 1')).toBeVisible();
 
   let breadcrumbWorkspaces = page
@@ -66,7 +68,7 @@ test('walks the Carbon workspace loop through explicit member-scoped actions', a
   await focusWithKeyboard(page, breadcrumbWorkspaces);
   await expect(breadcrumbWorkspaces).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/\/organizations$/);
+  await expect(page).toHaveURL(/\/workspaces$/);
   await page.getByRole('button', { name: 'Create workspace' }).click();
   breadcrumbWorkspaces = page
     .getByRole('navigation', { name: 'Breadcrumb' })
@@ -83,10 +85,18 @@ test('walks the Carbon workspace loop through explicit member-scoped actions', a
   await expect(page.getByLabel('Slug')).toBeFocused();
   await expect(page.getByLabel('Slug')).toHaveValue(createdSlug);
   await page.keyboard.press('Tab');
-  await expect(
-    page.getByRole('button', { name: 'Create workspace' }),
-  ).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Next' })).toBeFocused();
   await page.keyboard.press('Enter');
+
+  // Creating the workspace advances the wizard to the legal entity step;
+  // skipping it and the invites finishes on the new, still-empty workspace.
+  await page.getByRole('button', { name: 'Skip' }).click();
+  await expect(
+    page.getByText(
+      'Invite people to the workspace, or finish and invite later.',
+    ),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Finish' }).click();
 
   await expect(page).toHaveURL(new RegExp(`/${createdSlug}$`));
   // The landing page is Carbon: tiles are links scoped to main so the rail's
@@ -187,7 +197,7 @@ test('walks the Carbon workspace loop through explicit member-scoped actions', a
     .getByRole('navigation', { name: 'Breadcrumb' })
     .getByRole('link', { name: 'Workspaces' })
     .click();
-  await expect(page).toHaveURL(/\/organizations$/);
+  await expect(page).toHaveURL(/\/workspaces$/);
   // The renamed workspace is a DataGrid row; clicking it navigates to the workspace.
   const renamedRow = page.getByRole('row').filter({ hasText: renamedName });
   await expect(renamedRow).toBeVisible();
@@ -211,7 +221,7 @@ test('walks the Carbon workspace loop through explicit member-scoped actions', a
   ).not.toHaveClass(/--selected/);
   await expect(
     switcher.getByRole('link', { name: 'Create workspace' }),
-  ).toHaveAttribute('href', '/organizations/new');
+  ).toHaveAttribute('href', '/workspaces/new');
   // Carbon animates the header panel open; axe must scan the settled 256px panel.
   await expect(page.locator('.cds--header-panel--expanded')).toHaveCSS(
     'width',
@@ -219,16 +229,15 @@ test('walks the Carbon workspace loop through explicit member-scoped actions', a
   );
   await expectNoAccessibilityViolations(page);
   await switcher.getByRole('link', { name: 'Manage workspaces' }).click();
-  await expect(page).toHaveURL(/\/organizations$/);
+  await expect(page).toHaveURL(/\/workspaces$/);
   await page.getByRole('button', { name: 'Create workspace' }).click();
-  await expect(page).toHaveURL(/\/organizations\/new$/);
+  await expect(page).toHaveURL(/\/workspaces\/new$/);
   await expect(page.getByText('Remaining of granted quota: 0')).toBeVisible();
   await expect(
     page.getByText('Workspace creation is not available for this account.'),
   ).toBeVisible();
-  await expect(
-    page.getByRole('form', { name: 'Create workspace' }),
-  ).toHaveCount(0);
+  // The wizard still renders its workspace step, but a spent quota disables starting one.
+  await expect(page.getByRole('button', { name: 'Next' })).toBeDisabled();
   // The quota-exhausted notification must stay within a 320px viewport.
   await page.setViewportSize({ height: 640, width: 320 });
   await expectNoHorizontalOverflow(page);
