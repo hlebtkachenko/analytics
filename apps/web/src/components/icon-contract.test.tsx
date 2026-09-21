@@ -56,6 +56,7 @@ const reviewedImports = {
     'Switcher',
     'UserAvatar',
   ],
+  'lib/notifications/severity.tsx': ['CheckmarkFilled', 'InformationFilled'],
 } as const;
 
 const reviewedCallsites = [
@@ -621,6 +622,28 @@ describe('Carbon application icon AST contract', () => {
         attributes: { size: '{20}' },
         file: 'components/shell/product-shell.tsx',
         icon: 'Switcher',
+        selfClosing: true,
+      },
+      {
+        attributes: {
+          'aria-hidden': 'true',
+          className: '{styles.success!}',
+          focusable: 'false',
+          size: '{16}',
+        },
+        file: 'lib/notifications/severity.tsx',
+        icon: 'CheckmarkFilled',
+        selfClosing: true,
+      },
+      {
+        attributes: {
+          'aria-hidden': 'true',
+          className: '{styles.info!}',
+          focusable: 'false',
+          size: '{16}',
+        },
+        file: 'lib/notifications/severity.tsx',
+        icon: 'InformationFilled',
         selfClosing: true,
       },
     ]);

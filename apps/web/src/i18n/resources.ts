@@ -642,6 +642,12 @@ export const resources = {
           title: 'Transfer ownership to {{name}}',
         },
       },
+      notifications: {
+        columnDate: 'Received',
+        columnMessage: 'Notification',
+        empty: 'You have no notifications yet.',
+        title: 'Notifications',
+      },
       reference: {
         title: 'Carbon design system',
       },
@@ -703,8 +709,14 @@ export const resources = {
           action: 'Workspace invitations ({{count}} pending)',
         },
         notifications: {
+          dismiss: 'Dismiss',
+          dismissAll: 'Dismiss all',
           empty: 'You have no notifications yet.',
+          markAllRead: 'Mark all read',
           title: 'Notifications',
+          today: 'Today',
+          viewAll: 'View all',
+          yesterday: 'Yesterday',
         },
         roles: {
           admin: 'Admin',
