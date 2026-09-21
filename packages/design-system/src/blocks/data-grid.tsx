@@ -278,6 +278,22 @@ function EditableCell({
   );
 }
 
+// Interactive row controls whose clicks must not bubble up as a row click.
+const ROW_CONTROL_SELECTOR = [
+  '.cds--overflow-menu',
+  '.cds--overflow-menu-options',
+  '.cds--table-column-menu',
+  '.cds--checkbox',
+  '.cds--table-expand',
+].join(', ');
+
+// True when a click started inside a row's menu, checkbox, or expand control.
+function isRowControlTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element && target.closest(ROW_CONTROL_SELECTOR) !== null
+  );
+}
+
 // Read a cell as display text unless the column renders custom content.
 function cellContent(row: GridRow, column: GridColumn) {
   if (column.renderCell) return column.renderCell(row);
@@ -998,7 +1014,15 @@ export function DataGrid(props: DataGridProps) {
                       draggable={reorderableRows}
                       isSelected={selection !== 'none' && selected.has(row.id)}
                       key={row.id}
-                      onClick={onRowClick ? () => onRowClick(row) : undefined}
+                      onClick={
+                        onRowClick
+                          ? (event) => {
+                              // Skip clicks on the menu, checkbox, or expand control.
+                              if (isRowControlTarget(event.target)) return;
+                              onRowClick(row);
+                            }
+                          : undefined
+                      }
                       onDragOver={
                         reorderableRows
                           ? (event) => event.preventDefault()

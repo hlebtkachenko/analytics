@@ -125,6 +125,29 @@ describe('DataGrid', () => {
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: '1' }));
   });
 
+  it('does not fire the row click when the overflow menu is used', () => {
+    const onRowClick = vi.fn();
+    const onEdit = vi.fn();
+    render(
+      <DataGrid
+        columns={columns}
+        onRowClick={onRowClick}
+        rowActions={() => [{ id: 'edit', label: 'Edit', onClick: onEdit }]}
+        rows={rows}
+      />,
+    );
+    const firstBodyRow = screen.getAllByRole('row')[1] as HTMLElement;
+    fireEvent.click(within(firstBodyRow).getByRole('button'));
+    expect(onRowClick).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Edit'));
+    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: '1' }));
+    expect(onRowClick).not.toHaveBeenCalled();
+    fireEvent.click(within(firstBodyRow).getByText('beta'));
+    expect(onRowClick).toHaveBeenCalledWith(
+      expect.objectContaining({ id: '1' }),
+    );
+  });
+
   it('expands a row to reveal its detail content', () => {
     render(
       <DataGrid
