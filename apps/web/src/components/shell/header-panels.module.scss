@@ -31,6 +31,28 @@
   text-decoration: underline;
 }
 
+.notification {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding-block: 0.25rem;
+  color: inherit;
+  text-decoration: none;
+}
+
+.notificationTitle {
+  color: var(--cds-text-primary);
+}
+
+a.notification:hover .notificationTitle {
+  text-decoration: underline;
+}
+
+.notificationTime {
+  color: var(--cds-text-secondary);
+  font-size: 0.75rem;
+}
+
 .account {
   display: flex;
   flex-direction: column;

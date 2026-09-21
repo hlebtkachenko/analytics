@@ -1,3 +1,5 @@
+import { countUnreadNotifications, listNotifications } from '@bap/db/access';
+import type { NotificationRow } from '@bap/db/access';
 import type { Route } from 'next';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -6,7 +8,7 @@ import type { ReactNode } from 'react';
 import packageJson from '../../../package.json';
 import ProductShell from '../../components/shell/product-shell';
 import { signInPath } from '../../lib/auth/return-path';
-import { getAuth } from '../../lib/auth/server';
+import { getAuth, getAuthPool } from '../../lib/auth/server';
 import { readRailPinned } from '../../lib/preferences/server';
 
 type ProductLayoutProperties = Readonly<{
@@ -18,6 +20,7 @@ export default async function ProductLayout({
 }: ProductLayoutProperties) {
   const requestHeaders = await headers();
   let user: Readonly<{ email: string; name: string }> | null = null;
+  let userId: string | null = null;
 
   try {
     const auth = await getAuth();
@@ -26,12 +29,13 @@ export default async function ProductLayout({
     // An unverified account is not admitted to the shell, exactly like a signed out one.
     if (session?.user.emailVerified === true) {
       user = { email: session.user.email, name: session.user.name };
+      userId = session.user.id;
     }
   } catch {
     // Session failures are handled as signed-out state.
   }
 
-  if (user === null) {
+  if (user === null || userId === null) {
     // The proxy puts the requested path in x-bap-path because a layout never sees the URL.
     redirect(signInPath(requestHeaders.get('x-bap-path')) as Route);
     return null;
@@ -49,6 +53,18 @@ export default async function ProductLayout({
     invitationCount = 0;
   }
 
+  // Persisted per-user notifications and the unread count for the header inbox.
+  let notifications: readonly NotificationRow[] = [];
+  let unreadCount = 0;
+  try {
+    const pool = await getAuthPool();
+    notifications = await listNotifications(pool, userId);
+    unreadCount = await countUnreadNotifications(pool, userId);
+  } catch {
+    notifications = [];
+    unreadCount = 0;
+  }
+
   const railPinned = await readRailPinned();
   // The feedback address is an operator input, not a public build-time constant.
   const feedbackEmail = process.env.BAP_FEEDBACK_EMAIL;
@@ -57,7 +73,9 @@ export default async function ProductLayout({
     <ProductShell
       feedbackEmail={feedbackEmail}
       invitationCount={invitationCount}
+      notifications={notifications}
       railPinned={railPinned}
+      unreadCount={unreadCount}
       user={user}
       version={packageJson.version}
     >

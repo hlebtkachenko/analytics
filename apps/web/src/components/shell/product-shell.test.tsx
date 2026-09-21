@@ -1,3 +1,4 @@
+import type { NotificationRow } from '@bap/db/access';
 import { DesignSystemProvider } from '@bap/design-system/theme';
 import {
   cleanup,
@@ -16,6 +17,11 @@ vi.mock('next/navigation', () => ({
   usePathname: () => navigation.pathname,
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn() }),
   useSelectedLayoutSegments: () => navigation.segments,
+}));
+
+// The mark-read server action is stubbed; this UI test never touches the auth pool.
+vi.mock('../../lib/notifications/actions', () => ({
+  markNotificationsReadAction: vi.fn(() => Promise.resolve()),
 }));
 
 import { ActiveOrganization } from './active-organization';
@@ -60,7 +66,9 @@ function renderShell(
   options: Readonly<{
     feedbackEmail?: string;
     invitationCount?: number;
+    notifications?: readonly NotificationRow[];
     railPinned?: boolean;
+    unreadCount?: number;
   }> = {},
 ) {
   return render(
@@ -69,7 +77,9 @@ function renderShell(
         <ProductShell
           feedbackEmail={options.feedbackEmail}
           invitationCount={options.invitationCount}
+          notifications={options.notifications}
           railPinned={options.railPinned ?? false}
+          unreadCount={options.unreadCount}
           user={testUser}
           version="1.2.3"
         >
@@ -143,6 +153,47 @@ describe('ProductShell', () => {
       name: 'Workspace invitations (2 pending)',
     });
     expect(link.getAttribute('href')).toBe('/workspaces');
+  });
+
+  it('badges the notifications action with unread plus invitations', () => {
+    renderShell({ invitationCount: 2, unreadCount: 3 });
+
+    const action = screen.getByRole('button', { name: 'Notifications' });
+    expect(within(action).getByText('5')).toBeTruthy();
+  });
+
+  it('renders notification rows, linking the ones that carry an href', () => {
+    const notifications: NotificationRow[] = [
+      {
+        id: 'n1',
+        userId: 'u1',
+        kind: 'member.joined',
+        title: 'Ada joined Acme Legal',
+        href: '/acme-legal/members',
+        readAt: null,
+        createdAt: new Date('2026-09-20T10:00:00Z'),
+      },
+      {
+        id: 'n2',
+        userId: 'u1',
+        kind: 'member.joined',
+        title: 'A note without a link',
+        href: null,
+        readAt: new Date('2026-09-19T10:00:00Z'),
+        createdAt: new Date('2026-09-19T10:00:00Z'),
+      },
+    ];
+
+    renderShell({ notifications });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications' }));
+
+    const link = screen.getByRole('link', { name: /Ada joined Acme Legal/ });
+    expect(link.getAttribute('href')).toBe('/acme-legal/members');
+    expect(screen.getByText('A note without a link')).toBeTruthy();
+    expect(
+      screen.queryByRole('link', { name: /A note without a link/ }),
+    ).toBeNull();
   });
 
   it('shows the settings panel with an account settings link', () => {

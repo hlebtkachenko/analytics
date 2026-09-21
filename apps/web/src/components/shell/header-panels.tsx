@@ -1,5 +1,6 @@
 'use client';
 
+import type { NotificationRow } from '@bap/db/access';
 import { Asleep, Light, Logout } from '@bap/design-system/icons';
 import {
   Button,
@@ -18,6 +19,7 @@ import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
 
 import { authClient } from '../../lib/auth/client';
+import { markNotificationsReadAction } from '../../lib/notifications/actions';
 import {
   themeCookieName,
   writePreferenceCookie,
@@ -155,11 +157,35 @@ export function HelpPanel({
   );
 }
 
+// An absolute local date is enough for v1; relative time is a noted follow-up.
+function formatNotificationTime(value: Date): string {
+  return value.toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
 export function NotificationsPanel({
   expanded,
   invitationCount,
-}: PanelProperties & Readonly<{ invitationCount: number }>) {
+  notifications,
+  unreadCount,
+}: PanelProperties &
+  Readonly<{
+    invitationCount: number;
+    notifications: readonly NotificationRow[];
+    unreadCount: number;
+  }>) {
   const { t } = useTranslation();
+  const router = useRouter();
+
+  // Opening the panel marks the unread notifications read, then refreshes to clear the badge.
+  useEffect(() => {
+    if (expanded && unreadCount > 0) {
+      void markNotificationsReadAction().then(() => router.refresh());
+    }
+  }, [expanded, unreadCount, router]);
 
   return (
     <HeaderPanel expanded={expanded}>
@@ -172,9 +198,35 @@ export function NotificationsPanel({
             <Link className={styles.link!} href="/workspaces">
               {t('shell.invitations.action', { count: invitationCount })}
             </Link>
-          ) : (
+          ) : null}
+          {notifications.map((notification) => {
+            const row = (
+              <>
+                <span className={styles.notificationTitle!}>
+                  {notification.title}
+                </span>
+                <span className={styles.notificationTime!}>
+                  {formatNotificationTime(notification.createdAt)}
+                </span>
+              </>
+            );
+            return notification.href === null ? (
+              <div className={styles.notification!} key={notification.id}>
+                {row}
+              </div>
+            ) : (
+              <Link
+                className={styles.notification!}
+                href={{ pathname: notification.href }}
+                key={notification.id}
+              >
+                {row}
+              </Link>
+            );
+          })}
+          {invitationCount === 0 && notifications.length === 0 ? (
             <p className={styles.muted!}>{t('shell.notifications.empty')}</p>
-          )}
+          ) : null}
         </div>
       ) : null}
     </HeaderPanel>

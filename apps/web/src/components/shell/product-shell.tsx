@@ -1,5 +1,6 @@
 'use client';
 
+import type { NotificationRow } from '@bap/db/access';
 import {
   Close,
   Enterprise,
@@ -67,7 +68,9 @@ type ProductShellProperties = Readonly<{
   children: ReactNode;
   feedbackEmail?: string | undefined;
   invitationCount?: number | undefined;
+  notifications?: readonly NotificationRow[] | undefined;
   railPinned: boolean;
+  unreadCount?: number | undefined;
   user: Readonly<{ email: string; name: string }>;
   version: string;
 }>;
@@ -76,7 +79,9 @@ export default function ProductShell({
   children,
   feedbackEmail,
   invitationCount,
+  notifications,
   railPinned,
+  unreadCount,
   user,
   version,
 }: ProductShellProperties) {
@@ -86,7 +91,9 @@ export default function ProductShell({
         <ShellChrome
           feedbackEmail={feedbackEmail}
           invitationCount={invitationCount}
+          notifications={notifications}
           railPinned={railPinned}
+          unreadCount={unreadCount}
           user={user}
           version={version}
         >
@@ -101,7 +108,9 @@ function ShellChrome({
   children,
   feedbackEmail,
   invitationCount = 0,
+  notifications = [],
   railPinned,
+  unreadCount = 0,
   user,
   version,
 }: ProductShellProperties) {
@@ -265,9 +274,9 @@ function ShellChrome({
               tooltipAlignment="end"
             >
               <Notification size={20} />
-              {invitationCount > 0 ? (
+              {unreadCount + invitationCount > 0 ? (
                 <span aria-hidden="true" className={styles.invitationBadge!}>
-                  {invitationCount}
+                  {unreadCount + invitationCount}
                 </span>
               ) : null}
             </HeaderGlobalAction>
@@ -311,6 +320,8 @@ function ShellChrome({
           <NotificationsPanel
             expanded={openPanel === 'notifications'}
             invitationCount={invitationCount}
+            notifications={notifications}
+            unreadCount={unreadCount}
           />
           <HelpPanel
             expanded={openPanel === 'help'}

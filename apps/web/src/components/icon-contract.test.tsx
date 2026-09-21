@@ -52,6 +52,7 @@ const reviewedImports = {
     'Help',
     'Notification',
     'Search',
+    'Settings',
     'Switcher',
     'UserAvatar',
   ],
@@ -602,6 +603,12 @@ describe('Carbon application icon AST contract', () => {
         attributes: { size: '{20}' },
         file: 'components/shell/product-shell.tsx',
         icon: 'Help',
+        selfClosing: true,
+      },
+      {
+        attributes: { size: '{20}' },
+        file: 'components/shell/product-shell.tsx',
+        icon: 'Settings',
         selfClosing: true,
       },
       {
