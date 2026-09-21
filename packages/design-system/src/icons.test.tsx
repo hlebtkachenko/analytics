@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as icons from './icons.js';
 
 const expectedNames = [
+  'Add',
   'AiGenerate',
   'ArrowLeft',
   'ArrowRight',

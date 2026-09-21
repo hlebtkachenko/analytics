@@ -315,6 +315,7 @@ describe('Carbon catalog', () => {
   it('keeps full facades in ESM parity and the icon facade curated', async () => {
     expect(facadeKeys(bapReact)).toEqual(facadeEsmKeys('@carbon/react'));
     expect(facadeKeys(bapIcons)).toEqual([
+      'Add',
       'AiGenerate',
       'ArrowLeft',
       'ArrowRight',

@@ -92,6 +92,8 @@ export type DataGridProps = Readonly<{
   rows: readonly GridRow[];
   title?: string;
   description?: string;
+  // Render the title on the same row as the toolbar instead of stacked above it.
+  titleInline?: boolean;
 
   // Density and look.
   size?: DensitySize;

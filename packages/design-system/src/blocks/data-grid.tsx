@@ -307,6 +307,7 @@ export function DataGrid(props: DataGridProps) {
     rows,
     title,
     description,
+    titleInline = false,
     size = 'sm',
     zebra = false,
     wrapCells = false,
@@ -655,6 +656,8 @@ export function DataGrid(props: DataGridProps) {
     columnMenu || reorderableColumns || resizableColumns || Boolean(persistKey);
   const isEmpty = state === 'empty' || orderedRows.length === 0;
   const showOverlay = state === 'loading' && loadingMode === 'overlay';
+  // Inline layout puts the title beside the toolbar; needs both to be present.
+  const inlineHeader = titleInline && Boolean(title) && showToolbar;
 
   // The skeleton stands in for the whole grid while first data loads.
   // The wrapper clips it to the column so wide skeletons do not bleed out.
@@ -688,86 +691,97 @@ export function DataGrid(props: DataGridProps) {
     );
   }
 
+  const toolbar = showToolbar ? (
+    <TableToolbar>
+      {batchActions.length > 0 && (
+        <TableBatchActions
+          onCancel={clearSelection}
+          shouldShowBatchActions={selectedCount > 0}
+          totalSelected={selectedCount}
+        >
+          {batchActions.map((action) => (
+            <TableBatchAction
+              key={action.id}
+              onClick={() => action.onClick([...selected])}
+            >
+              {action.label}
+            </TableBatchAction>
+          ))}
+        </TableBatchActions>
+      )}
+      <TableToolbarContent>
+        {search && (
+          <TableToolbarSearch
+            onChange={(event) =>
+              handleSearch(typeof event === 'string' ? '' : event.target.value)
+            }
+            persistent={searchPlacement === 'persistent'}
+            placeholder="Search rows"
+            value={query}
+          />
+        )}
+        {filters.length > 0 && (
+          <FilterFacet
+            activeCount={filterCount}
+            groups={filters}
+            onApply={applyFilters}
+            onOpenChange={openFilters}
+            onReset={resetStagedFilters}
+            onToggle={toggleStagedFilter}
+            open={filterOpen}
+            staged={stagedFilters}
+          />
+        )}
+        {layoutMenu && (
+          <TableToolbarMenu iconDescription="Table options">
+            {columnMenu &&
+              columns
+                .filter((column) => column.hideable)
+                .map((column) => (
+                  <OverflowMenuItem
+                    key={column.key}
+                    itemText={`${layout.hidden.has(column.key) ? 'Show' : 'Hide'} ${column.header}`}
+                    onClick={() => layout.toggleHidden(column.key)}
+                  />
+                ))}
+            <OverflowMenuItem itemText="Reset layout" onClick={layout.reset} />
+          </TableToolbarMenu>
+        )}
+        {toolbarActions.map((action) => (
+          <Button
+            disabled={Boolean(action.disabled)}
+            key={action.id}
+            kind={action.kind ?? 'primary'}
+            onClick={action.onClick}
+            size="lg"
+          >
+            {action.label}
+          </Button>
+        ))}
+      </TableToolbarContent>
+    </TableToolbar>
+  ) : null;
+
   return (
     <TableContainer
       className={styles.root}
-      description={description}
-      title={title}
+      description={inlineHeader ? undefined : description}
+      title={inlineHeader ? undefined : title}
     >
-      {showToolbar && (
-        <TableToolbar>
-          {batchActions.length > 0 && (
-            <TableBatchActions
-              onCancel={clearSelection}
-              shouldShowBatchActions={selectedCount > 0}
-              totalSelected={selectedCount}
-            >
-              {batchActions.map((action) => (
-                <TableBatchAction
-                  key={action.id}
-                  onClick={() => action.onClick([...selected])}
-                >
-                  {action.label}
-                </TableBatchAction>
-              ))}
-            </TableBatchActions>
-          )}
-          <TableToolbarContent>
-            {search && (
-              <TableToolbarSearch
-                onChange={(event) =>
-                  handleSearch(
-                    typeof event === 'string' ? '' : event.target.value,
-                  )
-                }
-                persistent={searchPlacement === 'persistent'}
-                placeholder="Search rows"
-                value={query}
-              />
-            )}
-            {filters.length > 0 && (
-              <FilterFacet
-                activeCount={filterCount}
-                groups={filters}
-                onApply={applyFilters}
-                onOpenChange={openFilters}
-                onReset={resetStagedFilters}
-                onToggle={toggleStagedFilter}
-                open={filterOpen}
-                staged={stagedFilters}
-              />
-            )}
-            {layoutMenu && (
-              <TableToolbarMenu iconDescription="Table options">
-                {columnMenu &&
-                  columns
-                    .filter((column) => column.hideable)
-                    .map((column) => (
-                      <OverflowMenuItem
-                        key={column.key}
-                        itemText={`${layout.hidden.has(column.key) ? 'Show' : 'Hide'} ${column.header}`}
-                        onClick={() => layout.toggleHidden(column.key)}
-                      />
-                    ))}
-                <OverflowMenuItem
-                  itemText="Reset layout"
-                  onClick={layout.reset}
-                />
-              </TableToolbarMenu>
-            )}
-            {toolbarActions.map((action) => (
-              <Button
-                disabled={Boolean(action.disabled)}
-                key={action.id}
-                kind={action.kind ?? 'primary'}
-                onClick={action.onClick}
-                size="lg"
-              >
-                {action.label}
-              </Button>
-            ))}
-          </TableToolbarContent>
-        </TableToolbar>
+      {inlineHeader ? (
+        <div className={styles.inlineHeader}>
+          <div className={styles.inlineHeaderTitle}>
+            <h4 className="cds--data-table-header__title">{title}</h4>
+            {description ? (
+              <p className="cds--data-table-header__description">
+                {description}
+              </p>
+            ) : null}
+          </div>
+          {toolbar}
+        </div>
+      ) : (
+        toolbar
       )}
 
       <div className={styles.viewport}>

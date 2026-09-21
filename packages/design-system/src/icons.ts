@@ -1,6 +1,7 @@
 'use client';
 
 export {
+  Add,
   AiGenerate,
   ArrowLeft,
   ArrowRight,
