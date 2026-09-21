@@ -340,7 +340,6 @@ export default function WorkspaceList({
             size="sm"
             sortable
             title={t('workspaces.list.myTitle')}
-            titleInline
           />
 
           <DataGrid
@@ -373,7 +372,6 @@ export default function WorkspaceList({
             size="sm"
             sortable
             title={t('workspaces.list.joinedTitle')}
-            titleInline
           />
         </>
       )}
