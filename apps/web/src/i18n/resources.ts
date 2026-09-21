@@ -646,7 +646,10 @@ export const resources = {
         columnDate: 'Received',
         columnMessage: 'Notification',
         empty: 'You have no notifications yet.',
+        filterStatus: 'Status',
         sectionTitle: 'All notifications',
+        statusRead: 'Read',
+        statusUnread: 'Unread',
         title: 'Notifications',
       },
       reference: {

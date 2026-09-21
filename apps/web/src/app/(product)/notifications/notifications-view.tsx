@@ -1,7 +1,11 @@
 'use client';
 
 import { DataGrid } from '@bap/design-system/blocks';
-import type { GridColumn, GridRow } from '@bap/design-system/blocks';
+import type {
+  GridColumn,
+  GridFilterGroup,
+  GridRow,
+} from '@bap/design-system/blocks';
 import type { Route } from 'next';
 import { useRouter } from 'next/navigation';
 import { useTranslation } from 'react-i18next';
@@ -43,6 +47,7 @@ export default function NotificationsView({
     {
       header: t('notifications.columnMessage'),
       key: 'title',
+      sortable: true,
       renderCell: (row) => (
         <div className={styles.message}>
           <NotificationSeverityIcon
@@ -60,9 +65,19 @@ export default function NotificationsView({
     {
       header: t('notifications.columnDate'),
       key: 'created',
+      sortable: true,
       renderCell: (row) => dateFormat.format(new Date(String(row.created))),
     },
   ];
+
+  const statusFilter: GridFilterGroup = {
+    heading: t('notifications.filterStatus'),
+    key: 'status',
+    options: [
+      { id: 'unread', label: t('notifications.statusUnread') },
+      { id: 'read', label: t('notifications.statusRead') },
+    ],
+  };
 
   const hasUnread = notifications.some((notification) => !notification.read);
 
@@ -73,6 +88,7 @@ export default function NotificationsView({
     body: notification.body,
     href: notification.href,
     created: notification.created,
+    status: notification.read ? 'read' : 'unread',
   }));
 
   return (
@@ -81,6 +97,8 @@ export default function NotificationsView({
       <DataGrid
         columns={columns}
         emptyLabel={t('notifications.empty')}
+        filters={[statusFilter]}
+        initialSort={[{ direction: 'DESC', key: 'created' }]}
         onRowClick={(row) => {
           if (typeof row.href === 'string' && row.href.length > 0) {
             router.push(row.href as Route);
@@ -99,6 +117,7 @@ export default function NotificationsView({
           },
         ]}
         rows={rows}
+        searchPlacement="persistent"
         size="sm"
         state={rows.length === 0 ? 'empty' : 'ready'}
         title={t('notifications.sectionTitle')}
