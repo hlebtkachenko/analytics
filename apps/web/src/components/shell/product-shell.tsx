@@ -4,6 +4,7 @@ import {
   Close,
   Enterprise,
   Help,
+  Notification,
   Search,
   Switcher,
   UserAvatar,
@@ -26,9 +27,10 @@ import {
   SkipToContent,
   Theme,
 } from '@bap/design-system/react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import {
   railCookieName,
@@ -56,6 +58,7 @@ type PanelId = 'account' | 'help' | 'search' | 'switcher';
 type ProductShellProperties = Readonly<{
   children: ReactNode;
   feedbackEmail?: string | undefined;
+  invitationCount?: number | undefined;
   railPinned: boolean;
   user: Readonly<{ email: string; name: string }>;
   version: string;
@@ -64,6 +67,7 @@ type ProductShellProperties = Readonly<{
 export default function ProductShell({
   children,
   feedbackEmail,
+  invitationCount,
   railPinned,
   user,
   version,
@@ -73,6 +77,7 @@ export default function ProductShell({
       <ActiveOrganizationProvider>
         <ShellChrome
           feedbackEmail={feedbackEmail}
+          invitationCount={invitationCount}
           railPinned={railPinned}
           user={user}
           version={version}
@@ -87,11 +92,14 @@ export default function ProductShell({
 function ShellChrome({
   children,
   feedbackEmail,
+  invitationCount = 0,
   railPinned,
   user,
   version,
 }: ProductShellProperties) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { t } = useTranslation();
   const route = activeRoute(pathname);
   const organization = useActiveOrganization();
   const isLarge = useMediaQuery(largeViewportQuery, true);
@@ -210,6 +218,21 @@ function ShellChrome({
             >
               {searchOpen ? <Close size={20} /> : <Search size={20} />}
             </HeaderGlobalAction>
+            {invitationCount > 0 ? (
+              <HeaderGlobalAction
+                aria-label={t('shell.invitations.action', {
+                  count: invitationCount,
+                })}
+                className={styles.invitationAction!}
+                onClick={() => router.push('/organizations')}
+                tooltipAlignment="end"
+              >
+                <Notification size={20} />
+                <span aria-hidden="true" className={styles.invitationBadge!}>
+                  {invitationCount}
+                </span>
+              </HeaderGlobalAction>
+            ) : null}
             <HeaderGlobalAction
               aria-expanded={openPanel === 'help'}
               aria-label="Help"

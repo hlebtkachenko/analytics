@@ -37,6 +37,18 @@ export default async function ProductLayout({
     return null;
   }
 
+  // Pending workspace invitations for this account, from the same source the organizations page reads.
+  let invitationCount = 0;
+  try {
+    const auth = await getAuth();
+    const pending = await auth.api.listUserInvitations({
+      headers: requestHeaders,
+    });
+    invitationCount = pending.length;
+  } catch {
+    invitationCount = 0;
+  }
+
   const railPinned = await readRailPinned();
   // The feedback address is an operator input, not a public build-time constant.
   const feedbackEmail = process.env.BAP_FEEDBACK_EMAIL;
@@ -44,6 +56,7 @@ export default async function ProductLayout({
   return (
     <ProductShell
       feedbackEmail={feedbackEmail}
+      invitationCount={invitationCount}
       railPinned={railPinned}
       user={user}
       version={packageJson.version}

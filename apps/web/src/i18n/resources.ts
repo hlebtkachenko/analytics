@@ -695,6 +695,9 @@ export const resources = {
           documentation: 'Documentation',
           feedback: 'Send feedback',
         },
+        invitations: {
+          action: 'Workspace invitations ({{count}} pending)',
+        },
         roles: {
           admin: 'Admin',
           member: 'Member',
@@ -735,7 +738,18 @@ export const resources = {
         verify: 'Verify',
       },
       welcome: {
+        accept: 'Accept',
         continue: 'Continue to BAP',
+        invitationsSummary:
+          'Accept an invitation to join its workspace, or continue and respond later.',
+        invitationsTitle: 'Workspace invitations',
+        nameError: 'Your name could not be saved.',
+        nameHelper: 'This is how your name appears to other members.',
+        nameLabel: 'Display name',
+        nameSaved: 'Your name was saved.',
+        profileSummary: 'Confirm the name other members will see.',
+        profileTitle: 'Complete your profile',
+        saveName: 'Save name',
         summary: 'Your email address is verified and your account is active.',
         title: 'Welcome to BAP',
       },

@@ -19,6 +19,7 @@ export {
   Light,
   Login,
   Logout,
+  Notification,
   Password,
   Search,
   Security,

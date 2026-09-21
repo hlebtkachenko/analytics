@@ -57,13 +57,18 @@ afterEach(() => {
 const testUser = { email: 'ada@example.com', name: 'Ada Lovelace' } as const;
 
 function renderShell(
-  options: Readonly<{ feedbackEmail?: string; railPinned?: boolean }> = {},
+  options: Readonly<{
+    feedbackEmail?: string;
+    invitationCount?: number;
+    railPinned?: boolean;
+  }> = {},
 ) {
   return render(
     <DesignSystemProvider mode="light">
       <I18nProvider>
         <ProductShell
           feedbackEmail={options.feedbackEmail}
+          invitationCount={options.invitationCount}
           railPinned={options.railPinned ?? false}
           user={testUser}
           version="1.2.3"
@@ -108,6 +113,24 @@ describe('ProductShell', () => {
     }
     expect(screen.queryByRole('button', { name: 'Notifications' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull();
+  });
+
+  it('hides the invitations action when there are no pending invitations', () => {
+    renderShell();
+
+    expect(
+      screen.queryByRole('button', { name: /Workspace invitations/ }),
+    ).toBeNull();
+  });
+
+  it('shows a badged invitations action when invitations are pending', () => {
+    renderShell({ invitationCount: 2 });
+
+    const action = screen.getByRole('button', {
+      name: 'Workspace invitations (2 pending)',
+    });
+    expect(action).toBeTruthy();
+    expect(within(action).getByText('2')).toBeTruthy();
   });
 
   it('shows the application version in the help panel', () => {
