@@ -4,11 +4,14 @@ import {
   Button,
   Checkbox,
   DataTableSkeleton,
+  IconButton,
   InlineNotification,
   Loading,
   OverflowMenu,
   OverflowMenuItem,
   Pagination,
+  Popover,
+  PopoverContent,
   Select,
   SelectItem,
   Table,
@@ -31,6 +34,8 @@ import {
   TableToolbarSearch,
   TextInput,
 } from '../react';
+// The package is the icon-facade source, so the block reads Carbon icons directly.
+import { Filter } from '@carbon/icons-react';
 import {
   Fragment,
   useEffect,
@@ -49,6 +54,7 @@ import type {
   DataGridProps,
   DensitySize,
   GridColumn,
+  GridFilterGroup,
   GridRow,
   RowAction,
 } from './types';
@@ -98,6 +104,85 @@ function RowActionsMenu({
         />
       ))}
     </OverflowMenu>
+  );
+}
+
+// Toolbar funnel over a staged checkbox panel; selection commits only on Apply.
+function FilterFacet({
+  activeCount,
+  groups,
+  onApply,
+  onOpenChange,
+  onReset,
+  onToggle,
+  open,
+  staged,
+}: Readonly<{
+  activeCount: number;
+  groups: readonly GridFilterGroup[];
+  onApply: () => void;
+  onOpenChange: (open: boolean) => void;
+  onReset: () => void;
+  onToggle: (groupKey: string, id: string, checked: boolean) => void;
+  open: boolean;
+  staged: Readonly<Record<string, readonly string[]>>;
+}>): ReactNode {
+  return (
+    <Popover
+      align="bottom-end"
+      onRequestClose={() => onOpenChange(false)}
+      open={open}
+    >
+      <span className={styles.filterTrigger}>
+        <IconButton
+          kind="ghost"
+          label="Filter"
+          onClick={() => onOpenChange(!open)}
+          type="button"
+        >
+          <Filter />
+        </IconButton>
+        {activeCount > 0 ? (
+          <span aria-hidden className={styles.filterCount}>
+            {activeCount}
+          </span>
+        ) : null}
+      </span>
+      <PopoverContent className={styles.filterPopover}>
+        {open ? (
+          <div className={styles.filterPanel}>
+            <div className={styles.filterColumns}>
+              {groups.map((group) => (
+                <div className={styles.filterColumn} key={group.key}>
+                  <p className={styles.filterHeading}>{group.heading}</p>
+                  <div className={styles.filterOptions}>
+                    {group.options.map((option) => (
+                      <Checkbox
+                        checked={(staged[group.key] ?? []).includes(option.id)}
+                        id={`data-grid-filter-${group.key}-${option.id}`}
+                        key={option.id}
+                        labelText={option.label}
+                        onChange={(_event, { checked }) =>
+                          onToggle(group.key, option.id, checked)
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className={styles.filterFooter}>
+              <Button kind="ghost" onClick={onReset} size="lg" type="button">
+                Reset
+              </Button>
+              <Button kind="primary" onClick={onApply} size="lg" type="button">
+                Apply
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -221,6 +306,9 @@ export function DataGrid(props: DataGridProps) {
     searchPlacement = 'toolbar',
     searchValue,
     onSearch,
+    filters = [],
+    filterValues,
+    onFilterChange,
     pagination = false,
     paginationMode = 'client',
     pageSize = 10,
@@ -264,17 +352,49 @@ export function DataGrid(props: DataGridProps) {
   const serverSearch = typeof onSearch === 'function';
   const [clientQuery, setClientQuery] = useState('');
   const query = serverSearch ? (searchValue ?? '') : clientQuery;
+
+  // Faceted filter selection is controlled when filterValues is passed, else owned.
+  const filtersControlled = filterValues !== undefined;
+  const [ownedFilters, setOwnedFilters] = useState<
+    Record<string, readonly string[]>
+  >({});
+  const appliedFilters = filtersControlled ? filterValues : ownedFilters;
+  // Groups with a live selection; a row must match each of these to pass.
+  const activeFilters = useMemo(
+    () =>
+      Object.entries(appliedFilters).filter(([, ids]) => ids.length > 0) as [
+        string,
+        readonly string[],
+      ][],
+    [appliedFilters],
+  );
+
   const filtered = useMemo(() => {
-    if (serverSearch || !search || query.trim() === '') return rows;
-    const needle = query.toLowerCase();
-    return rows.filter((row) =>
-      columns.some((column) =>
-        String(row[column.key] ?? '')
-          .toLowerCase()
-          .includes(needle),
-      ),
+    const searched =
+      serverSearch || !search || query.trim() === ''
+        ? rows
+        : rows.filter((row) =>
+            columns.some((column) =>
+              String(row[column.key] ?? '')
+                .toLowerCase()
+                .includes(query.toLowerCase()),
+            ),
+          );
+    if (activeFilters.length === 0) return searched;
+    return searched.filter((row) =>
+      activeFilters.every(([key, ids]) => ids.includes(String(row[key]))),
     );
-  }, [rows, columns, query, search, serverSearch]);
+  }, [rows, columns, query, search, serverSearch, activeFilters]);
+
+  // The filter popover stages its checkboxes and only commits on Apply.
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [stagedFilters, setStagedFilters] = useState<
+    Record<string, readonly string[]>
+  >({});
+  const filterCount = Object.values(appliedFilters).reduce(
+    (sum, ids) => sum + ids.length,
+    0,
+  );
 
   const sort = useGridSort(filtered, initialSort, multiSort);
   const orderedRows = lockSort ? filtered : sort.sortedRows;
@@ -477,8 +597,37 @@ export function DataGrid(props: DataGridProps) {
     }
   };
 
+  // Opening seeds the staged selection from what is already applied.
+  const openFilters = (open: boolean): void => {
+    if (open) setStagedFilters({ ...appliedFilters });
+    setFilterOpen(open);
+  };
+  const toggleStagedFilter = (
+    groupKey: string,
+    id: string,
+    checked: boolean,
+  ): void => {
+    setStagedFilters((current) => {
+      const ids = current[groupKey] ?? [];
+      return {
+        ...current,
+        [groupKey]: checked
+          ? [...ids, id]
+          : ids.filter((value) => value !== id),
+      };
+    });
+  };
+  const applyFilters = (): void => {
+    if (filtersControlled) onFilterChange?.(stagedFilters);
+    else setOwnedFilters(stagedFilters);
+    setClientPage(1);
+    setFilterOpen(false);
+  };
+  const resetStagedFilters = (): void => setStagedFilters({});
+
   const showToolbar =
     search ||
+    filters.length > 0 ||
     columnMenu ||
     batchActions.length > 0 ||
     toolbarActions.length > 0 ||
@@ -558,6 +707,18 @@ export function DataGrid(props: DataGridProps) {
                 persistent={searchPlacement === 'persistent'}
                 placeholder="Search rows"
                 value={query}
+              />
+            )}
+            {filters.length > 0 && (
+              <FilterFacet
+                activeCount={filterCount}
+                groups={filters}
+                onApply={applyFilters}
+                onOpenChange={openFilters}
+                onReset={resetStagedFilters}
+                onToggle={toggleStagedFilter}
+                open={filterOpen}
+                staged={stagedFilters}
               />
             )}
             {layoutMenu && (

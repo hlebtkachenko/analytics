@@ -195,6 +195,85 @@ describe('DataGrid', () => {
     expect(root).toHaveClass(styles.root!);
   });
 
+  it('narrows rows to the applied filter selection', () => {
+    render(
+      <DataGrid
+        columns={columns}
+        filters={[
+          {
+            heading: 'Name',
+            key: 'name',
+            options: [
+              { id: 'alpha', label: 'Alpha' },
+              { id: 'beta', label: 'Beta' },
+            ],
+          },
+        ]}
+        rows={rows}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Alpha' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    const body = bodyRowText();
+    expect(body).toHaveLength(1);
+    expect(body[0]).toContain('alpha');
+  });
+
+  it('shows the count of applied filter selections in the badge', () => {
+    const { container } = render(
+      <DataGrid
+        columns={columns}
+        filters={[
+          {
+            heading: 'Name',
+            key: 'name',
+            options: [
+              { id: 'alpha', label: 'Alpha' },
+              { id: 'beta', label: 'Beta' },
+            ],
+          },
+        ]}
+        rows={rows}
+      />,
+    );
+    expect(container.querySelector(`.${styles.filterCount!}`)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Alpha' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Beta' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(
+      container.querySelector(`.${styles.filterCount!}`)?.textContent,
+    ).toBe('2');
+  });
+
+  it('clears the staged selection when reset is clicked', () => {
+    render(
+      <DataGrid
+        columns={columns}
+        filters={[
+          {
+            heading: 'Name',
+            key: 'name',
+            options: [{ id: 'alpha', label: 'Alpha' }],
+          },
+        ]}
+        rows={rows}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    const alpha = screen.getByRole('checkbox', {
+      name: 'Alpha',
+    }) as HTMLInputElement;
+    fireEvent.click(alpha);
+    expect(alpha.checked).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    expect(
+      (screen.getByRole('checkbox', { name: 'Alpha' }) as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+  });
+
   it('limits the page to the client page size', () => {
     const many: GridRow[] = Array.from({ length: 5 }, (_, index) => ({
       id: String(index),

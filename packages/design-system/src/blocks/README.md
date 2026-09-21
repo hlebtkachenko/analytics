@@ -62,6 +62,11 @@ Everything is off by default; turn on only what the page needs.
   needs `multi`), `selectAllScope` (`page`/`all`), `onSelectionChange`.
 - Search: `search`, `searchPlacement` (`toolbar`/`persistent`). Pass `onSearch`
   to switch client filtering to server search.
+- Faceted filter: `filters` (`GridFilterGroup[]`) renders a toolbar funnel with a
+  count badge over a staged checkbox popover (Reset/Apply). A row passes when, for
+  each group with a selection, `String(row[group.key])` is in that selection;
+  applied on top of search before pagination. Selection is owned internally
+  unless you pass `filterValues` + `onFilterChange` to control it.
 - Pagination: `pagination`, `paginationMode` (`client`/`server`), `pageSize`,
   `pageSizes`. Server mode needs `page`, `totalItems`, `onPageChange`.
 - Rows: `rowNumbers`, `onRowClick`, `reorderableRows` (+
