@@ -367,7 +367,7 @@ export function createAfterAcceptInvitationHook(pool: DatabasePool) {
     organization,
   }: {
     invitation: { id: string; inviterId: string };
-    member: { organizationId: string; userId: string };
+    member: { organizationId: string; role: string; userId: string };
     user: { name: string };
     organization: { name: string; slug: string };
   }): Promise<void> => {
@@ -380,6 +380,7 @@ export function createAfterAcceptInvitationHook(pool: DatabasePool) {
       userId: invitation.inviterId,
       kind: 'member.joined',
       title: `${user.name} joined ${organization.name}`,
+      body: `Joined as ${member.role}`,
       href: `/${organization.slug}/members`,
     }).catch(() => undefined);
   };

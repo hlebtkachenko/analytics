@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   countUnreadNotifications,
   createNotification,
+  deleteAllNotifications,
+  deleteNotification,
   ensureInitialOrganizationQuota,
   findOrganizationIdBySlug,
   findUserSessionToken,
@@ -10,6 +12,7 @@ import {
   listNotifications,
   listUserSessions,
   listWorkspaceMemberships,
+  markNotificationRead,
   markNotificationsRead,
   organizationCreationLimitReached,
   resolveMembership,
@@ -571,16 +574,23 @@ describe('notification accessors', () => {
         userId: 'user-1',
         kind: 'member.joined',
         title: 'Ada joined Acme',
+        body: 'Joined as member',
         href: '/acme/members',
       }),
     ).resolves.toBeUndefined();
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining('into auth.notification'),
-      ['user-1', 'member.joined', 'Ada joined Acme', '/acme/members'],
+      [
+        'user-1',
+        'member.joined',
+        'Ada joined Acme',
+        'Joined as member',
+        '/acme/members',
+      ],
     );
   });
 
-  it('defaults an absent href to null on insert', async () => {
+  it('defaults an absent body and href to null on insert', async () => {
     const query = vi.fn(async () => ({ rows: [], rowCount: 1 }));
     const pool = { query } as unknown as DatabasePool;
 
@@ -594,6 +604,7 @@ describe('notification accessors', () => {
       'member.joined',
       'Ada joined Acme',
       null,
+      null,
     ]);
   });
 
@@ -606,6 +617,7 @@ describe('notification accessors', () => {
           user_id: 'user-1',
           kind: 'member.joined',
           title: 'Ada joined Acme',
+          body: 'Joined as member',
           href: '/acme/members',
           read_at: null,
           created_at: createdAt,
@@ -620,6 +632,7 @@ describe('notification accessors', () => {
         userId: 'user-1',
         kind: 'member.joined',
         title: 'Ada joined Acme',
+        body: 'Joined as member',
         href: '/acme/members',
         readAt: null,
         createdAt,
@@ -659,6 +672,49 @@ describe('notification accessors', () => {
     const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
     expect(sql).toEqual(expect.stringContaining('where user_id = $1'));
     expect(sql).toEqual(expect.stringContaining('read_at is null'));
+    expect(params).toEqual(['user-1']);
+  });
+
+  it('marks a single caller notification read scoped by user and id', async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 1 }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(
+      markNotificationRead(pool, 'user-1', 'notification-1'),
+    ).resolves.toBe(1);
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toEqual(expect.stringContaining('user_id = $1'));
+    expect(sql).toEqual(expect.stringContaining('id = $2'));
+    expect(sql).toEqual(expect.stringContaining('read_at is null'));
+    expect(params).toEqual(['user-1', 'notification-1']);
+  });
+
+  it('deletes a single caller notification scoped by user and id', async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 1 }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(
+      deleteNotification(pool, 'user-1', 'notification-1'),
+    ).resolves.toBe(1);
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toEqual(
+      expect.stringContaining('delete from auth.notification'),
+    );
+    expect(sql).toEqual(expect.stringContaining('user_id = $1'));
+    expect(sql).toEqual(expect.stringContaining('id = $2'));
+    expect(params).toEqual(['user-1', 'notification-1']);
+  });
+
+  it('deletes every caller notification scoped by user', async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 4 }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(deleteAllNotifications(pool, 'user-1')).resolves.toBe(4);
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toEqual(
+      expect.stringContaining('delete from auth.notification'),
+    );
+    expect(sql).toEqual(expect.stringContaining('user_id = $1'));
     expect(params).toEqual(['user-1']);
   });
 });

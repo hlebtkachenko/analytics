@@ -50,7 +50,7 @@ export interface WorkspaceMembership {
 }
 
 // Exact match against the version recorded by the migration runner. Bump it to the newest migration id in the same pull request as that migration. Rollback consequence: application code rolled back after the migration is applied makes /ready return 503 on every service until this is bumped again.
-export const DATABASE_MIGRATION_COMPATIBILITY = '20260922.0003';
+export const DATABASE_MIGRATION_COMPATIBILITY = '20260922.0004';
 
 export const PUBLIC_SIGNUP_EDGE_RATE_LIMIT = {
   max: 3,
@@ -722,6 +722,7 @@ export interface NotificationRow {
   userId: string;
   kind: string;
   title: string;
+  body: string | null;
   href: string | null;
   readAt: Date | null;
   createdAt: Date;
@@ -731,6 +732,7 @@ export interface CreateNotificationInput {
   userId: string;
   kind: string;
   title: string;
+  body?: string | null;
   href?: string | null;
 }
 
@@ -740,9 +742,15 @@ export async function createNotification(
   input: CreateNotificationInput,
 ): Promise<void> {
   await pool.query(
-    `insert into auth.notification (user_id, kind, title, href)
-     values ($1, $2, $3, $4)`,
-    [input.userId, input.kind, input.title, input.href ?? null],
+    `insert into auth.notification (user_id, kind, title, body, href)
+     values ($1, $2, $3, $4, $5)`,
+    [
+      input.userId,
+      input.kind,
+      input.title,
+      input.body ?? null,
+      input.href ?? null,
+    ],
   );
 }
 
@@ -757,11 +765,12 @@ export async function listNotifications(
     user_id: string;
     kind: string;
     title: string;
+    body: string | null;
     href: string | null;
     read_at: Date | null;
     created_at: Date;
   }>(
-    `select id, user_id, kind, title, href, read_at, created_at
+    `select id, user_id, kind, title, body, href, read_at, created_at
      from auth.notification
      where user_id = $1
      order by created_at desc
@@ -774,6 +783,7 @@ export async function listNotifications(
     userId: row.user_id,
     kind: row.kind,
     title: row.title,
+    body: row.body,
     href: row.href,
     readAt: row.read_at,
     createdAt: row.created_at,
@@ -804,6 +814,51 @@ export async function markNotificationsRead(
     `update auth.notification
      set read_at = now()
      where user_id = $1 and read_at is null`,
+    [userId],
+  );
+
+  return result.rowCount ?? 0;
+}
+
+// Marks one of the caller's own unread notifications read and returns how many rows changed.
+export async function markNotificationRead(
+  pool: DatabasePool,
+  userId: string,
+  id: string,
+): Promise<number> {
+  const result = await pool.query(
+    `update auth.notification
+     set read_at = now()
+     where user_id = $1 and id = $2 and read_at is null`,
+    [userId, id],
+  );
+
+  return result.rowCount ?? 0;
+}
+
+// Hard-deletes one of the caller's own notifications and returns how many rows were removed.
+export async function deleteNotification(
+  pool: DatabasePool,
+  userId: string,
+  id: string,
+): Promise<number> {
+  const result = await pool.query(
+    `delete from auth.notification
+     where user_id = $1 and id = $2`,
+    [userId, id],
+  );
+
+  return result.rowCount ?? 0;
+}
+
+// Hard-deletes every one of the caller's own notifications and returns how many rows were removed.
+export async function deleteAllNotifications(
+  pool: DatabasePool,
+  userId: string,
+): Promise<number> {
+  const result = await pool.query(
+    `delete from auth.notification
+     where user_id = $1`,
     [userId],
   );
 

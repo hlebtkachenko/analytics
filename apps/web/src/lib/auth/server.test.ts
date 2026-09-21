@@ -1221,7 +1221,11 @@ describe('invitation acceptance notification', () => {
 
   const acceptedInvitation = {
     invitation: { id: 'invitation-1', inviterId: 'inviter-1' },
-    member: { organizationId: 'organization-1', userId: 'user-2' },
+    member: {
+      organizationId: 'organization-1',
+      role: 'member',
+      userId: 'user-2',
+    },
     user: { name: 'New Member' },
     organization: { name: 'Acme', slug: 'acme' },
   };
@@ -1243,6 +1247,7 @@ describe('invitation acceptance notification', () => {
       'inviter-1',
       'member.joined',
       'New Member joined Acme',
+      'Joined as member',
       '/acme/members',
     ]);
   });
