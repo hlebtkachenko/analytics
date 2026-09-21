@@ -697,9 +697,14 @@ export const resources = {
           about: 'Version {{version}}',
           documentation: 'Documentation',
           feedback: 'Send feedback',
+          whatsNew: "What's new",
         },
         invitations: {
           action: 'Workspace invitations ({{count}} pending)',
+        },
+        notifications: {
+          empty: 'You have no notifications yet.',
+          title: 'Notifications',
         },
         roles: {
           admin: 'Admin',
@@ -713,6 +718,12 @@ export const resources = {
           groupWorkspace: 'Workspaces',
           label: 'Search',
           placeholder: 'Search Afframe Analytics',
+        },
+        settings: {
+          accountSettings: 'Account settings',
+          description:
+            'Application preferences arrive with the first product module.',
+          title: 'Settings',
         },
       },
       signUp: {

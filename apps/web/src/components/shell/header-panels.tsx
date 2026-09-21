@@ -124,7 +124,7 @@ export function HelpPanel({
   return (
     <HeaderPanel expanded={expanded}>
       {expanded ? (
-        <div className={styles.menu!}>
+        <div className={styles.panel!}>
           <a
             className={styles.link!}
             href="https://github.com/hlebtkachenko/analytics/tree/main/docs"
@@ -138,7 +138,61 @@ export function HelpPanel({
               {t('shell.help.feedback')}
             </a>
           )}
-          <p className={styles.about!}>{t('shell.help.about', { version })}</p>
+          <a
+            className={styles.link!}
+            href="https://github.com/hlebtkachenko/analytics/releases"
+            rel="noreferrer"
+            target="_blank"
+          >
+            {t('shell.help.whatsNew')}
+          </a>
+          <p className={styles.identityMeta!}>
+            {t('shell.help.about', { version })}
+          </p>
+        </div>
+      ) : null}
+    </HeaderPanel>
+  );
+}
+
+export function NotificationsPanel({
+  expanded,
+  invitationCount,
+}: PanelProperties & Readonly<{ invitationCount: number }>) {
+  const { t } = useTranslation();
+
+  return (
+    <HeaderPanel expanded={expanded}>
+      {expanded ? (
+        <div className={styles.panel!}>
+          <h2 className={styles.panelHeading!}>
+            {t('shell.notifications.title')}
+          </h2>
+          {invitationCount > 0 ? (
+            <Link className={styles.link!} href="/workspaces">
+              {t('shell.invitations.action', { count: invitationCount })}
+            </Link>
+          ) : (
+            <p className={styles.muted!}>{t('shell.notifications.empty')}</p>
+          )}
+        </div>
+      ) : null}
+    </HeaderPanel>
+  );
+}
+
+export function SettingsPanel({ expanded }: PanelProperties) {
+  const { t } = useTranslation();
+
+  return (
+    <HeaderPanel expanded={expanded}>
+      {expanded ? (
+        <div className={styles.panel!}>
+          <h2 className={styles.panelHeading!}>{t('shell.settings.title')}</h2>
+          <p className={styles.muted!}>{t('shell.settings.description')}</p>
+          <Link className={styles.link!} href="/account">
+            {t('shell.settings.accountSettings')}
+          </Link>
         </div>
       ) : null}
     </HeaderPanel>

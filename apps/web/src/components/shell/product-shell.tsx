@@ -6,6 +6,7 @@ import {
   Help,
   Notification,
   Search,
+  Settings,
   Switcher,
   UserAvatar,
 } from '@bap/design-system/icons';
@@ -27,8 +28,8 @@ import {
   SkipToContent,
   Theme,
 } from '@bap/design-system/react';
-import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -43,7 +44,13 @@ import {
 } from './active-organization';
 import Breadcrumbs from './breadcrumbs';
 import GlobalSearch from './global-search';
-import { AccountPanel, HelpPanel, SwitcherPanel } from './header-panels';
+import {
+  AccountPanel,
+  HelpPanel,
+  NotificationsPanel,
+  SettingsPanel,
+  SwitcherPanel,
+} from './header-panels';
 import {
   activeRoute,
   railDestinations,
@@ -53,7 +60,8 @@ import styles from './product-shell.module.scss';
 import { ToastProvider } from './toast';
 import { largeViewportQuery, useMediaQuery } from './use-media-query';
 
-type PanelId = 'account' | 'help' | 'search' | 'switcher';
+type PanelId =
+  'account' | 'help' | 'notifications' | 'search' | 'settings' | 'switcher';
 
 type ProductShellProperties = Readonly<{
   children: ReactNode;
@@ -98,7 +106,6 @@ function ShellChrome({
   version,
 }: ProductShellProperties) {
   const pathname = usePathname();
-  const router = useRouter();
   const { t } = useTranslation();
   const route = activeRoute(pathname);
   const organization = useActiveOrganization();
@@ -108,6 +115,7 @@ function ShellChrome({
   const [openPanel, setOpenPanel] = useState<PanelId | null>(null);
   const [trackedPathname, setTrackedPathname] = useState(pathname);
   const [trackedRailPinned, setTrackedRailPinned] = useState(railPinned);
+  const triggerRef = useRef<HTMLElement | null>(null);
 
   // Close transient navigation and panels when the route changes, adjusting
   // state during render rather than in an effect.
@@ -127,17 +135,45 @@ function ShellChrome({
   const expanded = (pinned && isLarge) || mobileOpen;
   const searchOpen = openPanel === 'search';
 
-  // Escape dismisses any open panel or the mobile navigation.
+  // Escape dismisses any open panel or the mobile navigation and returns focus
+  // to the action that opened it, so keyboard users never lose their place.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if (event.key === 'Escape') {
+        const trigger = triggerRef.current;
         setOpenPanel(null);
         setMobileOpen(false);
+        if (trigger !== null) {
+          trigger.focus();
+          triggerRef.current = null;
+        }
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  // A pointer press outside the header closes any open panel. The panels and
+  // the search field render inside the header element, so a press that resolves
+  // to the header is never treated as outside. Focus is left where the user
+  // clicked.
+  useEffect(() => {
+    if (openPanel === null) {
+      return;
+    }
+    function onPointerDown(event: PointerEvent): void {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest('.cds--header') === null
+      ) {
+        setOpenPanel(null);
+        triggerRef.current = null;
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [openPanel]);
 
   function toggleNavigation(): void {
     if (isLarge) {
@@ -150,6 +186,8 @@ function ShellChrome({
   }
 
   function togglePanel(id: PanelId): void {
+    const active = document.activeElement;
+    triggerRef.current = active instanceof HTMLElement ? active : null;
     setOpenPanel((current) => (current === id ? null : id));
   }
 
@@ -218,21 +256,21 @@ function ShellChrome({
             >
               {searchOpen ? <Close size={20} /> : <Search size={20} />}
             </HeaderGlobalAction>
-            {invitationCount > 0 ? (
-              <HeaderGlobalAction
-                aria-label={t('shell.invitations.action', {
-                  count: invitationCount,
-                })}
-                className={styles.invitationAction!}
-                onClick={() => router.push('/workspaces')}
-                tooltipAlignment="end"
-              >
-                <Notification size={20} />
+            <HeaderGlobalAction
+              aria-expanded={openPanel === 'notifications'}
+              aria-label={t('shell.notifications.title')}
+              className={styles.invitationAction!}
+              isActive={openPanel === 'notifications'}
+              onClick={() => togglePanel('notifications')}
+              tooltipAlignment="end"
+            >
+              <Notification size={20} />
+              {invitationCount > 0 ? (
                 <span aria-hidden="true" className={styles.invitationBadge!}>
                   {invitationCount}
                 </span>
-              </HeaderGlobalAction>
-            ) : null}
+              ) : null}
+            </HeaderGlobalAction>
             <HeaderGlobalAction
               aria-expanded={openPanel === 'help'}
               aria-label="Help"
@@ -241,6 +279,15 @@ function ShellChrome({
               tooltipAlignment="end"
             >
               <Help size={20} />
+            </HeaderGlobalAction>
+            <HeaderGlobalAction
+              aria-expanded={openPanel === 'settings'}
+              aria-label={t('shell.settings.title')}
+              isActive={openPanel === 'settings'}
+              onClick={() => togglePanel('settings')}
+              tooltipAlignment="end"
+            >
+              <Settings size={20} />
             </HeaderGlobalAction>
             <HeaderGlobalAction
               aria-expanded={openPanel === 'account'}
@@ -261,11 +308,16 @@ function ShellChrome({
               <Switcher size={20} />
             </HeaderGlobalAction>
           </HeaderGlobalBar>
+          <NotificationsPanel
+            expanded={openPanel === 'notifications'}
+            invitationCount={invitationCount}
+          />
           <HelpPanel
             expanded={openPanel === 'help'}
             feedbackEmail={feedbackEmail}
             version={version}
           />
+          <SettingsPanel expanded={openPanel === 'settings'} />
           <AccountPanel
             activeOrganization={organization}
             expanded={openPanel === 'account'}

@@ -105,32 +105,68 @@ describe('ProductShell', () => {
     ).toBe('/workspaces');
   });
 
-  it('renders exactly the four global header actions', () => {
+  it('renders the six global header actions', () => {
     renderShell();
 
-    for (const label of ['Search', 'Help', 'Account', 'Workspaces']) {
+    for (const label of [
+      'Search',
+      'Notifications',
+      'Help',
+      'Settings',
+      'Account',
+      'Workspaces',
+    ]) {
       expect(screen.getByRole('button', { name: label })).toBeTruthy();
     }
-    expect(screen.queryByRole('button', { name: 'Notifications' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull();
   });
 
-  it('hides the invitations action when there are no pending invitations', () => {
+  it('shows an empty notifications panel and no badge when nothing is pending', () => {
     renderShell();
 
-    expect(
-      screen.queryByRole('button', { name: /Workspace invitations/ }),
-    ).toBeNull();
+    const action = screen.getByRole('button', { name: 'Notifications' });
+    expect(within(action).queryByText('2')).toBeNull();
+
+    fireEvent.click(action);
+
+    expect(screen.getByText('You have no notifications yet.')).toBeTruthy();
   });
 
-  it('shows a badged invitations action when invitations are pending', () => {
+  it('badges the notifications action and lists invitations when pending', () => {
     renderShell({ invitationCount: 2 });
 
-    const action = screen.getByRole('button', {
+    const action = screen.getByRole('button', { name: 'Notifications' });
+    expect(within(action).getByText('2')).toBeTruthy();
+
+    fireEvent.click(action);
+
+    const link = screen.getByRole('link', {
       name: 'Workspace invitations (2 pending)',
     });
-    expect(action).toBeTruthy();
-    expect(within(action).getByText('2')).toBeTruthy();
+    expect(link.getAttribute('href')).toBe('/workspaces');
+  });
+
+  it('shows the settings panel with an account settings link', () => {
+    renderShell();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeTruthy();
+    expect(
+      screen
+        .getByRole('link', { name: 'Account settings' })
+        .getAttribute('href'),
+    ).toBe('/account');
+  });
+
+  it('closes an open panel on a pointer press outside the header', () => {
+    renderShell();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Help' }));
+    expect(screen.getByRole('link', { name: 'Documentation' })).toBeTruthy();
+
+    fireEvent.pointerDown(screen.getByText('Page body'));
+
+    expect(screen.queryByRole('link', { name: 'Documentation' })).toBeNull();
   });
 
   it('shows the application version in the help panel', () => {
@@ -140,6 +176,7 @@ describe('ProductShell', () => {
 
     expect(screen.getByText('Version 1.2.3')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Documentation' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: "What's new" })).toBeTruthy();
   });
 
   it('hides the feedback link when no feedback address is configured', () => {
