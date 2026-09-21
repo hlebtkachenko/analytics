@@ -48,6 +48,8 @@ export default async function OrganizationsPage() {
       role: membership.role,
       status: membership.status,
       created: isoDate(membership.createdAt),
+      joined: isoDate(membership.joinedAt),
+      memberCount: membership.memberCount,
     }));
   } catch {
     loadError = true;

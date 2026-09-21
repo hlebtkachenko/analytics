@@ -65,6 +65,32 @@ enums.
   pnpm --filter @bap/web typecheck && pnpm --filter @bap/web lint &&
   pnpm --filter @bap/web test`.
 
+## Design review revision
+
+Live review pass on top of the above:
+
+- The build hero and the four upsell tiles are wrapped in one bounded container
+  (`workspace-build-section.module.scss` `.row`: border, small gutter, hero
+  wider on the left) so they read as a grouped tile row, not loose tiles.
+- The hero uses a richer blue-to-purple diagonal gradient and forces all hero
+  text (title, subtitle, CTA) white. The hero title is now "Create" and the CTA
+  "Create workspace" with `ArrowRight`.
+- A primary "Create workspace" button sits top-right of the page `Workspaces`
+  H1. `PageContainer` exposes no title-actions slot, so it is rendered as page
+  content in a `.titleRow` flex row inside `workspace-list.tsx`, not in the
+  shell header. The duplicate toolbar create action is removed.
+- The two tables use the `DataGrid` `title` prop ("My workspaces", "Joined
+  workspaces") instead of free `<h2>` headings. "Member of" is renamed to
+  "Joined workspaces".
+- The Joined table filters through the new `DataGrid` `filters` prop (Role,
+  Status groups) instead of the local external funnel. Rows carry the raw
+  `role`/`status` ids so the block filter matches; Tags render through
+  `renderCell`. `workspace-filter.ts`, `workspace-filter.test.ts`, and
+  `workspace-filter-flyout.tsx` are deleted.
+- Both tables drop expandable detail rows and drill in through `onRowClick` to
+  `/{slug}`. New columns: Members (`memberCount`) on both, Joined (membership
+  `joinedAt`) on the Joined table.
+
 ## Open questions
 
 None. The brief called the workspaces page the only caller of

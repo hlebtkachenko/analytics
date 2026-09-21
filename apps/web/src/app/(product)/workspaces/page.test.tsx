@@ -76,6 +76,8 @@ describe('OrganizationsPage', () => {
         role: 'owner',
         status: 'active',
         createdAt: new Date('2026-09-01T00:00:00.000Z'),
+        joinedAt: new Date('2026-09-01T00:00:00.000Z'),
+        memberCount: 3,
       },
     ]);
 
@@ -88,7 +90,7 @@ describe('OrganizationsPage', () => {
     expect(screen.getByText('Placeholder Holding')).toBeVisible();
   });
 
-  it('lists a non-owner membership under Member of with its status', async () => {
+  it('lists a non-owner membership under Joined workspaces with its status', async () => {
     mocks.listWorkspaceMemberships.mockResolvedValue([
       {
         id: 'organization-2',
@@ -97,12 +99,16 @@ describe('OrganizationsPage', () => {
         role: 'member',
         status: 'inactive',
         createdAt: new Date('2026-09-01T00:00:00.000Z'),
+        joinedAt: new Date('2026-09-01T00:00:00.000Z'),
+        memberCount: 5,
       },
     ]);
 
     await renderPage();
 
-    expect(screen.getByRole('heading', { name: 'Member of' })).toBeVisible();
+    expect(
+      screen.getByRole('heading', { name: 'Joined workspaces' }),
+    ).toBeVisible();
     const table = screen.getAllByRole('table')[1]!;
     expect(within(table).getByText('Client Books')).toBeVisible();
     expect(within(table).getByText('Inactive')).toBeVisible();
