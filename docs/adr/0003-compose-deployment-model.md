@@ -11,13 +11,14 @@ production host also needs explicit security and persistence behavior.
 ## Decision
 
 Use `compose.yaml` as the canonical service model. Apply
-`compose.development.yaml` for loopback-published local ports and
-`compose.mailpit.yaml` separately for the local synthetic-mail sink. Apply
-`compose.production.yaml` for restart and read-only application policies. Owner
-bootstrap deliberately uses base plus development without the mail overlay.
-Build each application from its own multi-stage Dockerfile, run Node.js as a
-non-root user, and persist PostgreSQL 18 under a named volume mounted at
-`/var/lib/postgresql`.
+`compose.development.yaml` for loopback-published local ports and an
+`on-failure` restart policy that recovers long-running application containers
+after a local out-of-memory kill, and `compose.mailpit.yaml` separately for the
+local synthetic-mail sink. Apply `compose.production.yaml` for `unless-stopped`
+restart and read-only application policies. Owner bootstrap deliberately uses
+base plus development without the mail overlay. Build each application from its
+own multi-stage Dockerfile, run Node.js as a non-root user, and persist
+PostgreSQL 18 under a named volume mounted at `/var/lib/postgresql`.
 
 ## Consequences
 
