@@ -14,7 +14,7 @@ import {
 
 import { getAuth, getAuthPool } from '../auth/server';
 import { entityScopeWriteSchema } from '../auth/bff';
-import { formValue, organizationPath, resultPath } from './action-support';
+import { formValue, resultPath } from './action-support';
 import { normalizeOrganizationSlug, organizationSlugSchema } from './slug';
 
 const invitationInputIdSchema = z.object({ invitationId: z.string().min(1) });
@@ -168,59 +168,82 @@ function isSlugTakenError(error: unknown): boolean {
 }
 
 const organizationNameSchema = z.string().trim().min(1);
-const createOrganizationInputSchema = z.object({
+const createWorkspaceInputSchema = z.object({
   name: organizationNameSchema,
   slug: z.string(),
 });
 
-export async function createOrganizationAction(
-  formData: FormData,
-): Promise<never> {
-  const input = createOrganizationInputSchema.safeParse({
-    name: formValue(formData, 'name'),
-    slug: formValue(formData, 'slug'),
-  });
-  let destination = resultPath('/workspaces/new', 'error');
+// Better Auth returns the created organization; only its id and slug are read back.
+const createdOrganizationSchema = z.object({
+  id: z.string().min(1),
+  slug: z.string().min(1),
+});
 
-  if (input.success) {
-    const slug = organizationSlugSchema.safeParse(
-      normalizeOrganizationSlug(input.data.slug),
-    );
-    if (slug.success) {
-      try {
-        const auth = await getAuth();
-        const requestHeaders = await headers();
-        const session = await auth.api.getSession({ headers: requestHeaders });
-        if (session?.user.emailVerified !== true) {
-          throw new Error('Organization creation unavailable.');
-        }
-        const quota = await getOrganizationCreationQuota(
-          await getAuthPool(),
-          session.user.id,
-        );
-        if (quota !== null && quota.remainingTotal === 0) {
-          destination = resultPath('/workspaces/new', 'quota-exhausted');
-        } else {
-          await auth.api.createOrganization({
-            body: {
-              keepCurrentActiveOrganization: true,
-              name: input.data.name,
-              slug: slug.data,
-            },
-            headers: requestHeaders,
-          });
-          revalidatePath('/workspaces');
-          destination = organizationPath(slug.data);
-        }
-      } catch (error) {
-        destination = isSlugTakenError(error)
-          ? resultPath('/workspaces/new', 'slug-taken')
-          : resultPath('/workspaces/new', 'error');
-      }
-    }
+export type CreateWorkspaceResult =
+  | Readonly<{ ok: true; id: string; slug: string }>
+  | Readonly<{
+      ok: false;
+      reason: 'slug-taken' | 'quota-exhausted' | 'invalid' | 'error';
+    }>;
+
+// Creates the workspace and returns its id and slug so the wizard can commit its next steps
+// against the real organization. Unlike the redirecting form action, every outcome is a value the
+// browser branches on. Better Auth makes the caller the owner; the slug is validated at the boundary.
+export async function createWorkspaceAction(
+  input: unknown,
+): Promise<CreateWorkspaceResult> {
+  const parsed = createWorkspaceInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, reason: 'invalid' };
   }
 
-  redirect(destination as Route);
+  const slug = organizationSlugSchema.safeParse(
+    normalizeOrganizationSlug(parsed.data.slug),
+  );
+  if (!slug.success) {
+    return { ok: false, reason: 'invalid' };
+  }
+
+  try {
+    const auth = await getAuth();
+    const requestHeaders = await headers();
+    const session = await auth.api.getSession({ headers: requestHeaders });
+    if (session?.user.emailVerified !== true) {
+      return { ok: false, reason: 'error' };
+    }
+
+    const quota = await getOrganizationCreationQuota(
+      await getAuthPool(),
+      session.user.id,
+    );
+    if (quota !== null && quota.remainingTotal === 0) {
+      return { ok: false, reason: 'quota-exhausted' };
+    }
+
+    const created = await auth.api.createOrganization({
+      body: {
+        keepCurrentActiveOrganization: true,
+        name: parsed.data.name,
+        slug: slug.data,
+      },
+      headers: requestHeaders,
+    });
+    const organization = createdOrganizationSchema.safeParse(created);
+    if (!organization.success) {
+      return { ok: false, reason: 'error' };
+    }
+
+    revalidatePath('/workspaces');
+    return {
+      id: organization.data.id,
+      ok: true,
+      slug: organization.data.slug,
+    };
+  } catch (error) {
+    return isSlugTakenError(error)
+      ? { ok: false, reason: 'slug-taken' }
+      : { ok: false, reason: 'error' };
+  }
 }
 
 // Accepts a pending invitation addressed to the caller; the id travels only in the form body.

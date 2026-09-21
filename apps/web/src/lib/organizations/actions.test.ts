@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   acceptOrganizationInvitationAction,
-  createOrganizationAction,
+  createWorkspaceAction,
   declineOrganizationInvitationAction,
   inviteMemberWithScopeAction,
 } from './actions';
@@ -85,11 +85,17 @@ describe('organization server actions', () => {
     });
   });
 
-  it('creates with normalized input without changing ambient organization state', async () => {
-    await createOrganizationAction(
-      form({ name: ' Organization Two ', slug: 'Organization Two' }),
-    );
+  it('creates with normalized input and returns the workspace id and slug', async () => {
+    const result = await createWorkspaceAction({
+      name: ' Organization Two ',
+      slug: 'Organization Two',
+    });
 
+    expect(result).toEqual({
+      id: 'organization-1',
+      ok: true,
+      slug: 'organization-one',
+    });
     expect(mocks.createOrganization).toHaveBeenCalledWith({
       body: {
         keepCurrentActiveOrganization: true,
@@ -101,49 +107,47 @@ describe('organization server actions', () => {
     expect(mocks.getSession).toHaveBeenCalledWith({
       headers: expect.any(Headers),
     });
-    expect(mocks.redirect).toHaveBeenCalledWith('/organization-two');
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/workspaces');
+    expect(mocks.redirect).not.toHaveBeenCalled();
   });
 
   it('rejects a reserved create slug before auth side effects', async () => {
-    await createOrganizationAction(
-      form({ name: 'Organizations', slug: 'organizations' }),
-    );
+    const result = await createWorkspaceAction({
+      name: 'Organizations',
+      slug: 'organizations',
+    });
 
+    expect(result).toEqual({ ok: false, reason: 'invalid' });
     expect(mocks.createOrganization).not.toHaveBeenCalled();
-    expect(mocks.redirect).toHaveBeenCalledWith(
-      '/workspaces/new?result=error',
-    );
   });
 
-  it('marks an exhausted quota so the create page shows it inline', async () => {
+  it('marks an exhausted quota so the wizard shows it inline', async () => {
     mocks.getOrganizationCreationQuota.mockResolvedValue({
       attributedTotal: 1,
       grantedTotal: 1,
       remainingTotal: 0,
     });
 
-    await createOrganizationAction(
-      form({ name: 'Organization Two', slug: 'organization-two' }),
-    );
+    const result = await createWorkspaceAction({
+      name: 'Organization Two',
+      slug: 'organization-two',
+    });
 
+    expect(result).toEqual({ ok: false, reason: 'quota-exhausted' });
     expect(mocks.createOrganization).not.toHaveBeenCalled();
-    expect(mocks.redirect).toHaveBeenCalledWith(
-      '/workspaces/new?result=quota-exhausted',
-    );
   });
 
-  it('marks a taken address so the create page shows it inline', async () => {
+  it('marks a taken address so the wizard shows it inline', async () => {
     mocks.createOrganization.mockRejectedValue({
       body: { code: 'ORGANIZATION_ALREADY_EXISTS' },
     });
 
-    await createOrganizationAction(
-      form({ name: 'Organization Two', slug: 'organization-two' }),
-    );
+    const result = await createWorkspaceAction({
+      name: 'Organization Two',
+      slug: 'organization-two',
+    });
 
-    expect(mocks.redirect).toHaveBeenCalledWith(
-      '/workspaces/new?result=slug-taken',
-    );
+    expect(result).toEqual({ ok: false, reason: 'slug-taken' });
   });
 
   it('accepts an invitation from the form body and returns a success marker', async () => {
@@ -295,18 +299,17 @@ describe('organization server actions', () => {
     expect(mocks.createInvitation).not.toHaveBeenCalled();
   });
 
-  it('rejects an unverified direct create action before writes', async () => {
+  it('rejects an unverified create action before writes', async () => {
     mocks.getSession.mockResolvedValue({
       user: { emailVerified: false, id: 'user-1' },
     });
 
-    await createOrganizationAction(
-      form({ name: 'Organization Two', slug: 'organization-two' }),
-    );
+    const result = await createWorkspaceAction({
+      name: 'Organization Two',
+      slug: 'organization-two',
+    });
 
+    expect(result).toEqual({ ok: false, reason: 'error' });
     expect(mocks.createOrganization).not.toHaveBeenCalled();
-    expect(mocks.redirect).toHaveBeenCalledWith(
-      '/workspaces/new?result=error',
-    );
   });
 });
