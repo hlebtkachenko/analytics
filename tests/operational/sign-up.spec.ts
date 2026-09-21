@@ -752,7 +752,7 @@ test('proves invitation-only registration, acceptance, and membership management
       memberRow().getByRole('cell', { exact: true, name: 'Member' }),
     ).toBeVisible();
 
-    await memberRow().getByRole('button', { name: 'Options' }).click();
+    await memberRow().getByRole('button', { name: 'Actions for' }).click();
     await page.getByRole('menuitem', { name: 'Change role' }).click();
     const roleDialog = page.getByRole('dialog', {
       name: /^Change role for /,
@@ -766,7 +766,7 @@ test('proves invitation-only registration, acceptance, and membership management
       memberRow().getByRole('cell', { exact: true, name: 'Admin' }),
     ).toBeVisible();
 
-    await memberRow().getByRole('button', { name: 'Options' }).click();
+    await memberRow().getByRole('button', { name: 'Actions for' }).click();
     await page.getByRole('menuitem', { exact: true, name: 'Remove' }).click();
     const removeDialog = page.getByRole('dialog', { name: /^Remove / });
     await expect(removeDialog).toBeVisible();

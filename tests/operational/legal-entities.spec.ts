@@ -208,7 +208,7 @@ test.describe.serial('workspace legal entities and entity scope', () => {
     await page.goto(`/${organizationSlug}/members`);
     const memberRow = page.getByRole('row').filter({ hasText: memberEmail });
     await expect(memberRow).toHaveCount(1);
-    await memberRow.getByRole('button', { name: 'Options' }).click();
+    await memberRow.getByRole('button', { name: 'Actions for' }).click();
     await page.getByRole('menuitem', { name: 'Edit entity scope' }).click();
 
     const scopeDialog = page.getByRole('dialog', {
