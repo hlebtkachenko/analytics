@@ -11,10 +11,12 @@ production host also needs explicit security and persistence behavior.
 ## Decision
 
 Use `compose.yaml` as the canonical service model. Apply
-`compose.development.yaml` for loopback-published local ports and an
+`compose.development.yaml` for loopback-published local ports, an
 `on-failure` restart policy that recovers long-running application containers
-after a local out-of-memory kill, and `compose.mailpit.yaml` separately for the
-local synthetic-mail sink. Apply `compose.production.yaml` for `unless-stopped`
+after a local out-of-memory kill, and a `BAP_PUBLIC_ORIGIN` pinned across the
+`web`, `api`, `reporting-api`, and `worker` services so the resource-JWT issuer
+stays consistent when only some services are recreated, and
+`compose.mailpit.yaml` separately for the local synthetic-mail sink. Apply `compose.production.yaml` for `unless-stopped`
 restart and read-only application policies. Owner bootstrap deliberately uses
 base plus development without the mail overlay. Build each application from its
 own multi-stage Dockerfile, run Node.js as a non-root user, and persist
