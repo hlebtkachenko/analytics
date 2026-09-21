@@ -28,9 +28,6 @@ export default async function NewOrganizationPage() {
 
   const title = await translate('workspaces.create.title');
   const back = await translate('workspaces.create.back');
-  const quotaRemaining = await translate('workspaces.create.quotaRemaining', {
-    remaining,
-  });
 
   return (
     <PageContainer>
@@ -38,7 +35,6 @@ export default async function NewOrganizationPage() {
       <Button href="/workspaces" kind="ghost">
         {back}
       </Button>
-      <p>{quotaRemaining}</p>
       <CreateWorkspaceWizard
         initialName={session.user.name}
         remaining={remaining}

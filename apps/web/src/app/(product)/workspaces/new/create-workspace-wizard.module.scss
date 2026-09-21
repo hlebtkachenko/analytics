@@ -1,0 +1,13 @@
+// Shared footer for each step: Back on the left, the step's advance actions on the right.
+.navRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+// The right-aligned group of advance actions within a step footer.
+.navActions {
+  display: flex;
+  gap: 1rem;
+}

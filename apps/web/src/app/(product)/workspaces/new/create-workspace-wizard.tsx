@@ -29,6 +29,7 @@ import {
   normalizeOrganizationSlug,
   organizationSlugSchema,
 } from '../../../../lib/organizations/slug';
+import styles from './create-workspace-wizard.module.scss';
 
 type EntityKind = 'company' | 'sole_trader';
 
@@ -261,6 +262,9 @@ export default function CreateWorkspaceWizard({
 
   return (
     <Stack gap={7}>
+      {organization === null ? (
+        <p>{t('workspaces.create.quotaRemaining', { remaining })}</p>
+      ) : null}
       <ProgressIndicator currentIndex={step} spaceEqually>
         <ProgressStep label={t('workspaces.create.steps.workspace')} />
         <ProgressStep label={t('workspaces.create.steps.entity')} />
@@ -386,14 +390,24 @@ export default function CreateWorkspaceWizard({
               }}
               value={registrationNumber}
             />
-            <Stack gap={4} orientation="horizontal">
-              <Button kind="ghost" onClick={() => setStep(2)} type="button">
-                {t('workspaces.create.skip')}
+            <div className={styles.navRow}>
+              <Button
+                disabled={savingEntity}
+                kind="ghost"
+                onClick={() => setStep(0)}
+                type="button"
+              >
+                {t('workspaces.create.stepBack')}
               </Button>
-              <Button disabled={savingEntity} type="submit">
-                {t('workspaces.create.entity.submit')}
-              </Button>
-            </Stack>
+              <div className={styles.navActions}>
+                <Button kind="ghost" onClick={() => setStep(2)} type="button">
+                  {t('workspaces.create.skip')}
+                </Button>
+                <Button disabled={savingEntity} type="submit">
+                  {t('workspaces.create.entity.submit')}
+                </Button>
+              </div>
+            </div>
           </Stack>
         </Form>
       ) : null}
@@ -483,6 +497,7 @@ export default function CreateWorkspaceWizard({
               ) : null}
               <Button
                 disabled={row.status !== 'idle'}
+                kind="secondary"
                 onClick={() => void sendInvite(index)}
                 type="button"
               >
@@ -497,21 +512,20 @@ export default function CreateWorkspaceWizard({
           >
             {t('workspaces.create.invite.addRow')}
           </Button>
-          <Button disabled={finishing} onClick={finish} type="button">
-            {t('workspaces.create.finish')}
-          </Button>
+          <div className={styles.navRow}>
+            <Button
+              disabled={finishing}
+              kind="ghost"
+              onClick={() => setStep(1)}
+              type="button"
+            >
+              {t('workspaces.create.stepBack')}
+            </Button>
+            <Button disabled={finishing} onClick={finish} type="button">
+              {t('workspaces.create.finish')}
+            </Button>
+          </div>
         </Stack>
-      ) : null}
-
-      {step > 0 && !finishing ? (
-        <Button
-          disabled={creating || savingEntity}
-          kind="ghost"
-          onClick={() => setStep((current) => current - 1)}
-          type="button"
-        >
-          {t('workspaces.create.stepBack')}
-        </Button>
       ) : null}
     </Stack>
   );
