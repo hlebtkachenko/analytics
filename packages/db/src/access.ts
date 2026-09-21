@@ -7,6 +7,9 @@ import type { DatabasePool } from './pool.js';
 const membershipRoleSchema = z.enum(['owner', 'admin', 'member']);
 export type MembershipRole = z.infer<typeof membershipRoleSchema>;
 
+const membershipStatusSchema = z.enum(['active', 'inactive']);
+export type MembershipStatus = z.infer<typeof membershipStatusSchema>;
+
 export interface MembershipResolution {
   emailVerified: boolean;
   role: MembershipRole;
@@ -40,6 +43,7 @@ export interface WorkspaceMembership {
   name: string;
   slug: string;
   role: MembershipRole;
+  status: MembershipStatus;
   createdAt: Date;
 }
 
@@ -602,7 +606,9 @@ export async function resolveOrganizationRoute(
   return { id: row.id, name: row.name, role: role.data, slug: row.slug };
 }
 
-// Lists the caller's workspaces with their own role in one query, never per-organization.
+// Lists every one of the caller's workspaces with their own role and status in
+// one query, never per-organization. Inactive memberships are included; callers
+// that only navigate to enterable workspaces filter to the active status.
 export async function listWorkspaceMemberships(
   pool: DatabasePool,
   subjectId: string,
@@ -612,15 +618,15 @@ export async function listWorkspaceMemberships(
     name: string;
     slug: string;
     role: string;
+    status: string;
     created_at: Date;
   }>(
     `select organization.id, organization.name, organization.slug,
-            membership.role, organization.created_at
+            membership.role, membership.status, organization.created_at
      from auth.organization as organization
      inner join auth.member as membership
        on membership.organization_id = organization.id
      where membership.user_id = $1
-       and membership.status = 'active'
      order by organization.name`,
     [subjectId],
   );
@@ -628,8 +634,9 @@ export async function listWorkspaceMemberships(
   const memberships: WorkspaceMembership[] = [];
   for (const row of result.rows) {
     const role = membershipRoleSchema.safeParse(row.role);
-    // Drop rows whose role fails the enum parse, consistent with resolveOrganizationRoute.
-    if (!role.success) {
+    const status = membershipStatusSchema.safeParse(row.status);
+    // Drop rows whose role or status fails the enum parse, consistent with resolveOrganizationRoute.
+    if (!role.success || !status.success) {
       continue;
     }
     memberships.push({
@@ -637,6 +644,7 @@ export async function listWorkspaceMemberships(
       name: row.name,
       slug: row.slug,
       role: role.data,
+      status: status.data,
       createdAt: row.created_at,
     });
   }

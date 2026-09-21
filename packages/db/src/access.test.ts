@@ -374,7 +374,7 @@ describe('organization accessors', () => {
     ).resolves.toBeNull();
   });
 
-  it('lists the caller workspaces with their own role in one query', async () => {
+  it('lists the caller workspaces with their own role and status in one query', async () => {
     const createdAt = new Date('2026-09-01T00:00:00.000Z');
     const query = vi.fn(async () => ({
       rows: [
@@ -383,6 +383,15 @@ describe('organization accessors', () => {
           name: 'Organization One',
           slug: 'organization-one',
           role: 'owner',
+          status: 'active',
+          created_at: createdAt,
+        },
+        {
+          id: 'organization-3',
+          name: 'Organization Three',
+          slug: 'organization-three',
+          role: 'member',
+          status: 'inactive',
           created_at: createdAt,
         },
         {
@@ -390,18 +399,29 @@ describe('organization accessors', () => {
           name: 'Organization Two',
           slug: 'organization-two',
           role: 'legacy-role',
+          status: 'active',
           created_at: createdAt,
         },
       ],
     }));
     const pool = { query } as unknown as DatabasePool;
 
+    // The inactive membership is returned; the row with an unparseable role is dropped.
     await expect(listWorkspaceMemberships(pool, 'user-1')).resolves.toEqual([
       {
         id: 'organization-1',
         name: 'Organization One',
         slug: 'organization-one',
         role: 'owner',
+        status: 'active',
+        createdAt,
+      },
+      {
+        id: 'organization-3',
+        name: 'Organization Three',
+        slug: 'organization-three',
+        role: 'member',
+        status: 'inactive',
         createdAt,
       },
     ]);
@@ -409,6 +429,11 @@ describe('organization accessors', () => {
       expect.stringMatching(
         /from auth\.organization as organization\s+inner join auth\.member as membership/,
       ),
+      ['user-1'],
+    );
+    // The active-only predicate is gone so every membership is returned.
+    expect(query).toHaveBeenCalledWith(
+      expect.not.stringContaining("membership.status = 'active'"),
       ['user-1'],
     );
   });
