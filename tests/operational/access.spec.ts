@@ -25,13 +25,13 @@ publicTest('protects the public BAP access boundary', async ({ page }) => {
   expect(metrics.status()).toBe(404);
   const root = await page.request.get('/', { maxRedirects: 0 });
   expect(root.status()).toBe(307);
-  expect(root.headers()['location']).toMatch(/\/organizations$/);
-  const organizations = await page.request.get('/organizations', {
+  expect(root.headers()['location']).toMatch(/\/workspaces$/);
+  const workspaces = await page.request.get('/workspaces', {
     maxRedirects: 0,
   });
-  expect(organizations.status()).toBe(307);
+  expect(workspaces.status()).toBe(307);
   // The default landing page carries no next parameter.
-  expect(organizations.headers()['location']).toBe('/sign-in');
+  expect(workspaces.headers()['location']).toBe('/sign-in');
   // Every slug answers the same signed-out redirect, so nothing about slug existence leaks.
   const organizationSlugPage = await page.request.get('/bap-operational', {
     maxRedirects: 0,
