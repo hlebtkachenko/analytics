@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  countUnreadNotifications,
+  createNotification,
   ensureInitialOrganizationQuota,
   findOrganizationIdBySlug,
   findUserSessionToken,
   getOrganizationCreationQuota,
+  listNotifications,
   listUserSessions,
   listWorkspaceMemberships,
+  markNotificationsRead,
   organizationCreationLimitReached,
   resolveMembership,
   resolveOrganizationRoute,
@@ -554,5 +558,107 @@ describe('organization accessors', () => {
       'select auth.transfer_ownership($1, $2, $3)',
       ['organization-1', 'user-1', 'user-2'],
     );
+  });
+});
+
+describe('notification accessors', () => {
+  it('inserts a notification scoped to the owning user', async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 1 }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(
+      createNotification(pool, {
+        userId: 'user-1',
+        kind: 'member.joined',
+        title: 'Ada joined Acme',
+        href: '/acme/members',
+      }),
+    ).resolves.toBeUndefined();
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('into auth.notification'),
+      ['user-1', 'member.joined', 'Ada joined Acme', '/acme/members'],
+    );
+  });
+
+  it('defaults an absent href to null on insert', async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 1 }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await createNotification(pool, {
+      userId: 'user-1',
+      kind: 'member.joined',
+      title: 'Ada joined Acme',
+    });
+    expect(query).toHaveBeenCalledWith(expect.any(String), [
+      'user-1',
+      'member.joined',
+      'Ada joined Acme',
+      null,
+    ]);
+  });
+
+  it('lists the caller notifications newest first with a limit param', async () => {
+    const createdAt = new Date('2026-09-20T10:00:00.000Z');
+    const query = vi.fn(async () => ({
+      rows: [
+        {
+          id: 'notification-1',
+          user_id: 'user-1',
+          kind: 'member.joined',
+          title: 'Ada joined Acme',
+          href: '/acme/members',
+          read_at: null,
+          created_at: createdAt,
+        },
+      ],
+    }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(listNotifications(pool, 'user-1')).resolves.toEqual([
+      {
+        id: 'notification-1',
+        userId: 'user-1',
+        kind: 'member.joined',
+        title: 'Ada joined Acme',
+        href: '/acme/members',
+        readAt: null,
+        createdAt,
+      },
+    ]);
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toEqual(expect.stringContaining('where user_id = $1'));
+    expect(sql).toEqual(expect.stringMatching(/order by created_at desc/));
+    expect(sql).toEqual(expect.stringContaining('limit $2'));
+    expect(params).toEqual(['user-1', 20]);
+  });
+
+  it('honours an explicit notification limit', async () => {
+    const query = vi.fn(async () => ({ rows: [] }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await listNotifications(pool, 'user-1', 5);
+    expect(query).toHaveBeenCalledWith(expect.any(String), ['user-1', 5]);
+  });
+
+  it('counts only unread notifications for the caller', async () => {
+    const query = vi.fn(async () => ({ rows: [{ unread_count: '3' }] }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(countUnreadNotifications(pool, 'user-1')).resolves.toBe(3);
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toEqual(expect.stringContaining('where user_id = $1'));
+    expect(sql).toEqual(expect.stringContaining('read_at is null'));
+    expect(params).toEqual(['user-1']);
+  });
+
+  it('marks the caller unread notifications read and returns the row count', async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 2 }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(markNotificationsRead(pool, 'user-1')).resolves.toBe(2);
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toEqual(expect.stringContaining('where user_id = $1'));
+    expect(sql).toEqual(expect.stringContaining('read_at is null'));
+    expect(params).toEqual(['user-1']);
   });
 });

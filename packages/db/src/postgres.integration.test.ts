@@ -677,6 +677,31 @@ describe('PostgreSQL 18 isolation', () => {
     }
   });
 
+  it('grants the notification inbox default auth privileges without a hand-written grant', async () => {
+    const tableAcl = await rootPool.query<{
+      grantee: string;
+      privilege_type: string;
+    }>(`select grantee, privilege_type
+       from information_schema.table_privileges
+       where table_schema = 'auth'
+         and table_name = 'notification'
+       order by grantee, privilege_type`);
+    expect(tableAcl.rows).toEqual([
+      { grantee: 'bap_auth', privilege_type: 'DELETE' },
+      { grantee: 'bap_auth', privilege_type: 'INSERT' },
+      { grantee: 'bap_auth', privilege_type: 'SELECT' },
+      { grantee: 'bap_auth', privilege_type: 'UPDATE' },
+      { grantee: 'bap_backup', privilege_type: 'SELECT' },
+      { grantee: 'bap_owner', privilege_type: 'DELETE' },
+      { grantee: 'bap_owner', privilege_type: 'INSERT' },
+      { grantee: 'bap_owner', privilege_type: 'REFERENCES' },
+      { grantee: 'bap_owner', privilege_type: 'SELECT' },
+      { grantee: 'bap_owner', privilege_type: 'TRIGGER' },
+      { grantee: 'bap_owner', privilege_type: 'TRUNCATE' },
+      { grantee: 'bap_owner', privilege_type: 'UPDATE' },
+    ]);
+  });
+
   it('rejects every reserved slug and keeps all database slug rules in parity with the shared corpus', async () => {
     const corpus = await readOrganizationSlugCorpus();
 

@@ -50,7 +50,7 @@ export interface WorkspaceMembership {
 }
 
 // Exact match against the version recorded by the migration runner. Bump it to the newest migration id in the same pull request as that migration. Rollback consequence: application code rolled back after the migration is applied makes /ready return 503 on every service until this is bumped again.
-export const DATABASE_MIGRATION_COMPATIBILITY = '20260922.0002';
+export const DATABASE_MIGRATION_COMPATIBILITY = '20260922.0003';
 
 export const PUBLIC_SIGNUP_EDGE_RATE_LIMIT = {
   max: 3,
@@ -714,6 +714,100 @@ export async function findUserSessionToken(
   );
 
   return result.rows[0]?.token ?? null;
+}
+
+// A persisted per-user notification row for the header inbox panel.
+export interface NotificationRow {
+  id: string;
+  userId: string;
+  kind: string;
+  title: string;
+  href: string | null;
+  readAt: Date | null;
+  createdAt: Date;
+}
+
+export interface CreateNotificationInput {
+  userId: string;
+  kind: string;
+  title: string;
+  href?: string | null;
+}
+
+// Raises one notification for a user; any server path scopes it by owning the user_id it writes.
+export async function createNotification(
+  pool: DatabasePool,
+  input: CreateNotificationInput,
+): Promise<void> {
+  await pool.query(
+    `insert into auth.notification (user_id, kind, title, href)
+     values ($1, $2, $3, $4)`,
+    [input.userId, input.kind, input.title, input.href ?? null],
+  );
+}
+
+// Lists the caller's own notifications, newest first, scoped by user_id.
+export async function listNotifications(
+  pool: DatabasePool,
+  userId: string,
+  limit = 20,
+): Promise<NotificationRow[]> {
+  const result = await pool.query<{
+    id: string;
+    user_id: string;
+    kind: string;
+    title: string;
+    href: string | null;
+    read_at: Date | null;
+    created_at: Date;
+  }>(
+    `select id, user_id, kind, title, href, read_at, created_at
+     from auth.notification
+     where user_id = $1
+     order by created_at desc
+     limit $2`,
+    [userId, limit],
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    userId: row.user_id,
+    kind: row.kind,
+    title: row.title,
+    href: row.href,
+    readAt: row.read_at,
+    createdAt: row.created_at,
+  }));
+}
+
+// Counts the caller's unread notifications for the header badge, scoped by user_id.
+export async function countUnreadNotifications(
+  pool: DatabasePool,
+  userId: string,
+): Promise<number> {
+  const result = await pool.query<{ unread_count: string }>(
+    `select count(*) as unread_count
+     from auth.notification
+     where user_id = $1 and read_at is null`,
+    [userId],
+  );
+
+  return Number(result.rows[0]?.unread_count ?? 0);
+}
+
+// Marks every unread notification of the caller as read and returns how many rows changed.
+export async function markNotificationsRead(
+  pool: DatabasePool,
+  userId: string,
+): Promise<number> {
+  const result = await pool.query(
+    `update auth.notification
+     set read_at = now()
+     where user_id = $1 and read_at is null`,
+    [userId],
+  );
+
+  return result.rowCount ?? 0;
 }
 
 export interface MigrationCompatibility {
