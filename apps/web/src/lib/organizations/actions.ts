@@ -233,7 +233,6 @@ export async function createWorkspaceAction(
       return { ok: false, reason: 'error' };
     }
 
-    revalidatePath('/workspaces');
     return {
       id: organization.data.id,
       ok: true,

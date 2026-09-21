@@ -33,10 +33,8 @@ vi.mock('next/navigation', () => ({
 import { I18nProvider } from '../../../../i18n/client-provider';
 import NewOrganizationPage from './page';
 
-async function renderPage(result?: string) {
-  const ui = await NewOrganizationPage({
-    searchParams: Promise.resolve(result === undefined ? {} : { result }),
-  });
+async function renderPage() {
+  const ui = await NewOrganizationPage();
   return render(<I18nProvider>{ui}</I18nProvider>);
 }
 
@@ -68,7 +66,7 @@ describe('NewOrganizationPage', () => {
     expect(slug).toHaveValue('revised-workspace');
   });
 
-  it('replaces the wizard with one message at zero quota', async () => {
+  it('keeps the wizard mounted at zero quota with the warning shown', async () => {
     mocks.getOrganizationCreationQuota.mockResolvedValue({
       attributedTotal: 1,
       grantedTotal: 1,
@@ -80,26 +78,10 @@ describe('NewOrganizationPage', () => {
     expect(
       screen.getByText('Workspace creation is not available for this account.'),
     ).toBeVisible();
+    // The wizard is never swapped out, so its first step stays mounted.
     expect(
-      screen.queryByRole('form', { name: 'Create workspace' }),
-    ).not.toBeInTheDocument();
-  });
-
-  it('replaces the wizard with the quota-exhausted marker even with remaining quota', async () => {
-    mocks.getOrganizationCreationQuota.mockResolvedValue({
-      attributedTotal: 1,
-      grantedTotal: 3,
-      remainingTotal: 2,
-    });
-
-    await renderPage('quota-exhausted');
-
-    expect(
-      screen.getByText('Workspace creation is not available for this account.'),
-    ).toBeVisible();
-    expect(
-      screen.queryByRole('form', { name: 'Create workspace' }),
-    ).not.toBeInTheDocument();
+      screen.getByRole('form', { name: 'Create workspace' }),
+    ).toBeInTheDocument();
   });
 
   it('fails closed to zero when quota cannot be read', async () => {

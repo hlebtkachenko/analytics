@@ -107,7 +107,8 @@ describe('organization server actions', () => {
     expect(mocks.getSession).toHaveBeenCalledWith({
       headers: expect.any(Headers),
     });
-    expect(mocks.revalidatePath).toHaveBeenCalledWith('/workspaces');
+    // The wizard stays mounted through its later steps, so no route is revalidated on create.
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
     expect(mocks.redirect).not.toHaveBeenCalled();
   });
 

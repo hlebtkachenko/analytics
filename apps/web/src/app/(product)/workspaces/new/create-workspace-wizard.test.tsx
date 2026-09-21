@@ -42,10 +42,13 @@ const createdEntity = {
   updatedAt: '2026-01-01T00:00:00.000Z',
 };
 
-function renderWizard() {
+function renderWizard(remaining = 3) {
   return render(
     <I18nProvider>
-      <CreateWorkspaceWizard initialName="Acme Workspace" />
+      <CreateWorkspaceWizard
+        initialName="Acme Workspace"
+        remaining={remaining}
+      />
     </I18nProvider>,
   );
 }
@@ -65,6 +68,16 @@ afterEach(cleanup);
 describe('CreateWorkspaceWizard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('blocks starting a workspace and disables next at zero quota', () => {
+    renderWizard(0);
+
+    expect(
+      screen.getByText('Workspace creation is not available for this account.'),
+    ).toBeVisible();
+    expect(screen.getByText('Next')).toBeDisabled();
+    expect(mocks.createWorkspaceAction).not.toHaveBeenCalled();
   });
 
   it('creates the workspace, locks step one and advances to the entity step', async () => {

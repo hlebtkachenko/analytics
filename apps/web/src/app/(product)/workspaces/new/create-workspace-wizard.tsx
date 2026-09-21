@@ -77,7 +77,8 @@ const emailSchema = z.email().max(254);
 
 export default function CreateWorkspaceWizard({
   initialName,
-}: Readonly<{ initialName: string }>) {
+  remaining,
+}: Readonly<{ initialName: string; remaining: number }>) {
   const { t } = useTranslation();
   const router = useRouter();
   const fieldPrefix = useId();
@@ -114,6 +115,8 @@ export default function CreateWorkspaceWizard({
 
   const slugValid = organizationSlugSchema.safeParse(slug).success;
   const locked = organization !== null;
+  // Only blocks starting a new workspace; once created, the quota is irrelevant to steps 2 and 3.
+  const quotaBlocked = organization === null && remaining === 0;
 
   const createResultMessages: Readonly<Record<string, string>> = {
     error: t('workspaces.create.unavailable'),
@@ -123,7 +126,7 @@ export default function CreateWorkspaceWizard({
   };
 
   async function createWorkspace(): Promise<void> {
-    if (locked || !slugValid) {
+    if (locked || quotaBlocked || !slugValid) {
       return;
     }
     setCreating(true);
@@ -273,6 +276,14 @@ export default function CreateWorkspaceWizard({
           }}
         >
           <Stack gap={6}>
+            {quotaBlocked ? (
+              <InlineNotification
+                hideCloseButton
+                kind="warning"
+                lowContrast
+                title={t('workspaces.create.quotaExhausted')}
+              />
+            ) : null}
             {createError !== null ? (
               <InlineNotification
                 hideCloseButton
@@ -310,7 +321,10 @@ export default function CreateWorkspaceWizard({
               required
               value={slug}
             />
-            <Button disabled={!slugValid || creating || locked} type="submit">
+            <Button
+              disabled={!slugValid || creating || locked || quotaBlocked}
+              type="submit"
+            >
               {t('workspaces.create.next')}
             </Button>
           </Stack>
