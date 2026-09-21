@@ -19,10 +19,15 @@ vi.mock('next/navigation', () => ({
   useSelectedLayoutSegments: () => navigation.segments,
 }));
 
-// The mark-read server action is stubbed; this UI test never touches the auth pool.
-vi.mock('../../lib/notifications/actions', () => ({
+// The notification server actions are stubbed; this UI test never touches the auth pool.
+const notificationActions = vi.hoisted(() => ({
+  dismissAllNotificationsAction: vi.fn(() => Promise.resolve()),
+  dismissNotificationAction: vi.fn(() => Promise.resolve()),
+  markNotificationReadAction: vi.fn(() => Promise.resolve()),
   markNotificationsReadAction: vi.fn(() => Promise.resolve()),
 }));
+
+vi.mock('../../lib/notifications/actions', () => notificationActions);
 
 import { ActiveOrganization } from './active-organization';
 import ProductShell from './product-shell';
@@ -53,6 +58,9 @@ beforeEach(() => {
   stubMatchMedia(true);
   globalThis.ResizeObserver =
     ResizeObserverStub as unknown as typeof ResizeObserver;
+  for (const action of Object.values(notificationActions)) {
+    action.mockClear();
+  }
 });
 
 afterEach(() => {
@@ -196,6 +204,113 @@ describe('ProductShell', () => {
     expect(
       screen.queryByRole('link', { name: /A note without a link/ }),
     ).toBeNull();
+  });
+
+  it('does not mark notifications read when the panel opens', () => {
+    const notifications: NotificationRow[] = [
+      {
+        id: 'n1',
+        userId: 'u1',
+        kind: 'member.joined',
+        title: 'Ada joined Acme Legal',
+        body: null,
+        href: null,
+        readAt: null,
+        createdAt: new Date(),
+      },
+    ];
+
+    renderShell({ notifications, unreadCount: 1 });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications' }));
+
+    expect(
+      notificationActions.markNotificationsReadAction,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('marks all read from the panel header action', () => {
+    const notifications: NotificationRow[] = [
+      {
+        id: 'n1',
+        userId: 'u1',
+        kind: 'member.joined',
+        title: 'Ada joined Acme Legal',
+        body: null,
+        href: null,
+        readAt: null,
+        createdAt: new Date(),
+      },
+    ];
+
+    renderShell({ notifications, unreadCount: 1 });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mark all read' }));
+
+    expect(notificationActions.markNotificationsReadAction).toHaveBeenCalled();
+  });
+
+  it('dismisses a single notification from its row action', () => {
+    const notifications: NotificationRow[] = [
+      {
+        id: 'n1',
+        userId: 'u1',
+        kind: 'member.joined',
+        title: 'Ada joined Acme Legal',
+        body: null,
+        href: null,
+        readAt: null,
+        createdAt: new Date(),
+      },
+    ];
+
+    renderShell({ notifications });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+
+    expect(notificationActions.dismissNotificationAction).toHaveBeenCalledWith(
+      'n1',
+    );
+  });
+
+  it('groups notifications by day and marks unread rows', () => {
+    const now = new Date();
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const notifications: NotificationRow[] = [
+      {
+        id: 'n1',
+        userId: 'u1',
+        kind: 'member.joined',
+        title: 'A fresh unread note',
+        body: 'With a body',
+        href: null,
+        readAt: null,
+        createdAt: now,
+      },
+      {
+        id: 'n2',
+        userId: 'u1',
+        kind: 'system',
+        title: 'An older read note',
+        body: null,
+        href: null,
+        readAt: yesterday,
+        createdAt: yesterday,
+      },
+    ];
+
+    const { container } = renderShell({ notifications, unreadCount: 1 });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications' }));
+
+    expect(screen.getByText('Today')).toBeTruthy();
+    expect(screen.getByText('Yesterday')).toBeTruthy();
+    expect(screen.getByText('With a body')).toBeTruthy();
+    expect(
+      container.querySelector('[class*="notificationUnread"]'),
+    ).toBeTruthy();
   });
 
   it('shows the settings panel with an account settings link', () => {

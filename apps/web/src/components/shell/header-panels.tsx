@@ -1,10 +1,11 @@
 'use client';
 
 import type { NotificationRow } from '@bap/db/access';
-import { Asleep, Light, Logout } from '@bap/design-system/icons';
+import { Asleep, Close, Light, Logout } from '@bap/design-system/icons';
 import {
   Button,
   HeaderPanel,
+  IconButton,
   RadioButton,
   RadioButtonGroup,
   Switcher,
@@ -14,12 +15,21 @@ import {
 import { themeModes, useThemeMode } from '@bap/design-system/theme';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
 
 import { authClient } from '../../lib/auth/client';
-import { markNotificationsReadAction } from '../../lib/notifications/actions';
+import {
+  dismissAllNotificationsAction,
+  dismissNotificationAction,
+  markNotificationReadAction,
+  markNotificationsReadAction,
+} from '../../lib/notifications/actions';
+import {
+  NotificationSeverityIcon,
+  notificationSeverity,
+} from '../../lib/notifications/severity';
 import {
   themeCookieName,
   writePreferenceCookie,
@@ -157,13 +167,71 @@ export function HelpPanel({
   );
 }
 
-// An absolute local date is enough for v1; relative time is a noted follow-up.
-function formatNotificationTime(value: Date): string {
-  return value.toLocaleDateString(undefined, {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
+// Relative time in the largest sensible unit, e.g. "2 hours ago" / "yesterday".
+const relativeTimeUnits: readonly [Intl.RelativeTimeFormatUnit, number][] = [
+  ['year', 31_536_000],
+  ['month', 2_592_000],
+  ['week', 604_800],
+  ['day', 86_400],
+  ['hour', 3600],
+  ['minute', 60],
+  ['second', 1],
+];
+
+function formatRelativeTime(value: Date, now: Date): string {
+  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+  const seconds = Math.round((value.getTime() - now.getTime()) / 1000);
+  for (const [unit, unitSeconds] of relativeTimeUnits) {
+    if (Math.abs(seconds) >= unitSeconds || unit === 'second') {
+      return formatter.format(Math.round(seconds / unitSeconds), unit);
+    }
+  }
+  return formatter.format(0, 'second');
+}
+
+// Local midnight, so notifications group by calendar day.
+function startOfDay(value: Date): number {
+  return new Date(
+    value.getFullYear(),
+    value.getMonth(),
+    value.getDate(),
+  ).getTime();
+}
+
+type NotificationGroup = Readonly<{
+  items: readonly NotificationRow[];
+  key: number;
+  label: string;
+}>;
+
+// Group by calendar day, newest first, labelling Today / Yesterday / a date.
+function groupByDay(
+  notifications: readonly NotificationRow[],
+  now: Date,
+  t: (key: string) => string,
+): NotificationGroup[] {
+  const sorted = [...notifications].sort(
+    (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+  );
+  const today = startOfDay(now);
+  const groups: { items: NotificationRow[]; key: number; label: string }[] = [];
+  for (const notification of sorted) {
+    const key = startOfDay(notification.createdAt);
+    let group = groups.find((candidate) => candidate.key === key);
+    if (!group) {
+      const dayDelta = Math.round((today - key) / 86_400_000);
+      const label =
+        dayDelta === 0
+          ? t('shell.notifications.today')
+          : dayDelta === 1
+            ? t('shell.notifications.yesterday')
+            : notification.createdAt.toLocaleDateString();
+      group = { items: [], key, label };
+      groups.push(group);
+    }
+    group.items.push(notification);
+  }
+  return groups;
 }
 
 export function NotificationsPanel({
@@ -179,54 +247,123 @@ export function NotificationsPanel({
   }>) {
   const { t } = useTranslation();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const now = new Date();
+  const groups = groupByDay(notifications, now, t);
 
-  // Opening the panel marks the unread notifications read, then refreshes to clear the badge.
-  useEffect(() => {
-    if (expanded && unreadCount > 0) {
-      void markNotificationsReadAction().then(() => router.refresh());
-    }
-  }, [expanded, unreadCount, router]);
+  // Run a refreshing action inside a transition so its button is briefly disabled.
+  function runAction(action: () => Promise<void>): void {
+    startTransition(() => {
+      void action().then(() => router.refresh());
+    });
+  }
 
   return (
-    <HeaderPanel expanded={expanded}>
+    <HeaderPanel className={styles.notificationsPanel!} expanded={expanded}>
       {expanded ? (
         <div className={styles.panel!}>
-          <h2 className={styles.panelHeading!}>
-            {t('shell.notifications.title')}
-          </h2>
+          <div className={styles.notificationsHeader!}>
+            <h2 className={styles.panelHeading!}>
+              {t('shell.notifications.title')}
+            </h2>
+            <div className={styles.notificationsActions!}>
+              <Button
+                disabled={unreadCount === 0 || isPending}
+                kind="ghost"
+                onClick={() => runAction(markNotificationsReadAction)}
+                size="sm"
+                type="button"
+              >
+                {t('shell.notifications.markAllRead')}
+              </Button>
+              <Button
+                disabled={notifications.length === 0 || isPending}
+                kind="ghost"
+                onClick={() => runAction(dismissAllNotificationsAction)}
+                size="sm"
+                type="button"
+              >
+                {t('shell.notifications.dismissAll')}
+              </Button>
+            </div>
+          </div>
           {invitationCount > 0 ? (
             <Link className={styles.link!} href="/workspaces">
               {t('shell.invitations.action', { count: invitationCount })}
             </Link>
           ) : null}
-          {notifications.map((notification) => {
-            const row = (
-              <>
-                <span className={styles.notificationTitle!}>
-                  {notification.title}
-                </span>
-                <span className={styles.notificationTime!}>
-                  {formatNotificationTime(notification.createdAt)}
-                </span>
-              </>
-            );
-            return notification.href === null ? (
-              <div className={styles.notification!} key={notification.id}>
-                {row}
-              </div>
-            ) : (
-              <Link
-                className={styles.notification!}
-                href={{ pathname: notification.href }}
-                key={notification.id}
-              >
-                {row}
-              </Link>
-            );
-          })}
+          {groups.map((group) => (
+            <div className={styles.dayGroup!} key={group.key}>
+              <p className={styles.dayHeader!}>{group.label}</p>
+              {group.items.map((notification) => {
+                const unread = notification.readAt === null;
+                const title = (
+                  <span className={styles.notificationTitle!}>
+                    {notification.title}
+                  </span>
+                );
+                return (
+                  <div
+                    className={
+                      unread
+                        ? `${styles.notification!} ${styles.notificationUnread!}`
+                        : styles.notification!
+                    }
+                    key={notification.id}
+                  >
+                    <NotificationSeverityIcon
+                      severity={notificationSeverity(notification.kind)}
+                    />
+                    <div className={styles.notificationText!}>
+                      {notification.href === null ? (
+                        title
+                      ) : (
+                        <Link
+                          className={styles.notificationLink!}
+                          href={{ pathname: notification.href }}
+                          onClick={() =>
+                            void markNotificationReadAction(
+                              notification.id,
+                            ).then(() => router.refresh())
+                          }
+                        >
+                          {title}
+                        </Link>
+                      )}
+                      {notification.body === null ||
+                      notification.body.length === 0 ? null : (
+                        <span className={styles.notificationBody!}>
+                          {notification.body}
+                        </span>
+                      )}
+                      <span className={styles.notificationTime!}>
+                        {formatRelativeTime(notification.createdAt, now)}
+                      </span>
+                    </div>
+                    <IconButton
+                      disabled={isPending}
+                      kind="ghost"
+                      label={t('shell.notifications.dismiss')}
+                      onClick={() =>
+                        runAction(() =>
+                          dismissNotificationAction(notification.id),
+                        )
+                      }
+                      size="sm"
+                    >
+                      <Close aria-hidden="true" size={16} />
+                    </IconButton>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
           {invitationCount === 0 && notifications.length === 0 ? (
             <p className={styles.muted!}>{t('shell.notifications.empty')}</p>
           ) : null}
+          <Link className={styles.viewAll!} href="/notifications">
+            {t('shell.notifications.viewAll')}
+          </Link>
         </div>
       ) : null}
     </HeaderPanel>

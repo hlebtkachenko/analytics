@@ -31,26 +31,90 @@
   text-decoration: underline;
 }
 
-.notification {
+.notificationsPanel:global(.cds--header-panel--expanded) {
+  inline-size: 20rem;
+}
+
+.notificationsHeader {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.notificationsActions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.dayGroup {
   display: flex;
   flex-direction: column;
-  gap: 0.125rem;
-  padding-block: 0.25rem;
+  gap: 0.25rem;
+}
+
+.dayHeader {
+  color: var(--cds-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.notification {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  padding: 0.5rem;
   color: inherit;
   text-decoration: none;
+  border-inline-start: 2px solid transparent;
+}
+
+.notificationUnread {
+  border-inline-start-color: var(--cds-border-interactive);
+  background-color: var(--cds-layer-hover);
+}
+
+.notificationText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-inline-size: 0;
 }
 
 .notificationTitle {
   color: var(--cds-text-primary);
 }
 
-a.notification:hover .notificationTitle {
+.notificationLink {
+  color: inherit;
+  text-decoration: none;
+}
+
+.notificationLink:hover .notificationTitle {
   text-decoration: underline;
+}
+
+.notificationBody {
+  color: var(--cds-text-secondary);
+  font-size: 0.875rem;
 }
 
 .notificationTime {
   color: var(--cds-text-secondary);
   font-size: 0.75rem;
+}
+
+.viewAll {
+  padding-block-start: 0.5rem;
+  color: var(--cds-link-primary);
+  text-decoration: none;
+  border-block-start: 1px solid var(--cds-border-subtle);
+}
+
+.viewAll:hover {
+  text-decoration: underline;
 }
 
 .account {

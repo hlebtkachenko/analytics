@@ -40,7 +40,7 @@ const reviewedImports = {
   'components/datasets/dataset-export.tsx': ['Download'],
   'components/datasets/dataset-view.tsx': ['ArrowLeft', 'ArrowRight', 'Close'],
   'components/design-system-reference.tsx': ['Launch'],
-  'components/shell/header-panels.tsx': ['Asleep', 'Light', 'Logout'],
+  'components/shell/header-panels.tsx': ['Asleep', 'Close', 'Light', 'Logout'],
   'components/shell/product-navigation.ts': [
     'DataSet',
     'Document',
@@ -560,6 +560,15 @@ describe('Carbon application icon AST contract', () => {
         attributes: { 'aria-hidden': 'true' },
         file: 'app/(product)/workspaces/workspace-build-section.tsx',
         icon: 'ArrowRight',
+        selfClosing: true,
+      },
+      {
+        attributes: {
+          'aria-hidden': 'true',
+          size: '{16}',
+        },
+        file: 'components/shell/header-panels.tsx',
+        icon: 'Close',
         selfClosing: true,
       },
       {
