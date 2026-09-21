@@ -114,7 +114,7 @@ describe('InvitationPage', () => {
         '/api/auth/organization/accept-invitation',
         expect.objectContaining({ method: 'POST' }),
       );
-      expect(mocks.replace).toHaveBeenCalledWith('/organizations');
+      expect(mocks.replace).toHaveBeenCalledWith('/workspaces');
     });
   });
 

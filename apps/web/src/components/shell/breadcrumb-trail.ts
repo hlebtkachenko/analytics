@@ -8,8 +8,8 @@ export const moduleLabels: Readonly<Record<string, string>> = {
   documents: 'Documents',
   entities: 'Entities',
   members: 'Members',
-  organizations: 'Workspaces',
   settings: 'Settings',
+  workspaces: 'Workspaces',
 };
 
 // Child labels are scoped by their parent module, so `new` never reads the same
@@ -22,7 +22,7 @@ const childLabels: Readonly<Record<string, Readonly<Record<string, string>>>> =
       security: 'Security',
     },
     documents: { analytics: 'Analytics', new: 'New document' },
-    organizations: { new: 'Create workspace' },
+    workspaces: { new: 'Create workspace' },
   };
 
 // The label an unknown child segment takes, so an opaque identifier never reaches the trail.
@@ -65,8 +65,8 @@ export function buildTrail(
     // A workspace slug route: Organizations, then the organization, then descendants.
     crumbs.push({
       current: false,
-      href: '/organizations',
-      label: moduleLabels.organizations!,
+      href: '/workspaces',
+      label: moduleLabels.workspaces!,
     });
     href = `/${first}`;
     crumbs.push({

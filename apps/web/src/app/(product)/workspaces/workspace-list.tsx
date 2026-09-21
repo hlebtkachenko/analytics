@@ -84,7 +84,7 @@ export default function WorkspaceList({
     if (toast !== undefined) {
       notify({ kind: toast.kind, title: t(toast.key) });
     }
-    router.replace('/organizations');
+    router.replace('/workspaces');
   }, [notify, result, router, t]);
 
   const roleLabels = {
@@ -117,7 +117,7 @@ export default function WorkspaceList({
       id: 'create-workspace',
       label: t('workspaces.list.createAction'),
       onClick: () => {
-        router.push('/organizations/new');
+        router.push('/workspaces/new');
       },
     },
   ] as const;
@@ -191,7 +191,7 @@ export default function WorkspaceList({
           </ol>
           <Button
             onClick={() => {
-              router.push('/organizations/new');
+              router.push('/workspaces/new');
             }}
             type="button"
           >

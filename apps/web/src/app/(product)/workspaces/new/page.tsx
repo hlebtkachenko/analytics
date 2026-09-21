@@ -42,7 +42,7 @@ export default async function NewOrganizationPage({
   return (
     <PageContainer>
       <h1>{title}</h1>
-      <Button href="/organizations" kind="ghost">
+      <Button href="/workspaces" kind="ghost">
         {back}
       </Button>
       <p>{quotaRemaining}</p>

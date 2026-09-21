@@ -14,6 +14,6 @@ describe('HomePage', () => {
   it('always redirects to the organization index', () => {
     HomePage();
 
-    expect(mocks.redirect).toHaveBeenCalledWith('/organizations');
+    expect(mocks.redirect).toHaveBeenCalledWith('/workspaces');
   });
 });

@@ -1,9 +1,4 @@
-import {
-  DataSet,
-  Document,
-  Enterprise,
-  UserAvatar,
-} from '@bap/design-system/icons';
+import { DataSet, Document, UserAvatar } from '@bap/design-system/icons';
 import type { ComponentType } from 'react';
 
 // Carbon icon components accept a Carbon artboard size and nothing the rail sets.
@@ -23,12 +18,6 @@ export type WorkspaceSectionItem = Readonly<{
 
 // The rail's whole-app destinations, all real routes, rendered straight from this array.
 export const railDestinations: readonly RailDestination[] = [
-  {
-    href: '/organizations',
-    icon: Enterprise,
-    label: 'Workspaces',
-    route: 'organizations',
-  },
   { href: '/datasets', icon: DataSet, label: 'Datasets', route: 'datasets' },
   {
     href: '/documents',
@@ -55,6 +44,6 @@ export function activeRoute(pathname: string): string | undefined {
   const destination = railDestinations.find(
     (candidate) => candidate.route === first,
   );
-  // Every workspace slug belongs to the Organizations section.
-  return destination?.route ?? 'organizations';
+  // Every workspace slug belongs to the workspaces section.
+  return destination?.route ?? 'workspaces';
 }

@@ -11,7 +11,7 @@ describe('buildTrail', () => {
 
   it('scopes a child label by its parent module', () => {
     expect(buildTrail(['documents', 'new']).at(-1)?.label).toBe('New document');
-    expect(buildTrail(['organizations', 'new']).at(-1)?.label).toBe(
+    expect(buildTrail(['workspaces', 'new']).at(-1)?.label).toBe(
       'Create workspace',
     );
   });
@@ -54,7 +54,7 @@ describe('buildTrail', () => {
         slug: 'placeholder-holding',
       }),
     ).toEqual([
-      { current: false, href: '/organizations', label: 'Workspaces' },
+      { current: false, href: '/workspaces', label: 'Workspaces' },
       {
         current: false,
         href: '/placeholder-holding',

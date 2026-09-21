@@ -194,11 +194,11 @@ function ShellChrome({
             isCollapsible
             onClick={toggleNavigation}
           />
-          <HeaderName href="/organizations" prefix="Afframe">
+          <HeaderName href="/workspaces" prefix="Afframe">
             Analytics
           </HeaderName>
           <HeaderNavigation aria-label="Areas">
-            <HeaderMenuItem href="/organizations" isActive>
+            <HeaderMenuItem href="/workspaces" isActive>
               Analytics
             </HeaderMenuItem>
           </HeaderNavigation>
@@ -224,7 +224,7 @@ function ShellChrome({
                   count: invitationCount,
                 })}
                 className={styles.invitationAction!}
-                onClick={() => router.push('/organizations')}
+                onClick={() => router.push('/workspaces')}
                 tooltipAlignment="end"
               >
                 <Notification size={20} />

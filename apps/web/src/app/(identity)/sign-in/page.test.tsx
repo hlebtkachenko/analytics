@@ -65,7 +65,7 @@ describe('SignInPage', () => {
     submitCredentials();
 
     await waitFor(() =>
-      expect(mocks.replace).toHaveBeenCalledWith('/organizations'),
+      expect(mocks.replace).toHaveBeenCalledWith('/workspaces'),
     );
   });
 
@@ -91,7 +91,7 @@ describe('SignInPage', () => {
     submitCredentials();
 
     await waitFor(() =>
-      expect(mocks.replace).toHaveBeenCalledWith('/organizations'),
+      expect(mocks.replace).toHaveBeenCalledWith('/workspaces'),
     );
     expect(mocks.replace).not.toHaveBeenCalledWith('//evil.example');
   });
@@ -107,7 +107,7 @@ describe('SignInPage', () => {
     await waitFor(() =>
       expect(mocks.replace).toHaveBeenCalledWith('/sign-in/two-factor'),
     );
-    expect(mocks.replace).not.toHaveBeenCalledWith('/organizations');
+    expect(mocks.replace).not.toHaveBeenCalledWith('/workspaces');
   });
 
   it('carries a safe next path into the challenge', async () => {

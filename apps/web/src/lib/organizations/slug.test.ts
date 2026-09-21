@@ -49,6 +49,7 @@ describe('organization slugs', () => {
       'settings',
       'assistant',
       'audit',
+      'workspaces',
     ]);
   });
 

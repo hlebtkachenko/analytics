@@ -102,7 +102,7 @@ describe('ProductShell', () => {
     expect(screen.queryByText('AI Assistant')).toBeNull();
     expect(
       screen.getByRole('link', { name: /Afframe/ }).getAttribute('href'),
-    ).toBe('/organizations');
+    ).toBe('/workspaces');
   });
 
   it('renders exactly the four global header actions', () => {

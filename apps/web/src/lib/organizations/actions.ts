@@ -180,7 +180,7 @@ export async function createOrganizationAction(
     name: formValue(formData, 'name'),
     slug: formValue(formData, 'slug'),
   });
-  let destination = resultPath('/organizations/new', 'error');
+  let destination = resultPath('/workspaces/new', 'error');
 
   if (input.success) {
     const slug = organizationSlugSchema.safeParse(
@@ -199,7 +199,7 @@ export async function createOrganizationAction(
           session.user.id,
         );
         if (quota !== null && quota.remainingTotal === 0) {
-          destination = resultPath('/organizations/new', 'quota-exhausted');
+          destination = resultPath('/workspaces/new', 'quota-exhausted');
         } else {
           await auth.api.createOrganization({
             body: {
@@ -209,13 +209,13 @@ export async function createOrganizationAction(
             },
             headers: requestHeaders,
           });
-          revalidatePath('/organizations');
+          revalidatePath('/workspaces');
           destination = organizationPath(slug.data);
         }
       } catch (error) {
         destination = isSlugTakenError(error)
-          ? resultPath('/organizations/new', 'slug-taken')
-          : resultPath('/organizations/new', 'error');
+          ? resultPath('/workspaces/new', 'slug-taken')
+          : resultPath('/workspaces/new', 'error');
       }
     }
   }
@@ -245,7 +245,7 @@ async function respondToInvitation(
     invitationId: formValue(formData, 'invitationId'),
   });
   let destination = resultPath(
-    '/organizations',
+    '/workspaces',
     decision === 'accept' ? 'accept-error' : 'decline-error',
   );
 
@@ -269,14 +269,14 @@ async function respondToInvitation(
           headers: requestHeaders,
         });
       }
-      revalidatePath('/organizations');
+      revalidatePath('/workspaces');
       destination = resultPath(
-        '/organizations',
+        '/workspaces',
         decision === 'accept' ? 'accept-success' : 'decline-success',
       );
     } catch {
       destination = resultPath(
-        '/organizations',
+        '/workspaces',
         decision === 'accept' ? 'accept-error' : 'decline-error',
       );
     }

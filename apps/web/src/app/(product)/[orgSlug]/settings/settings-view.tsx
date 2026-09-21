@@ -98,7 +98,7 @@ export default function SettingsView({
     setSubmitting(false);
 
     if (result.ok) {
-      router.push('/organizations?result=workspace-left');
+      router.push('/workspaces?result=workspace-left');
       return;
     }
 

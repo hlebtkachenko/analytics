@@ -23,6 +23,7 @@ export const reservedOrganizationSlugs = [
   'settings',
   'assistant',
   'audit',
+  'workspaces',
 ] as const;
 
 const reservedOrganizationSlugSet = new Set<string>(reservedOrganizationSlugs);

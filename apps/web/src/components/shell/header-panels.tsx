@@ -101,10 +101,10 @@ export function SwitcherPanel({
             </SwitcherItem>
           ))}
           <SwitcherDivider />
-          <SwitcherItem aria-label="Create workspace" href="/organizations/new">
+          <SwitcherItem aria-label="Create workspace" href="/workspaces/new">
             Create workspace
           </SwitcherItem>
-          <SwitcherItem aria-label="Manage workspaces" href="/organizations">
+          <SwitcherItem aria-label="Manage workspaces" href="/workspaces">
             Manage workspaces
           </SwitcherItem>
         </Switcher>

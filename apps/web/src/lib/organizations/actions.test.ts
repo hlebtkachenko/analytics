@@ -111,7 +111,7 @@ describe('organization server actions', () => {
 
     expect(mocks.createOrganization).not.toHaveBeenCalled();
     expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organizations/new?result=error',
+      '/workspaces/new?result=error',
     );
   });
 
@@ -128,7 +128,7 @@ describe('organization server actions', () => {
 
     expect(mocks.createOrganization).not.toHaveBeenCalled();
     expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organizations/new?result=quota-exhausted',
+      '/workspaces/new?result=quota-exhausted',
     );
   });
 
@@ -142,7 +142,7 @@ describe('organization server actions', () => {
     );
 
     expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organizations/new?result=slug-taken',
+      '/workspaces/new?result=slug-taken',
     );
   });
 
@@ -156,7 +156,7 @@ describe('organization server actions', () => {
       headers: expect.any(Headers),
     });
     expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organizations?result=accept-success',
+      '/workspaces?result=accept-success',
     );
   });
 
@@ -170,7 +170,7 @@ describe('organization server actions', () => {
       headers: expect.any(Headers),
     });
     expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organizations?result=decline-success',
+      '/workspaces?result=decline-success',
     );
   });
 
@@ -184,7 +184,7 @@ describe('organization server actions', () => {
     );
 
     expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organizations?result=accept-error',
+      '/workspaces?result=accept-error',
     );
     expect(JSON.stringify(mocks.redirect.mock.calls)).not.toContain('private');
   });
@@ -199,7 +199,7 @@ describe('organization server actions', () => {
     );
 
     expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organizations?result=decline-error',
+      '/workspaces?result=decline-error',
     );
     expect(JSON.stringify(mocks.redirect.mock.calls)).not.toContain(
       'invitation-1',
@@ -218,7 +218,7 @@ describe('organization server actions', () => {
 
     expect(mocks.acceptInvitation).not.toHaveBeenCalled();
     expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organizations?result=accept-error',
+      '/workspaces?result=accept-error',
     );
   });
 
@@ -306,7 +306,7 @@ describe('organization server actions', () => {
 
     expect(mocks.createOrganization).not.toHaveBeenCalled();
     expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organizations/new?result=error',
+      '/workspaces/new?result=error',
     );
   });
 });

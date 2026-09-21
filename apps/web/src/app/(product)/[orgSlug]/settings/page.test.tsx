@@ -223,7 +223,7 @@ describe('OrganizationSettingsPage', () => {
       );
     });
     expect(mocks.push).toHaveBeenCalledWith(
-      '/organizations?result=workspace-left',
+      '/workspaces?result=workspace-left',
     );
   });
 

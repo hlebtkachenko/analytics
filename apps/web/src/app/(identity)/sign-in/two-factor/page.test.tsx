@@ -53,7 +53,7 @@ describe('TwoFactorPage', () => {
     await waitFor(() =>
       expect(mocks.verifyTotp).toHaveBeenCalledWith({ code: '123456' }),
     );
-    expect(mocks.replace).toHaveBeenCalledWith('/organizations');
+    expect(mocks.replace).toHaveBeenCalledWith('/workspaces');
   });
 
   it('returns to a safe next path after a valid code', async () => {
@@ -82,7 +82,7 @@ describe('TwoFactorPage', () => {
     );
 
     await waitFor(() =>
-      expect(mocks.replace).toHaveBeenCalledWith('/organizations'),
+      expect(mocks.replace).toHaveBeenCalledWith('/workspaces'),
     );
   });
 

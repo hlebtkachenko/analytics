@@ -163,7 +163,7 @@ describe('OrganizationsPage', () => {
 
       expect(screen.getByText(text)).toBeVisible();
       expect(mocks.replace).toHaveBeenCalledOnce();
-      expect(mocks.replace).toHaveBeenCalledWith('/organizations');
+      expect(mocks.replace).toHaveBeenCalledWith('/workspaces');
     },
   );
 });

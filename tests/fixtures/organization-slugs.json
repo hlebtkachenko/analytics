@@ -33,5 +33,6 @@
   { "slug": "entities", "valid": false },
   { "slug": "settings", "valid": false },
   { "slug": "assistant", "valid": false },
-  { "slug": "audit", "valid": false }
+  { "slug": "audit", "valid": false },
+  { "slug": "workspaces", "valid": false }
 ]
