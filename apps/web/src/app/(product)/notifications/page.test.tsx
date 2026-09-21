@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getAuthPool: vi.fn(),
   listNotifications: vi.fn(),
   dismissNotificationAction: vi.fn(),
+  markNotificationsReadAction: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error('NEXT_REDIRECT');
   }),
@@ -32,6 +33,7 @@ vi.mock('../../../lib/auth/server', () => ({
 }));
 vi.mock('../../../lib/notifications/actions', () => ({
   dismissNotificationAction: mocks.dismissNotificationAction,
+  markNotificationsReadAction: mocks.markNotificationsReadAction,
 }));
 vi.mock('next/headers', () => ({ headers: async () => new Headers() }));
 vi.mock('next/navigation', () => ({
@@ -72,6 +74,7 @@ describe('NotificationsPage', () => {
     mocks.getAuthPool.mockResolvedValue({});
     mocks.listNotifications.mockResolvedValue([]);
     mocks.dismissNotificationAction.mockResolvedValue(undefined);
+    mocks.markNotificationsReadAction.mockResolvedValue(undefined);
   });
 
   it('renders the notifications heading and each row', async () => {
@@ -98,6 +101,16 @@ describe('NotificationsPage', () => {
     expect(mocks.dismissNotificationAction).toHaveBeenCalledWith(
       sampleNotification.id,
     );
+  });
+
+  it('marks all read from the toolbar action', async () => {
+    mocks.listNotifications.mockResolvedValue([sampleNotification]);
+
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark all read' }));
+
+    expect(mocks.markNotificationsReadAction).toHaveBeenCalled();
   });
 
   it('shows the empty state when there are no notifications', async () => {

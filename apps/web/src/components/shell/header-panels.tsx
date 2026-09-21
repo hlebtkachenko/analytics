@@ -21,10 +21,8 @@ import { z } from 'zod';
 
 import { authClient } from '../../lib/auth/client';
 import {
-  dismissAllNotificationsAction,
   dismissNotificationAction,
   markNotificationReadAction,
-  markNotificationsReadAction,
 } from '../../lib/notifications/actions';
 import {
   NotificationSeverityIcon,
@@ -238,12 +236,10 @@ export function NotificationsPanel({
   expanded,
   invitationCount,
   notifications,
-  unreadCount,
 }: PanelProperties &
   Readonly<{
     invitationCount: number;
     notifications: readonly NotificationRow[];
-    unreadCount: number;
   }>) {
   const { t } = useTranslation();
   const router = useRouter();
@@ -262,31 +258,9 @@ export function NotificationsPanel({
     <HeaderPanel className={styles.notificationsPanel!} expanded={expanded}>
       {expanded ? (
         <div className={styles.panel!}>
-          <div className={styles.notificationsHeader!}>
-            <h2 className={styles.panelHeading!}>
-              {t('shell.notifications.title')}
-            </h2>
-            <div className={styles.notificationsActions!}>
-              <Button
-                disabled={unreadCount === 0 || isPending}
-                kind="ghost"
-                onClick={() => runAction(markNotificationsReadAction)}
-                size="sm"
-                type="button"
-              >
-                {t('shell.notifications.markAllRead')}
-              </Button>
-              <Button
-                disabled={notifications.length === 0 || isPending}
-                kind="ghost"
-                onClick={() => runAction(dismissAllNotificationsAction)}
-                size="sm"
-                type="button"
-              >
-                {t('shell.notifications.dismissAll')}
-              </Button>
-            </div>
-          </div>
+          <h2 className={styles.panelHeading!}>
+            {t('shell.notifications.title')}
+          </h2>
           {invitationCount > 0 ? (
             <Link className={styles.link!} href="/workspaces">
               {t('shell.invitations.action', { count: invitationCount })}

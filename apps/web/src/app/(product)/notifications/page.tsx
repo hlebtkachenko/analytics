@@ -35,6 +35,7 @@ export default async function NotificationsPage() {
       body: row.body,
       href: row.href,
       created: row.createdAt.toISOString(),
+      read: row.readAt !== null,
     }));
   } catch {
     notifications = [];

@@ -6,7 +6,10 @@ import type { Route } from 'next';
 import { useRouter } from 'next/navigation';
 import { useTranslation } from 'react-i18next';
 
-import { dismissNotificationAction } from '../../../lib/notifications/actions';
+import {
+  dismissNotificationAction,
+  markNotificationsReadAction,
+} from '../../../lib/notifications/actions';
 import {
   NotificationSeverityIcon,
   notificationSeverity,
@@ -20,6 +23,7 @@ export type NotificationItem = Readonly<{
   body: string | null;
   href: string | null;
   created: string;
+  read: boolean;
 }>;
 
 type NotificationsViewProperties = Readonly<{
@@ -60,6 +64,8 @@ export default function NotificationsView({
     },
   ];
 
+  const hasUnread = notifications.some((notification) => !notification.read);
+
   const rows: readonly GridRow[] = notifications.map((notification) => ({
     id: notification.id,
     kind: notification.kind,
@@ -94,6 +100,19 @@ export default function NotificationsView({
       size="sm"
       state={rows.length === 0 ? 'empty' : 'ready'}
       title={t('notifications.title')}
+      toolbarActions={[
+        {
+          disabled: !hasUnread,
+          id: 'mark-all-read',
+          kind: 'ghost',
+          label: t('shell.notifications.markAllRead'),
+          onClick: () => {
+            void markNotificationsReadAction().then(() => {
+              router.refresh();
+            });
+          },
+        },
+      ]}
     />
   );
 }

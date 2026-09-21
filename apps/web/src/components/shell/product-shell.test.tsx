@@ -229,28 +229,6 @@ describe('ProductShell', () => {
     ).not.toHaveBeenCalled();
   });
 
-  it('marks all read from the panel header action', () => {
-    const notifications: NotificationRow[] = [
-      {
-        id: 'n1',
-        userId: 'u1',
-        kind: 'member.joined',
-        title: 'Ada joined Acme Legal',
-        body: null,
-        href: null,
-        readAt: null,
-        createdAt: new Date(),
-      },
-    ];
-
-    renderShell({ notifications, unreadCount: 1 });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Notifications' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Mark all read' }));
-
-    expect(notificationActions.markNotificationsReadAction).toHaveBeenCalled();
-  });
-
   it('dismisses a single notification from its row action', () => {
     const notifications: NotificationRow[] = [
       {
