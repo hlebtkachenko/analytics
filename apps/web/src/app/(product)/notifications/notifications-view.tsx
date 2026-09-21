@@ -117,8 +117,10 @@ export default function NotificationsView({
           },
         ]}
         rows={rows}
+        search
         searchPlacement="persistent"
         size="sm"
+        sortable
         state={rows.length === 0 ? 'empty' : 'ready'}
         title={t('notifications.sectionTitle')}
         toolbarActions={[
