@@ -697,7 +697,7 @@ test('proves invitation-only registration, acceptance, and membership management
       .poll(() => new URL(recipientPage.url()).pathname, {
         message: 'Invitation acceptance did not reach the workspace list.',
       })
-      .toBe('/organizations');
+      .toBe('/workspaces');
     // The accepted membership is a workspace row, and the header switcher lists it.
     await expect(
       recipientPage.getByRole('cell', { name: 'BAP Operational' }),
