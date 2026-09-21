@@ -278,15 +278,15 @@ test('proves every real authenticated icon control and header panel', async ({
   await expectNoAccessibilityViolations(page);
   await expectNoDocumentOverflow(page);
 
-  // The header holds exactly four global actions: search, help, account, and
-  // the workspace switcher; every panel renders real content at 640px.
+  // The header holds exactly six global actions: search, notifications, help,
+  // settings, account, and the workspace switcher; every panel renders real
+  // content at 640px.
   const header = page.getByRole('banner');
   await authenticatedExpect(
-    header.getByRole('button', { name: /^(Search|Help|Account|Workspaces)$/ }),
-  ).toHaveCount(4);
-  await authenticatedExpect(
-    header.getByRole('button', { name: /^(Notifications|Settings)$/ }),
-  ).toHaveCount(0);
+    header.getByRole('button', {
+      name: /^(Search|Notifications|Help|Settings|Account|Workspaces)$/,
+    }),
+  ).toHaveCount(6);
 
   await header.getByRole('button', { exact: true, name: 'Help' }).click();
   await authenticatedExpect(
@@ -336,7 +336,7 @@ test('proves every real authenticated icon control and header panel', async ({
   );
   await authenticatedExpect(
     header.getByRole('link', { name: 'Manage workspaces' }),
-  ).toHaveAttribute('href', '/organizations');
+  ).toHaveAttribute('href', '/workspaces');
   // Every switcher item is a real keyboard destination.
   await focusWithKeyboard(page, switcherWorkspace);
   await expectSettledHeaderPanel(switcherWorkspace);
@@ -351,7 +351,7 @@ test('proves every real authenticated icon control and header panel', async ({
   ).toHaveAttribute('aria-expanded', 'true');
   const results = header.getByRole('listbox', { name: 'Search' });
   await authenticatedExpect(
-    results.getByRole('option', { name: 'Workspaces' }),
+    results.getByRole('option', { name: 'Datasets' }),
   ).toHaveAttribute('aria-selected', 'true');
   await searchBox.fill('acc');
   await authenticatedExpect(results.getByRole('option')).toHaveCount(1);
