@@ -2,7 +2,7 @@ import type { DatabasePool } from '@bap/db/pool';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { BlobStore, StaleBlob } from '../blobs/blob-store.js';
-import type { SplitEmailItemJob } from '../inbox/contract.js';
+import type { ScanInboxItemJob, SplitEmailItemJob } from '../inbox/contract.js';
 import {
   INBOX_MAINTENANCE_CRON,
   INBOX_MAINTENANCE_SCHEDULE_OPTIONS,
@@ -18,10 +18,13 @@ const TRACKED = 'a'.repeat(64);
 const ORPHAN = 'b'.repeat(64);
 const ITEM_ID = '6c4d9e30-1b7f-4e5c-ad43-801b9f7c6e51';
 const CHANNEL_ID = '4a2b7c1e-9f5d-4c3a-8b21-6e0f7d5a4c39';
+const UPLOAD_ITEM_ID = '2c9d5b1a-7e3f-4a8b-9c0d-1e2f3a4b5c6d';
+const UPLOADER = 'user_1';
 
 interface Fixture {
   blobs: BlobStore;
   enqueued: SplitEmailItemJob[];
+  rescanned: ScanInboxItemJob[];
   lines: { level: string; message: string }[];
   metrics: WorkerMetrics;
   pool: DatabasePool;
@@ -37,6 +40,7 @@ function fixture(
   const queries: { text: string; values: unknown[] }[] = [];
   const unlinked: string[] = [];
   const enqueued: SplitEmailItemJob[] = [];
+  const rescanned: ScanInboxItemJob[] = [];
   const lines: { level: string; message: string }[] = [];
   const pool = {
     query: async (text: string, values: unknown[]) => {
@@ -53,6 +57,24 @@ function fixture(
           throw error;
         }
         return { rows: [{ id: ITEM_ID }] };
+      }
+      if (text.includes('app.list_unscanned_inbox_items')) {
+        return {
+          rows: [
+            {
+              channel_id: null,
+              created_by: UPLOADER,
+              item_id: UPLOAD_ITEM_ID,
+              organization_id: ORGANIZATION,
+            },
+            {
+              channel_id: CHANNEL_ID,
+              created_by: UPLOADER,
+              item_id: ITEM_ID,
+              organization_id: ORGANIZATION,
+            },
+          ],
+        };
       }
       if (text.includes('app.list_stuck_email_items')) {
         return {
@@ -94,6 +116,7 @@ function fixture(
     metrics: new WorkerMetrics(),
     pool,
     queries,
+    rescanned,
     unlinked,
   };
 }
@@ -107,12 +130,15 @@ function loggerOf(lines: Fixture['lines']) {
 }
 
 describe('runInboxMaintenance', () => {
-  it('sweeps orphans, reaps stalled items and requeues stuck emails in three statements', async () => {
+  it('sweeps orphans, reaps stalled items and resends the stuck split and scan jobs', async () => {
     const f = fixture();
 
     const report = await runInboxMaintenance({
       blobs: f.blobs,
       data: {},
+      enqueueScanInboxItem: async (job) => {
+        f.rescanned.push(job);
+      },
       enqueueSplitEmailItem: async (job) => {
         f.enqueued.push(job);
       },
@@ -126,6 +152,7 @@ describe('runInboxMaintenance', () => {
       orphansRemoved: 1,
       reapedItemIds: [ITEM_ID],
       requeuedItemIds: [ITEM_ID],
+      rescannedItemIds: [UPLOAD_ITEM_ID, ITEM_ID],
     });
     // Only the hash with no row is unlinked; the tracked one stays.
     expect(f.unlinked).toEqual([`org/${ORGANIZATION}/${ORPHAN}`]);
@@ -138,8 +165,18 @@ describe('runInboxMaintenance', () => {
       [ORGANIZATION, [TRACKED, ORPHAN]],
       ['60 minutes', MAINTENANCE_ROW_LIMIT],
       ['10 minutes', MAINTENANCE_ROW_LIMIT],
+      ['10 minutes', MAINTENANCE_ROW_LIMIT],
     ]);
     expect(f.enqueued).toEqual([
+      { channelId: CHANNEL_ID, itemId: ITEM_ID, organizationId: ORGANIZATION },
+    ]);
+    // An upload names its uploader, a channel push names its channel; neither payload carries anything else.
+    expect(f.rescanned).toEqual([
+      {
+        itemId: UPLOAD_ITEM_ID,
+        organizationId: ORGANIZATION,
+        userId: UPLOADER,
+      },
       { channelId: CHANNEL_ID, itemId: ITEM_ID, organizationId: ORGANIZATION },
     ]);
     expect(await f.metrics.render()).toContain(
@@ -153,6 +190,9 @@ describe('runInboxMaintenance', () => {
     const report = await runInboxMaintenance({
       blobs: f.blobs,
       data: {},
+      enqueueScanInboxItem: async (job) => {
+        f.rescanned.push(job);
+      },
       enqueueSplitEmailItem: async (job) => {
         f.enqueued.push(job);
       },
@@ -181,6 +221,9 @@ describe('runInboxMaintenance', () => {
     const report = await runInboxMaintenance({
       blobs: f.blobs,
       data: {},
+      enqueueScanInboxItem: async (job) => {
+        f.rescanned.push(job);
+      },
       enqueueSplitEmailItem: async (job) => {
         f.enqueued.push(job);
       },
@@ -204,6 +247,9 @@ describe('runInboxMaintenance', () => {
     await runInboxMaintenance({
       blobs: f.blobs,
       data: {},
+      enqueueScanInboxItem: async (job) => {
+        f.rescanned.push(job);
+      },
       enqueueSplitEmailItem: async () => undefined,
       logger: loggerOf(f.lines),
       metrics: f.metrics,
@@ -216,6 +262,7 @@ describe('runInboxMaintenance', () => {
     expect(info[0]?.message).toContain('1 orphaned files removed');
     expect(info[0]?.message).toContain('1 stalled items reaped');
     expect(info[0]?.message).toContain('1 email items requeued');
+    expect(info[0]?.message).toContain('2 items resent for scanning');
     expect(info[0]?.message).not.toContain(ITEM_ID);
     expect(debug[0]?.message).toContain(ITEM_ID);
     for (const line of f.lines) {
@@ -231,6 +278,9 @@ describe('runInboxMaintenance', () => {
       runInboxMaintenance({
         blobs: f.blobs,
         data: { organizationId: ORGANIZATION },
+        enqueueScanInboxItem: async (job) => {
+          f.rescanned.push(job);
+        },
         enqueueSplitEmailItem: async () => undefined,
         logger: loggerOf(f.lines),
         metrics: f.metrics,

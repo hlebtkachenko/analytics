@@ -1233,6 +1233,7 @@ describe('inbox maintenance', () => {
     return runInboxMaintenance({
       blobs: store,
       data: {},
+      enqueueScanInboxItem: async () => undefined,
       enqueueSplitEmailItem: async (job) => {
         requeued.push(job);
       },

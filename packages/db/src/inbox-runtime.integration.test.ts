@@ -41,6 +41,15 @@ const fiveMinuteParentItemId = '00000000-0000-4000-8000-000000003004';
 const disabledChannelItemId = '00000000-0000-4000-8000-000000003005';
 const deletedChannelItemId = '00000000-0000-4000-8000-000000003006';
 const foreignOldParentItemId = '00000000-0000-4000-8000-000000003007';
+const apiChannelId = '00000000-0000-4000-8000-0000000000c5';
+const unscannedBlobHash = 'd'.repeat(64);
+const scannedBlobHash = 'e'.repeat(64);
+const oldUploadItemId = '00000000-0000-4000-8000-000000004001';
+const freshUploadItemId = '00000000-0000-4000-8000-000000004002';
+const scannedUploadItemId = '00000000-0000-4000-8000-000000004003';
+const discardedUploadItemId = '00000000-0000-4000-8000-000000004004';
+const oldApiItemId = '00000000-0000-4000-8000-000000004005';
+const disabledApiItemId = '00000000-0000-4000-8000-000000004006';
 
 const orgOneOwner: TenantContext = {
   organizationId: 'org-1',
@@ -239,18 +248,31 @@ beforeAll(async () => {
      values ($1, 'org-1', 'email', 'Placeholder mailbox', true, null, 'user-1'),
             ($2, 'org-1', 'email', 'Placeholder disabled mailbox', false, null, 'user-1'),
             ($3, 'org-1', 'email', 'Placeholder deleted mailbox', false, now(), 'user-1'),
-            ($4, 'org-2', 'email', 'Placeholder foreign mailbox', true, null, 'user-2')`,
-    [enabledChannelId, disabledChannelId, deletedChannelId, foreignChannelId],
+            ($4, 'org-2', 'email', 'Placeholder foreign mailbox', true, null, 'user-2'),
+            ($5, 'org-1', 'api', 'Placeholder push', true, null, 'user-1')`,
+    [
+      enabledChannelId,
+      disabledChannelId,
+      deletedChannelId,
+      foreignChannelId,
+      apiChannelId,
+    ],
   );
   await rootPool.query(
-    `insert into app.blob (organization_id, sha256, byte_size, media_type, storage_key, created_by)
-     values ('org-1', $1, 2048, 'application/pdf', $3, 'user-1'),
-            ('org-2', $2, 2048, 'application/pdf', $4, 'user-2')`,
+    `insert into app.blob (organization_id, sha256, byte_size, media_type, storage_key, scan_status, created_by)
+     values ('org-1', $1, 2048, 'application/pdf', $3, 'not_scanned', 'user-1'),
+            ('org-2', $2, 2048, 'application/pdf', $4, 'not_scanned', 'user-2'),
+            ('org-1', $5, 2048, 'application/pdf', $7, 'not_scanned', 'user-1'),
+            ('org-1', $6, 2048, 'application/pdf', $8, 'clean', 'user-1')`,
     [
       ownedBlobHash,
       foreignBlobHash,
       `org/org-1/${ownedBlobHash}`,
       `org/org-2/${foreignBlobHash}`,
+      unscannedBlobHash,
+      scannedBlobHash,
+      `org/org-1/${unscannedBlobHash}`,
+      `org/org-1/${scannedBlobHash}`,
     ],
   );
   // Manual uploads in processing, aged by updated_at; the reaper reads nothing else.
@@ -298,6 +320,46 @@ beforeAll(async () => {
       `channel_${foreignChannelId}`,
     ],
   );
+  // Direct uploads and one API push, aged by received_at, with the blob verdict the scan sweep sorts on.
+  await rootPool.query(
+    `insert into app.inbox_item
+       (id, organization_id, channel_kind, channel_id, payload_kind, status, received_at, created_by)
+     values ($1, 'org-1', 'upload', null, 'file', 'needs_review', now() - interval '2 hours', 'user-1'),
+            ($2, 'org-1', 'upload', null, 'file', 'needs_review', now(), 'user-1'),
+            ($3, 'org-1', 'upload', null, 'file', 'needs_review', now() - interval '1 hour', 'user-1'),
+            ($4, 'org-1', 'upload', null, 'file', 'discarded', now() - interval '1 hour', 'user-1'),
+            ($5, 'org-1', 'api', $7, 'file', 'received', now() - interval '1 hour', $9),
+            ($6, 'org-1', 'api', $8, 'file', 'received', now() - interval '1 hour', $10)`,
+    [
+      oldUploadItemId,
+      freshUploadItemId,
+      scannedUploadItemId,
+      discardedUploadItemId,
+      oldApiItemId,
+      disabledApiItemId,
+      apiChannelId,
+      disabledChannelId,
+      `channel_${apiChannelId}`,
+      `channel_${disabledChannelId}`,
+    ],
+  );
+  await rootPool.query(
+    `insert into app.inbox_item_file (item_id, organization_id, blob_id, position)
+     select item.id, 'org-1', blob.id, 1
+       from (values ($1::uuid, $7::text), ($2, $7), ($3, $8), ($4, $7), ($5, $7), ($6, $7))
+              as item (id, sha256)
+       join app.blob as blob on blob.sha256 = item.sha256`,
+    [
+      oldUploadItemId,
+      freshUploadItemId,
+      scannedUploadItemId,
+      discardedUploadItemId,
+      oldApiItemId,
+      disabledApiItemId,
+      unscannedBlobHash,
+      scannedBlobHash,
+    ],
+  );
 });
 
 afterAll(async () => {
@@ -311,12 +373,12 @@ describe('inbox runtime', () => {
     const compatibility = await checkMigrationCompatibility(apiPool);
 
     expect(result.applied).toEqual([]);
-    expect(result.currentVersion).toBe('20260922.0008');
-    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260922.0008');
+    expect(result.currentVersion).toBe('20260922.0009');
+    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260922.0009');
     expect(compatibility).toEqual({
       compatible: true,
-      expectedVersion: '20260922.0008',
-      version: '20260922.0008',
+      expectedVersion: '20260922.0009',
+      version: '20260922.0009',
     });
 
     const functions = await rootPool.query<{
@@ -338,13 +400,15 @@ describe('inbox runtime', () => {
     where function.oid in (
       'app.list_blob_keys(text, text[])'::regprocedure,
       'app.reap_stalled_inbox_items(interval, integer)'::regprocedure,
-      'app.list_stuck_email_items(interval, integer)'::regprocedure
+      'app.list_stuck_email_items(interval, integer)'::regprocedure,
+      'app.list_unscanned_inbox_items(interval, integer)'::regprocedure
     )
     order by function_name`);
     expect(functions.rows).toEqual(
       [
         'app.list_blob_keys',
         'app.list_stuck_email_items',
+        'app.list_unscanned_inbox_items',
         'app.reap_stalled_inbox_items',
       ].map((functionName) => ({
         function_name: functionName,
@@ -418,6 +482,14 @@ describe('inbox runtime', () => {
         roles: ['bap_owner'],
         tablename: 'inbox_item',
         with_check: 'true',
+      },
+      {
+        cmd: 'SELECT',
+        policyname: 'inbox_item_file_maintenance_select',
+        qual: 'true',
+        roles: ['bap_owner'],
+        tablename: 'inbox_item_file',
+        with_check: null,
       },
     ]);
 
@@ -825,6 +897,7 @@ describe('inbox runtime', () => {
       ["select app.list_blob_keys('org-1', $1)", [[ownedBlobHash]]],
       ["select app.reap_stalled_inbox_items('60 minutes', 500)", []],
       ["select app.list_stuck_email_items('10 minutes', 500)", []],
+      ["select app.list_unscanned_inbox_items('10 minutes', 500)", []],
     ] as const;
 
     for (const [statement, values] of calls) {
@@ -1019,6 +1092,45 @@ describe('inbox runtime', () => {
       [foreignOldParentItemId]: 'received',
       [freshParentItemId]: 'received',
       [oldParentItemId]: 'received',
+    });
+  });
+
+  it('lists the unscanned upload and API items on live channels only, with a floored stale window', async () => {
+    // '1 minute' is floored to 10 minutes, so the upload received just now is skipped, as is the scanned one.
+    const unscanned = await apiPool.query<{
+      channel_id: string | null;
+      created_by: string;
+      item_id: string;
+      organization_id: string;
+    }>(
+      "select item_id, channel_id, organization_id, created_by from app.list_unscanned_inbox_items('1 minute', 500) order by item_id",
+    );
+    expect(unscanned.rows).toEqual([
+      {
+        channel_id: null,
+        created_by: 'user-1',
+        item_id: oldUploadItemId,
+        organization_id: 'org-1',
+      },
+      {
+        channel_id: apiChannelId,
+        created_by: `channel_${apiChannelId}`,
+        item_id: oldApiItemId,
+        organization_id: 'org-1',
+      },
+    ]);
+    await expect(
+      apiPool.query<{ item_id: string }>(
+        "select item_id from app.list_unscanned_inbox_items('1 minute', 1)",
+      ),
+    ).resolves.toMatchObject({ rows: [{ item_id: oldUploadItemId }] });
+    // The list is read only: nothing changed on the items it named or skipped.
+    await expect(
+      readItemStatuses([oldUploadItemId, discardedUploadItemId, oldApiItemId]),
+    ).resolves.toEqual({
+      [discardedUploadItemId]: 'discarded',
+      [oldApiItemId]: 'received',
+      [oldUploadItemId]: 'needs_review',
     });
   });
 

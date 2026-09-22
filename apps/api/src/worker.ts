@@ -21,6 +21,7 @@ import {
 import {
   sendRerunInboxRule,
   sendRouteInboxItem,
+  sendScanInboxItem,
   sendSplitEmailItem,
 } from './inbox/inbox-queue.js';
 import { INGEST_DATASET_QUEUE } from './ingestion/contract.js';
@@ -260,6 +261,7 @@ async function bootstrap(): Promise<void> {
           await runInboxMaintenance({
             blobs,
             data: job.data,
+            enqueueScanInboxItem: (scan) => sendScanInboxItem(queue, scan),
             enqueueSplitEmailItem: (split) => sendSplitEmailItem(queue, split),
             logger,
             metrics,

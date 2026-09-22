@@ -67,14 +67,17 @@ every status other than `clean`, with 409 `blob_scan_pending` for `not_scanned`
 and the existing 409 `blob_quarantined` for `infected` and `failed`. The BFF
 blob route reads the upstream `code` and passes `blob_scan_pending` through.
 
-Maintenance. Migration `20260922.0008_inbox_scan_sweep.sql` adds
+Maintenance. Migration `20260922.0009_inbox_scan_sweep.sql` adds
 `app.list_unscanned_inbox_items(stale interval, max_rows integer)`, a
 `SECURITY DEFINER` function owned by `bap_owner` with EXECUTE to `bap_api`, the
 shape of `app.list_stuck_email_items`: it raises `insufficient_privilege` inside
 a tenant context and returns the `upload` and `api` items still `received` or
 `needs_review` past the same 10 minute window with a `not_scanned` blob,
-skipping an item whose channel is disabled or deleted.
-`DATABASE_MIGRATION_COMPATIBILITY` becomes `20260922.0008`. The maintenance tick
+skipping an item whose channel is disabled or deleted. It also adds
+`inbox_item_file_maintenance_select`, because `FORCE` row level security applies
+to the definer and no policy admitted `bap_owner` to the item to blob link yet;
+SELECT only, the shape of `blob_maintenance_select`.
+`DATABASE_MIGRATION_COMPATIBILITY` becomes `20260922.0009`. The maintenance tick
 gains a fourth task that resends `scan_inbox_item` for each row; the exclusive
 queue drops a duplicate.
 
