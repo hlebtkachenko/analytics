@@ -1,3 +1,34 @@
+// The page title can be a long single line; let it wrap so it never sets a wide
+// min-content that pushes the page past a narrow (320px) viewport.
+.pageTitle {
+  overflow-wrap: anywhere;
+}
+
+// Let the wizard column shrink to its grid track so nothing pushes the page
+// past a narrow (320px) viewport.
+.wizard {
+  min-inline-size: 0;
+}
+
+// The slug address preview is a long unbreakable path; let it wrap so it never
+// sets a wide min-content that pushes the wizard past a narrow viewport.
+.wizard :global(.cds--form__helper-text) {
+  overflow-wrap: anywhere;
+}
+
+// Carbon notifications carry an 18rem min-width; let the quota-exhausted notice
+// shrink to the column so it stays inside a narrow (320px) viewport.
+.wizard :global(.cds--inline-notification) {
+  min-inline-size: 0;
+}
+
+// The 3-step indicator keeps its intrinsic width; let it scroll so it never
+// pushes the wizard past a narrow (320px) viewport.
+.steps {
+  min-inline-size: 0;
+  overflow-x: auto;
+}
+
 // Shared footer for each step: Back on the left, the step's advance actions on the right.
 .navRow {
   display: flex;

@@ -6,6 +6,7 @@ import PageContainer from '../../../../components/page-container';
 import { translate } from '../../../../i18n/server';
 import { getAuth, getAuthPool } from '../../../../lib/auth/server';
 import CreateWorkspaceWizard from './create-workspace-wizard';
+import styles from './create-workspace-wizard.module.scss';
 
 export default async function NewOrganizationPage() {
   const auth = await getAuth().catch(() => null);
@@ -29,7 +30,7 @@ export default async function NewOrganizationPage() {
 
   return (
     <PageContainer>
-      <h1>{title}</h1>
+      <h1 className={styles.pageTitle}>{title}</h1>
       <CreateWorkspaceWizard
         initialName={session.user.name}
         remaining={remaining}

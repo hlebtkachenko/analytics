@@ -16,6 +16,7 @@ import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
 
+import { useMediaQuery } from '../../../../components/shell/use-media-query';
 import {
   legalEntitiesPath,
   legalEntitySchema,
@@ -83,6 +84,9 @@ export default function CreateWorkspaceWizard({
   const { t } = useTranslation();
   const router = useRouter();
   const fieldPrefix = useId();
+  // Stack the step indicator on narrow viewports so its wide horizontal layout
+  // never pushes the wizard past the content column.
+  const narrowViewport = useMediaQuery('(max-width: 42rem)');
 
   const [step, setStep] = useState(0);
 
@@ -261,15 +265,21 @@ export default function CreateWorkspaceWizard({
   }
 
   return (
-    <Stack gap={7}>
+    <Stack className={styles.wizard!} gap={7}>
       {organization === null ? (
         <p>{t('workspaces.create.quotaRemaining', { remaining })}</p>
       ) : null}
-      <ProgressIndicator currentIndex={step} spaceEqually>
-        <ProgressStep label={t('workspaces.create.steps.workspace')} />
-        <ProgressStep label={t('workspaces.create.steps.entity')} />
-        <ProgressStep label={t('workspaces.create.steps.invite')} />
-      </ProgressIndicator>
+      <div className={styles.steps}>
+        <ProgressIndicator
+          currentIndex={step}
+          spaceEqually
+          vertical={narrowViewport}
+        >
+          <ProgressStep label={t('workspaces.create.steps.workspace')} />
+          <ProgressStep label={t('workspaces.create.steps.entity')} />
+          <ProgressStep label={t('workspaces.create.steps.invite')} />
+        </ProgressIndicator>
+      </div>
 
       {step === 0 ? (
         <Form
