@@ -1898,7 +1898,7 @@ type InboxItemWrite = Readonly<{
 }>;
 
 // Every item write answers with the refreshed detail, so one helper covers the whole set.
-async function writeInboxItem(
+async function writeInboxItemWith(
   auth: BffAuth,
   request: Request,
   organizationId: string,
@@ -1947,91 +1947,80 @@ async function writeInboxItem(
   );
 }
 
-export async function patchInboxItemHints(
-  auth: BffAuth,
-  request: Request,
-  organizationId: string,
-  itemId: string,
-  fetchImplementation: typeof fetch = fetch,
-): Promise<Response> {
-  return await writeInboxItem(
-    auth,
-    request,
-    organizationId,
-    itemId,
-    {
-      action: 'hints',
-      bodySchema: updateInboxHintsRequestSchema,
-      method: 'PATCH',
-      operation: 'patchInboxItemHints',
-    },
-    fetchImplementation,
-  );
-}
+const inboxItemWrites = {
+  assign: {
+    action: 'assign',
+    bodySchema: assignInboxItemRequestSchema,
+    method: 'POST',
+    operation: 'postInboxItemAssign',
+  },
+  attach: {
+    action: 'attach',
+    bodySchema: attachInboxItemRequestSchema,
+    method: 'POST',
+    operation: 'postInboxItemAttach',
+  },
+  discard: {
+    action: 'discard',
+    bodySchema: discardInboxItemRequestSchema,
+    method: 'POST',
+    operation: 'postInboxItemDiscard',
+  },
+  hints: {
+    action: 'hints',
+    bodySchema: updateInboxHintsRequestSchema,
+    method: 'PATCH',
+    operation: 'patchInboxItemHints',
+  },
+  process: {
+    action: 'process',
+    bodySchema: null,
+    method: 'POST',
+    operation: 'postInboxItemProcess',
+  },
+  restore: {
+    action: 'restore',
+    bodySchema: null,
+    method: 'POST',
+    operation: 'postInboxItemRestore',
+  },
+  routeDocument: {
+    action: 'route/document',
+    bodySchema: routeInboxItemToDocumentRequestSchema,
+    conflictSchema: inboxRouteConflictSchema,
+    method: 'POST',
+    operation: 'postInboxItemRouteDocument',
+  },
+  routeUndo: {
+    action: 'route/undo',
+    bodySchema: null,
+    method: 'POST',
+    operation: 'postInboxItemRouteUndo',
+  },
+  snooze: {
+    action: 'snooze',
+    bodySchema: snoozeInboxItemRequestSchema,
+    method: 'POST',
+    operation: 'postInboxItemSnooze',
+  },
+} as const satisfies Record<string, InboxItemWrite>;
 
-export async function postInboxItemProcess(
-  auth: BffAuth,
-  request: Request,
-  organizationId: string,
-  itemId: string,
-  fetchImplementation: typeof fetch = fetch,
-): Promise<Response> {
-  return await writeInboxItem(
-    auth,
-    request,
-    organizationId,
-    itemId,
-    {
-      action: 'process',
-      bodySchema: null,
-      method: 'POST',
-      operation: 'postInboxItemProcess',
-    },
-    fetchImplementation,
-  );
-}
+export type InboxItemWriteAction = keyof typeof inboxItemWrites;
 
-export async function postInboxItemRouteDocument(
+export async function writeInboxItem(
   auth: BffAuth,
   request: Request,
   organizationId: string,
   itemId: string,
+  action: InboxItemWriteAction,
   fetchImplementation: typeof fetch = fetch,
 ): Promise<Response> {
-  return await writeInboxItem(
+  return await writeInboxItemWith(
     auth,
     request,
     organizationId,
     itemId,
-    {
-      action: 'route/document',
-      bodySchema: routeInboxItemToDocumentRequestSchema,
-      conflictSchema: inboxRouteConflictSchema,
-      method: 'POST',
-      operation: 'postInboxItemRouteDocument',
-    },
-    fetchImplementation,
-  );
-}
-
-export async function postInboxItemAttach(
-  auth: BffAuth,
-  request: Request,
-  organizationId: string,
-  itemId: string,
-  fetchImplementation: typeof fetch = fetch,
-): Promise<Response> {
-  return await writeInboxItem(
-    auth,
-    request,
-    organizationId,
-    itemId,
-    {
-      action: 'attach',
-      bodySchema: attachInboxItemRequestSchema,
-      method: 'POST',
-      operation: 'postInboxItemAttach',
-    },
+    inboxItemWrites[action],
     fetchImplementation,
   );
 }
@@ -2065,116 +2054,6 @@ export async function postInboxItemsBulk(
       path: 'inbox/items/bulk',
       schema: bulkInboxItemsResponseSchema,
       successStatus: 200,
-    },
-    fetchImplementation,
-  );
-}
-
-export async function postInboxItemRouteUndo(
-  auth: BffAuth,
-  request: Request,
-  organizationId: string,
-  itemId: string,
-  fetchImplementation: typeof fetch = fetch,
-): Promise<Response> {
-  return await writeInboxItem(
-    auth,
-    request,
-    organizationId,
-    itemId,
-    {
-      action: 'route/undo',
-      bodySchema: null,
-      method: 'POST',
-      operation: 'postInboxItemRouteUndo',
-    },
-    fetchImplementation,
-  );
-}
-
-export async function postInboxItemDiscard(
-  auth: BffAuth,
-  request: Request,
-  organizationId: string,
-  itemId: string,
-  fetchImplementation: typeof fetch = fetch,
-): Promise<Response> {
-  return await writeInboxItem(
-    auth,
-    request,
-    organizationId,
-    itemId,
-    {
-      action: 'discard',
-      bodySchema: discardInboxItemRequestSchema,
-      method: 'POST',
-      operation: 'postInboxItemDiscard',
-    },
-    fetchImplementation,
-  );
-}
-
-export async function postInboxItemRestore(
-  auth: BffAuth,
-  request: Request,
-  organizationId: string,
-  itemId: string,
-  fetchImplementation: typeof fetch = fetch,
-): Promise<Response> {
-  return await writeInboxItem(
-    auth,
-    request,
-    organizationId,
-    itemId,
-    {
-      action: 'restore',
-      bodySchema: null,
-      method: 'POST',
-      operation: 'postInboxItemRestore',
-    },
-    fetchImplementation,
-  );
-}
-
-export async function postInboxItemAssign(
-  auth: BffAuth,
-  request: Request,
-  organizationId: string,
-  itemId: string,
-  fetchImplementation: typeof fetch = fetch,
-): Promise<Response> {
-  return await writeInboxItem(
-    auth,
-    request,
-    organizationId,
-    itemId,
-    {
-      action: 'assign',
-      bodySchema: assignInboxItemRequestSchema,
-      method: 'POST',
-      operation: 'postInboxItemAssign',
-    },
-    fetchImplementation,
-  );
-}
-
-export async function postInboxItemSnooze(
-  auth: BffAuth,
-  request: Request,
-  organizationId: string,
-  itemId: string,
-  fetchImplementation: typeof fetch = fetch,
-): Promise<Response> {
-  return await writeInboxItem(
-    auth,
-    request,
-    organizationId,
-    itemId,
-    {
-      action: 'snooze',
-      bodySchema: snoozeInboxItemRequestSchema,
-      method: 'POST',
-      operation: 'postInboxItemSnooze',
     },
     fetchImplementation,
   );
