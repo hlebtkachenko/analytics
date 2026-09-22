@@ -51,6 +51,8 @@ interface FixtureOptions {
   scope?: { granted: string[]; mode: string };
   // The skip definer raises: the item left review between the two transactions.
   skipRefused?: boolean;
+  // The skip transaction fails for an infrastructure reason instead of the definer refusing.
+  skipFailed?: boolean;
 }
 
 interface Fixture {
@@ -147,9 +149,21 @@ function fixture(options: FixtureOptions = {}): Fixture {
         options.skipRefused === true &&
         text.includes('app.record_inbox_automation_skip')
       ) {
-        throw new Error(
-          'Inbox automation skips name an item in review of the current organization',
+        throw Object.assign(
+          new Error(
+            'Inbox automation skips name an item in review of the current organization',
+          ),
+          { code: 'P0001' },
         );
+      }
+
+      if (
+        options.skipFailed === true &&
+        text.includes('app.record_inbox_automation_skip')
+      ) {
+        throw Object.assign(new Error('Connection terminated unexpectedly'), {
+          code: 'ECONNRESET',
+        });
       }
 
       if (text.includes('last_attempt')) {
@@ -369,6 +383,16 @@ describe('routeInboxItem author resolution', () => {
     });
     expect(await jobCount(context.metrics, 'completed')).toBe(1);
     expect(await jobCount(context.metrics, 'failed')).toBe(0);
+  });
+
+  it('rethrows a skip failure that is not the definer refusal, so the queue retries', async () => {
+    const context = fixture({ membership: [], skipFailed: true });
+
+    await expect(context.run()).rejects.toMatchObject({
+      code: 'ECONNRESET',
+    });
+    expect(await jobCount(context.metrics, 'completed')).toBe(0);
+    expect(await jobCount(context.metrics, 'failed')).toBe(1);
   });
 
   it('passes a restricted scope that admits the entity to the document create', async () => {
