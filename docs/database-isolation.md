@@ -311,7 +311,10 @@ SELECT. The eraser gains column grants on `blob.created_by`,
 `inbox_item.decided_by_user_id`, `inbox_item_extraction.created_by`,
 `inbox_event.actor_user_id` and `document_file.created_by`, and `app.erase_user`
 tombstones all 7. The migration reserves the `inbox` organization slug with the
-guard-then-replace pattern, bringing `organization_slug_reserved_check` to 18
+guard-then-replace pattern, rebuilding `organization_slug_reserved_check` to 18
+literals and dropping the five flat workspace routes migration `20260916.0001`
+had added. Migration `20260922.0005` re-adds `inbox` after the platform route
+reservations rebuild the list without it, so the final constraint holds 25
 literals. `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
 `20260916.0002` after this migration.
 
@@ -405,8 +408,8 @@ full address as the secret once and writes it plain into
 address when the revoked row is an `email_address`.
 `auth.resolve_channel_credential` is unchanged: the email caller lowercases the
 local part and hashes exactly that, never the whole address.
-`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
-`20260917.0003`.
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
+`20260917.0003` after this migration, and is now `20260922.0005`.
 
 ## Tenant policy contract
 

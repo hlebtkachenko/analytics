@@ -528,7 +528,7 @@ describe('PostgreSQL 18 isolation', () => {
         conname: 'organization_slug_reserved_check',
         convalidated: true,
         definition:
-          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text, 'organizations'::text, 'documents'::text, 'members'::text, 'entities'::text, 'settings'::text, 'assistant'::text, 'audit'::text, 'workspaces'::text, 'notifications'::text])))",
+          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text, 'organizations'::text, 'documents'::text, 'members'::text, 'entities'::text, 'settings'::text, 'assistant'::text, 'audit'::text, 'workspaces'::text, 'notifications'::text, 'inbox'::text])))",
         table_name: 'organization',
       },
     ]);
