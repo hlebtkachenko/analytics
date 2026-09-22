@@ -331,8 +331,8 @@ versioned `v1`, and is guarded the same way as the document routes above; see
 | POST   | `/inbox/items/:itemId/restore`        | `manageDocuments` | 200     | 401, 403, 404, 409 (not discarded)                                                    |
 | POST   | `/inbox/items/:itemId/assign`         | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or discarded)                                              |
 | POST   | `/inbox/items/:itemId/snooze`         | `manageDocuments` | 200     | 401, 403, 404, 409 (routed or discarded)                                              |
-| GET    | `/inbox/blobs/:blobId/download`       | `readDocuments`   | 200     | 401, 403, 404, 409 (`blob_quarantined`)                                               |
-| GET    | `/inbox/blobs/:blobId/inline`         | `readDocuments`   | 200     | 401, 403, 404, 409 (`blob_quarantined`), 415 (media type not inlineable)              |
+| GET    | `/inbox/blobs/:blobId/download`       | `readDocuments`   | 200     | 401, 403, 404, 409 (`blob_quarantined`, `blob_scan_pending`)                          |
+| GET    | `/inbox/blobs/:blobId/inline`         | `readDocuments`   | 200     | 401, 403, 404, 409 (`blob_quarantined`, `blob_scan_pending`), 415 (not inlineable)    |
 
 [ADR 0016](adr/0016-channel-principal.md) adds the channel principal and its
 routes, also mounted under `organizations/:organizationId/...` and versioned
@@ -359,15 +359,18 @@ in the web service, which forwards a signature-verified message as raw MIME to
 the email route above with a `ChannelAccess` only; a `TenantAccess` answers 403
 there, unlike the items route. The stored `.eml` enqueues `split_email_item`,
 which parses the MIME, scans every new blob through `clamd`, and splits
-attachments into child items. The item detail gains `sender`, the parsed `From`
-header address as the worker read it from the MIME (not `MAIL FROM`), null for a
-manual upload or before the split runs, and `senderAuthenticated`, the DKIM
-alignment verdict the split computed from Mailgun's
-`X-Mailgun-Dkim-Check-Result` header and the `DKIM-Signature` domains; a missing
-or repeated verdict header counts as not authenticated. An organization's own
-sender-pattern rules match on the address and apply their hints whatever the
-verdict, but they auto-route only when the sender is authenticated. An email
-channel's credential issue response carries
+attachments into child items. A direct upload and an API push enqueue
+`scan_inbox_item` instead of the route job: it scans the stored blob through the
+same `clamd`, discards an infected item, and routes only after a clean verdict,
+so both blob routes answer 409 `blob_scan_pending` until it lands. The item
+detail gains `sender`, the parsed `From` header address as the worker read it
+from the MIME (not `MAIL FROM`), null for a manual upload or before the split
+runs, and `senderAuthenticated`, the DKIM alignment verdict the split computed
+from Mailgun's `X-Mailgun-Dkim-Check-Result` header and the `DKIM-Signature`
+domains; a missing or repeated verdict header counts as not authenticated. An
+organization's own sender-pattern rules match on the address and apply their
+hints whatever the verdict, but they auto-route only when the sender is
+authenticated. An email channel's credential issue response carries
 `secret: intakeToken | intakeEmailAddress`: an API channel's `secret` is the
 bearer token shown once, an email channel's is the issued address itself
 (`in-<32 hex>@<intake domain>`), stored plain on `inbox_channel.email_address`
