@@ -12,8 +12,12 @@
 }
 
 // The table fills its grid column instead of floating at its intrinsic width.
+// A raw render-prop DataTable has no scroll wrapper, so let the container scroll
+// its own overflow and keep a wide table from pushing the page past a 320px
+// viewport.
 .tableContainer {
   inline-size: 100%;
+  overflow-x: auto;
 }
 
 // Carbon caps popover content at 368px, which clips the third filter column.
