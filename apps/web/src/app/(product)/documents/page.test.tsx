@@ -96,6 +96,7 @@ function respondWith(
   documents: unknown[],
   manageDocuments = true,
   readDocuments = true,
+  total = documents.length,
 ) {
   return vi.fn(async (input: string) => {
     if (input === '/api/auth/organization/list') {
@@ -128,7 +129,7 @@ function respondWith(
         documents,
         page: 1,
         pageSize: 25,
-        total: documents.length,
+        total,
         totalsByCurrency:
           documents.length === 0
             ? []
@@ -209,7 +210,47 @@ describe('DocumentsPage', () => {
 
     await waitFor(() => {
       expect(
-        documentRequests(fetchMock).some((path) => path.includes('sort=title')),
+        documentRequests(fetchMock).some((path) =>
+          path.includes('sort=title&order=asc'),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it('sends the applied filter selection as server parameters', async () => {
+    const fetchMock = respondWith([documentSummary]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderDocumentsPage();
+    await screen.findByText('Placeholder document');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Received invoice' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => {
+      expect(
+        documentRequests(fetchMock).some((path) =>
+          path.includes('kind=received_invoice&page=1'),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it('asks the server for the page the pagination control selects', async () => {
+    const fetchMock = respondWith([documentSummary], true, true, 60);
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderDocumentsPage();
+    await screen.findByText('Placeholder document');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+
+    await waitFor(() => {
+      expect(
+        documentRequests(fetchMock).some((path) =>
+          path.includes('page=2&pageSize=25'),
+        ),
       ).toBe(true);
     });
   });
@@ -291,7 +332,7 @@ describe('DocumentsPage', () => {
     await screen.findByText('Placeholder document');
 
     expect(
-      screen.getByRole('button', { name: 'View Placeholder document' }),
+      screen.getByRole('link', { name: 'View Placeholder document' }),
     ).toBeVisible();
   });
 });
