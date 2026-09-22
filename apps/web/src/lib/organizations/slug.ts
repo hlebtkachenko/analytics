@@ -1,32 +1,5 @@
+import { reservedOrganizationSlugs } from '@bap/db/organization-slug';
 import { z } from 'zod';
-
-export const reservedOrganizationSlugs = [
-  'access',
-  'api',
-  'datasets',
-  'design-system',
-  'health',
-  'invitation',
-  'metrics',
-  'ready',
-  'sign-in',
-  'sign-up',
-  'forgot-password',
-  'reset-password',
-  'activate',
-  'welcome',
-  'account',
-  'organizations',
-  'documents',
-  'members',
-  'entities',
-  'settings',
-  'assistant',
-  'audit',
-  'workspaces',
-  'notifications',
-  'inbox',
-] as const;
 
 const reservedOrganizationSlugSet = new Set<string>(reservedOrganizationSlugs);
 

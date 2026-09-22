@@ -20,6 +20,10 @@
       "types": "./dist/config.d.ts",
       "import": "./dist/config.js"
     },
+    "./organization-slug": {
+      "types": "./dist/organization-slug.d.ts",
+      "import": "./dist/organization-slug.js"
+    },
     "./pool": {
       "types": "./dist/pool.d.ts",
       "import": "./dist/pool.js"

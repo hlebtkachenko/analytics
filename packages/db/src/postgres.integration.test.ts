@@ -27,6 +27,7 @@ import {
   withTenantContext,
 } from './index.js';
 import type { TenantContext } from './index.js';
+import { reservedOrganizationSlugs } from './organization-slug.js';
 import { endPools } from './integration-support.js';
 import { executeEraseUser } from './cli.js';
 
@@ -726,6 +727,21 @@ describe('PostgreSQL 18 isolation', () => {
         "delete from auth.organization where id like 'slug-parity-%'",
       ),
     );
+  });
+
+  it('keeps the reserved slug constraint and the shared list in parity', async () => {
+    const constraint = await rootPool.query<{ definition: string }>(
+      `select pg_get_constraintdef(oid) as definition
+       from pg_constraint
+       where conname = 'organization_slug_reserved_check'`,
+    );
+    const definition = constraint.rows[0]?.definition ?? '';
+    const literals = [...definition.matchAll(/'([^']+)'/g)].map(
+      (match) => match[1]!,
+    );
+
+    expect(literals.length).toBeGreaterThan(0);
+    expect(new Set(literals)).toEqual(new Set(reservedOrganizationSlugs));
   });
 
   it('fails the route reservation migration before replacing the constraint when the slug is occupied', async () => {
