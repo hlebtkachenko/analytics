@@ -17,13 +17,15 @@ hand-roll Carbon `DataTable` markup in a page.
   - `apps/web/src/app/(product)/account/account-view.tsx`
   - `apps/web/src/app/(product)/account/security/security-view.tsx`
   - `apps/web/src/components/tables-showcase/tables-showcase.tsx`
+  - `apps/web/src/app/(product)/documents/page.tsx` (documents, migrated
+    2026-09-22)
+  - `apps/web/src/components/datasets/dataset-table.tsx` (datasets, migrated
+    2026-09-22)
 - Hand-rolls Carbon `DataTable` (boundary violation, cleanup targets):
   - `apps/web/src/app/(product)/[orgSlug]/members/members-view.tsx` (members)
-  - `apps/web/src/app/(product)/documents/page.tsx` (documents)
-  - `apps/web/src/components/datasets/dataset-table.tsx` (datasets)
 
-Strategic fix: migrate the three hand-rolled tables to the `DataGrid` block. The
-block already solves empty state, loading skeleton, row actions, expandable
+Strategic fix: migrate the remaining hand-rolled table to the `DataGrid` block.
+The block already solves empty state, loading skeleton, row actions, expandable
 detail rows, toolbar actions, and a11y headers through props (`state`,
 `loadingMode`, `emptyLabel`, `rowActions`, `renderRowDetail`, `toolbarActions`),
 so migrating fixes several issues below at once. Members was fixed in place
@@ -109,9 +111,13 @@ pagination default 10; icon buttons via `IconButton` + curated facade icon.
 
 - members-view: fixes applied in place this round; open decision to migrate to
   the `DataGrid` block.
-- documents/page.tsx: hand-rolled `DataTable`; audit for all eight issues;
-  prefer migrating to `DataGrid`.
-- datasets/dataset-table.tsx: hand-rolled `DataTable`; same audit and migration.
+- documents/page.tsx: migrated to `DataGrid`. Server sort arrived as the new
+  block props `sortMode`, `sort` and `onSortChange`; the kind and status
+  MultiSelects became one filter facet; the floating empty `Tile` became
+  `state="empty"` with `emptyLabel`, and `Clear filters` became a toolbar
+  action. The partner picker and the date range stay page-level controls because
+  the block has no such inputs.
+- datasets/dataset-table.tsx: migrated to `DataGrid`; static rows, no toolbar.
 - entities-view, workspace-list, account-view, security-view: already
   `DataGrid`; verify they set empty/loading states and that any Export/toolbar
   icons are icon-only and consistent.
