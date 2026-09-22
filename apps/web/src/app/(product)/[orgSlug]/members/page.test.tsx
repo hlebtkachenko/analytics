@@ -384,6 +384,25 @@ describe('OrganizationMembersPage', () => {
     });
   });
 
+  it('offers all entities when the workspace has none', async () => {
+    mocks.readLegalEntities.mockResolvedValue([]);
+
+    await renderPage();
+
+    fireEvent.click(
+      screen.getAllByRole('button', { name: 'Invite member' })[0]!,
+    );
+    expect(
+      (screen.getByLabelText('Entity access') as HTMLSelectElement).value,
+    ).toBe('all');
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'new@bap.test' },
+    });
+    expect(
+      screen.getByRole('button', { name: 'Send invitation' }),
+    ).toBeEnabled();
+  });
+
   it('keeps the invite modal open with an inline duplicate error', async () => {
     mocks.inviteMemberWithScopeAction.mockResolvedValue({
       ok: false,

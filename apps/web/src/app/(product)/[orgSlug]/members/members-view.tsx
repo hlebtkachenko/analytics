@@ -312,9 +312,9 @@ export default function MembersView({
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<MemberRole>('member');
   const [inviteError, setInviteError] = useState<string | null>(null);
-  // Entity access is granted at invite time, so the picker starts empty and forces a choice.
+  // Entity access is granted at invite time, so the picker starts empty and forces a choice only when entities exist.
   const [inviteScopeMode, setInviteScopeMode] = useState<'all' | 'restricted'>(
-    'restricted',
+    legalEntities.length === 0 ? 'all' : 'restricted',
   );
   const [inviteScopeSelection, setInviteScopeSelection] = useState<
     readonly LegalEntity[]
@@ -610,7 +610,7 @@ export default function MembersView({
     setInviteEmail('');
     setInviteRole('member');
     setInviteError(null);
-    setInviteScopeMode('restricted');
+    setInviteScopeMode(legalEntities.length === 0 ? 'all' : 'restricted');
     setInviteScopeSelection([]);
     setInviteOpen(true);
   }
