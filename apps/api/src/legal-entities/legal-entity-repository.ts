@@ -52,6 +52,32 @@ export interface MemberEntityScope {
 // 'unknown-entity' is the only failure the caller must translate, and it becomes a 400.
 export type WriteMemberEntityScopeResult = 'unknown-entity' | 'written';
 
+export type MemberStatusValue = 'active' | 'inactive';
+
+export interface SetMemberStatusInput extends TenantContext {
+  status: MemberStatusValue;
+  targetUserId: string;
+}
+
+// The controller maps each outcome to a status: not-found to 404, forbidden to 403, last-owner to 409, invalid to 400.
+export type SetMemberStatusResult =
+  | { outcome: 'updated'; previousStatus: string }
+  | { outcome: 'not-found' }
+  | { outcome: 'forbidden' }
+  | { outcome: 'last-owner' }
+  | { outcome: 'invalid' };
+
+// The custom SQLSTATE codes auth.set_member_status raises, mapped to the outcome the controller translates.
+const MEMBER_STATUS_ERROR_OUTCOMES: Record<
+  string,
+  'forbidden' | 'invalid' | 'last-owner'
+> = {
+  BP001: 'invalid',
+  BP002: 'invalid',
+  BP003: 'forbidden',
+  BP004: 'last-owner',
+};
+
 interface LegalEntityRow {
   created_at: Date;
   id: string;
@@ -334,6 +360,54 @@ export async function writeMemberEntityScope(
   });
 }
 
+// Status and audit are one atomic transaction: bap_auth cannot call app.record_audit, so this cannot go through Better Auth.
+export async function setMemberStatus(
+  pool: DatabasePool,
+  input: SetMemberStatusInput,
+): Promise<SetMemberStatusResult> {
+  try {
+    return await runInTenantContext(pool, input, async (transaction) => {
+      const changed = await transaction.query<{
+        previous_status: string | null;
+      }>('select auth.set_member_status($1, $2) as previous_status', [
+        input.targetUserId,
+        input.status,
+      ]);
+      const previousStatus = changed.rows[0]?.previous_status ?? null;
+
+      // A null return means the subject is not a member of this organization, so nothing is audited.
+      if (previousStatus === null) {
+        return { outcome: 'not-found' as const };
+      }
+
+      const action =
+        input.status === 'inactive'
+          ? 'member.deactivated'
+          : 'member.reactivated';
+      // The audited resource is the subject; the metadata carries no name or email, only the status and the actor role.
+      await transaction.query(
+        "select app.record_audit($1, 'member', $2, $3::jsonb)",
+        [
+          action,
+          input.targetUserId,
+          JSON.stringify({ previous_status: previousStatus, role: input.role }),
+        ],
+      );
+      return { outcome: 'updated' as const, previousStatus };
+    });
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    const outcome =
+      typeof code === 'string' ? MEMBER_STATUS_ERROR_OUTCOMES[code] : undefined;
+
+    if (outcome !== undefined) {
+      return { outcome };
+    }
+
+    throw error;
+  }
+}
+
 export abstract class LegalEntityRepository {
   abstract createEntity(input: CreateLegalEntityInput): Promise<LegalEntity>;
   abstract deleteEntity(input: DeleteLegalEntityInput): Promise<boolean>;
@@ -342,6 +416,9 @@ export abstract class LegalEntityRepository {
   abstract readMemberScope(
     input: ReadMemberEntityScopeInput,
   ): Promise<EntityScope>;
+  abstract setMemberStatus(
+    input: SetMemberStatusInput,
+  ): Promise<SetMemberStatusResult>;
   abstract updateEntity(
     input: UpdateLegalEntityInput,
   ): Promise<LegalEntity | null>;
@@ -383,6 +460,12 @@ export class DatabaseLegalEntityRepository
     input: ReadMemberEntityScopeInput,
   ): Promise<EntityScope> {
     return readMemberEntityScope(await this.getPool(), input);
+  }
+
+  async setMemberStatus(
+    input: SetMemberStatusInput,
+  ): Promise<SetMemberStatusResult> {
+    return setMemberStatus(await this.getPool(), input);
   }
 
   async updateEntity(

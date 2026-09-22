@@ -133,6 +133,13 @@ export function memberEntityScopePath(
   return `${organizationPath(organizationId)}/members/${encodeURIComponent(userId)}/entity-scope`;
 }
 
+export function memberStatusPath(
+  organizationId: string,
+  userId: string,
+): string {
+  return `${organizationPath(organizationId)}/members/${encodeURIComponent(userId)}/status`;
+}
+
 export function datasetPath(organizationId: string, datasetId: string): string {
   return `${datasetsPath(organizationId)}/${encodeURIComponent(datasetId)}`;
 }
@@ -161,4 +168,43 @@ export async function getJson(
 // An aborted effect is an ordinary unmount, not a failure the operator should see.
 export function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
+}
+
+// The outcome of one JSON mutation: the parsed body on success, or the status the caller branches on.
+export type MutationResult =
+  | Readonly<{ ok: true; data: unknown }>
+  | Readonly<{ ok: false; status: number }>;
+
+// One JSON mutation against a fixed BFF route; a 401 is bounced to sign-in like getJson.
+export async function mutateJson(
+  path: string,
+  init: Readonly<{
+    body?: unknown;
+    method: 'DELETE' | 'PATCH' | 'POST' | 'PUT';
+  }>,
+): Promise<MutationResult> {
+  const response = await fetch(path, {
+    cache: 'no-store',
+    method: init.method,
+    ...(init.body === undefined
+      ? {}
+      : {
+          body: JSON.stringify(init.body),
+          headers: { 'content-type': 'application/json' },
+        }),
+  });
+
+  if (!response.ok) {
+    // A soft navigation never re-runs the layout, so an expired session is sent back here.
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.location.assign(
+        signInPath(`${window.location.pathname}${window.location.search}`),
+      );
+    }
+    return { ok: false, status: response.status };
+  }
+
+  // A 204 write carries no body, so there is nothing to parse.
+  const data = response.status === 204 ? null : await response.json();
+  return { data, ok: true };
 }

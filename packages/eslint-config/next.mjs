@@ -22,12 +22,7 @@ export default [
   {
     // Product UI uses the design-system scaffolding, never inline layout styles.
     files: ['src/app/(product)/**/*.tsx', 'src/components/**/*.tsx'],
-    ignores: [
-      'src/components/shell/**',
-      'src/app/(product)/(throwaway)/**',
-      'src/app/(product)/account/**',
-      '**/*.test.tsx',
-    ],
+    ignores: ['src/components/shell/**', '**/*.test.tsx'],
     rules: {
       'no-restricted-syntax': [
         'error',
@@ -46,9 +41,9 @@ export default [
       'src/app/(product)/**/not-found.tsx',
     ],
     ignores: [
-      'src/app/(product)/(throwaway)/**',
       'src/app/(product)/[[]orgSlug[]]/**',
-      'src/app/(product)/account/**',
+      // The access page only redirects to /account/access, so it renders no PageContainer.
+      'src/app/(product)/access/**',
     ],
     plugins: { bap },
     rules: {

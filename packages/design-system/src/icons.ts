@@ -1,19 +1,25 @@
 'use client';
 
 export {
+  Add,
   AiGenerate,
   ArrowLeft,
   ArrowRight,
   Asleep,
   Checkmark,
+  CheckmarkFilled,
   Close,
   DataSet,
   Document,
   DocumentAdd,
+  DotMark,
   Download,
   Email,
   Enterprise,
+  ErrorFilled,
+  Filter,
   Help,
+  InformationFilled,
   Launch,
   Light,
   Login,
@@ -30,4 +36,5 @@ export {
   UserFollow,
   UserMultiple,
   View,
+  WarningFilled,
 } from '@carbon/icons-react';

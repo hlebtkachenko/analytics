@@ -35,6 +35,7 @@ import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
 
 import PageContainer from '../../../components/page-container';
+import { StatusIndicator } from '../../../components/status-indicator';
 import { getJson, isAbortError } from '../../../lib/datasets/client';
 import {
   documentsPath,
@@ -62,7 +63,7 @@ import type {
 import {
   documentKindLabelKeys,
   documentStatusLabelKeys,
-  documentStatusTagTypes,
+  documentStatusSeverity,
 } from '../../../lib/documents/labels.ts';
 import { useLegalEntities } from '../../../lib/organizations/use-legal-entities';
 import { useOrganizationAccess } from '../../../lib/organizations/use-organization-access';
@@ -608,27 +609,23 @@ export default function DocumentsPage() {
                       </TableCell>
                       <TableCell>{document.currencyCode}</TableCell>
                       <TableCell>
-                        <Tag
-                          size="sm"
-                          type={documentStatusTagTypes[document.status]}
-                        >
-                          {t(documentStatusLabelKeys[document.status])}
-                        </Tag>
+                        <StatusIndicator
+                          label={t(documentStatusLabelKeys[document.status])}
+                          severity={documentStatusSeverity[document.status]}
+                        />
                       </TableCell>
                       <TableCell>
                         {document.isBalanced === null ? (
                           t('documents.notAvailable')
                         ) : (
-                          <Tag
-                            size="sm"
-                            type={document.isBalanced ? 'green' : 'red'}
-                          >
-                            {t(
+                          <StatusIndicator
+                            label={t(
                               document.isBalanced
                                 ? 'documents.balancedYes'
                                 : 'documents.balancedNo',
                             )}
-                          </Tag>
+                            severity={document.isBalanced ? 'success' : 'error'}
+                          />
                         )}
                       </TableCell>
                       <TableCell className={styles.amount!}>

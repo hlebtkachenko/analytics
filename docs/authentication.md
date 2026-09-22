@@ -17,7 +17,7 @@ Nine authentication paths are disabled:
 - `/api/auth/change-email`, because email changes use BAP-owned flows
 - `/api/auth/delete-user/callback`, because deletion has no email-verification
   callback
-- `/api/auth/admin/remove-user`, because Better Auth 1.7.3 bypasses the BAP
+- `/api/auth/admin/remove-user`, because Better Auth 1.7.4 bypasses the BAP
   deletion hook and erasure request on that Admin-plugin path
 - `/api/auth/admin/impersonate-user`, because BAP has no approved
   session-minting impersonation workflow
@@ -74,10 +74,11 @@ header or UI shell:
 Both sign-in steps accept an optional `next` parameter, and `safeReturnPath` in
 `apps/web/src/lib/auth/return-path.ts` honours it only when it is a same-origin
 path of at most 2048 characters that starts with a single slash and carries no
-scheme or backslash, otherwise the flow lands on `/access`. A value carrying a
-control character, a protocol-relative or cross-origin target, or a route that
-cannot follow a sign in (`/api` and the identity pages) falls back to `/access`
-as well, and the same validator builds every `/sign-in?next=` link.
+scheme or backslash, otherwise the flow lands on `/workspaces`. A value carrying
+a control character, a protocol-relative or cross-origin target, or a route that
+cannot follow a sign in (`/api` and the identity pages) falls back to
+`/workspaces` as well, and the same validator builds every `/sign-in?next=`
+link.
 
 The sign-up page reads the switch through the server-only database boundary. The
 form remains available in every switch state: a true value shows public
@@ -117,34 +118,39 @@ Activation callback error codes are canonicalized before render to the fixed
 rendered. A live session redirects from `/activate` to `/welcome`. With no
 session, the page explains generically that an email scanner may have consumed
 the link and offers sign-in. `/welcome` redirects an unauthenticated request to
-`/sign-in` and links an authenticated account to `/access`.
+`/sign-in` and links an authenticated account to `/workspaces`.
 
 All identity forms use standard Carbon form controls through
 `@bap/design-system`. Auth failures use a non-dismissible, low-contrast error
 `InlineNotification` with an alert role. The pages never render or log raw
 tokens, framework error bodies, or database errors.
 
-`/account` is a separate authenticated, deliberately temporary plain-HTML page.
-Its own source has no Carbon components, style sheet, or icons and retains the
-exact throwaway marker. The root layout surrounds it with the shared Carbon
-application shell, but its content remains plain and its permanent Carbon
-replacement is future work. It shows the session email and exposes sign-out,
-password change, and account deletion. Its Server Component redirects failed or
-absent session reads to `/sign-in` and passes only the email into the
-interactive client boundary.
+The `/account` area is a set of authenticated Carbon pages inside the shared
+application shell. `/account` is the profile page: it edits the name through
+`updateUser`, shows a read-only email and an initials `Tag`, lists the caller's
+workspaces and roles read server-side through `listWorkspaceMemberships`, and
+deletes the account from a danger-zone modal that maps the invalid-password and
+sole-owner errors inline. `/account/security` handles password change (with
+revoke-other-sessions), two-step verification enable, disable, and backup-code
+regeneration, and the caller's active sessions with per-row revoke and a
+sign-out-others toolbar. `/account/preferences` writes the theme and rail
+cookies. `/account/access` is the moved access diagnostic; `/access` now only
+redirects to it. Each Server Component redirects a failed or absent session read
+to `/sign-in` and passes no private identifier into the client boundary beyond
+what the page renders.
 
 ## Authenticated application navigation
 
 Signed-in application routes share a minimal Carbon shell whose layout owns a
 skip link to the single `main-content` landmark. Desktop and collapsible mobile
-navigation use native links to Access, Organizations, Datasets, and Account and
-identify the current route. Identity and invitation routes stay outside the
+navigation use native links to Organizations, Datasets, Documents, and Account
+and identify the current route. Identity and invitation routes stay outside the
 shell.
 
-The Access organization cards link implemented capabilities to real routes and
-also list the caller's eight capabilities and `entityScope`. Member management
-and entity access management target `/{slug}/members`, visible only with
-`manageMembers` and `manageEntityAccess`; dataset upload targets
+The access diagnostic organization cards link implemented capabilities to real
+routes and also list the caller's eight capabilities and `entityScope`. Member
+management and entity access management target `/{slug}/members`, visible only
+with `manageMembers` and `manageEntityAccess`; dataset upload targets
 `/datasets?organization={slug}#upload-dataset`. The dataset page accepts that
 slug only when it matches the authenticated organization list, then sends only
 the corresponding immutable organization id through the BFF. There is no
@@ -156,16 +162,16 @@ one legal entity, and an upload entity selector. Both stay within the caller's
 `entityScope`: a restricted admin or member can only switch among, or upload
 into, the entities named there.
 
-Subordinate routes expose semantic breadcrumbs. Permanent Carbon content uses
-Carbon breadcrumbs, including `Datasets > {dataset name}` for an inline dataset
-view. The six temporary organization page modules keep plain native breadcrumbs,
-their exact throwaway markers, and zero CSS, design-system, or icon imports.
-Only the shared root shell is Carbon; permanent Carbon organization and account
-content remains future work.
+Subordinate routes expose semantic breadcrumbs. Carbon content uses Carbon
+breadcrumbs, including `Datasets > {dataset name}` for an inline dataset view
+and `Account > Security`, `Account > Preferences`, and `Account > Access` for
+the account children. The `/workspaces` list and create pages, the account
+pages, and the `/[orgSlug]` landing, `/[orgSlug]/entities`,
+`/[orgSlug]/members`, and `/[orgSlug]/settings` pages are all Carbon.
 
 ## Admin HTTP inventory
 
-Installed Better Auth 1.7.3 registers exactly 15 Admin-plugin endpoints. In the
+Installed Better Auth 1.7.4 registers exactly 15 Admin-plugin endpoints. In the
 table below, paths are relative to `/api/auth`. A reachable HTTP endpoint still
 requires the named authoritative browser session and, where listed, permission.
 Requests are JSON unless a query is shown. There is no BAP admin UI or BAP HTTP
@@ -310,14 +316,18 @@ resource-token signatures against it.
 
 Password change uses Better Auth's installed `/change-password` endpoint. It
 requires `currentPassword`, enforces the configured 14-128 character bounds, and
-accepts `revokeOtherSessions`. The account page exposes that option. No custom
-rate rule is added: Better Auth 1.7.3 already applies its special
-3-per-10-second rule to the endpoint.
+accepts `revokeOtherSessions`. The `/account/security` page exposes that option
+and maps `INVALID_PASSWORD`, `PASSWORD_TOO_SHORT`, and `PASSWORD_TOO_LONG`
+inline by field. It falls under the global 100-per-minute rate rule, not a
+custom one. A change with `revokeOtherSessions` rotates the session, so the view
+refreshes to re-derive the current session id.
 
-Account deletion is enabled. Better Auth 1.7.3 accepts either the submitted
-password or a session younger than `session.freshAge`; the endpoint is therefore
-not password-protected. BAP sets freshness to 5 minutes to keep passwordless
-acceptance short, and the account page always submits the current password.
+Account deletion is enabled. In Better Auth 1.7.4 the delete-user endpoint runs
+`sensitiveSessionMiddleware`; when the browser supplies the password there is no
+freshness check. BAP sets `session.freshAge` to 5 minutes, and the account page
+always submits the current password. The delete modal maps `INVALID_PASSWORD`
+and `CREDENTIAL_ACCOUNT_NOT_FOUND` inline on the password field and
+`ACCOUNT_HAS_SOLE_OWNED_ORGANIZATIONS` as an inline notification.
 
 The deletion hook counts organizations where the deleting user has `owner` as an
 exact comma-separated role token and no different member has that same token.
@@ -492,7 +502,7 @@ by single hyphens, cannot be all digits, and cannot be one of `access`, `api`,
 constraints use the same literal contract. The normalizer is deterministic and
 never silently renames a reserved, numeric, empty, or too-short result.
 
-Installed Better Auth 1.7.3 has 11 endpoints that otherwise fall back to
+Installed Better Auth 1.7.4 has 11 endpoints that otherwise fall back to
 `session.activeOrganizationId`. BAP's before-hook requires a non-empty explicit
 `organizationId` in the body for `has-permission`, `update`, `invite-member`,
 `remove-member`, and `update-member-role`; and in the query for
@@ -550,7 +560,7 @@ slug-accepting sibling. A slug-shaped value forwarded by mistake can pass the
 BFF syntax check, but resolves no id membership and is refused with 403 by the
 service boundary.
 
-`/` redirects unconditionally to `/organizations`, not to a last-visited
+`/` redirects unconditionally to `/workspaces`, not to a last-visited
 organization. That page lists only the verified session user's memberships and
 links creation. `/{orgSlug}` links the member and settings pages. Literal
 top-level routes take precedence over the dynamic segment, so migration
@@ -558,55 +568,75 @@ top-level routes take precedence over the dynamic segment, so migration
 literal route is published. Adding another top-level route must reserve its
 segment in the same pull request.
 
-## Temporary organization pages
+## Organization pages
 
-The 6 temporary organization pages, now including `/[orgSlug]/entities`, are an
-intentionally throwaway, unstyled browser loop. They use semantic headings,
-navigation, labels, native controls, lists, and progressive-enhancement
-server-action forms, with no page CSS, design-system, or icon imports. Each
-subordinate page uses a plain native breadcrumb. Their exact throwaway markers
-remain enforced, and permanent Carbon page content is future work even though
-the shared root shell surrounds authenticated routes. `/organizations/new` reads
+The `/[orgSlug]` landing page is now a Carbon overview inside `PageContainer`.
+It renders the workspace name, the slug, and the caller's role as a `Tag`, a row
+of `ClickableTile` quick links to members, invitations, entities, documents,
+datasets, and settings each showing a real count where one exists, and a
+data-driven "Next steps" list that appears only when a matching condition and
+its capability both hold. Every count is read server-side from Better Auth
+(`listMembers` total, pending `listInvitations`) and the BFF
+(`readLegalEntities`, `readDatasets`) using the caller's session and the
+server-resolved organization id; a failed read fails closed and surfaces an
+`InlineNotification`. The `/[orgSlug]/entities`, `/[orgSlug]/members`, and
+`/[orgSlug]/settings` pages are likewise Carbon pages that mutate by client
+call, so the temporary `[orgSlug]` loop is gone and the account pages are Carbon
+as well.
+
+The `/workspaces` list and `/workspaces/new` create pages are now Carbon pages
+inside `PageContainer`. The list reads the caller's workspaces with their role
+through a narrow SELECT-only `@bap/db` membership accessor and lists pending
+invitations with accept and decline server actions. `/workspaces/new` reads
 creator-attributed quota through a narrow SELECT-only `@bap/db` accessor. A
 missing row, malformed state, or read failure renders remaining quota as zero
-and replaces the complete form with one sentence. When capacity exists, the
-account name prefills the organization name and the shared normalizer keeps the
-slug field in step with name edits.
+and replaces the form with one message. When capacity exists, the account name
+prefills the workspace name and the shared normalizer keeps the slug field in
+step with name edits.
 
 Creation validates and normalizes again on the server, calls Better Auth with
 `keepCurrentActiveOrganization: true`, and redirects only to the validated
-created slug. Settings, invitation, role, and removal actions accept no
-organization id or callback from the browser. They resolve the bound slug
-through the member-gated route resolver and pass that exact id to Better Auth.
-Before doing either, every scoped action validates the bound slug. A malformed,
-protocol-relative-looking, or encoded-looking value redirects only to
-`/organizations?result=error`, without calling the resolver or Better Auth.
-Destinations for valid values use only the parsed slug or the durable slug
-returned by the resolver. All failures use fixed local redirects and generic
-messages.
+created slug. The remaining organization server actions are invitation accept
+and decline; each carries only an invitation id in its form body, and Better
+Auth matches that invitation to the verified session, so no browser-supplied
+organization id or callback selects a tenant. All failures use fixed local
+redirects and generic messages. Settings, membership, and entity-scope mutations
+are no longer server actions: the Carbon `/[orgSlug]/settings`,
+`/[orgSlug]/members`, and `/[orgSlug]/entities` pages call Better Auth or the
+BFF directly with the organization id resolved server-side from the route slug.
 
 Only owners can update settings, invite, assign `owner`, `admin`, or `member`,
-remove a member, and edit an admin's or a member's entity scope, subject to the
-temporary final-owner safeguard. Admins and ordinary members both receive
-read-only settings, membership, and invitation views; ADR 0011 moved member and
-organization management to `owner` alone, and Better Auth's explicit access
-control now enforces the same restriction independently of this UI.
-`/[orgSlug]/members` adds an owner-only entity scope editor next to each
-restricted admin or member, setting `all` or an explicit set of legal entity
-ids; the editor rejects an owner target. Before this temporary UI demotes or
-removes an owner, its action rereads the full 100-member-bounded list and
-refuses to remove the final observed owner. This is a non-atomic UI safeguard,
-not a global invariant. Installed Better Auth 1.7.3 checks only self-demotion
-and uses its configured member limit when counting owners for removal, so
-concurrent or direct endpoint gaps remain the approved follow-up. Organization
-deletion, active selection, custom roles, and teams remain unavailable.
+remove a member, and edit an admin's or a member's entity scope. Admins and
+ordinary members both receive read-only settings, membership, and invitation
+views; ADR 0011 moved member and organization management to `owner` alone, and
+Better Auth's explicit access control enforces the same restriction
+independently of this UI. The Carbon `/[orgSlug]/members` page runs its invite,
+role, and removal mutations through client `authClient.organization.*` calls,
+each carrying an explicit `organizationId` that the auth before-hook requires
+and from which Better Auth re-derives membership and permission, while the
+cancel-invitation call sends only the `invitationId` and lets Better Auth derive
+the organization; the browser id never selects a tenant. It also offers an
+owner-only entity scope editor next to each admin or member, setting `all` or an
+explicit set of legal entity ids through the BFF; the editor is hidden for an
+owner target, which the API also rejects with a 409. The Carbon
+`/[orgSlug]/settings` page saves name and slug changes through
+`authClient.organization.update` and lets any member leave through
+`authClient.organization.leave`, both carrying the server-resolved
+`organizationId`; a slug change re-checks the reserved contract in the auth
+before-hook and refreshes the active organization context, while name and slug
+fields stay read-only for admins and members. Better Auth 1.7.4 owns the
+sole-owner invariant: it blocks removing the only owner, blocks a sole owner's
+self-demotion, and refuses a sole owner's own leave, which the settings page
+surfaces inline; the members page no longer rereads the member list to guard
+that case. Organization deletion, active selection, custom roles, and teams
+remain unavailable.
 
 The new `/[orgSlug]/entities` page lists the legal entities in the viewer's
 scope. An owner or an admin holding `createEntities`/`updateEntities` can add or
 edit a `company` or `sole_trader` entity with an optional registration number;
 only an owner can delete one. Members see the list without management forms.
-This page shares the same plain, temporary presentation as the other four
-organization pages.
+This page shares the same Carbon presentation inside `PageContainer` as the
+other organization pages.
 
 ## First owner
 

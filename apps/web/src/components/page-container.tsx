@@ -1,6 +1,8 @@
 import { Column, Grid, Stack } from '@bap/design-system/react';
 import type { ReactNode } from 'react';
 
+import styles from './page-container.module.scss';
+
 type PageContainerProperties = Readonly<{
   children: ReactNode;
   condensed?: boolean;
@@ -15,7 +17,9 @@ export default function PageContainer({
   return (
     <Grid condensed={condensed}>
       <Column sm={4} md={8} lg={16}>
-        <Stack gap={7}>{children}</Stack>
+        <Stack className={styles.stack!} gap={7}>
+          {children}
+        </Stack>
       </Column>
     </Grid>
   );

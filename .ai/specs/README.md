@@ -4,6 +4,7 @@
 
 - [Inbox email channel (Phase 1a-email)](2026-09-17-inbox-email-channel.md)
 - [Inbox channels (Phase 1a)](2026-09-17-inbox-channels.md)
+- [Native Carbon members tables](2026-09-17-members-native-tables.md)
 - [Inbox foundation (Phase 0)](2026-09-16-inbox-foundation.md)
 - [Document analytics page and documents demo](2026-09-15-document-analytics-page.md)
 - [Invoice line periods, advance deductions and rounding](2026-09-15-invoice-periods-advances.md)

@@ -1,3 +1,9 @@
+// Let the block root shrink inside a grid or flex parent so a wide tree scrolls
+// inside its own overflow region instead of stretching the page.
+.root {
+  min-inline-size: 0;
+}
+
 .alignEnd {
   text-align: end;
 }

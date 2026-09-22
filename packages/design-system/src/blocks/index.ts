@@ -14,6 +14,8 @@ export type {
   DataGridProps,
   DensitySize,
   GridColumn,
+  GridFilterGroup,
+  GridFilterOption,
   GridRow,
   GridState,
   LoadingMode,

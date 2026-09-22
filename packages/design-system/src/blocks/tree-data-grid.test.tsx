@@ -116,6 +116,20 @@ describe('TreeDataGrid', () => {
     expect(screen.getByText('node-a1')).toBeVisible();
   });
 
+  it('names each search landmark from its grid title', () => {
+    render(
+      <>
+        <TreeDataGrid columns={columns} nodes={nodes} search title="Regions" />
+        <TreeDataGrid columns={columns} nodes={nodes} search title="Clusters" />
+      </>,
+    );
+
+    expect(screen.getAllByRole('search')).toHaveLength(2);
+    expect(screen.getByRole('search', { name: 'Search Regions' })).not.toBe(
+      screen.getByRole('search', { name: 'Search Clusters' }),
+    );
+  });
+
   it('cascades a subtree selection and reports its ids', () => {
     const onSelectionChange = vi.fn();
     render(

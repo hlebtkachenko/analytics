@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  entityScopeRequestSchema,
   entityScopeSchema,
   legalEntityIdentifierSchema,
   legalEntityInScope,
@@ -241,6 +242,30 @@ describe('organization access contract', () => {
     expect(
       legalEntitySchema.safeParse({ ...entity, id: 'not-a-uuid' }).success,
     ).toBe(false);
+  });
+
+  it('requires at least one entity when a restricted scope is written', () => {
+    // Writing a scope grants access, so a restricted write must name at least one entity.
+    expect(entityScopeRequestSchema.safeParse({ mode: 'all' }).success).toBe(
+      true,
+    );
+    expect(
+      entityScopeRequestSchema.safeParse({
+        legalEntityIds: [],
+        mode: 'restricted',
+      }).success,
+    ).toBe(false);
+    expect(
+      entityScopeRequestSchema.safeParse({
+        legalEntityIds: [entityId],
+        mode: 'restricted',
+      }).success,
+    ).toBe(true);
+    // Reading a resolved scope stays permissive: a member with no grant is restricted with none.
+    expect(
+      entityScopeSchema.safeParse({ legalEntityIds: [], mode: 'restricted' })
+        .success,
+    ).toBe(true);
   });
 
   it('answers scope membership for both scope modes', () => {

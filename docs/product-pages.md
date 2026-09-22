@@ -23,7 +23,8 @@ The group layout also enforces the browser session and redirects an
 unauthenticated or unverified request to `/sign-in?next=<encoded path>`. A page
 does not need its own session check: the layout gates every hard load, and
 `getJson` sends a 401 on a soft navigation back to sign in with the current
-path. `/account` keeps its own check as defence in depth.
+path. The account pages keep their own session check as defence in depth and
+read the session directly to derive the profile, sessions, and preferences.
 
 ## 2. Render the body inside PageContainer
 
@@ -71,8 +72,8 @@ and shows ancestors only.
 
 Child labels are scoped by the parent module, because the same segment means
 different things under different modules: `/documents/new` reads `New document`
-while `/organizations/new` reads `Create organization`. Name a child in
-`childLabels` under its parent, not in `moduleLabels`:
+while `/workspaces/new` reads `Create workspace`. Name a child in `childLabels`
+under its parent, not in `moduleLabels`:
 
 ```ts
 const childLabels = {
@@ -85,9 +86,11 @@ trail. Give its parent an entry in `childFallbacks`, for example
 `documents: 'Document'`, so an unknown child renders that label instead of the
 raw value. Cover both in `breadcrumb-trail.test.ts`.
 
-Optionally add one entry to `stubResults` in
-`apps/web/src/components/shell/global-search.tsx` so the page is discoverable
-from the header search.
+A whole-app destination in `railDestinations` is already in the header search
+index, which `global-search.tsx` builds from the rail destinations, the
+account's workspaces, and the active workspace's legal entities. A page that is
+not a rail destination needs no search wiring; do not hand-maintain a static
+result list.
 
 ## 5. Add the icon to the facade and to the icon contract
 

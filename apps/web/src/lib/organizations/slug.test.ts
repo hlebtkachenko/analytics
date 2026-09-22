@@ -44,6 +44,13 @@ describe('organization slugs', () => {
       'account',
       'organizations',
       'documents',
+      'members',
+      'entities',
+      'settings',
+      'assistant',
+      'audit',
+      'workspaces',
+      'notifications',
       'inbox',
     ]);
   });

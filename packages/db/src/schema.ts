@@ -150,6 +150,7 @@ export const members = authSchema.table(
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
     role: text('role').notNull().default('member'),
+    status: text('status').notNull().default('active'),
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),

@@ -7,6 +7,9 @@ import type { DatabasePool } from './pool.js';
 const membershipRoleSchema = z.enum(['owner', 'admin', 'member']);
 export type MembershipRole = z.infer<typeof membershipRoleSchema>;
 
+const membershipStatusSchema = z.enum(['active', 'inactive']);
+export type MembershipStatus = z.infer<typeof membershipStatusSchema>;
+
 export interface MembershipResolution {
   emailVerified: boolean;
   role: MembershipRole;
@@ -35,8 +38,19 @@ export interface ResolveOrganizationRouteInput {
   subjectId: string;
 }
 
+export interface WorkspaceMembership {
+  id: string;
+  name: string;
+  slug: string;
+  role: MembershipRole;
+  status: MembershipStatus;
+  createdAt: Date;
+  joinedAt: Date;
+  memberCount: number;
+}
+
 // Exact match against the version recorded by the migration runner. Bump it to the newest migration id in the same pull request as that migration. Rollback consequence: application code rolled back after the migration is applied makes /ready return 503 on every service until this is bumped again.
-export const DATABASE_MIGRATION_COMPATIBILITY = '20260917.0003';
+export const DATABASE_MIGRATION_COMPATIBILITY = '20260922.0004';
 
 export const PUBLIC_SIGNUP_EDGE_RATE_LIMIT = {
   max: 3,
@@ -152,6 +166,7 @@ export async function countSoleOwnedOrganizations(
          from auth.member as other_owner
          where other_owner.organization_id = subject_membership.organization_id
            and 'owner' = any(string_to_array(other_owner.role, ','))
+           and other_owner.status = 'active'
            and other_owner.user_id <> subject_membership.user_id
        )`,
     [userId],
@@ -170,6 +185,86 @@ export async function recordUserErasureRequest(
   userId: string,
 ): Promise<void> {
   await pool.query('select auth.request_user_erasure($1)', [userId]);
+}
+
+// Atomically hands ownership from the sitting owner to an active member and demotes
+// the sitting owner to admin. The definer function verifies the caller is the owner,
+// so a non-owner from-user is refused inside the transaction.
+export async function transferOwnership(
+  pool: DatabasePool,
+  organizationId: string,
+  fromUserId: string,
+  toUserId: string,
+): Promise<void> {
+  await pool.query('select auth.transfer_ownership($1, $2, $3)', [
+    organizationId,
+    fromUserId,
+    toUserId,
+  ]);
+}
+
+// The scope an owner chooses when inviting an admin or member: all entities, or a named set.
+export type InvitationEntityScope =
+  | Readonly<{ mode: 'all' }>
+  | Readonly<{ legalEntityIds: readonly string[]; mode: 'restricted' }>;
+
+export interface WriteInvitationEntityScopeInput {
+  createdBy: string;
+  invitationId: string;
+  organizationId: string;
+  scope: InvitationEntityScope;
+}
+
+// 'unknown-entity' is the only failure the caller translates to a rejected invite.
+export type WriteInvitationEntityScopeResult = 'unknown-entity' | 'written';
+
+// Stores the chosen scope against the invitation id through the definer function, the only writer
+// bap_auth may use in schema app. A restricted scope naming an entity outside the organization is
+// refused, which the invite action turns into a rejected invitation.
+export async function writeInvitationEntityScope(
+  pool: DatabasePool,
+  input: WriteInvitationEntityScopeInput,
+): Promise<WriteInvitationEntityScopeResult> {
+  const legalEntityIds =
+    input.scope.mode === 'restricted' ? [...input.scope.legalEntityIds] : [];
+
+  try {
+    await pool.query(
+      'select auth.write_invitation_entity_scope($1, $2, $3, $4::uuid[], $5)',
+      [
+        input.invitationId,
+        input.organizationId,
+        input.scope.mode,
+        legalEntityIds,
+        input.createdBy,
+      ],
+    );
+    return 'written';
+  } catch (error) {
+    if ((error as { code?: unknown }).code === 'BP008') {
+      return 'unknown-entity';
+    }
+    throw error;
+  }
+}
+
+export interface ApplyInvitationEntityScopeInput {
+  invitationId: string;
+  organizationId: string;
+  userId: string;
+}
+
+// Copies the invitation scope onto the accepted membership and removes the invitation scope, run
+// from the accept-invitation hook so both accept surfaces apply the same grant.
+export async function applyInvitationEntityScope(
+  pool: DatabasePool,
+  input: ApplyInvitationEntityScopeInput,
+): Promise<void> {
+  await pool.query('select auth.apply_invitation_entity_scope($1, $2, $3)', [
+    input.invitationId,
+    input.organizationId,
+    input.userId,
+  ]);
 }
 
 export interface InitialOrganizationQuota {
@@ -427,6 +522,45 @@ export async function resolveMembership(
   return { emailVerified: row.email_verified, role: role.data };
 }
 
+// Reads a member's status for the inactive-caller gate; bap_auth holds SELECT on auth.member.
+// null means no membership row, which the gate leaves to Better Auth rather than treating as inactive.
+export async function readMemberStatus(
+  pool: DatabasePool,
+  organizationId: string,
+  userId: string,
+): Promise<'active' | 'inactive' | null> {
+  const result = await pool.query<{ status: string }>(
+    `select status
+     from auth.member
+     where organization_id = $1 and user_id = $2`,
+    [organizationId, userId],
+  );
+  const status = result.rows[0]?.status;
+
+  return status === 'active' || status === 'inactive' ? status : null;
+}
+
+// True when the organization keeps another active owner besides the excluded member.
+export async function hasOtherActiveOwner(
+  pool: DatabasePool,
+  organizationId: string,
+  excludedUserId: string,
+): Promise<boolean> {
+  const result = await pool.query<{ present: boolean }>(
+    `select exists (
+       select 1
+       from auth.member
+       where organization_id = $1
+         and user_id <> $2
+         and status = 'active'
+         and 'owner' = any(string_to_array(role, ','))
+     ) as present`,
+    [organizationId, excludedUserId],
+  );
+
+  return result.rows[0]?.present === true;
+}
+
 // Slug-only lookup for the gated synthetic setup path, never a request-time resolver.
 export async function findOrganizationIdBySlug(
   pool: DatabasePool,
@@ -456,6 +590,7 @@ export async function resolveOrganizationRoute(
        on membership.organization_id = organization.id
      where organization.slug = $1
        and membership.user_id = $2
+       and membership.status = 'active'
      limit 1`,
     [input.organizationSlug, input.subjectId],
   );
@@ -471,6 +606,263 @@ export async function resolveOrganizationRoute(
   }
 
   return { id: row.id, name: row.name, role: role.data, slug: row.slug };
+}
+
+// Lists every one of the caller's workspaces with their own role and status in
+// one query, never per-organization. Inactive memberships are included; callers
+// that only navigate to enterable workspaces filter to the active status.
+export async function listWorkspaceMemberships(
+  pool: DatabasePool,
+  subjectId: string,
+): Promise<WorkspaceMembership[]> {
+  const result = await pool.query<{
+    id: string;
+    name: string;
+    slug: string;
+    role: string;
+    status: string;
+    created_at: Date;
+    joined_at: Date;
+    member_count: number | string;
+  }>(
+    `select organization.id, organization.name, organization.slug,
+            membership.role, membership.status, organization.created_at,
+            membership.created_at as joined_at,
+            (select count(*) from auth.member as counted
+              where counted.organization_id = organization.id
+                and counted.status = 'active')::int as member_count
+     from auth.organization as organization
+     inner join auth.member as membership
+       on membership.organization_id = organization.id
+     where membership.user_id = $1
+     order by organization.name`,
+    [subjectId],
+  );
+
+  const memberships: WorkspaceMembership[] = [];
+  for (const row of result.rows) {
+    const role = membershipRoleSchema.safeParse(row.role);
+    const status = membershipStatusSchema.safeParse(row.status);
+    // Drop rows whose role or status fails the enum parse, consistent with resolveOrganizationRoute.
+    if (!role.success || !status.success) {
+      continue;
+    }
+    memberships.push({
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      role: role.data,
+      status: status.data,
+      createdAt: row.created_at,
+      joinedAt: row.joined_at,
+      memberCount: Number(row.member_count),
+    });
+  }
+
+  return memberships;
+}
+
+// A caller session row for the account security page; the token is never returned.
+export interface UserSession {
+  id: string;
+  createdAt: Date;
+  updatedAt: Date;
+  expiresAt: Date;
+  ipAddress: string | null;
+  userAgent: string | null;
+}
+
+// Lists the caller's own sessions for display; the token column is deliberately omitted.
+export async function listUserSessions(
+  pool: DatabasePool,
+  userId: string,
+): Promise<UserSession[]> {
+  const result = await pool.query<{
+    id: string;
+    created_at: Date;
+    updated_at: Date;
+    expires_at: Date;
+    ip_address: string | null;
+    user_agent: string | null;
+  }>(
+    `select id, created_at, updated_at, expires_at, ip_address, user_agent
+     from auth.session
+     where user_id = $1
+     order by updated_at desc`,
+    [userId],
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    expiresAt: row.expires_at,
+    ipAddress: row.ip_address,
+    userAgent: row.user_agent,
+  }));
+}
+
+// Resolves a session token scoped to the caller, so a revoke only ever targets the caller's row.
+export async function findUserSessionToken(
+  pool: DatabasePool,
+  userId: string,
+  sessionId: string,
+): Promise<string | null> {
+  const result = await pool.query<{ token: string }>(
+    'select token from auth.session where id = $1 and user_id = $2',
+    [sessionId, userId],
+  );
+
+  return result.rows[0]?.token ?? null;
+}
+
+// A persisted per-user notification row for the header inbox panel.
+export interface NotificationRow {
+  id: string;
+  userId: string;
+  kind: string;
+  title: string;
+  body: string | null;
+  href: string | null;
+  readAt: Date | null;
+  createdAt: Date;
+}
+
+export interface CreateNotificationInput {
+  userId: string;
+  kind: string;
+  title: string;
+  body?: string | null;
+  href?: string | null;
+}
+
+// Raises one notification for a user; any server path scopes it by owning the user_id it writes.
+export async function createNotification(
+  pool: DatabasePool,
+  input: CreateNotificationInput,
+): Promise<void> {
+  await pool.query(
+    `insert into auth.notification (user_id, kind, title, body, href)
+     values ($1, $2, $3, $4, $5)`,
+    [
+      input.userId,
+      input.kind,
+      input.title,
+      input.body ?? null,
+      input.href ?? null,
+    ],
+  );
+}
+
+// Lists the caller's own notifications, newest first, scoped by user_id.
+export async function listNotifications(
+  pool: DatabasePool,
+  userId: string,
+  limit = 20,
+): Promise<NotificationRow[]> {
+  const result = await pool.query<{
+    id: string;
+    user_id: string;
+    kind: string;
+    title: string;
+    body: string | null;
+    href: string | null;
+    read_at: Date | null;
+    created_at: Date;
+  }>(
+    `select id, user_id, kind, title, body, href, read_at, created_at
+     from auth.notification
+     where user_id = $1
+     order by created_at desc
+     limit $2`,
+    [userId, limit],
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    userId: row.user_id,
+    kind: row.kind,
+    title: row.title,
+    body: row.body,
+    href: row.href,
+    readAt: row.read_at,
+    createdAt: row.created_at,
+  }));
+}
+
+// Counts the caller's unread notifications for the header badge, scoped by user_id.
+export async function countUnreadNotifications(
+  pool: DatabasePool,
+  userId: string,
+): Promise<number> {
+  const result = await pool.query<{ unread_count: string }>(
+    `select count(*) as unread_count
+     from auth.notification
+     where user_id = $1 and read_at is null`,
+    [userId],
+  );
+
+  return Number(result.rows[0]?.unread_count ?? 0);
+}
+
+// Marks every unread notification of the caller as read and returns how many rows changed.
+export async function markNotificationsRead(
+  pool: DatabasePool,
+  userId: string,
+): Promise<number> {
+  const result = await pool.query(
+    `update auth.notification
+     set read_at = now()
+     where user_id = $1 and read_at is null`,
+    [userId],
+  );
+
+  return result.rowCount ?? 0;
+}
+
+// Marks one of the caller's own unread notifications read and returns how many rows changed.
+export async function markNotificationRead(
+  pool: DatabasePool,
+  userId: string,
+  id: string,
+): Promise<number> {
+  const result = await pool.query(
+    `update auth.notification
+     set read_at = now()
+     where user_id = $1 and id = $2 and read_at is null`,
+    [userId, id],
+  );
+
+  return result.rowCount ?? 0;
+}
+
+// Hard-deletes one of the caller's own notifications and returns how many rows were removed.
+export async function deleteNotification(
+  pool: DatabasePool,
+  userId: string,
+  id: string,
+): Promise<number> {
+  const result = await pool.query(
+    `delete from auth.notification
+     where user_id = $1 and id = $2`,
+    [userId, id],
+  );
+
+  return result.rowCount ?? 0;
+}
+
+// Hard-deletes every one of the caller's own notifications and returns how many rows were removed.
+export async function deleteAllNotifications(
+  pool: DatabasePool,
+  userId: string,
+): Promise<number> {
+  const result = await pool.query(
+    `delete from auth.notification
+     where user_id = $1`,
+    [userId],
+  );
+
+  return result.rowCount ?? 0;
 }
 
 export interface MigrationCompatibility {

@@ -18,6 +18,13 @@ export const reservedOrganizationSlugs = [
   'account',
   'organizations',
   'documents',
+  'members',
+  'entities',
+  'settings',
+  'assistant',
+  'audit',
+  'workspaces',
+  'notifications',
   'inbox',
 ] as const;
 
