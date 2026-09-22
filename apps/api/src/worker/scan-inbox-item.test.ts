@@ -13,7 +13,7 @@ const repository = vi.hoisted(() => ({
   appendEvent: vi.fn(async () => undefined),
 }));
 
-vi.mock('../inbox/inbox-repository.js', () => repository);
+vi.mock('../inbox/inbox-repository-support.js', () => repository);
 
 const ORGANIZATION = 'organization_1';
 const CHANNEL_ID = 'c2a35496-71df-4eb2-8309-e671f5d2c4b7';

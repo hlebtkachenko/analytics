@@ -19,12 +19,14 @@ import type { InboxItem, ProviderIssue } from '../inbox/contract.js';
 import { toCreateDocumentBody } from '../inbox/draft-composer.js';
 import type { ComposedDocument } from '../inbox/draft-composer.js';
 import {
-  findDuplicateCandidates,
-  finishRouteInTransaction,
   insertExtraction,
   loadItem,
   loadItemFiles,
   loadLatestExtraction,
+} from '../inbox/inbox-repository-support.js';
+import {
+  findDuplicateCandidates,
+  finishRouteInTransaction,
   loadRouteSuggestion,
 } from '../inbox/inbox-repository.js';
 import type { RouteDecision } from '../inbox/inbox-repository.js';

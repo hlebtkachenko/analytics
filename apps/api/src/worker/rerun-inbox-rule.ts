@@ -13,12 +13,11 @@ import type {
   RerunInboxRuleJob,
   RouteInboxItemJob,
 } from '../inbox/contract.js';
+import { loadItem, loadItemFiles } from '../inbox/inbox-repository-support.js';
 import {
   applyInboxRules,
-  loadItem,
-  loadItemFiles,
   loadMatchedRuleIds,
-} from '../inbox/inbox-repository.js';
+} from '../inbox/inbox-rule-repository.js';
 import { rerunInboxRuleJobPayloadSchema, runTenantJob } from './job-context.js';
 import type { RerunInboxRuleJobPayload } from './job-context.js';
 import type { RouteJobLogger } from './route-inbox-item.js';

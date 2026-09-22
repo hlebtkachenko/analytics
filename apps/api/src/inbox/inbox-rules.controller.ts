@@ -58,7 +58,7 @@ import type {
   OrderInboxRulesRequest,
   UpdateInboxRuleRequest,
 } from './contract.js';
-import { RuleLimitError } from './inbox-repository.js';
+import { RuleLimitError } from './inbox-rule-repository.js';
 import { InboxService } from './inbox.service.js';
 import { isInvoiceAutoRoute } from './rules.js';
 

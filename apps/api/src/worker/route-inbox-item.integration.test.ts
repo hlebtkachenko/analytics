@@ -43,46 +43,51 @@ import {
   sendRouteInboxItem,
 } from '../inbox/inbox-queue.js';
 import {
-  adoptRule,
+  createChannel,
+  issueCredential,
+  listChannels,
+  readChannel,
+  readChannelPrincipal,
+  revokeCredential,
+  updateChannel,
+} from '../inbox/inbox-channel-repository.js';
+import { loadItem, loadItemFiles } from '../inbox/inbox-repository-support.js';
+import {
   approveItem,
   attachItem,
   assignItem,
-  createChannel,
-  createRule,
-  deleteRoutingTarget,
-  deleteRule,
   discardItem,
   finishRouteInTransaction,
-  issueCredential,
-  listChannels,
   listItems,
-  listRoutingTargets,
-  listRules,
-  loadItem,
-  loadItemFiles,
-  orderRules,
-  putRoutingTarget,
   readBlob,
-  readChannel,
-  readChannelPrincipal,
-  readInboxSettings,
   readItem,
   readProviderInput,
-  readRule,
   receiveIntake,
   recordExtraction,
   reopenEmailItem,
   restoreItem,
-  revokeCredential,
   routeToDocument,
   snoozeItem,
   undoRoute,
-  updateChannel,
   updateHints,
-  updateInboxSettings,
-  updateRule,
   type InboxRepository,
 } from '../inbox/inbox-repository.js';
+import {
+  adoptRule,
+  createRule,
+  deleteRule,
+  listRules,
+  orderRules,
+  readRule,
+  updateRule,
+} from '../inbox/inbox-rule-repository.js';
+import {
+  deleteRoutingTarget,
+  listRoutingTargets,
+  putRoutingTarget,
+  readInboxSettings,
+  updateInboxSettings,
+} from '../inbox/inbox-settings-repository.js';
 import * as fixtures from '../inbox/providers/__fixtures__/index.js';
 import { endPools } from '../test-support/end-pools.js';
 import { createQueue, createQueueClientFromConfiguration } from './queue.js';

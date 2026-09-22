@@ -1,7 +1,7 @@
 import type { TenantContext } from '@bap/db';
 import type { PoolClient } from 'pg';
 
-import { appendEvent } from '../inbox/inbox-repository.js';
+import { appendEvent } from '../inbox/inbox-repository-support.js';
 
 // The scan verdict is written by the definer and evented; an error never reaches the database so a retry sees not_scanned.
 export async function recordScan(
