@@ -1,0 +1,19 @@
+@use '@bap/design-system/tokens/spacing.scss' as spacing;
+
+// The read-only tiles wrap into a flexible row and share equal widths.
+.stats {
+  display: grid;
+  gap: spacing.$spacing-05;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.value {
+  font-size: 1.75rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.label {
+  color: var(--cds-text-secondary);
+  margin-block-start: spacing.$spacing-02;
+}

@@ -1,16 +1,46 @@
 @use '@bap/design-system/tokens/spacing.scss' as spacing;
 
-.heading {
+// Title and entity scope share one row; the scope sits right and the title truncates first.
+.headingRow {
+  align-items: center;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: spacing.$spacing-05;
+  justify-content: space-between;
+  margin-block-end: spacing.$spacing-05;
+}
+
+.title {
+  margin-block-end: 0;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// The empty state pairs its sentence with the two recovery actions.
+.emptyActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-04;
+  margin-block-start: spacing.$spacing-05;
+}
+
+.tables {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-03;
+  gap: spacing.$spacing-07;
+  margin-block-start: spacing.$spacing-06;
 }
 
-.tableContainer {
-  min-inline-size: 0;
-}
-
-.amount {
+// Amounts and counts read as tabular figures so the columns line up.
+.tables :global(td) {
   font-variant-numeric: tabular-nums;
-  text-align: end;
+}
+
+.documentCell {
+  align-items: center;
+  display: flex;
+  gap: spacing.$spacing-03;
+  min-inline-size: 0;
 }

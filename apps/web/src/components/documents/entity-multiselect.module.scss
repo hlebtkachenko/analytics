@@ -1,0 +1,6 @@
+// Wide enough for entity names, never past a third of the header row.
+.entitySelect {
+  flex: 0 1 auto;
+  min-inline-size: 18rem;
+  max-inline-size: 33%;
+}

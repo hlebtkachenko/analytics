@@ -1,17 +1,28 @@
 @use '@bap/design-system/tokens/spacing.scss' as spacing;
+@use '@bap/design-system/tokens/type.scss' as type;
 
-.partnerRow {
-  align-items: end;
-  display: flex;
-  gap: spacing.$spacing-05;
-}
-
-.partnerField {
-  flex: 1 1 auto;
+.tableContainer {
   min-inline-size: 0;
 }
 
-.tableContainer {
+// The line editor fits its column: fixed layout, shrinking inputs, no horizontal scroll.
+.tableContainer :global(.cds--data-table) {
+  inline-size: 100%;
+  table-layout: fixed;
+}
+
+.tableContainer :global(thead) th:first-child {
+  inline-size: 18%;
+}
+
+.tableContainer :global(thead) th:last-child {
+  inline-size: 9%;
+}
+
+.tableContainer :global(.cds--text-input),
+.tableContainer :global(.cds--text-input__field-wrapper),
+.tableContainer :global(.cds--select),
+.tableContainer :global(.cds--select-input) {
   min-inline-size: 0;
 }
 
@@ -20,4 +31,29 @@
   display: flex;
   flex-wrap: wrap;
   gap: spacing.$spacing-05;
+}
+
+.sectionHead {
+  align-items: baseline;
+  display: flex;
+  gap: spacing.$spacing-04;
+}
+
+.sectionHeading {
+  @include type.type-style('heading-03');
+}
+
+// The sticky action bar is opaque and above the fields so nothing shows through.
+.bottomBar {
+  align-items: center;
+  background: var(--cds-background);
+  border-block-start: 1px solid var(--cds-border-subtle);
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-03;
+  justify-content: flex-end;
+  padding-block: spacing.$spacing-04;
+  position: sticky;
+  z-index: 1;
 }

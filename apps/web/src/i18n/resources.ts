@@ -423,6 +423,7 @@ export const resources = {
         linksTitle: 'Linked documents',
         linkTarget: 'Document identifier',
         list: {
+          actionsFor: 'Actions for {{title}}',
           actionsMenu: 'Actions',
           columnDate: 'Date',
           columnDocument: 'Document',
@@ -496,7 +497,6 @@ export const resources = {
         vatModeStandard: 'Standard',
         versionBanner: 'Version history',
         view: 'View',
-        viewNamed: 'View {{title}}',
       },
       forgotPassword: {
         backToSignIn: 'Back to sign in',
