@@ -28,5 +28,12 @@
   { "slug": "welcome", "valid": false },
   { "slug": "account", "valid": false },
   { "slug": "organizations", "valid": false },
-  { "slug": "documents", "valid": false }
+  { "slug": "documents", "valid": false },
+  { "slug": "members", "valid": false },
+  { "slug": "entities", "valid": false },
+  { "slug": "settings", "valid": false },
+  { "slug": "assistant", "valid": false },
+  { "slug": "audit", "valid": false },
+  { "slug": "workspaces", "valid": false },
+  { "slug": "notifications", "valid": false }
 ]

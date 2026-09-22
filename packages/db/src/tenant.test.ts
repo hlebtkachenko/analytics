@@ -118,19 +118,22 @@ describe('readEntityScope', () => {
     expect(queries).toEqual([]);
   });
 
-  it('treats a missing row and an explicit all as the same unscoped answer', async () => {
+  it('grants no access to a member without a row and every entity only on an explicit all', async () => {
     const missing = createClient({});
     const explicit = createClient({
       'app.member_entity_scope': [{ mode: 'all' }],
     });
 
+    // Entity access is granted, never assumed, so a missing row resolves to no entities.
     await expect(
       readEntityScope(missing.client, {
         organizationId: 'org-1',
         role: 'member',
         userId: 'user-1',
       }),
-    ).resolves.toEqual({ mode: 'all' });
+    ).resolves.toEqual({ legalEntityIds: [], mode: 'restricted' });
+    // No access table read is needed when there is no stored row at all.
+    expect(missing.queries).toHaveLength(1);
     await expect(
       readEntityScope(explicit.client, {
         organizationId: 'org-1',
@@ -138,7 +141,7 @@ describe('readEntityScope', () => {
         userId: 'user-1',
       }),
     ).resolves.toEqual({ mode: 'all' });
-    // The access table is never read when the mode is not restricted.
+    // The access table is never read when the stored mode is not restricted.
     expect(explicit.queries).toHaveLength(1);
   });
 

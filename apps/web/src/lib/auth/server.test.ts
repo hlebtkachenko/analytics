@@ -24,22 +24,27 @@ import {
   adminPluginOptions,
   authLoggerConfiguration,
   authRateLimitRules,
+  beforeCreateInvitation,
   beforeCreateOrganization,
   cookieSecureForOrigin,
   createAccountDeletionBeforeHook,
+  createAfterAcceptInvitationHook,
   createAuthBeforeHook,
+  createBeforeUpdateMemberRoleHook,
   createPublicSignUpBeforeHook,
   createInvitationSender,
   createPasswordResetSender,
   createVerificationSender,
   customSyntheticUser,
   invalidOrganizationSlugErrorCode,
+  lastActiveOwnerErrorCode,
   loadAuthEnvironment,
   organizationCreationConfiguration,
   organizationIdRequiredErrorCode,
   organizationIdRequiredPaths,
   organizationLimitReached,
   organizationRoles,
+  ownerRoleNotAssignableErrorCode,
   publicSignUpAllowed,
   publicSignUpErrorCode,
   readAuthSecret,
@@ -241,6 +246,8 @@ describe('Better Auth resource contract', () => {
         '/delete-user/callback',
         '/organization/delete',
         '/organization/get-active-member',
+        '/organization/leave',
+        '/organization/remove-member',
         '/organization/set-active',
         '/token',
       ].sort(),
@@ -722,6 +729,52 @@ describe('organization creation policy', () => {
     },
   );
 
+  it('normalizes and validates a submitted update slug before the id check', async () => {
+    const hook = createAuthBeforeHook(poolWithQuery(vi.fn()));
+    const body = {
+      data: { name: 'Example', slug: ' Example  Org ' },
+      organizationId: 'organization-1',
+    };
+
+    await expect(
+      hook({ body, path: '/organization/update' }),
+    ).resolves.toBeUndefined();
+    expect(body.data.slug).toBe('example-org');
+
+    await expect(
+      hook({
+        body: { data: { slug: 'API' }, organizationId: 'organization-1' },
+        path: '/organization/update',
+      }),
+    ).rejects.toMatchObject({
+      body: { code: invalidOrganizationSlugErrorCode },
+    });
+  });
+
+  it('passes an update through when its data carries no slug', async () => {
+    const hook = createAuthBeforeHook(poolWithQuery(vi.fn()));
+
+    await expect(
+      hook({
+        body: { data: { name: 'Example' }, organizationId: 'organization-1' },
+        path: '/organization/update',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('rejects an update with a valid slug but no explicit organization id', async () => {
+    const hook = createAuthBeforeHook(poolWithQuery(vi.fn()));
+
+    await expect(
+      hook({
+        body: { data: { slug: 'example-org' } },
+        path: '/organization/update',
+      }),
+    ).rejects.toMatchObject({
+      body: { code: organizationIdRequiredErrorCode },
+    });
+  });
+
   it('injects the authenticated creator and overwrites forged hook data', async () => {
     await expect(
       beforeCreateOrganization({
@@ -782,7 +835,6 @@ describe('organization creation policy', () => {
       '/organization/invite-member': 'body',
       '/organization/list-invitations': 'query',
       '/organization/list-members': 'query',
-      '/organization/remove-member': 'body',
       '/organization/update': 'body',
       '/organization/update-member-role': 'body',
     });
@@ -1091,6 +1143,126 @@ describe('organization creation policy', () => {
       expect(database.organization).toHaveLength(1);
       expect(database.organization[0]?.id).toBe(organization.id);
     }
+  });
+});
+
+describe('owner role assignment policy', () => {
+  function poolWithQuery(query: ReturnType<typeof vi.fn>): DatabasePool {
+    return { query } as unknown as DatabasePool;
+  }
+
+  it('refuses an invitation that would grant the owner role', async () => {
+    for (const role of ['owner', 'owner,admin']) {
+      await expect(
+        beforeCreateInvitation({ invitation: { role } }),
+      ).rejects.toMatchObject({
+        body: { code: ownerRoleNotAssignableErrorCode },
+      });
+    }
+  });
+
+  it('allows an invitation that grants an assignable role', async () => {
+    for (const role of ['admin', 'member']) {
+      await expect(
+        beforeCreateInvitation({ invitation: { role } }),
+      ).resolves.toBeUndefined();
+    }
+  });
+
+  it('refuses a role change to owner without reading the database', async () => {
+    const query = vi.fn();
+    const hook = createBeforeUpdateMemberRoleHook(poolWithQuery(query));
+
+    await expect(
+      hook({
+        member: { role: 'member', userId: 'user-2' },
+        newRole: 'owner',
+        organization: { id: 'organization-1' },
+      }),
+    ).rejects.toMatchObject({
+      body: { code: ownerRoleNotAssignableErrorCode },
+    });
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('still refuses to demote the last active owner', async () => {
+    const query = vi.fn(async () => ({ rows: [{ present: false }] }));
+    const hook = createBeforeUpdateMemberRoleHook(poolWithQuery(query));
+
+    await expect(
+      hook({
+        member: { role: 'owner', userId: 'user-1' },
+        newRole: 'admin',
+        organization: { id: 'organization-1' },
+      }),
+    ).rejects.toMatchObject({
+      body: { code: lastActiveOwnerErrorCode },
+    });
+  });
+
+  it('allows demoting an owner while another active owner remains', async () => {
+    const query = vi.fn(async () => ({ rows: [{ present: true }] }));
+    const hook = createBeforeUpdateMemberRoleHook(poolWithQuery(query));
+
+    await expect(
+      hook({
+        member: { role: 'owner', userId: 'user-1' },
+        newRole: 'admin',
+        organization: { id: 'organization-1' },
+      }),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe('invitation acceptance notification', () => {
+  function poolWithQuery(query: ReturnType<typeof vi.fn>): DatabasePool {
+    return { query } as unknown as DatabasePool;
+  }
+
+  const acceptedInvitation = {
+    invitation: { id: 'invitation-1', inviterId: 'inviter-1' },
+    member: {
+      organizationId: 'organization-1',
+      role: 'member',
+      userId: 'user-2',
+    },
+    user: { name: 'New Member' },
+    organization: { name: 'Acme', slug: 'acme' },
+  };
+
+  it('notifies the inviter that the member joined', async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('apply_invitation_entity_scope')) return { rows: [] };
+      if (sql.includes('insert into auth.notification')) return { rows: [] };
+      throw new Error(`unexpected query: ${sql}`);
+    });
+    const hook = createAfterAcceptInvitationHook(poolWithQuery(query));
+
+    await hook(acceptedInvitation);
+
+    const notificationCall = query.mock.calls.find(([sql]) =>
+      (sql as string).includes('insert into auth.notification'),
+    ) as unknown as [string, unknown[]] | undefined;
+    expect(notificationCall?.[1]).toEqual([
+      'inviter-1',
+      'member.joined',
+      'New Member joined Acme',
+      'Joined as member',
+      '/acme/members',
+    ]);
+  });
+
+  it('swallows a notification failure and still resolves', async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('apply_invitation_entity_scope')) return { rows: [] };
+      if (sql.includes('insert into auth.notification')) {
+        throw new Error('notification insert failed');
+      }
+      throw new Error(`unexpected query: ${sql}`);
+    });
+    const hook = createAfterAcceptInvitationHook(poolWithQuery(query));
+
+    await expect(hook(acceptedInvitation)).resolves.toBeUndefined();
   });
 });
 

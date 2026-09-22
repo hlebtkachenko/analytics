@@ -578,7 +578,7 @@ try {
       'Icon explorer',
       icons,
       'Search BAP application icons',
-      29,
+      36,
       'BAP application icons',
     ],
     [

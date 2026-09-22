@@ -23,6 +23,7 @@ import {
   resolveOrganizationRoute,
   runMigrations,
   setOrganizationQuota,
+  transferOwnership,
   withTenantContext,
 } from './index.js';
 import type { TenantContext } from './index.js';
@@ -121,13 +122,16 @@ function vectorLiteral(leading: readonly number[]): string {
 }
 
 function poolFor(user: string, password: string): Pool {
-  return new Pool({
+  const pool = new Pool({
     database: container.getDatabase(),
     host: container.getHost(),
     password,
     port: container.getPort(),
     user,
   });
+  // pg emits 'error' on idle clients when the backend dies at teardown; swallow it so the container shutdown race is not an unhandled error.
+  pool.on('error', () => undefined);
+  return pool;
 }
 
 async function asOwner<T>(
@@ -524,7 +528,7 @@ describe('PostgreSQL 18 isolation', () => {
         conname: 'organization_slug_reserved_check',
         convalidated: true,
         definition:
-          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text, 'organizations'::text, 'documents'::text])))",
+          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text, 'organizations'::text, 'documents'::text, 'members'::text, 'entities'::text, 'settings'::text, 'assistant'::text, 'audit'::text, 'workspaces'::text, 'notifications'::text])))",
         table_name: 'organization',
       },
     ]);
@@ -673,6 +677,31 @@ describe('PostgreSQL 18 isolation', () => {
     }
   });
 
+  it('grants the notification inbox default auth privileges without a hand-written grant', async () => {
+    const tableAcl = await rootPool.query<{
+      grantee: string;
+      privilege_type: string;
+    }>(`select grantee, privilege_type
+       from information_schema.table_privileges
+       where table_schema = 'auth'
+         and table_name = 'notification'
+       order by grantee, privilege_type`);
+    expect(tableAcl.rows).toEqual([
+      { grantee: 'bap_auth', privilege_type: 'DELETE' },
+      { grantee: 'bap_auth', privilege_type: 'INSERT' },
+      { grantee: 'bap_auth', privilege_type: 'SELECT' },
+      { grantee: 'bap_auth', privilege_type: 'UPDATE' },
+      { grantee: 'bap_backup', privilege_type: 'SELECT' },
+      { grantee: 'bap_owner', privilege_type: 'DELETE' },
+      { grantee: 'bap_owner', privilege_type: 'INSERT' },
+      { grantee: 'bap_owner', privilege_type: 'REFERENCES' },
+      { grantee: 'bap_owner', privilege_type: 'SELECT' },
+      { grantee: 'bap_owner', privilege_type: 'TRIGGER' },
+      { grantee: 'bap_owner', privilege_type: 'TRUNCATE' },
+      { grantee: 'bap_owner', privilege_type: 'UPDATE' },
+    ]);
+  });
+
   it('rejects every reserved slug and keeps all database slug rules in parity with the shared corpus', async () => {
     const corpus = await readOrganizationSlugCorpus();
 
@@ -737,6 +766,50 @@ describe('PostgreSQL 18 isolation', () => {
         owner.query(
           `insert into auth.organization (id, name, slug)
            values ('reserved-route-still-blocked', 'Reserved route blocked', 'organizations')`,
+        ),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('fails the workspace-route reservation migration before replacing the constraint when a slug is occupied', async () => {
+    const migration = await readFile(
+      new URL(
+        '../drizzle/20260916.0001_reserve_workspace_slugs.sql',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    const client = await migratorPool.connect();
+    let transactionOpen = false;
+
+    try {
+      await client.query('begin');
+      transactionOpen = true;
+      await client.query('set local role bap_owner');
+      await client.query(
+        'alter table auth.organization drop constraint organization_slug_reserved_check',
+      );
+      await client.query(
+        `insert into auth.organization (id, name, slug)
+         values ('workspace-route-collision', 'Workspace route collision', 'members')`,
+      );
+
+      await expect(client.query(migration)).rejects.toMatchObject({
+        code: '23514',
+        constraint: 'organization_slug_reserved_check',
+      });
+    } finally {
+      if (transactionOpen) {
+        await client.query('rollback').catch(() => undefined);
+      }
+      client.release();
+    }
+
+    await expect(
+      asOwner((owner) =>
+        owner.query(
+          `insert into auth.organization (id, name, slug)
+           values ('workspace-route-still-blocked', 'Workspace route blocked', 'members')`,
         ),
       ),
     ).rejects.toThrow();
@@ -1015,7 +1088,7 @@ describe('PostgreSQL 18 isolation', () => {
       asOwner((client) =>
         client.query(`
           insert into auth.member (id, organization_id, user_id, role)
-          values ('schema-invalid-member', 'schema-org', 'schema-grantor', 'owner,admin')
+          values ('schema-invalid-member', 'schema-org', 'schema-grantor', 'member,admin')
         `),
       ),
     ).rejects.toThrow(/member_role_check/);
@@ -1556,6 +1629,21 @@ describe('PostgreSQL 18 isolation', () => {
        order by table_name, column_name, privilege_type`);
     expect(eraserColumns.rows).toEqual([
       {
+        column_name: 'resource_id',
+        privilege_type: 'SELECT',
+        table_name: 'audit_log',
+      },
+      {
+        column_name: 'resource_id',
+        privilege_type: 'UPDATE',
+        table_name: 'audit_log',
+      },
+      {
+        column_name: 'resource_type',
+        privilege_type: 'SELECT',
+        table_name: 'audit_log',
+      },
+      {
         column_name: 'user_id',
         privilege_type: 'SELECT',
         table_name: 'audit_log',
@@ -1691,14 +1779,16 @@ describe('PostgreSQL 18 isolation', () => {
         values
           ('lifecycle-member-sole', 'lifecycle-sole-org', 'lifecycle-owner', 'owner'),
           ('lifecycle-member-shared-a', 'lifecycle-shared-org', 'lifecycle-owner', 'owner'),
-          ('lifecycle-member-shared-b', 'lifecycle-shared-org', 'lifecycle-coowner', 'owner')
+          ('lifecycle-member-shared-b', 'lifecycle-shared-org', 'lifecycle-coowner', 'member')
       `);
     });
 
     try {
+      // One owner per organization now, so both organizations count; a non-owner
+      // co-member never disqualifies the owner's sole ownership.
       await expect(
         countSoleOwnedOrganizations(authPool, 'lifecycle-owner'),
-      ).resolves.toBe(1);
+      ).resolves.toBe(2);
       await expect(
         countSoleOwnedOrganizations(authPool, 'lifecycle-coowner'),
       ).resolves.toBe(0);
@@ -1940,6 +2030,348 @@ describe('PostgreSQL 18 isolation', () => {
         "select count(*)::integer as total from app.dataset where created_by = 'user-3'",
       ),
     ).resolves.toMatchObject({ rows: [{ total: 2 }] });
+  });
+
+  describe('member status and audit', () => {
+    const ownerContext: TenantContext = {
+      organizationId: 'ms-org',
+      role: 'owner',
+      userId: 'ms-owner',
+    };
+    const memberContext: TenantContext = {
+      organizationId: 'ms-org',
+      role: 'member',
+      userId: 'ms-member',
+    };
+
+    beforeAll(async () => {
+      await asOwner(async (client) => {
+        await client.query(`
+          insert into auth."user" (id, name, email, email_verified)
+          values
+            ('ms-owner', 'Status Owner', 'ms-owner@example.test', true),
+            ('ms-owner-2', 'Status Co-owner', 'ms-owner-2@example.test', true),
+            ('ms-member', 'Status Member', 'ms-member@example.test', true),
+            ('ms-foreign', 'Status Foreign', 'ms-foreign@example.test', true)
+        `);
+        await client.query(`
+          insert into auth.organization (id, name, slug)
+          values ('ms-org', 'Status Org', 'ms-status'),
+                 ('ms-org-2', 'Status Org Two', 'ms-status-two')
+        `);
+        await client.query(`
+          insert into auth.member (id, organization_id, user_id, role)
+          values
+            ('ms-mem-owner', 'ms-org', 'ms-owner', 'owner'),
+            ('ms-mem-owner-2', 'ms-org', 'ms-owner-2', 'admin'),
+            ('ms-mem-member', 'ms-org', 'ms-member', 'member'),
+            ('ms-mem-foreign', 'ms-org-2', 'ms-foreign', 'owner')
+        `);
+      });
+    });
+
+    afterAll(async () => {
+      await rootPool.query(
+        "delete from app.audit_log where organization_id = 'ms-org'",
+      );
+      await asOwner(async (client) => {
+        await client.query(
+          "delete from auth.member where organization_id in ('ms-org', 'ms-org-2')",
+        );
+        await client.query(
+          "delete from auth.organization where id in ('ms-org', 'ms-org-2')",
+        );
+        await client.query('delete from auth."user" where id like \'ms-%\'');
+      });
+    });
+
+    it('excludes an inactive member from resolve_membership', async () => {
+      await asTenant(apiPool, ownerContext, (transaction) =>
+        transaction.query(
+          "select auth.set_member_status('ms-member', 'inactive')",
+        ),
+      );
+      await expect(
+        resolveMembership(apiPool, {
+          organizationId: 'ms-org',
+          subjectId: 'ms-member',
+        }),
+      ).resolves.toBeNull();
+
+      await asTenant(apiPool, ownerContext, (transaction) =>
+        transaction.query(
+          "select auth.set_member_status('ms-member', 'active')",
+        ),
+      );
+      await expect(
+        resolveMembership(apiPool, {
+          organizationId: 'ms-org',
+          subjectId: 'ms-member',
+        }),
+      ).resolves.toEqual({ emailVerified: true, role: 'member' });
+    });
+
+    it('refuses a status change without context and denies bap_reporting', async () => {
+      await expect(
+        apiPool.query("select auth.set_member_status('ms-member', 'inactive')"),
+      ).rejects.toThrow(/tenant and actor context/);
+      await expect(
+        reportingPool.query(
+          "select auth.set_member_status('ms-member', 'inactive')",
+        ),
+      ).rejects.toThrow(/permission denied/);
+    });
+
+    it('refuses a non-owner acting on another and a self-reactivation', async () => {
+      await expect(
+        asTenant(apiPool, memberContext, (transaction) =>
+          transaction.query(
+            "select auth.set_member_status('ms-owner', 'inactive')",
+          ),
+        ),
+      ).rejects.toThrow(/another member status/);
+      await expect(
+        asTenant(apiPool, memberContext, (transaction) =>
+          transaction.query(
+            "select auth.set_member_status('ms-member', 'active')",
+          ),
+        ),
+      ).rejects.toThrow(/deactivate their own/);
+    });
+
+    it('permits a member to deactivate only their own membership', async () => {
+      const left = await asTenant(apiPool, memberContext, (transaction) =>
+        transaction.query<{ previous_status: string | null }>(
+          "select auth.set_member_status('ms-member', 'inactive') as previous_status",
+        ),
+      );
+      expect(left.rows[0]?.previous_status).toBe('active');
+
+      await asTenant(apiPool, ownerContext, (transaction) =>
+        transaction.query(
+          "select auth.set_member_status('ms-member', 'active')",
+        ),
+      );
+    });
+
+    it('treats another organization member as not found', async () => {
+      const foreign = await asTenant(apiPool, ownerContext, (transaction) =>
+        transaction.query<{ previous_status: string | null }>(
+          "select auth.set_member_status('ms-foreign', 'inactive') as previous_status",
+        ),
+      );
+      expect(foreign.rows[0]?.previous_status).toBeNull();
+    });
+
+    it('refuses to deactivate the last active owner', async () => {
+      await asTenant(apiPool, ownerContext, (transaction) =>
+        transaction.query(
+          "select auth.set_member_status('ms-owner-2', 'inactive')",
+        ),
+      );
+      await expect(
+        asTenant(apiPool, ownerContext, (transaction) =>
+          transaction.query(
+            "select auth.set_member_status('ms-owner', 'inactive')",
+          ),
+        ),
+      ).rejects.toThrow(/last active owner/);
+
+      await asTenant(apiPool, ownerContext, (transaction) =>
+        transaction.query(
+          "select auth.set_member_status('ms-owner-2', 'active')",
+        ),
+      );
+    });
+
+    it('writes a member audit row that never records name or email', async () => {
+      await asTenant(apiPool, ownerContext, async (transaction) => {
+        await transaction.query(
+          "select auth.set_member_status('ms-member', 'inactive')",
+        );
+        await transaction.query(
+          "select app.record_audit('member.deactivated', 'member', 'ms-member', $1::jsonb)",
+          [JSON.stringify({ previous_status: 'active', role: 'owner' })],
+        );
+      });
+
+      const audit = await rootPool.query<{
+        action: string;
+        metadata: Record<string, unknown>;
+        user_id: string;
+      }>(
+        `select action, user_id, metadata
+         from app.audit_log
+         where organization_id = 'ms-org'
+           and resource_type = 'member'
+           and resource_id = 'ms-member'`,
+      );
+      expect(audit.rows).toEqual([
+        {
+          action: 'member.deactivated',
+          metadata: { previous_status: 'active', role: 'owner' },
+          user_id: 'ms-owner',
+        },
+      ]);
+
+      await asTenant(apiPool, ownerContext, (transaction) =>
+        transaction.query(
+          "select auth.set_member_status('ms-member', 'active')",
+        ),
+      );
+    });
+
+    it('tombstones the member audit resource_id on erasure', async () => {
+      // The audit row from the previous test carries resource_id 'ms-member' and actor 'ms-owner'.
+      await recordUserErasureRequest(authPool, 'ms-member');
+      await asOwner((client) =>
+        client.query('delete from auth."user" where id = \'ms-member\''),
+      );
+
+      const result = await executeEraseUser(migratorPool, 'ms-member');
+      expect(result.tombstone).toMatch(/^erased_/);
+
+      const audit = await rootPool.query<{
+        resource_id: string | null;
+        user_id: string;
+      }>(
+        `select user_id, resource_id
+         from app.audit_log
+         where organization_id = 'ms-org'
+           and resource_type = 'member'
+           and action = 'member.deactivated'`,
+      );
+      // The subject was never the actor, so only the resource_id is tombstoned.
+      expect(audit.rows).toEqual([
+        { resource_id: result.tombstone, user_id: 'ms-owner' },
+      ]);
+    });
+  });
+
+  describe('single owner and ownership transfer', () => {
+    beforeAll(async () => {
+      await asOwner(async (client) => {
+        await client.query(`
+          insert into auth."user" (id, name, email, email_verified)
+          values
+            ('so-owner', 'Sole Owner', 'so-owner@example.test', true),
+            ('so-member', 'Sole Member', 'so-member@example.test', true),
+            ('so-second', 'Sole Second', 'so-second@example.test', true)
+        `);
+        await client.query(`
+          insert into auth.organization (id, name, slug)
+          values ('so-org', 'Sole Org', 'so-org')
+        `);
+        await client.query(`
+          insert into auth.member (id, organization_id, user_id, role)
+          values
+            ('so-mem-owner', 'so-org', 'so-owner', 'owner'),
+            ('so-mem-member', 'so-org', 'so-member', 'member'),
+            ('so-mem-second', 'so-org', 'so-second', 'admin')
+        `);
+      });
+    });
+
+    afterAll(async () => {
+      await rootPool.query(
+        "delete from app.audit_log where organization_id = 'so-org'",
+      );
+      await asOwner(async (client) => {
+        await client.query(
+          "delete from auth.member where organization_id = 'so-org'",
+        );
+        await client.query("delete from auth.organization where id = 'so-org'");
+        await client.query('delete from auth."user" where id like \'so-%\'');
+      });
+    });
+
+    it('refuses a second active owner on insert', async () => {
+      await expect(
+        asOwner((client) =>
+          client.query(`
+            insert into auth.member (id, organization_id, user_id, role)
+            values ('so-mem-extra', 'so-org', 'so-member', 'owner')
+          `),
+        ),
+      ).rejects.toThrow(/only one active owner/);
+    });
+
+    it('refuses promoting a second active owner on update', async () => {
+      await expect(
+        asOwner((client) =>
+          client.query(
+            "update auth.member set role = 'owner' where id = 'so-mem-second'",
+          ),
+        ),
+      ).rejects.toThrow(/only one active owner/);
+    });
+
+    it('refuses a transfer from a caller who is not the owner', async () => {
+      await expect(
+        transferOwnership(authPool, 'so-org', 'so-second', 'so-member'),
+      ).rejects.toThrow(/current owner/);
+    });
+
+    it('refuses a transfer to an inactive member', async () => {
+      await asTenant(
+        apiPool,
+        { organizationId: 'so-org', role: 'owner', userId: 'so-owner' },
+        (transaction) =>
+          transaction.query(
+            "select auth.set_member_status('so-member', 'inactive')",
+          ),
+      );
+      await expect(
+        transferOwnership(authPool, 'so-org', 'so-owner', 'so-member'),
+      ).rejects.toThrow(/active member/);
+      await asTenant(
+        apiPool,
+        { organizationId: 'so-org', role: 'owner', userId: 'so-owner' },
+        (transaction) =>
+          transaction.query(
+            "select auth.set_member_status('so-member', 'active')",
+          ),
+      );
+    });
+
+    it('swaps the roles and audits the transfer in one transaction', async () => {
+      await transferOwnership(authPool, 'so-org', 'so-owner', 'so-member');
+
+      const roles = await rootPool.query<{ role: string; user_id: string }>(
+        `select user_id, role
+         from auth.member
+         where organization_id = 'so-org'
+           and user_id in ('so-owner', 'so-member')
+         order by user_id`,
+      );
+      expect(roles.rows).toEqual([
+        { role: 'owner', user_id: 'so-member' },
+        { role: 'admin', user_id: 'so-owner' },
+      ]);
+
+      const audit = await rootPool.query<{
+        action: string;
+        metadata: Record<string, unknown>;
+        resource_id: string | null;
+        user_id: string;
+      }>(
+        `select action, user_id, resource_id, metadata
+         from app.audit_log
+         where organization_id = 'so-org'
+           and action = 'organization.ownership_transferred'`,
+      );
+      expect(audit.rows).toEqual([
+        {
+          action: 'organization.ownership_transferred',
+          metadata: { from_user_id: 'so-owner', to_user_id: 'so-member' },
+          resource_id: 'so-member',
+          user_id: 'so-owner',
+        },
+      ]);
+
+      // Restore the original owner so re-runs and later assertions see a clean org.
+      await transferOwnership(authPool, 'so-org', 'so-member', 'so-owner');
+    });
   });
 
   it('fails closed without tenant context and resets settings after a transaction', async () => {
@@ -2188,7 +2620,8 @@ describe('PostgreSQL 18 isolation', () => {
     expect(scopes).toEqual({
       owner: { mode: 'all' },
       restricted: { legalEntityIds: [secondEntityId], mode: 'restricted' },
-      unscoped: { mode: 'all' },
+      // Entity access is granted, never assumed: a member without a stored row reaches no entity.
+      unscoped: { legalEntityIds: [], mode: 'restricted' },
     });
 
     // The scope tables are tenant scoped like every other app table.
@@ -2274,7 +2707,7 @@ describe('PostgreSQL 18 isolation', () => {
        values ('member-scope', 'org-1', 'scope-user', 'member')`,
     );
 
-    // A re-invited subject starts unrestricted instead of inheriting the restriction of its former membership.
+    // A re-invited subject starts with no entity access instead of inheriting a former restriction.
     await expect(
       asTenant(apiPool, orgOneOwner, (transaction) =>
         readEntityScope(transaction, {
@@ -2283,14 +2716,126 @@ describe('PostgreSQL 18 isolation', () => {
           userId: 'scope-user',
         }),
       ),
-    ).resolves.toEqual({ mode: 'all' });
+    ).resolves.toEqual({ legalEntityIds: [], mode: 'restricted' });
 
     await storeScope();
+    // Becoming owner clears the member's stored scope. Demote user-1 first so the
+    // single-owner invariant holds, then restore it; raw updates add no audit rows.
+    await authPool.query(
+      "update auth.member set role = 'admin' where id = 'member-1'",
+    );
     await authPool.query(
       "update auth.member set role = 'owner' where id = 'member-scope'",
     );
     expect(await storedRows()).toEqual({ access: 0, scopes: 0 });
+    await authPool.query(
+      "update auth.member set role = 'admin' where id = 'member-scope'",
+    );
+    await authPool.query(
+      "update auth.member set role = 'owner' where id = 'member-1'",
+    );
     await authPool.query(`delete from auth."user" where id = 'scope-user'`);
+  });
+
+  it('stores an invitation scope at invite time and applies it on accept', async () => {
+    const invitationId = 'invitation-scope-1';
+    const inviteeId = 'invitee-1';
+    await authPool.query(
+      `insert into auth."user" (id, name, email, email_verified)
+       values ($1, 'Invitee', 'invitee@example.test', true)`,
+      [inviteeId],
+    );
+    await authPool.query(
+      `insert into auth.invitation (id, organization_id, email, status, expires_at, inviter_id)
+       values ($1, 'org-1', 'invitee@example.test', 'pending', now() + interval '2 days', 'user-1')`,
+      [invitationId],
+    );
+
+    // A restricted scope naming a foreign entity is refused, so a forged invite cannot store it.
+    await expect(
+      authPool.query(
+        'select auth.write_invitation_entity_scope($1, $2, $3, $4::uuid[], $5)',
+        [invitationId, 'org-1', 'restricted', [foreignEntityId], 'user-1'],
+      ),
+    ).rejects.toThrow();
+    // A restricted scope with no entity is refused: access is granted, never empty.
+    await expect(
+      authPool.query(
+        'select auth.write_invitation_entity_scope($1, $2, $3, $4::uuid[], $5)',
+        [invitationId, 'org-1', 'restricted', [], 'user-1'],
+      ),
+    ).rejects.toThrow();
+
+    await authPool.query(
+      'select auth.write_invitation_entity_scope($1, $2, $3, $4::uuid[], $5)',
+      [invitationId, 'org-1', 'restricted', [ownedEntityId], 'user-1'],
+    );
+
+    const stored = await rootPool.query<{ mode: string }>(
+      `select scope.mode
+       from app.invitation_entity_scope as scope
+       where scope.invitation_id = $1`,
+      [invitationId],
+    );
+    const storedAccess = await rootPool.query<{ legal_entity_id: string }>(
+      `select legal_entity_id
+       from app.invitation_legal_entity_access
+       where invitation_id = $1`,
+      [invitationId],
+    );
+    expect(stored.rows).toEqual([{ mode: 'restricted' }]);
+    expect(storedAccess.rows).toEqual([{ legal_entity_id: ownedEntityId }]);
+
+    // Accept applies the stored scope onto the new membership and clears the invitation scope.
+    await authPool.query(
+      `insert into auth.member (id, organization_id, user_id, role)
+       values ('member-invitee', 'org-1', $1, 'member')`,
+      [inviteeId],
+    );
+    await authPool.query(
+      'select auth.apply_invitation_entity_scope($1, $2, $3)',
+      [invitationId, 'org-1', inviteeId],
+    );
+
+    const applied = await asTenant(apiPool, orgOneOwner, (transaction) =>
+      readEntityScope(transaction, {
+        organizationId: 'org-1',
+        role: 'member',
+        userId: inviteeId,
+      }),
+    );
+    expect(applied).toEqual({
+      legalEntityIds: [ownedEntityId],
+      mode: 'restricted',
+    });
+
+    const leftover = await rootPool.query<{ total: number }>(
+      `select
+         (select count(*)::int from app.invitation_entity_scope where invitation_id = $1) as total`,
+      [invitationId],
+    );
+    expect(leftover.rows).toEqual([{ total: 0 }]);
+
+    // The cross-schema cascade removes any invitation scope when the invitation itself is deleted.
+    await authPool.query(
+      'select auth.write_invitation_entity_scope($1, $2, $3, $4::uuid[], $5)',
+      [invitationId, 'org-1', 'all', [], 'user-1'],
+    );
+    await authPool.query('delete from auth.invitation where id = $1', [
+      invitationId,
+    ]);
+    const cascaded = await rootPool.query<{ total: number }>(
+      'select count(*)::int as total from app.invitation_entity_scope where invitation_id = $1',
+      [invitationId],
+    );
+    expect(cascaded.rows).toEqual([{ total: 0 }]);
+
+    await authPool.query("delete from auth.member where id = 'member-invitee'");
+    await authPool.query('delete from auth."user" where id = $1', [inviteeId]);
+    // Remove the audit row the apply recorded so the append-only assertion stays exact.
+    await rootPool.query(
+      "delete from app.audit_log where organization_id = 'org-1' and action = 'member_entity_scope.granted'",
+    );
   });
 
   it('grants entity, scope and access writes to the application role and reads to reporting and backup', async () => {

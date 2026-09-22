@@ -20,8 +20,10 @@ The suite proves:
   server gates, generic outcomes, redirects, and alert semantics;
 - invitation-only sign-up retains its form while both backend admission layers
   reject an uninvited address;
-- the account page gates on a server session and calls the exact Better Auth
-  password-change, session-revocation, sign-out, and deletion client methods;
+- the account pages gate on a server session and drive the exact Better Auth
+  profile, password-change, two-factor, session-revocation, and deletion
+  methods, map their error codes inline, and read sessions and workspaces
+  server-side;
 - web health is public while readiness and metrics remain private;
 - Better Auth configuration, resource-JWT bounds, BFF response boundaries, CSP,
   bootstrap recovery states, and synthetic-account safeguards behave as
@@ -54,22 +56,18 @@ pixel mismatch cap and a 0.2 pixelmatch threshold. Chromium baselines are
 platform-specific: `chromium-darwin` supports local development and
 `chromium-linux` is refreshed in Playwright 1.62.1 Noble for GitHub Actions.
 
-Design-system icon tests pin the exact 29 curated `@bap/design-system/icons`
+Design-system icon tests pin the exact 27 curated `@bap/design-system/icons`
 exports and their intrinsic glyph behavior at the supported 16, 20, 24, and 32px
 artboards. A separate TypeScript compiler AST contract parses the actual
 production TSX, rejects direct application imports from `@carbon/icons-react`,
 and pins the reviewed Carbon control-icon callsites plus the direct decorative
 status icons, facade imports, visible labels, and absence of icon-only controls.
-The AST coverage also protects the five temporary pages' exact throwaway marker
-and zero CSS/design-system/icon boundary. That source-level guard scopes the
-temporary page modules, not the product shell layout under `app/(product)` that
-surrounds authenticated routes. Committed production Playwright coverage
-verifies real public and authenticated controls for keyboard order, axe,
-label-derived accessible names, Carbon SVG semantics and alignment, 44px
-targets, temporary-content exclusion, console and page errors, and 640 CSS-pixel
-layout-equivalent reflow without document overflow. The 640px check is not a
-browser-zoom claim; true browser zoom is recorded only as separate dated local
-evidence after setting and reading the Chrome tab zoom.
+Committed production Playwright coverage verifies real public and authenticated
+controls for keyboard order, axe, label-derived accessible names, Carbon SVG
+semantics and alignment, 44px targets, console and page errors, and 640
+CSS-pixel layout-equivalent reflow without document overflow. The 640px check is
+not a browser-zoom claim; true browser zoom is recorded only as separate dated
+local evidence after setting and reading the Chrome tab zoom.
 
 ## Integration and operational proof
 
@@ -165,17 +163,22 @@ join, approved role parsing, and real member, nonmember, and unknown-slug
 outcomes through `bap_auth`. Web tests prove malformed slugs reach neither
 session nor database work, unauthenticated and unverified requests fail closed,
 resolver errors disclose nothing, and the layout uses the same not-found path
-for every negative result. The root redirect is pinned to `/organizations`.
+for every negative result. The root redirect is pinned to `/workspaces`.
 Separate BFF and PostgreSQL assertions prove a valid slug-shaped selector can
 cross the web's syntax check but cannot resolve as an id at the service
-membership boundary. Temporary organization page tests cover every route:
-membership listing, quota-positive and quota-zero creation states, name-to-slug
-prefill, organization navigation, plain native breadcrumbs, explicit-id member
-and invitation reads, permission-based form visibility, and settings prefill.
-Action tests prove normalized creation preserves ambient session state, forged
-organization ids are ignored, explicit resolved ids reach Better Auth, the
-temporary sole-owner recheck runs, co-owner changes work, and failures expose
-only fixed generic outcomes.
+membership boundary. Organization page tests cover every route: membership
+listing, quota-positive and quota-zero creation states, name-to-slug prefill,
+organization navigation, explicit-id member and invitation reads,
+permission-based control visibility, and settings name and slug prefill that
+stays read-only for non-owners and for a failed access read. The settings page
+tests also prove that a save calls Better Auth with the resolved id and
+refreshes, a slug change navigates to the new URL, a taken slug shows an inline
+error with the form kept, and that leaving pushes to `/workspaces` while a sole
+owner's leave surfaces inline. Action tests prove normalized creation preserves
+ambient session state, invitation accept and decline carry only a verified
+invitation id, and failures expose only fixed generic outcomes. The auth
+before-hook test proves an update revalidates and normalizes a submitted slug
+against the reserved contract.
 
 The identity and organization integration closure adds no runtime path. The
 shared TypeScript/PostgreSQL corpus explicitly enumerates all 16 reserved
@@ -194,20 +197,19 @@ collision fixture and proves the migration aborts before replacing the
 constraint. The real quota reader covers positive, exhausted, and absent grants
 through `bap_auth`.
 
-The live organization browser walk starts from `/organizations`, creates an
-allowed organization, and traverses its overview, members, and settings pages
-through Caddy. It also covers the shared skip link and primary navigation, plain
-native breadcrumbs, native keyboard operation, axe, a mobile viewport, 640
+The live organization browser walk starts from `/workspaces`, creates an allowed
+organization, and traverses its overview, members, and settings pages through
+Caddy. It also covers the shared skip link and primary navigation, the shared
+shell breadcrumbs, native keyboard operation, axe, a mobile viewport, 640
 CSS-pixel layout-equivalent reflow, horizontal overflow, and page/console
-errors. This is not a browser-zoom assertion. The temporary page modules
-intentionally retain their marker comments and have no CSS, design-system, or
-icon imports; only the product shell layout under `app/(product)` is Carbon. The
-operational workflow raises only its disposable synthetic owner's total quota
-from 1 to 2 through the existing migrator command; the second organization
-consumes that capacity and the proof finishes on the zero-quota state. The
-authenticated access, icon, organization, dataset, and final sign-out specs
-share one worker-scoped synthetic browser session, and every authenticated spec
-asserts accessibility through the one shared
+errors. This is not a browser-zoom assertion. The overview, members, and
+settings pages are Carbon pages under the product shell layout under
+`app/(product)`. The operational workflow raises only its disposable synthetic
+owner's total quota from 1 to 2 through the existing migrator command; the
+second organization consumes that capacity and the proof finishes on the
+zero-quota state. The authenticated access, icon, organization, dataset, and
+final sign-out specs share one worker-scoped synthetic browser session, and
+every authenticated spec asserts accessibility through the one shared
 `tests/operational/accessibility-support.ts` helper beside the shared sign-in
 and legal entity helpers, so a single definition decides what counts as an
 accessibility violation. The public access assertions remain unauthenticated,
@@ -245,13 +247,13 @@ The two-level tenancy proof runs as `tests/operational/legal-entities.spec.ts`
 against the same disposable stack. Its narrated steps prove that the owner
 creates two neutral legal entities, restricts the member to the first one
 through the members page scope editor, that an admin is offered the create form
-and no delete control, that the member's `/access` page reports read-only
-capabilities and the restricted scope, that the member's dataset scope select
-lists only the permitted entity, that an owner upload lands in the chosen entity
-and the all-entities versus one-entity switch filters it, and that the owner
-deletes the admin-created entity. The spec signs in the admin and the member
-once each in their own browser contexts and waits out the shared 3-per-minute
-sign-in rule rather than retrying blindly.
+and no delete control, that the member's `/account/access` page reports
+read-only capabilities and the restricted scope, that the member's dataset scope
+select lists only the permitted entity, that an owner upload lands in the chosen
+entity and the all-entities versus one-entity switch filters it, and that the
+owner deletes the admin-created entity. The spec signs in the admin and the
+member once each in their own browser contexts and waits out the shared
+3-per-minute sign-in rule rather than retrying blindly.
 
 ```sh
 pnpm demo:tenancy

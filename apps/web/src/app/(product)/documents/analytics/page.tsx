@@ -12,7 +12,6 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-  Tag,
   Tile,
 } from '@bap/design-system/react';
 import type { ReactNode } from 'react';
@@ -20,6 +19,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import PageContainer from '../../../../components/page-container';
+import { StatusIndicator } from '../../../../components/status-indicator';
 import { getJson, isAbortError } from '../../../../lib/datasets/client';
 import {
   documentAnalyticsPath,
@@ -30,7 +30,7 @@ import { documentAnalyticsResponseSchema } from '../../../../lib/documents/contr
 import type { DocumentAnalyticsResponse } from '../../../../lib/documents/contract.ts';
 import {
   documentStatusLabelKeys,
-  documentStatusTagTypes,
+  documentStatusSeverity,
   invoiceLineKindLabelKeys,
   vatModeLabelKeys,
 } from '../../../../lib/documents/labels.ts';
@@ -301,12 +301,10 @@ export default function DocumentAnalyticsPage() {
                     {formatAmount(document.amountDue, document.currencyCode)}
                   </TableCell>
                   <TableCell>
-                    <Tag
-                      size="sm"
-                      type={documentStatusTagTypes[document.status]}
-                    >
-                      {t(documentStatusLabelKeys[document.status])}
-                    </Tag>
+                    <StatusIndicator
+                      label={t(documentStatusLabelKeys[document.status])}
+                      severity={documentStatusSeverity[document.status]}
+                    />
                   </TableCell>
                 </>
               ),

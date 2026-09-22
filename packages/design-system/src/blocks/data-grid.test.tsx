@@ -8,6 +8,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DataGrid } from './data-grid';
+import styles from './data-grid.module.scss';
 import type { GridColumn, GridRow } from './types';
 
 const columns: readonly GridColumn[] = [
@@ -67,6 +68,26 @@ describe('DataGrid', () => {
     expect(screen.queryByText('beta')).not.toBeInTheDocument();
   });
 
+  it('names each search landmark from its grid title', () => {
+    render(
+      <>
+        <DataGrid columns={columns} rows={rows} search title="My workspaces" />
+        <DataGrid
+          columns={columns}
+          rows={rows}
+          search
+          title="Joined workspaces"
+        />
+      </>,
+    );
+    expect(screen.getAllByRole('search')).toHaveLength(2);
+    expect(
+      screen.getByRole('search', { name: 'Search My workspaces' }),
+    ).not.toBe(
+      screen.getByRole('search', { name: 'Search Joined workspaces' }),
+    );
+  });
+
   it('reports multi selection changes', () => {
     const onSelectionChange = vi.fn();
     render(
@@ -122,6 +143,29 @@ describe('DataGrid', () => {
     fireEvent.click(within(firstBodyRow).getByRole('button'));
     fireEvent.click(screen.getByText('Edit'));
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: '1' }));
+  });
+
+  it('does not fire the row click when the overflow menu is used', () => {
+    const onRowClick = vi.fn();
+    const onEdit = vi.fn();
+    render(
+      <DataGrid
+        columns={columns}
+        onRowClick={onRowClick}
+        rowActions={() => [{ id: 'edit', label: 'Edit', onClick: onEdit }]}
+        rows={rows}
+      />,
+    );
+    const firstBodyRow = screen.getAllByRole('row')[1] as HTMLElement;
+    fireEvent.click(within(firstBodyRow).getByRole('button'));
+    expect(onRowClick).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Edit'));
+    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: '1' }));
+    expect(onRowClick).not.toHaveBeenCalled();
+    fireEvent.click(within(firstBodyRow).getByText('beta'));
+    expect(onRowClick).toHaveBeenCalledWith(
+      expect.objectContaining({ id: '1' }),
+    );
   });
 
   it('expands a row to reveal its detail content', () => {
@@ -186,6 +230,111 @@ describe('DataGrid', () => {
   it('shows the empty state when there are no rows', () => {
     render(<DataGrid columns={columns} emptyLabel="Nothing here" rows={[]} />);
     expect(screen.getByText('Nothing here')).toBeInTheDocument();
+  });
+
+  it('marks its root so it shrinks inside a grid or flex parent', () => {
+    const { container } = render(<DataGrid columns={columns} rows={rows} />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveClass(styles.root!);
+  });
+
+  it('narrows rows to the applied filter selection', () => {
+    render(
+      <DataGrid
+        columns={columns}
+        filters={[
+          {
+            heading: 'Name',
+            key: 'name',
+            options: [
+              { id: 'alpha', label: 'Alpha' },
+              { id: 'beta', label: 'Beta' },
+            ],
+          },
+        ]}
+        rows={rows}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Alpha' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    const body = bodyRowText();
+    expect(body).toHaveLength(1);
+    expect(body[0]).toContain('alpha');
+  });
+
+  it('shows the count of applied filter selections in the badge', () => {
+    const { container } = render(
+      <DataGrid
+        columns={columns}
+        filters={[
+          {
+            heading: 'Name',
+            key: 'name',
+            options: [
+              { id: 'alpha', label: 'Alpha' },
+              { id: 'beta', label: 'Beta' },
+            ],
+          },
+        ]}
+        rows={rows}
+      />,
+    );
+    expect(container.querySelector(`.${styles.filterCount!}`)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Alpha' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Beta' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(
+      container.querySelector(`.${styles.filterCount!}`)?.textContent,
+    ).toBe('2');
+  });
+
+  it('clears the staged selection when reset is clicked', () => {
+    render(
+      <DataGrid
+        columns={columns}
+        filters={[
+          {
+            heading: 'Name',
+            key: 'name',
+            options: [{ id: 'alpha', label: 'Alpha' }],
+          },
+        ]}
+        rows={rows}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    const alpha = screen.getByRole('checkbox', {
+      name: 'Alpha',
+    }) as HTMLInputElement;
+    fireEvent.click(alpha);
+    expect(alpha.checked).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    expect(
+      (screen.getByRole('checkbox', { name: 'Alpha' }) as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+  });
+
+  it('places the title on the same row as the toolbar when inline', () => {
+    const { container } = render(
+      <DataGrid
+        columns={columns}
+        rows={rows}
+        search
+        title="Reports"
+        titleInline
+      />,
+    );
+    const header = container.querySelector(`.${styles.inlineHeader!}`);
+    expect(header).not.toBeNull();
+    expect(
+      within(header as HTMLElement).getByText('Reports'),
+    ).toBeInTheDocument();
+    expect(
+      within(header as HTMLElement).getByPlaceholderText('Search rows'),
+    ).toBeInTheDocument();
   });
 
   it('limits the page to the client page size', () => {

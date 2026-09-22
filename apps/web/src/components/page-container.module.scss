@@ -1,0 +1,7 @@
+// Carbon Stack lays its children out in a single implicit grid column that
+// defaults to a max-content track, so one wide child (a data grid) stretches
+// the whole page past a narrow viewport. Pin the column to the container width
+// so wide children shrink and scroll inside their own viewport instead.
+.stack {
+  grid-template-columns: minmax(0, 1fr);
+}

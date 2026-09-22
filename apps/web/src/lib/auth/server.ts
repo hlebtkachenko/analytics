@@ -1,11 +1,16 @@
 import {
+  applyInvitationEntityScope,
   countSoleOwnedOrganizations,
+  createNotification,
+  hasOtherActiveOwner,
   organizationCreationLimitReached,
   publicSignupEnabled,
   publicSignupInvitationExists,
+  readMemberStatus,
   recordUserErasureRequest,
 } from '@bap/db/access';
 import { admin, jwt, organization, twoFactor } from 'better-auth/plugins';
+import { getSessionFromCtx } from 'better-auth/api';
 import { APIError, betterAuth } from 'better-auth';
 import { createAccessControl } from 'better-auth/plugins/access';
 import { defaultStatements } from 'better-auth/plugins/organization/access';
@@ -68,6 +73,9 @@ export const accountDeletionUnavailableErrorCode =
 export const adminPluginOptions = { schema: adminAuthSchema } as const;
 export const invalidOrganizationSlugErrorCode = 'INVALID_ORGANIZATION_SLUG';
 export const organizationIdRequiredErrorCode = 'ORGANIZATION_ID_REQUIRED';
+export const memberInactiveErrorCode = 'MEMBER_INACTIVE';
+export const lastActiveOwnerErrorCode = 'LAST_ACTIVE_OWNER';
+export const ownerRoleNotAssignableErrorCode = 'OWNER_ROLE_NOT_ASSIGNABLE';
 export const unsupportedActiveOrganizationEndpointErrorCode =
   'ACTIVE_ORGANIZATION_ENDPOINT_DISABLED';
 export const unsupportedActiveOrganizationPath =
@@ -116,7 +124,6 @@ export const organizationIdRequiredPaths = {
   '/organization/invite-member': 'body',
   '/organization/list-invitations': 'query',
   '/organization/list-members': 'query',
-  '/organization/remove-member': 'body',
   '/organization/update': 'body',
   '/organization/update-member-role': 'body',
 } as const;
@@ -222,6 +229,23 @@ export function createAuthBeforeHook(pool: DatabasePool) {
       return undefined;
     }
 
+    // The update route only revalidates a submitted slug; membership and id checks follow.
+    if (context.path === '/organization/update') {
+      const data = objectInput(objectInput(context.body)?.data);
+      if (typeof data?.slug === 'string') {
+        const parsed = organizationSlugSchema.safeParse(
+          normalizeOrganizationSlug(data.slug),
+        );
+        if (!parsed.success) {
+          throw APIError.from('BAD_REQUEST', {
+            code: invalidOrganizationSlugErrorCode,
+            message: 'Organization slug is invalid.',
+          });
+        }
+        data.slug = parsed.data;
+      }
+    }
+
     const location =
       context.path === undefined
         ? undefined
@@ -239,9 +263,126 @@ export function createAuthBeforeHook(pool: DatabasePool) {
           message: 'An explicit organization id is required.',
         });
       }
+
+      // An inactive member is denied on every organization-scoped path before Better Auth reads its own membership.
+      await rejectInactiveMember(pool, context, input.organizationId);
     }
 
     return undefined;
+  };
+}
+
+// Denies an inactive caller on the organization-scoped paths; a caller with no membership row is left to Better Auth.
+async function rejectInactiveMember(
+  pool: DatabasePool,
+  context: AuthBeforeContext,
+  organizationId: string,
+): Promise<void> {
+  const session = await getSessionFromCtx(
+    context as unknown as Parameters<typeof getSessionFromCtx>[0],
+  ).catch(() => null);
+  const userId = session?.user?.id;
+
+  if (typeof userId !== 'string' || userId.length === 0) {
+    return;
+  }
+
+  const status = await readMemberStatus(pool, organizationId, userId).catch(
+    () => null,
+  );
+
+  if (status === 'inactive') {
+    throw APIError.from('FORBIDDEN', {
+      code: memberInactiveErrorCode,
+      message: 'This membership is inactive.',
+    });
+  }
+}
+
+// Owner is never a freely assignable role: it is granted only at organization creation and moves only through ownership transfer.
+export function assertRoleAssignable(role: string): void {
+  if (role.split(',').includes('owner')) {
+    throw APIError.from('BAD_REQUEST', {
+      code: ownerRoleNotAssignableErrorCode,
+      message: 'The owner role cannot be assigned.',
+    });
+  }
+}
+
+// Rejects an invitation that would grant the owner role before Better Auth writes it.
+export async function beforeCreateInvitation({
+  invitation,
+}: {
+  invitation: { role: string };
+}): Promise<void> {
+  assertRoleAssignable(invitation.role);
+}
+
+// Refuses to demote the last active owner, so an organization can never strip itself of every active owner.
+export function createBeforeUpdateMemberRoleHook(pool: DatabasePool) {
+  return async ({
+    member,
+    newRole,
+    organization: targetOrganization,
+  }: {
+    member: { role: string; userId: string };
+    newRole: string;
+    organization: { id: string };
+  }): Promise<void> => {
+    // Owner is never assignable through a role change; ownership moves only through transfer.
+    assertRoleAssignable(newRole);
+
+    const wasOwner = member.role.split(',').includes('owner');
+    const willBeOwner = newRole.split(',').includes('owner');
+
+    if (!wasOwner || willBeOwner) {
+      return;
+    }
+
+    // A read failure refuses the demotion, which is the safe default for the last-owner guard.
+    const otherActiveOwner = await hasOtherActiveOwner(
+      pool,
+      targetOrganization.id,
+      member.userId,
+    ).catch(() => false);
+
+    if (!otherActiveOwner) {
+      throw APIError.from('BAD_REQUEST', {
+        code: lastActiveOwnerErrorCode,
+        message: 'The last active owner cannot be demoted.',
+      });
+    }
+  };
+}
+
+// Applies the scope stored at invite time onto the freshly accepted membership, covering both
+// accept surfaces through the one Better Auth hook. The member is already created when this runs,
+// so a failure is swallowed rather than breaking acceptance: the member simply starts with no
+// entity access, the safe default, which an owner can grant afterwards.
+export function createAfterAcceptInvitationHook(pool: DatabasePool) {
+  return async ({
+    invitation,
+    member,
+    user,
+    organization,
+  }: {
+    invitation: { id: string; inviterId: string };
+    member: { organizationId: string; role: string; userId: string };
+    user: { name: string };
+    organization: { name: string; slug: string };
+  }): Promise<void> => {
+    await applyInvitationEntityScope(pool, {
+      invitationId: invitation.id,
+      organizationId: member.organizationId,
+      userId: member.userId,
+    }).catch(() => undefined);
+    void createNotification(pool, {
+      userId: invitation.inviterId,
+      kind: 'member.joined',
+      title: `${user.name} joined ${organization.name}`,
+      body: `Joined as ${member.role}`,
+      href: `/${organization.slug}/members`,
+    }).catch(() => undefined);
   };
 }
 
@@ -521,7 +662,12 @@ async function createAuth() {
       organization({
         ...organizationCreationConfiguration,
         ac: organizationAccessControl,
-        organizationHooks: { beforeCreateOrganization },
+        organizationHooks: {
+          afterAcceptInvitation: createAfterAcceptInvitationHook(pool),
+          beforeCreateInvitation,
+          beforeCreateOrganization,
+          beforeUpdateMemberRole: createBeforeUpdateMemberRoleHook(pool),
+        },
         organizationLimit: (user) => organizationLimitReached(pool, user),
         schema: organizationAuthSchema,
         roles: organizationRoles,

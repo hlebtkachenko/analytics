@@ -52,6 +52,19 @@ export const entityScopeSchema = z.discriminatedUnion('mode', [
     .strict(),
 ]);
 
+// The write contract for a scope an owner sets: entity access is granted, so a restricted scope
+// must name at least one entity. The resolved scope above stays permissive because a member with
+// no grant resolves to a restricted scope with an empty list, which is a valid read, never a write.
+export const entityScopeRequestSchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('all') }).strict(),
+  z
+    .object({
+      legalEntityIds: z.array(legalEntityIdentifierSchema).min(1),
+      mode: z.literal('restricted'),
+    })
+    .strict(),
+]);
+
 // Capabilities only tell the UI which actions to show, the database stays the enforcement layer.
 export const organizationCapabilitiesSchema = z
   .object({
@@ -109,6 +122,7 @@ export const organizationAccessResponseSchema = z
 
 export type AccessService = z.infer<typeof accessServiceSchema>;
 export type EntityScope = z.infer<typeof entityScopeSchema>;
+export type EntityScopeRequest = z.infer<typeof entityScopeRequestSchema>;
 export type LegalEntity = z.infer<typeof legalEntitySchema>;
 export type LegalEntityKind = z.infer<typeof legalEntityKindSchema>;
 export type OrganizationAccessResponse = z.infer<

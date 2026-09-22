@@ -4,7 +4,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "env": ["BAP_PUBLIC_ORIGIN", "NODE_ENV"],
+      "env": ["BAP_FEEDBACK_EMAIL", "BAP_PUBLIC_ORIGIN", "NODE_ENV"],
       "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**", "dist/**"]
     },
     "@bap/design-system#build": {

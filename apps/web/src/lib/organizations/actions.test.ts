@@ -3,29 +3,37 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  createOrganizationAction,
-  inviteOrganizationMemberAction,
-  removeOrganizationMemberAction,
-  updateOrganizationAction,
-  updateOrganizationMemberRoleAction,
+  acceptOrganizationInvitationAction,
+  createWorkspaceAction,
+  declineOrganizationInvitationAction,
+  inviteMemberWithScopeAction,
 } from './actions';
 
+const ENTITY_ID = '9b7d1c30-6a4b-4d1f-9c2e-7a5f0e3b8d21';
+
 const mocks = vi.hoisted(() => ({
+  acceptInvitation: vi.fn(),
+  cancelInvitation: vi.fn(),
   createInvitation: vi.fn(),
   createOrganization: vi.fn(),
   getAuth: vi.fn(),
+  getAuthPool: vi.fn(),
+  getOrganizationCreationQuota: vi.fn(),
   getSession: vi.fn(),
-  listMembers: vi.fn(),
   redirect: vi.fn(),
-  removeMember: vi.fn(),
+  rejectInvitation: vi.fn(),
   resolveOrganizationRouteForRequest: vi.fn(),
   revalidatePath: vi.fn(),
-  updateMemberRole: vi.fn(),
-  updateOrganization: vi.fn(),
+  writeInvitationEntityScope: vi.fn(),
 }));
 
+vi.mock('@bap/db/access', () => ({
+  getOrganizationCreationQuota: mocks.getOrganizationCreationQuota,
+  writeInvitationEntityScope: mocks.writeInvitationEntityScope,
+}));
 vi.mock('../auth/server', () => ({
   getAuth: mocks.getAuth,
+  getAuthPool: mocks.getAuthPool,
 }));
 vi.mock('./resolver', () => ({
   resolveOrganizationRouteForRequest: mocks.resolveOrganizationRouteForRequest,
@@ -54,42 +62,40 @@ describe('organization server actions', () => {
     vi.clearAllMocks();
     mocks.getAuth.mockResolvedValue({
       api: {
+        acceptInvitation: mocks.acceptInvitation,
+        cancelInvitation: mocks.cancelInvitation,
         createInvitation: mocks.createInvitation,
         createOrganization: mocks.createOrganization,
         getSession: mocks.getSession,
-        listMembers: mocks.listMembers,
-        removeMember: mocks.removeMember,
-        updateMemberRole: mocks.updateMemberRole,
-        updateOrganization: mocks.updateOrganization,
+        rejectInvitation: mocks.rejectInvitation,
       },
+    });
+    mocks.getAuthPool.mockResolvedValue({});
+    mocks.createInvitation.mockResolvedValue({ id: 'invitation-1' });
+    mocks.writeInvitationEntityScope.mockResolvedValue('written');
+    mocks.getOrganizationCreationQuota.mockResolvedValue({
+      attributedTotal: 0,
+      grantedTotal: 3,
+      remainingTotal: 3,
     });
     mocks.resolveOrganizationRouteForRequest.mockResolvedValue(organization);
     mocks.createOrganization.mockResolvedValue(organization);
     mocks.getSession.mockResolvedValue({
       user: { emailVerified: true, id: 'user-1' },
     });
-    mocks.listMembers.mockResolvedValue({
-      members: [
-        {
-          id: 'member-1',
-          role: 'owner',
-          userId: 'user-1',
-        },
-        {
-          id: 'member-2',
-          role: 'member',
-          userId: 'user-2',
-        },
-      ],
-      total: 2,
-    });
   });
 
-  it('creates with normalized input without changing ambient organization state', async () => {
-    await createOrganizationAction(
-      form({ name: ' Organization Two ', slug: 'Organization Two' }),
-    );
+  it('creates with normalized input and returns the workspace id and slug', async () => {
+    const result = await createWorkspaceAction({
+      name: ' Organization Two ',
+      slug: 'Organization Two',
+    });
 
+    expect(result).toEqual({
+      id: 'organization-1',
+      ok: true,
+      slug: 'organization-one',
+    });
     expect(mocks.createOrganization).toHaveBeenCalledWith({
       body: {
         keepCurrentActiveOrganization: true,
@@ -101,242 +107,210 @@ describe('organization server actions', () => {
     expect(mocks.getSession).toHaveBeenCalledWith({
       headers: expect.any(Headers),
     });
-    expect(mocks.redirect).toHaveBeenCalledWith('/organization-two');
+    // The wizard stays mounted through its later steps, so no route is revalidated on create.
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+    expect(mocks.redirect).not.toHaveBeenCalled();
   });
 
   it('rejects a reserved create slug before auth side effects', async () => {
-    await createOrganizationAction(
-      form({ name: 'Organizations', slug: 'organizations' }),
-    );
+    const result = await createWorkspaceAction({
+      name: 'Organizations',
+      slug: 'organizations',
+    });
 
+    expect(result).toEqual({ ok: false, reason: 'invalid' });
     expect(mocks.createOrganization).not.toHaveBeenCalled();
-    expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organizations/new?result=error',
-    );
   });
 
-  it('rejects an unverified direct create action before writes', async () => {
-    mocks.getSession.mockResolvedValue({
-      user: { emailVerified: false, id: 'user-1' },
+  it('marks an exhausted quota so the wizard shows it inline', async () => {
+    mocks.getOrganizationCreationQuota.mockResolvedValue({
+      attributedTotal: 1,
+      grantedTotal: 1,
+      remainingTotal: 0,
     });
 
-    await createOrganizationAction(
-      form({ name: 'Organization Two', slug: 'organization-two' }),
-    );
+    const result = await createWorkspaceAction({
+      name: 'Organization Two',
+      slug: 'organization-two',
+    });
 
+    expect(result).toEqual({ ok: false, reason: 'quota-exhausted' });
     expect(mocks.createOrganization).not.toHaveBeenCalled();
-    expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organizations/new?result=error',
-    );
   });
 
-  it('invites with the resolved id and ignores a forged form id', async () => {
-    await inviteOrganizationMemberAction(
-      'organization-one',
-      form({
-        email: 'INVITED@EXAMPLE.TEST',
-        organizationId: 'forged-organization',
-        role: 'member',
-      }),
+  it('marks a taken address so the wizard shows it inline', async () => {
+    mocks.createOrganization.mockRejectedValue({
+      body: { code: 'ORGANIZATION_ALREADY_EXISTS' },
+    });
+
+    const result = await createWorkspaceAction({
+      name: 'Organization Two',
+      slug: 'organization-two',
+    });
+
+    expect(result).toEqual({ ok: false, reason: 'slug-taken' });
+  });
+
+  it('accepts an invitation from the form body and returns a success marker', async () => {
+    await acceptOrganizationInvitationAction(
+      form({ invitationId: 'invitation-1' }),
     );
 
-    expect(mocks.createInvitation).toHaveBeenCalledWith({
-      body: {
-        email: 'invited@example.test',
-        organizationId: 'organization-1',
-        role: 'member',
-      },
+    expect(mocks.acceptInvitation).toHaveBeenCalledWith({
+      body: { invitationId: 'invitation-1' },
       headers: expect.any(Headers),
     });
     expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organization-one/members?result=success',
+      '/workspaces?result=accept-success',
     );
   });
 
-  it('refuses the temporary UI path that would demote the final owner', async () => {
-    mocks.listMembers.mockResolvedValue({
-      members: [{ id: 'member-1', role: 'owner', userId: 'user-1' }],
-      total: 1,
-    });
-
-    await updateOrganizationMemberRoleAction(
-      'organization-one',
-      form({ memberId: 'member-1', role: 'admin' }),
+  it('declines an invitation from the form body and returns a decline marker', async () => {
+    await declineOrganizationInvitationAction(
+      form({ invitationId: 'invitation-1' }),
     );
 
-    expect(mocks.updateMemberRole).not.toHaveBeenCalled();
-    expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organization-one/members?result=error',
-    );
-  });
-
-  it('allows an explicit co-owner demotion through Better Auth permissions', async () => {
-    mocks.listMembers.mockResolvedValue({
-      members: [
-        { id: 'member-1', role: 'owner', userId: 'user-1' },
-        { id: 'member-2', role: 'owner', userId: 'user-2' },
-      ],
-      total: 2,
-    });
-
-    await updateOrganizationMemberRoleAction(
-      'organization-one',
-      form({ memberId: 'member-2', role: 'admin' }),
-    );
-
-    expect(mocks.updateMemberRole).toHaveBeenCalledWith({
-      body: {
-        memberId: 'member-2',
-        organizationId: 'organization-1',
-        role: 'admin',
-      },
-      headers: expect.any(Headers),
-    });
-  });
-
-  it('refuses the temporary UI path that would remove the final owner', async () => {
-    mocks.listMembers.mockResolvedValue({
-      members: [{ id: 'member-1', role: 'owner', userId: 'user-1' }],
-      total: 1,
-    });
-
-    await removeOrganizationMemberAction(
-      'organization-one',
-      form({ memberId: 'member-1' }),
-    );
-
-    expect(mocks.removeMember).not.toHaveBeenCalled();
-    expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organization-one/members?result=error',
-    );
-  });
-
-  it('updates settings with the resolved id and a safe renamed route', async () => {
-    await updateOrganizationAction(
-      'organization-one',
-      form({
-        name: ' Organization Renamed ',
-        organizationId: 'forged-organization',
-        slug: 'Organization Renamed',
-      }),
-    );
-
-    expect(mocks.updateOrganization).toHaveBeenCalledWith({
-      body: {
-        data: {
-          name: 'Organization Renamed',
-          slug: 'organization-renamed',
-        },
-        organizationId: 'organization-1',
-      },
+    expect(mocks.rejectInvitation).toHaveBeenCalledWith({
+      body: { invitationId: 'invitation-1' },
       headers: expect.any(Headers),
     });
     expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organization-renamed/settings?result=success',
+      '/workspaces?result=decline-success',
     );
   });
 
-  it('redacts Better Auth failures behind a fixed result path', async () => {
-    mocks.createInvitation.mockRejectedValue(
-      new Error('private provider and membership detail'),
+  it('redacts an invitation response failure behind a fixed marker', async () => {
+    mocks.acceptInvitation.mockRejectedValue(
+      new Error('private invitation detail'),
     );
 
-    await inviteOrganizationMemberAction(
-      'organization-one',
-      form({ email: 'invited@example.test', role: 'member' }),
+    await acceptOrganizationInvitationAction(
+      form({ invitationId: 'invitation-1' }),
     );
 
     expect(mocks.redirect).toHaveBeenCalledWith(
-      '/organization-one/members?result=error',
+      '/workspaces?result=accept-error',
     );
     expect(JSON.stringify(mocks.redirect.mock.calls)).not.toContain('private');
   });
 
-  it.each(['admin', 'member'] as const)(
-    'refuses every owner-only membership action to an %s',
-    async (role) => {
-      mocks.resolveOrganizationRouteForRequest.mockResolvedValue({
-        ...organization,
-        role,
-      });
+  it('redacts a decline invitation response failure behind a fixed marker', async () => {
+    mocks.rejectInvitation.mockRejectedValue(
+      new Error('private invitation detail'),
+    );
 
-      await inviteOrganizationMemberAction(
-        'organization-one',
-        form({ email: 'invited@example.test', role: 'member' }),
-      );
-      await updateOrganizationMemberRoleAction(
-        'organization-one',
-        form({ memberId: 'member-2', role: 'admin' }),
-      );
-      await removeOrganizationMemberAction(
-        'organization-one',
-        form({ memberId: 'member-2' }),
-      );
-      await updateOrganizationAction(
-        'organization-one',
-        form({ name: 'Organization Renamed', slug: 'organization-renamed' }),
-      );
+    await declineOrganizationInvitationAction(
+      form({ invitationId: 'invitation-1' }),
+    );
 
-      expect(mocks.createInvitation).not.toHaveBeenCalled();
-      expect(mocks.updateMemberRole).not.toHaveBeenCalled();
-      expect(mocks.removeMember).not.toHaveBeenCalled();
-      expect(mocks.updateOrganization).not.toHaveBeenCalled();
-      expect(mocks.revalidatePath).not.toHaveBeenCalled();
-      expect(mocks.redirect.mock.calls.map((call) => call[0])).toEqual([
-        '/organization-one/members?result=error',
-        '/organization-one/members?result=error',
-        '/organization-one/members?result=error',
-        '/organization-one/settings?result=error',
-      ]);
-    },
-  );
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      '/workspaces?result=decline-error',
+    );
+    expect(JSON.stringify(mocks.redirect.mock.calls)).not.toContain(
+      'invitation-1',
+    );
+    expect(JSON.stringify(mocks.redirect.mock.calls)).not.toContain('private');
+  });
 
-  it.each([
-    ['invite', '/attacker.example'],
-    ['update role', '//attacker.example'],
-    ['remove', 'organization--one'],
-    ['update settings', 'organization%2Fsettings'],
-  ])(
-    'rejects an invalid %s action scope with one fixed same-origin redirect',
-    async (action, unsafeSlug) => {
-      if (action === 'invite') {
-        await inviteOrganizationMemberAction(
-          unsafeSlug,
-          form({ email: 'invited@example.test', role: 'member' }),
-        );
-      } else if (action === 'update role') {
-        await updateOrganizationMemberRoleAction(
-          unsafeSlug,
-          form({ memberId: 'member-2', role: 'admin' }),
-        );
-      } else if (action === 'remove') {
-        await removeOrganizationMemberAction(
-          unsafeSlug,
-          form({ memberId: 'member-2' }),
-        );
-      } else {
-        await updateOrganizationAction(
-          unsafeSlug,
-          form({ name: 'Organization Renamed', slug: 'organization-renamed' }),
-        );
-      }
+  it('rejects an unverified invitation response before any auth write', async () => {
+    mocks.getSession.mockResolvedValue({
+      user: { emailVerified: false, id: 'user-1' },
+    });
 
-      expect(mocks.redirect).toHaveBeenCalledOnce();
-      expect(mocks.redirect).toHaveBeenCalledWith(
-        '/organizations?result=error',
-      );
-      expect(
-        new URL(mocks.redirect.mock.calls[0]?.[0], 'https://bap.invalid')
-          .origin,
-      ).toBe('https://bap.invalid');
-      expect(mocks.resolveOrganizationRouteForRequest).not.toHaveBeenCalled();
-      expect(mocks.getAuth).not.toHaveBeenCalled();
-      expect(mocks.createInvitation).not.toHaveBeenCalled();
-      expect(mocks.listMembers).not.toHaveBeenCalled();
-      expect(mocks.removeMember).not.toHaveBeenCalled();
-      expect(mocks.updateMemberRole).not.toHaveBeenCalled();
-      expect(mocks.updateOrganization).not.toHaveBeenCalled();
-      expect(mocks.revalidatePath).not.toHaveBeenCalled();
-    },
-  );
+    await acceptOrganizationInvitationAction(
+      form({ invitationId: 'invitation-1' }),
+    );
+
+    expect(mocks.acceptInvitation).not.toHaveBeenCalled();
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      '/workspaces?result=accept-error',
+    );
+  });
+
+  it('creates an invitation and stores its restricted entity scope', async () => {
+    const result = await inviteMemberWithScopeAction({
+      email: 'New@bap.test',
+      organizationId: 'organization-1',
+      role: 'member',
+      scope: { legalEntityIds: [ENTITY_ID], mode: 'restricted' },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(mocks.createInvitation).toHaveBeenCalledWith({
+      body: {
+        email: 'new@bap.test',
+        organizationId: 'organization-1',
+        role: 'member',
+      },
+      headers: expect.any(Headers),
+    });
+    expect(mocks.writeInvitationEntityScope).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        createdBy: 'user-1',
+        invitationId: 'invitation-1',
+        organizationId: 'organization-1',
+        scope: { legalEntityIds: [ENTITY_ID], mode: 'restricted' },
+      },
+    );
+  });
+
+  it('reports a duplicate invitation without writing a scope', async () => {
+    mocks.createInvitation.mockRejectedValue({
+      body: { code: 'USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION' },
+    });
+
+    const result = await inviteMemberWithScopeAction({
+      email: 'guest@bap.test',
+      organizationId: 'organization-1',
+      role: 'member',
+      scope: { mode: 'all' },
+    });
+
+    expect(result).toEqual({ ok: false, reason: 'already-invited' });
+    expect(mocks.writeInvitationEntityScope).not.toHaveBeenCalled();
+  });
+
+  it('cancels the invitation when its scope names an unknown entity', async () => {
+    mocks.writeInvitationEntityScope.mockResolvedValue('unknown-entity');
+
+    const result = await inviteMemberWithScopeAction({
+      email: 'new@bap.test',
+      organizationId: 'organization-1',
+      role: 'admin',
+      scope: { legalEntityIds: [ENTITY_ID], mode: 'restricted' },
+    });
+
+    expect(result).toEqual({ ok: false, reason: 'invalid' });
+    expect(mocks.cancelInvitation).toHaveBeenCalledWith({
+      body: { invitationId: 'invitation-1' },
+      headers: expect.any(Headers),
+    });
+  });
+
+  it('refuses a restricted invite scope with no entity before any auth write', async () => {
+    const result = await inviteMemberWithScopeAction({
+      email: 'new@bap.test',
+      organizationId: 'organization-1',
+      role: 'member',
+      scope: { legalEntityIds: [], mode: 'restricted' },
+    });
+
+    expect(result).toEqual({ ok: false, reason: 'invalid' });
+    expect(mocks.createInvitation).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unverified create action before writes', async () => {
+    mocks.getSession.mockResolvedValue({
+      user: { emailVerified: false, id: 'user-1' },
+    });
+
+    const result = await createWorkspaceAction({
+      name: 'Organization Two',
+      slug: 'organization-two',
+    });
+
+    expect(result).toEqual({ ok: false, reason: 'error' });
+    expect(mocks.createOrganization).not.toHaveBeenCalled();
+  });
 });

@@ -12,10 +12,13 @@ export async function createServerI18n() {
   return instance;
 }
 
-export async function translate(key: string): Promise<string> {
+export async function translate(
+  key: string,
+  options?: Record<string, unknown>,
+): Promise<string> {
   const instance = await createServerI18n();
   if (!instance.exists(key)) {
     throw new Error(`Missing translation: ${key}`);
   }
-  return instance.t(key);
+  return instance.t(key, options ?? {});
 }

@@ -206,7 +206,11 @@ export function PivotGrid({
   const measureKey = matrix.measures[0]?.key ?? '';
 
   return (
-    <TableContainer title={title} description={description}>
+    <TableContainer
+      className={styles.root}
+      description={description}
+      title={title}
+    >
       <Table size={size}>
         {measureCount > 1 ? (
           <>

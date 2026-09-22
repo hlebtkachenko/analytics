@@ -40,7 +40,7 @@ function renderTwoFactor() {
 }
 
 describe('TwoFactorPage', () => {
-  it('continues to the access page after a valid code', async () => {
+  it('continues to the organizations list after a valid code', async () => {
     mocks.verifyTotp.mockResolvedValue({ data: {}, error: null });
     renderTwoFactor();
     fireEvent.change(screen.getByLabelText('Verification code'), {
@@ -53,7 +53,7 @@ describe('TwoFactorPage', () => {
     await waitFor(() =>
       expect(mocks.verifyTotp).toHaveBeenCalledWith({ code: '123456' }),
     );
-    expect(mocks.replace).toHaveBeenCalledWith('/access');
+    expect(mocks.replace).toHaveBeenCalledWith('/workspaces');
   });
 
   it('returns to a safe next path after a valid code', async () => {
@@ -81,7 +81,9 @@ describe('TwoFactorPage', () => {
       screen.getByRole('form', { name: 'Two-step verification' }),
     );
 
-    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/access'));
+    await waitFor(() =>
+      expect(mocks.replace).toHaveBeenCalledWith('/workspaces'),
+    );
   });
 
   it('shows the localized error and stays on the page after rejection', async () => {

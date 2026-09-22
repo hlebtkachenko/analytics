@@ -16,7 +16,7 @@ test('signs out after every shared authenticated browser proof', async ({
     }
   });
 
-  await page.goto('/access');
+  await page.goto('/account/access');
   await expect(
     page.getByRole('heading', { name: 'Organization access' }),
   ).toBeVisible();

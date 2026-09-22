@@ -59,12 +59,14 @@ async function renderSignIn(publicSignup = true) {
 }
 
 describe('SignInPage', () => {
-  it('continues to the access page after successful authentication', async () => {
+  it('continues to the organizations list after successful authentication', async () => {
     mocks.signIn.mockResolvedValue({ data: {}, error: null });
     await renderSignIn();
     submitCredentials();
 
-    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/access'));
+    await waitFor(() =>
+      expect(mocks.replace).toHaveBeenCalledWith('/workspaces'),
+    );
   });
 
   it('returns to a safe same-origin next path after successful authentication', async () => {
@@ -88,7 +90,9 @@ describe('SignInPage', () => {
     await renderSignIn();
     submitCredentials();
 
-    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/access'));
+    await waitFor(() =>
+      expect(mocks.replace).toHaveBeenCalledWith('/workspaces'),
+    );
     expect(mocks.replace).not.toHaveBeenCalledWith('//evil.example');
   });
 
@@ -103,7 +107,7 @@ describe('SignInPage', () => {
     await waitFor(() =>
       expect(mocks.replace).toHaveBeenCalledWith('/sign-in/two-factor'),
     );
-    expect(mocks.replace).not.toHaveBeenCalledWith('/access');
+    expect(mocks.replace).not.toHaveBeenCalledWith('/workspaces');
   });
 
   it('carries a safe next path into the challenge', async () => {

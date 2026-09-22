@@ -92,27 +92,32 @@ async function expectIconControl(
   ).toBe(false);
 }
 
-async function expectDecorativeStatusIcon(heading: Locator): Promise<void> {
-  const icon = heading.locator('..').locator('svg');
-  await expect(icon).toHaveCount(1);
-  await expect(icon).toHaveAttribute('aria-hidden', 'true');
-  await expect(icon).toHaveAttribute('focusable', 'false');
-  await expect(icon).toHaveAttribute('fill', 'currentColor');
-  await expect(icon).toHaveAttribute('height', '20');
-  await expect(icon).toHaveAttribute('width', '20');
-  await expect(icon).not.toHaveAttribute('aria-label', /.+/);
-  await expect(icon).not.toHaveAttribute('tabindex', /.+/);
-  expect(
-    await icon.evaluate((element) => {
-      const rectangle = element.getBoundingClientRect();
-      return {
-        active: element === document.activeElement,
-        height: rectangle.height,
-        tabIndex: element.tabIndex,
-        width: rectangle.width,
-      };
-    }),
-  ).toEqual({ active: false, height: 20, tabIndex: -1, width: 20 });
+// Carbon animates the header panel open, so axe must scan it settled. Wait by
+// geometry, not the internal expanded class or its fixed width: poll a public
+// element inside the panel until two reads 100ms apart are equal and non-zero.
+async function expectSettledHeaderPanel(panelContent: Locator): Promise<void> {
+  await expect(panelContent).toBeVisible();
+  const page = panelContent.page();
+  await expect
+    .poll(
+      async () => {
+        const first = await panelContent.boundingBox();
+        await page.waitForTimeout(100);
+        const second = await panelContent.boundingBox();
+        return (
+          first !== null &&
+          second !== null &&
+          second.width > 0 &&
+          second.height > 0 &&
+          second.x === first.x &&
+          second.y === first.y &&
+          second.width === first.width &&
+          second.height === first.height
+        );
+      },
+      { timeout: 5_000 },
+    )
+    .toBe(true);
 }
 
 async function focusWithKeyboard(page: Page, control: Locator): Promise<void> {
@@ -201,7 +206,7 @@ publicTest(
   },
 );
 
-test('proves every real authenticated icon control and Phase 10 exclusion', async ({
+test('proves every real authenticated icon control and header panel', async ({
   page,
 }) => {
   test.skip(password.length === 0, 'BAP_OPERATIONAL_PASSWORD is required.');
@@ -224,7 +229,7 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
           `/api/bff/reporting/organizations/${organizationId}/access`,
     ),
   ]);
-  await page.goto('/access');
+  await page.goto('/account/access');
   for (const response of await accessReady) {
     authenticatedExpect(response.ok()).toBe(true);
   }
@@ -242,9 +247,14 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
     ['link', 'Manage entity access'],
     ['link', 'Manage legal entities'],
     ['link', 'Upload data'],
+    ['link', 'Ask the assistant'],
   ] as const) {
     await expectIconControl(page.getByRole(role, { name: label }), label);
   }
+  // The assistant action is a real link into the workspace datasets, no placeholder tile.
+  await authenticatedExpect(
+    page.getByRole('link', { name: 'Ask the assistant' }),
+  ).toHaveAttribute('href', `/datasets?organization=${organizationSlug}`);
   for (const capability of [
     'Manage organization',
     'Manage members',
@@ -264,20 +274,105 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   await authenticatedExpect(
     page.getByText('Entity scope: All legal entities'),
   ).toBeVisible();
-  for (const label of ['Ask the assistant']) {
-    const heading = page.getByRole('heading', { name: label });
-    await authenticatedExpect(heading).toBeVisible();
-    await expectDecorativeStatusIcon(heading);
-    await authenticatedExpect(
-      page.getByRole('button', { name: label }),
-    ).toHaveCount(0);
-    await authenticatedExpect(
-      page.getByRole('link', { name: label }),
-    ).toHaveCount(0);
-  }
   await focusWithKeyboard(page, page.getByRole('button', { name: 'Sign out' }));
   await expectNoAccessibilityViolations(page);
   await expectNoDocumentOverflow(page);
+
+  // The header holds exactly six global actions: search, notifications, help,
+  // settings, account, and the workspace switcher; every panel renders real
+  // content at 640px.
+  const header = page.getByRole('banner');
+  await authenticatedExpect(
+    header.getByRole('button', {
+      name: /^(Search|Notifications|Help|Settings|Account|Workspaces)$/,
+    }),
+  ).toHaveCount(6);
+
+  await header.getByRole('button', { exact: true, name: 'Help' }).click();
+  await authenticatedExpect(
+    header.getByRole('button', { exact: true, name: 'Help' }),
+  ).toHaveAttribute('aria-expanded', 'true');
+  await authenticatedExpect(
+    header.getByRole('link', { name: 'Documentation' }),
+  ).toHaveAttribute('href', /\/docs$/);
+  await authenticatedExpect(
+    header.getByText(/^Version \d+\.\d+\.\d+$/),
+  ).toBeVisible();
+  await expectSettledHeaderPanel(
+    header.getByRole('link', { name: 'Documentation' }),
+  );
+  await expectNoAccessibilityViolations(page);
+  await expectNoDocumentOverflow(page);
+
+  await header.getByRole('button', { exact: true, name: 'Account' }).click();
+  await authenticatedExpect(
+    header.getByRole('button', { exact: true, name: 'Help' }),
+  ).toHaveAttribute('aria-expanded', 'false');
+  await authenticatedExpect(
+    header.getByText('Operational Owner'),
+  ).toBeVisible();
+  await authenticatedExpect(
+    header.getByRole('link', { name: 'Security and sessions' }),
+  ).toHaveAttribute('href', '/account/security');
+  await authenticatedExpect(
+    header.getByRole('radio', { name: 'System' }),
+  ).toBeChecked();
+  await authenticatedExpect(
+    header.getByRole('button', { name: 'Sign out' }),
+  ).toBeVisible();
+  await expectSettledHeaderPanel(
+    header.getByRole('button', { name: 'Sign out' }),
+  );
+  await expectNoAccessibilityViolations(page);
+  await expectNoDocumentOverflow(page);
+
+  await header.getByRole('button', { exact: true, name: 'Workspaces' }).click();
+  const switcherWorkspace = header
+    .getByRole('list', { name: 'Workspaces' })
+    .getByRole('link', { name: 'BAP Operational' });
+  await authenticatedExpect(switcherWorkspace).toHaveAttribute(
+    'href',
+    `/${organizationSlug}`,
+  );
+  await authenticatedExpect(
+    header.getByRole('link', { name: 'Manage workspaces' }),
+  ).toHaveAttribute('href', '/workspaces');
+  // Every switcher item is a real keyboard destination.
+  await focusWithKeyboard(page, switcherWorkspace);
+  await expectSettledHeaderPanel(switcherWorkspace);
+  await expectNoAccessibilityViolations(page);
+  await expectNoDocumentOverflow(page);
+
+  await header.getByRole('button', { exact: true, name: 'Search' }).click();
+  const searchBox = header.getByRole('searchbox', { name: 'Search' });
+  await authenticatedExpect(searchBox).toBeFocused();
+  await authenticatedExpect(
+    header.getByRole('button', { exact: true, name: 'Close search' }),
+  ).toHaveAttribute('aria-expanded', 'true');
+  const results = header.getByRole('listbox', { name: 'Search' });
+  await authenticatedExpect(
+    results.getByRole('option', { name: 'Datasets' }),
+  ).toHaveAttribute('aria-selected', 'true');
+  await searchBox.fill('acc');
+  await authenticatedExpect(results.getByRole('option')).toHaveCount(1);
+  await authenticatedExpect(
+    results.getByRole('option', { name: 'Account' }),
+  ).toHaveAttribute('aria-selected', 'true');
+  await expectNoAccessibilityViolations(page);
+  await expectNoDocumentOverflow(page);
+  await page.keyboard.press('Escape');
+  await authenticatedExpect(searchBox).toHaveCount(0);
+  await authenticatedExpect(
+    header.getByRole('button', { exact: true, name: 'Search' }),
+  ).toHaveAttribute('aria-expanded', 'false');
+  await header.getByRole('button', { exact: true, name: 'Search' }).click();
+  await searchBox.fill('account');
+  await page.keyboard.press('Enter');
+  await authenticatedExpect(page).toHaveURL(/\/account$/);
+  await authenticatedExpect(
+    page.getByRole('heading', { exact: true, name: 'Account' }),
+  ).toBeVisible();
+  await authenticatedExpect(searchBox).toHaveCount(0);
 
   const datasetsReady = Promise.all([
     page.waitForResponse(
@@ -364,32 +459,38 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
   await expectNoAccessibilityViolations(page);
   await expectNoDocumentOverflow(page);
 
-  for (const route of [
-    '/organizations',
-    '/organizations/new',
-    `/${organizationSlug}`,
-    `/${organizationSlug}/members`,
-    `/${organizationSlug}/settings`,
-  ]) {
-    await page.goto(route);
-    await authenticatedExpect(page.locator('main')).toHaveCount(1);
-    // The layout owns the Carbon breadcrumb band; assert only the temporary
-    // page's own content stays free of design-system markup.
-    const temporaryContent = page.locator(
-      'main > :not([data-breadcrumb-band])',
-    );
-    await authenticatedExpect(
-      temporaryContent.locator('svg.cds--btn__icon'),
-    ).toHaveCount(0);
-    await authenticatedExpect(
-      temporaryContent.locator('[class*="cds--"]'),
-    ).toHaveCount(0);
-    await expectNoAccessibilityViolations(page);
-    await expectNoDocumentOverflow(page);
+  // The workspace landing page is Carbon: the heading is the workspace name
+  // and every tile is a real link; locators stay inside main so the rail's
+  // module links never collide with the tiles.
+  await page.goto(`/${organizationSlug}`);
+  const landing = page.getByRole('main');
+  await authenticatedExpect(landing).toHaveCount(1);
+  await authenticatedExpect(
+    landing.getByRole('heading', { exact: true, name: 'BAP Operational' }),
+  ).toBeVisible();
+  await authenticatedExpect(
+    landing.getByText('Some workspace details could not be loaded.'),
+  ).toHaveCount(0);
+  for (const [name, href] of [
+    [/^Members [1-9]\d* of 100$/, `/${organizationSlug}/members`],
+    [
+      /^Pending invitations \d+$/,
+      `/${organizationSlug}/members?tab=invitations`,
+    ],
+    [/^Legal entities [1-9]\d*$/, `/${organizationSlug}/entities`],
+    ['Documents', '/documents'],
+    ['Datasets', '/datasets'],
+    ['Settings', `/${organizationSlug}/settings`],
+  ] as const) {
+    const tile = landing.getByRole('link', { exact: true, name });
+    await authenticatedExpect(tile).toBeVisible();
+    await authenticatedExpect(tile).toHaveAttribute('href', href);
   }
+  await expectNoAccessibilityViolations(page);
+  await expectNoDocumentOverflow(page);
 
   await page.setViewportSize({ height: 640, width: 320 });
-  await page.goto('/access');
+  await page.goto('/account/access');
   await expectNoDocumentOverflow(page);
   await page.getByRole('button', { name: 'Expand side navigation' }).click();
   const smallScreenAccount = page
@@ -405,6 +506,10 @@ test('proves every real authenticated icon control and Phase 10 exclusion', asyn
     page.getByRole('heading', { exact: true, name: 'Account' }),
   ).toBeVisible();
   await authenticatedExpect(page.locator('main')).toHaveCount(1);
+  await expectNoDocumentOverflow(page);
+  await expectNoAccessibilityViolations(page);
+
+  await page.goto('/account/security');
   await expectNoDocumentOverflow(page);
   await expectNoAccessibilityViolations(page);
 

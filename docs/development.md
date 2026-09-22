@@ -191,7 +191,7 @@ strings, and tests, is [Adding a product page](product-pages.md). In short:
   [the route table](application-routes.md), all in the same change, so the
   segment can never collide with an organization slug and stays discoverable.
 
-The `(product)/(throwaway)` organization pages, `(product)/account`, and the
-`[orgSlug]` workspace routes are a deliberate legacy exception: they use plain
-semantic HTML and are exempt from the `PageContainer` rule. New pages follow the
-rule above, not that exception.
+Every product page, including the account pages, renders inside `PageContainer`
+and follows the rule above. The only exception is the redirect-only
+`(product)/access/page.tsx`, which renders no content and is listed in the
+`bap/product-page-container` ignores.

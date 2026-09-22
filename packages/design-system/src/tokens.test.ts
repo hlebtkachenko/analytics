@@ -315,19 +315,25 @@ describe('Carbon catalog', () => {
   it('keeps full facades in ESM parity and the icon facade curated', async () => {
     expect(facadeKeys(bapReact)).toEqual(facadeEsmKeys('@carbon/react'));
     expect(facadeKeys(bapIcons)).toEqual([
+      'Add',
       'AiGenerate',
       'ArrowLeft',
       'ArrowRight',
       'Asleep',
       'Checkmark',
+      'CheckmarkFilled',
       'Close',
       'DataSet',
       'Document',
       'DocumentAdd',
+      'DotMark',
       'Download',
       'Email',
       'Enterprise',
+      'ErrorFilled',
+      'Filter',
       'Help',
+      'InformationFilled',
       'Launch',
       'Light',
       'Login',
@@ -344,6 +350,7 @@ describe('Carbon catalog', () => {
       'UserFollow',
       'UserMultiple',
       'View',
+      'WarningFilled',
     ]);
     expect(facadeKeys(bapPictograms)).toEqual(
       facadeEsmKeys('@carbon/pictograms-react'),

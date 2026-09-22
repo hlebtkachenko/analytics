@@ -1,5 +1,5 @@
 // The default landing page whenever no safe same-origin return path was given.
-export const defaultReturnPath = '/access';
+export const defaultReturnPath = '/workspaces';
 
 const maximumReturnPathLength = 2048;
 

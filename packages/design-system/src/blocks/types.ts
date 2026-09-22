@@ -65,6 +65,16 @@ export type ToolbarAction = Readonly<{
   onClick: () => void;
 }>;
 
+// One selectable choice inside a faceted filter group.
+export type GridFilterOption = Readonly<{ id: string; label: string }>;
+
+// A faceted filter group: a heading over a column of checkbox options.
+export type GridFilterGroup = Readonly<{
+  key: string;
+  heading: string;
+  options: readonly GridFilterOption[];
+}>;
+
 // A per-row action shown in the trailing overflow menu.
 export type RowAction = Readonly<{
   id: string;
@@ -82,6 +92,8 @@ export type DataGridProps = Readonly<{
   rows: readonly GridRow[];
   title?: string;
   description?: string;
+  // Render the title on the same row as the toolbar instead of stacked above it.
+  titleInline?: boolean;
 
   // Density and look.
   size?: DensitySize;
@@ -109,6 +121,14 @@ export type DataGridProps = Readonly<{
   // Controlled value plus handler switches client filtering to server search.
   searchValue?: string;
   onSearch?: (query: string) => void;
+
+  // Faceted filter facet: renders a funnel + popover of checkbox groups in the toolbar.
+  filters?: readonly GridFilterGroup[];
+  // Optional controlled selection per group key; omit to let the grid own it.
+  filterValues?: Readonly<Record<string, readonly string[]>>;
+  onFilterChange?: (
+    values: Readonly<Record<string, readonly string[]>>,
+  ) => void;
 
   // Pagination.
   pagination?: boolean;

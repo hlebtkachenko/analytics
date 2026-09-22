@@ -8,18 +8,18 @@ export function rateLimitDelayMs(header: string | undefined): number {
   return bounded * 1_000 + 1_000;
 }
 
-// Submits the real sign-in form and waits out a denied attempt instead of failing the run.
+// Submits the real sign-in form and waits out a denied attempt instead of failing the run; the form resets after a denial, so every retry refills it.
 export async function signInThroughForm(
   page: Page,
   email: string,
   password: string,
 ): Promise<void> {
   await page.goto('/sign-in');
-  await page.getByLabel('Email address').fill(email);
-  await page.locator('input[name="password"]').fill(password);
   const submit = page.getByRole('button', { name: 'Sign in' });
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.getByLabel('Email address').fill(email);
+    await page.locator('input[name="password"]').fill(password);
     const pending = page.waitForResponse(
       (response) =>
         response.request().method() === 'POST' &&

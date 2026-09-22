@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
-import { safeReturnPath, signInPath, twoFactorPath } from './return-path';
+import {
+  defaultReturnPath,
+  safeReturnPath,
+  signInPath,
+  twoFactorPath,
+} from './return-path';
+
+describe('defaultReturnPath', () => {
+  it('lands a signed-in session on the organizations list', () => {
+    expect(defaultReturnPath).toBe('/workspaces');
+  });
+});
 
 describe('safeReturnPath', () => {
   it('keeps a same-origin path with its query string', () => {
@@ -10,38 +21,38 @@ describe('safeReturnPath', () => {
   });
 
   it('refuses a protocol-relative path', () => {
-    expect(safeReturnPath('//evil.example')).toBe('/access');
+    expect(safeReturnPath('//evil.example')).toBe('/workspaces');
   });
 
   it('refuses an absolute URL', () => {
-    expect(safeReturnPath('https://evil.example')).toBe('/access');
+    expect(safeReturnPath('https://evil.example')).toBe('/workspaces');
   });
 
   it('refuses a backslash path a browser may normalize', () => {
-    expect(safeReturnPath('/\\evil')).toBe('/access');
+    expect(safeReturnPath('/\\evil')).toBe('/workspaces');
   });
 
   it('refuses a control character the URL parser would strip', () => {
-    expect(safeReturnPath('/\t/evil.com')).toBe('/access');
-    expect(safeReturnPath('/\n/evil.com')).toBe('/access');
-    expect(safeReturnPath('/\r/evil.com')).toBe('/access');
+    expect(safeReturnPath('/\t/evil.com')).toBe('/workspaces');
+    expect(safeReturnPath('/\n/evil.com')).toBe('/workspaces');
+    expect(safeReturnPath('/\r/evil.com')).toBe('/workspaces');
   });
 
   it('refuses a decoded double slash that leaves this origin', () => {
-    expect(safeReturnPath('///evil.com')).toBe('/access');
+    expect(safeReturnPath('///evil.com')).toBe('/workspaces');
   });
 
   it('refuses dot segments that collapse into a protocol-relative path', () => {
-    expect(safeReturnPath('/..//evil.com')).toBe('/access');
+    expect(safeReturnPath('/..//evil.com')).toBe('/workspaces');
   });
 
   it('falls back when the value is absent or empty', () => {
-    expect(safeReturnPath(null)).toBe('/access');
-    expect(safeReturnPath('')).toBe('/access');
+    expect(safeReturnPath(null)).toBe('/workspaces');
+    expect(safeReturnPath('')).toBe('/workspaces');
   });
 
   it('refuses an over long value', () => {
-    expect(safeReturnPath(`/${'a'.repeat(2048)}`)).toBe('/access');
+    expect(safeReturnPath(`/${'a'.repeat(2048)}`)).toBe('/workspaces');
   });
 
   it('refuses a route that cannot be the destination of a signed in session', () => {
@@ -56,7 +67,7 @@ describe('safeReturnPath', () => {
       '/forgot-password',
       '/welcome',
     ]) {
-      expect(safeReturnPath(path)).toBe('/access');
+      expect(safeReturnPath(path)).toBe('/workspaces');
     }
   });
 
@@ -72,7 +83,7 @@ describe('signInPath', () => {
     expect(signInPath('/documents?organization=x')).toBe(
       '/sign-in?next=%2Fdocuments%3Forganization%3Dx',
     );
-    expect(signInPath('/access')).toBe('/sign-in');
+    expect(signInPath('/workspaces')).toBe('/sign-in');
     expect(signInPath(null)).toBe('/sign-in');
     expect(signInPath('//evil.example')).toBe('/sign-in');
   });
@@ -83,7 +94,7 @@ describe('twoFactorPath', () => {
     expect(twoFactorPath('/documents')).toBe(
       '/sign-in/two-factor?next=%2Fdocuments',
     );
-    expect(twoFactorPath('/access')).toBe('/sign-in/two-factor');
+    expect(twoFactorPath('/workspaces')).toBe('/sign-in/two-factor');
     expect(twoFactorPath('/\t/evil.com')).toBe('/sign-in/two-factor');
   });
 });

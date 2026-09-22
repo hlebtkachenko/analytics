@@ -6,326 +6,301 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
-import { getAuth } from '../auth/server';
 import {
-  formValue,
-  invalidScopedActionPath,
-  organizationPath,
-  resolveActionOrganization,
-  resultPath,
-} from './action-support';
+  getOrganizationCreationQuota,
+  transferOwnership,
+  writeInvitationEntityScope,
+} from '@bap/db/access';
+
+import { getAuth, getAuthPool } from '../auth/server';
+import { entityScopeWriteSchema } from '../auth/bff';
+import { formValue, resultPath } from './action-support';
 import { normalizeOrganizationSlug, organizationSlugSchema } from './slug';
 
+const invitationInputIdSchema = z.object({ invitationId: z.string().min(1) });
+
+const transferOwnershipInputSchema = z.object({
+  organizationId: z.string().min(1),
+  toUserId: z.string().min(1),
+});
+
+export type TransferOwnershipResult =
+  Readonly<{ ok: true }> | Readonly<{ ok: false }>;
+
+// Hands ownership to another active member and demotes the caller to admin. Authorization
+// is enforced in the database function: the caller is bound to the session user as the
+// from-owner, so a non-owner caller is refused inside the transaction.
+export async function transferOwnershipAction(
+  input: unknown,
+): Promise<TransferOwnershipResult> {
+  const parsed = transferOwnershipInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false };
+  }
+
+  try {
+    const auth = await getAuth();
+    const requestHeaders = await headers();
+    const session = await auth.api.getSession({ headers: requestHeaders });
+    if (session?.user.emailVerified !== true) {
+      return { ok: false };
+    }
+
+    await transferOwnership(
+      await getAuthPool(),
+      parsed.data.organizationId,
+      session.user.id,
+      parsed.data.toUserId,
+    );
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+}
+
+const inviteMemberWithScopeInputSchema = z.object({
+  email: z.email().max(254),
+  organizationId: z.string().min(1),
+  role: z.enum(['admin', 'member']),
+  scope: entityScopeWriteSchema,
+});
+
+export type InviteMemberWithScopeResult =
+  | Readonly<{ ok: true }>
+  | Readonly<{
+      ok: false;
+      reason: 'already-invited' | 'already-member' | 'error' | 'invalid';
+    }>;
+
+// Better Auth reports these on invite; both keep the modal open with an inline explanation.
+function invitationErrorCode(error: unknown): string | null {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'body' in error &&
+    typeof (error as { body?: unknown }).body === 'object'
+  ) {
+    const code = (error as { body?: { code?: unknown } }).body?.code;
+    return typeof code === 'string' ? code : null;
+  }
+  return null;
+}
+
+// Creates the invitation and stores the entity scope its acceptance will apply. Owners choose the
+// scope at invite time because entity access is granted, never assumed; the accept hook applies it.
+// The invitation is created first, then its scope; a scope that names an unknown entity cancels the
+// invitation so no half-formed invite survives. Authorization is Better Auth's: the session user
+// must hold the invite permission in this organization.
+export async function inviteMemberWithScopeAction(
+  input: unknown,
+): Promise<InviteMemberWithScopeResult> {
+  const parsed = inviteMemberWithScopeInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, reason: 'invalid' };
+  }
+
+  try {
+    const auth = await getAuth();
+    const requestHeaders = await headers();
+    const session = await auth.api.getSession({ headers: requestHeaders });
+    if (session?.user.emailVerified !== true) {
+      return { ok: false, reason: 'error' };
+    }
+
+    let invitationId: string;
+    try {
+      const invitation = await auth.api.createInvitation({
+        body: {
+          email: parsed.data.email.toLowerCase(),
+          organizationId: parsed.data.organizationId,
+          role: parsed.data.role,
+        },
+        headers: requestHeaders,
+      });
+      const id = (invitation as { id?: unknown }).id;
+      if (typeof id !== 'string' || id.length === 0) {
+        return { ok: false, reason: 'error' };
+      }
+      invitationId = id;
+    } catch (error) {
+      const code = invitationErrorCode(error);
+      if (code === 'USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION') {
+        return { ok: false, reason: 'already-invited' };
+      }
+      if (code === 'USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION') {
+        return { ok: false, reason: 'already-member' };
+      }
+      return { ok: false, reason: 'error' };
+    }
+
+    const written = await writeInvitationEntityScope(await getAuthPool(), {
+      createdBy: session.user.id,
+      invitationId,
+      organizationId: parsed.data.organizationId,
+      scope: parsed.data.scope,
+    });
+
+    if (written === 'unknown-entity') {
+      // Roll the invitation back so it never accepts into a scope that could not be stored.
+      await auth.api.cancelInvitation({
+        body: { invitationId },
+        headers: requestHeaders,
+      });
+      return { ok: false, reason: 'invalid' };
+    }
+
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: 'error' };
+  }
+}
+
+// Better Auth answers a slug collision with this code, the only failure the create page names.
+function isSlugTakenError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'body' in error &&
+    typeof (error as { body?: unknown }).body === 'object' &&
+    (error as { body?: { code?: unknown } }).body?.code ===
+      'ORGANIZATION_ALREADY_EXISTS'
+  );
+}
+
 const organizationNameSchema = z.string().trim().min(1);
-const organizationRoleSchema = z.enum(['owner', 'admin', 'member']);
-const createOrganizationInputSchema = z.object({
+const createWorkspaceInputSchema = z.object({
   name: organizationNameSchema,
   slug: z.string(),
 });
-const invitationInputSchema = z.object({
-  email: z
-    .email()
-    .max(254)
-    .transform((email) => email.toLowerCase()),
-  role: organizationRoleSchema,
-});
-const memberRoleInputSchema = z.object({
-  memberId: z.string().min(1),
-  role: organizationRoleSchema,
-});
-const memberRemovalInputSchema = z.object({ memberId: z.string().min(1) });
 
-export async function createOrganizationAction(
-  formData: FormData,
-): Promise<never> {
-  const input = createOrganizationInputSchema.safeParse({
-    name: formValue(formData, 'name'),
-    slug: formValue(formData, 'slug'),
-  });
-  let destination = resultPath('/organizations/new', 'error');
+// Better Auth returns the created organization; only its id and slug are read back.
+const createdOrganizationSchema = z.object({
+  id: z.string().min(1),
+  slug: z.string().min(1),
+});
 
-  if (input.success) {
-    const slug = organizationSlugSchema.safeParse(
-      normalizeOrganizationSlug(input.data.slug),
+export type CreateWorkspaceResult =
+  | Readonly<{ ok: true; id: string; slug: string }>
+  | Readonly<{
+      ok: false;
+      reason: 'slug-taken' | 'quota-exhausted' | 'invalid' | 'error';
+    }>;
+
+// Creates the workspace and returns its id and slug so the wizard can commit its next steps
+// against the real organization. Unlike the redirecting form action, every outcome is a value the
+// browser branches on. Better Auth makes the caller the owner; the slug is validated at the boundary.
+export async function createWorkspaceAction(
+  input: unknown,
+): Promise<CreateWorkspaceResult> {
+  const parsed = createWorkspaceInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, reason: 'invalid' };
+  }
+
+  const slug = organizationSlugSchema.safeParse(
+    normalizeOrganizationSlug(parsed.data.slug),
+  );
+  if (!slug.success) {
+    return { ok: false, reason: 'invalid' };
+  }
+
+  try {
+    const auth = await getAuth();
+    const requestHeaders = await headers();
+    const session = await auth.api.getSession({ headers: requestHeaders });
+    if (session?.user.emailVerified !== true) {
+      return { ok: false, reason: 'error' };
+    }
+
+    const quota = await getOrganizationCreationQuota(
+      await getAuthPool(),
+      session.user.id,
     );
-    if (slug.success) {
-      try {
-        const auth = await getAuth();
-        const requestHeaders = await headers();
-        const session = await auth.api.getSession({ headers: requestHeaders });
-        if (session?.user.emailVerified !== true) {
-          throw new Error('Organization creation unavailable.');
-        }
-        await auth.api.createOrganization({
-          body: {
-            keepCurrentActiveOrganization: true,
-            name: input.data.name,
-            slug: slug.data,
-          },
-          headers: requestHeaders,
-        });
-        revalidatePath('/organizations');
-        destination = organizationPath(slug.data);
-      } catch {
-        destination = resultPath('/organizations/new', 'error');
-      }
+    if (quota !== null && quota.remainingTotal === 0) {
+      return { ok: false, reason: 'quota-exhausted' };
     }
-  }
 
-  redirect(destination as Route);
+    const created = await auth.api.createOrganization({
+      body: {
+        keepCurrentActiveOrganization: true,
+        name: parsed.data.name,
+        slug: slug.data,
+      },
+      headers: requestHeaders,
+    });
+    const organization = createdOrganizationSchema.safeParse(created);
+    if (!organization.success) {
+      return { ok: false, reason: 'error' };
+    }
+
+    return {
+      id: organization.data.id,
+      ok: true,
+      slug: organization.data.slug,
+    };
+  } catch (error) {
+    return isSlugTakenError(error)
+      ? { ok: false, reason: 'slug-taken' }
+      : { ok: false, reason: 'error' };
+  }
 }
 
-export async function inviteOrganizationMemberAction(
-  organizationSlug: string,
+// Accepts a pending invitation addressed to the caller; the id travels only in the form body.
+export async function acceptOrganizationInvitationAction(
   formData: FormData,
 ): Promise<never> {
-  const routeSlug = organizationSlugSchema.safeParse(organizationSlug);
-  if (!routeSlug.success) {
-    return redirect(invalidScopedActionPath as Route);
-  }
+  return respondToInvitation(formData, 'accept');
+}
 
-  const input = invitationInputSchema.safeParse({
-    email: formValue(formData, 'email'),
-    role: formValue(formData, 'role'),
+// Declines a pending invitation addressed to the caller; the id travels only in the form body.
+export async function declineOrganizationInvitationAction(
+  formData: FormData,
+): Promise<never> {
+  return respondToInvitation(formData, 'decline');
+}
+
+async function respondToInvitation(
+  formData: FormData,
+  decision: 'accept' | 'decline',
+): Promise<never> {
+  const input = invitationInputIdSchema.safeParse({
+    invitationId: formValue(formData, 'invitationId'),
   });
-  let fallback = resultPath(
-    organizationPath(routeSlug.data, '/members'),
-    'error',
+  let destination = resultPath(
+    '/workspaces',
+    decision === 'accept' ? 'accept-error' : 'decline-error',
   );
-  let destination = fallback;
 
   if (input.success) {
     try {
-      const organization = await resolveActionOrganization(
-        routeSlug.data,
-        'owner',
-      );
-      fallback = resultPath(
-        organizationPath(organization.slug, '/members'),
-        'error',
-      );
-      destination = fallback;
-      const auth = await getAuth();
-      await auth.api.createInvitation({
-        body: {
-          email: input.data.email,
-          organizationId: organization.id,
-          role: input.data.role,
-        },
-        headers: await headers(),
-      });
-      revalidatePath(organizationPath(organization.slug, '/members'));
-      destination = resultPath(
-        organizationPath(organization.slug, '/members'),
-        'success',
-      );
-    } catch {
-      destination = fallback;
-    }
-  }
-
-  redirect(destination as Route);
-}
-
-export async function updateOrganizationMemberRoleAction(
-  organizationSlug: string,
-  formData: FormData,
-): Promise<never> {
-  const routeSlug = organizationSlugSchema.safeParse(organizationSlug);
-  if (!routeSlug.success) {
-    return redirect(invalidScopedActionPath as Route);
-  }
-
-  const input = memberRoleInputSchema.safeParse({
-    memberId: formValue(formData, 'memberId'),
-    role: formValue(formData, 'role'),
-  });
-  let fallback = resultPath(
-    organizationPath(routeSlug.data, '/members'),
-    'error',
-  );
-  let destination = fallback;
-
-  if (input.success) {
-    try {
-      const organization = await resolveActionOrganization(
-        routeSlug.data,
-        'owner',
-      );
-      fallback = resultPath(
-        organizationPath(organization.slug, '/members'),
-        'error',
-      );
-      destination = fallback;
       const auth = await getAuth();
       const requestHeaders = await headers();
-      const memberList = await auth.api.listMembers({
-        headers: requestHeaders,
-        query: { limit: 100, organizationId: organization.id },
-      });
-      const target = memberList.members.find(
-        (member) => member.id === input.data.memberId,
-      );
-      const ownerTotal = memberList.members.filter(
-        (member) => member.role === 'owner',
-      ).length;
-      if (
-        target === undefined ||
-        (target.role === 'owner' &&
-          input.data.role !== 'owner' &&
-          ownerTotal <= 1)
-      ) {
-        throw new Error('Member role action unavailable.');
+      const session = await auth.api.getSession({ headers: requestHeaders });
+      if (session?.user.emailVerified !== true) {
+        throw new Error('Invitation response unavailable.');
       }
-
-      await auth.api.updateMemberRole({
-        body: {
-          memberId: input.data.memberId,
-          organizationId: organization.id,
-          role: input.data.role,
-        },
-        headers: requestHeaders,
-      });
-      revalidatePath(organizationPath(organization.slug, '/members'));
-      destination = resultPath(
-        organizationPath(organization.slug, '/members'),
-        'success',
-      );
-    } catch {
-      destination = fallback;
-    }
-  }
-
-  redirect(destination as Route);
-}
-
-export async function removeOrganizationMemberAction(
-  organizationSlug: string,
-  formData: FormData,
-): Promise<never> {
-  const routeSlug = organizationSlugSchema.safeParse(organizationSlug);
-  if (!routeSlug.success) {
-    return redirect(invalidScopedActionPath as Route);
-  }
-
-  const input = memberRemovalInputSchema.safeParse({
-    memberId: formValue(formData, 'memberId'),
-  });
-  let fallback = resultPath(
-    organizationPath(routeSlug.data, '/members'),
-    'error',
-  );
-  let destination = fallback;
-
-  if (input.success) {
-    try {
-      const organization = await resolveActionOrganization(
-        routeSlug.data,
-        'owner',
-      );
-      fallback = resultPath(
-        organizationPath(organization.slug, '/members'),
-        'error',
-      );
-      destination = fallback;
-      const auth = await getAuth();
-      const requestHeaders = await headers();
-      const [memberList, session] = await Promise.all([
-        auth.api.listMembers({
+      // Better Auth compares the invitation email to the session, so only the recipient can respond.
+      if (decision === 'accept') {
+        await auth.api.acceptInvitation({
+          body: { invitationId: input.data.invitationId },
           headers: requestHeaders,
-          query: { limit: 100, organizationId: organization.id },
-        }),
-        auth.api.getSession({ headers: requestHeaders }),
-      ]);
-      const target = memberList.members.find(
-        (member) => member.id === input.data.memberId,
-      );
-      const ownerTotal = memberList.members.filter(
-        (member) => member.role === 'owner',
-      ).length;
-      if (
-        target === undefined ||
-        session?.user.emailVerified !== true ||
-        (target.role === 'owner' && ownerTotal <= 1)
-      ) {
-        throw new Error('Member removal unavailable.');
-      }
-
-      await auth.api.removeMember({
-        body: {
-          memberIdOrEmail: input.data.memberId,
-          organizationId: organization.id,
-        },
-        headers: requestHeaders,
-      });
-      revalidatePath('/organizations');
-      revalidatePath(organizationPath(organization.slug, '/members'));
-      destination =
-        target.userId === session.user.id
-          ? '/organizations'
-          : resultPath(
-              organizationPath(organization.slug, '/members'),
-              'success',
-            );
-    } catch {
-      destination = fallback;
-    }
-  }
-
-  redirect(destination as Route);
-}
-
-export async function updateOrganizationAction(
-  organizationSlug: string,
-  formData: FormData,
-): Promise<never> {
-  const routeSlug = organizationSlugSchema.safeParse(organizationSlug);
-  if (!routeSlug.success) {
-    return redirect(invalidScopedActionPath as Route);
-  }
-
-  const input = createOrganizationInputSchema.safeParse({
-    name: formValue(formData, 'name'),
-    slug: formValue(formData, 'slug'),
-  });
-  let fallback = resultPath(
-    organizationPath(routeSlug.data, '/settings'),
-    'error',
-  );
-  let destination = fallback;
-
-  if (input.success) {
-    const slug = organizationSlugSchema.safeParse(
-      normalizeOrganizationSlug(input.data.slug),
-    );
-    if (slug.success) {
-      try {
-        const organization = await resolveActionOrganization(
-          routeSlug.data,
-          'owner',
-        );
-        fallback = resultPath(
-          organizationPath(organization.slug, '/settings'),
-          'error',
-        );
-        destination = fallback;
-        const auth = await getAuth();
-        await auth.api.updateOrganization({
-          body: {
-            data: { name: input.data.name, slug: slug.data },
-            organizationId: organization.id,
-          },
-          headers: await headers(),
         });
-        revalidatePath('/organizations');
-        revalidatePath(organizationPath(organization.slug), 'layout');
-        destination = resultPath(
-          organizationPath(slug.data, '/settings'),
-          'success',
-        );
-      } catch {
-        destination = fallback;
+      } else {
+        await auth.api.rejectInvitation({
+          body: { invitationId: input.data.invitationId },
+          headers: requestHeaders,
+        });
       }
+      revalidatePath('/workspaces');
+      destination = resultPath(
+        '/workspaces',
+        decision === 'accept' ? 'accept-success' : 'decline-success',
+      );
+    } catch {
+      destination = resultPath(
+        '/workspaces',
+        decision === 'accept' ? 'accept-error' : 'decline-error',
+      );
     }
   }
 

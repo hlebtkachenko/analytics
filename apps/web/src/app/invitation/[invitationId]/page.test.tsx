@@ -97,7 +97,7 @@ describe('InvitationPage', () => {
     });
   });
 
-  it('continues to the access page after acceptance', async () => {
+  it('continues to the organizations list after acceptance', async () => {
     const fetchMock = vi.fn(async (input: string) =>
       input.startsWith('/api/auth/organization/get-invitation')
         ? Response.json(pendingInvitation)
@@ -114,7 +114,7 @@ describe('InvitationPage', () => {
         '/api/auth/organization/accept-invitation',
         expect.objectContaining({ method: 'POST' }),
       );
-      expect(mocks.replace).toHaveBeenCalledWith('/access');
+      expect(mocks.replace).toHaveBeenCalledWith('/workspaces');
     });
   });
 

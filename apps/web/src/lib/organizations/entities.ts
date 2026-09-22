@@ -2,36 +2,25 @@ import { headers } from 'next/headers';
 
 import {
   accessResponseSchema,
-  deleteLegalEntity,
-  entityScopeSchema,
+  getDatasets,
   getLegalEntities,
-  getMemberEntityScope,
   getMemberEntityScopes,
   getOrganizationAccess,
   legalEntityListSchema,
   memberEntityScopeListSchema,
-  patchLegalEntity,
-  postLegalEntity,
-  putMemberEntityScope,
 } from '../auth/bff';
 import type { EntityScope, LegalEntity, OrganizationAccess } from '../auth/bff';
 import { getAuth } from '../auth/server';
 import {
   accessPath,
+  datasetListSchema,
+  datasetsPath,
   entityScopesPath,
   legalEntitiesPath,
-  legalEntityPath,
-  memberEntityScopePath,
 } from '../datasets/client';
+import type { DatasetSummary } from '../datasets/client';
 
-export type { EntityScope, LegalEntity, OrganizationAccess };
-
-// A null registration number clears the stored one, which only an update may ask for.
-export type LegalEntityInput = Readonly<{
-  kind?: 'company' | 'sole_trader' | undefined;
-  name?: string | undefined;
-  registrationNumber?: string | null | undefined;
-}>;
+export type { DatasetSummary, EntityScope, LegalEntity, OrganizationAccess };
 
 // Never dialled: the synthetic request only carries the caller's session to the BFF helpers.
 const serverRequestOrigin = 'http://web.internal';
@@ -104,23 +93,22 @@ export async function readLegalEntities(
   return parsed.success ? parsed.data.legalEntities : null;
 }
 
-export async function readMemberEntityScope(
+// The API has no count endpoint, so the scope-wide list is read in full for its length.
+export async function readDatasets(
   organizationId: string,
-  userId: string,
-): Promise<EntityScope | null> {
-  const response = await getMemberEntityScope(
+): Promise<readonly DatasetSummary[] | null> {
+  const response = await getDatasets(
     await authApi(),
-    await serverBffRequest(memberEntityScopePath(organizationId, userId)),
+    await serverBffRequest(datasetsPath(organizationId)),
     organizationId,
-    userId,
   );
 
   if (!response.ok) {
     return null;
   }
 
-  const parsed = entityScopeSchema.safeParse(await response.json());
-  return parsed.success ? parsed.data : null;
+  const parsed = datasetListSchema.safeParse(await response.json());
+  return parsed.success ? parsed.data.datasets : null;
 }
 
 // One read for the whole member list; a member without a stored row is unrestricted.
@@ -144,65 +132,4 @@ export async function readMemberEntityScopes(
         parsed.data.entityScopes.map((row) => [row.userId, row.entityScope]),
       )
     : null;
-}
-
-export async function createLegalEntity(
-  organizationId: string,
-  body: LegalEntityInput,
-): Promise<boolean> {
-  const path = legalEntitiesPath(organizationId);
-  const response = await postLegalEntity(
-    await authApi(),
-    await serverBffRequest(path, { body, method: 'POST' }),
-    organizationId,
-  );
-
-  return response.ok;
-}
-
-export async function updateLegalEntity(
-  organizationId: string,
-  legalEntityId: string,
-  body: LegalEntityInput,
-): Promise<boolean> {
-  const path = legalEntityPath(organizationId, legalEntityId);
-  const response = await patchLegalEntity(
-    await authApi(),
-    await serverBffRequest(path, { body, method: 'PATCH' }),
-    organizationId,
-    legalEntityId,
-  );
-
-  return response.ok;
-}
-
-export async function removeLegalEntity(
-  organizationId: string,
-  legalEntityId: string,
-): Promise<boolean> {
-  const path = legalEntityPath(organizationId, legalEntityId);
-  const response = await deleteLegalEntity(
-    await authApi(),
-    await serverBffRequest(path, { method: 'DELETE' }),
-    organizationId,
-    legalEntityId,
-  );
-
-  return response.ok;
-}
-
-export async function writeMemberEntityScope(
-  organizationId: string,
-  userId: string,
-  scope: EntityScope,
-): Promise<boolean> {
-  const path = memberEntityScopePath(organizationId, userId);
-  const response = await putMemberEntityScope(
-    await authApi(),
-    await serverBffRequest(path, { body: scope, method: 'PUT' }),
-    organizationId,
-    userId,
-  );
-
-  return response.ok;
 }

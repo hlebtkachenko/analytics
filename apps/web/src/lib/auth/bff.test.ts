@@ -1136,6 +1136,16 @@ describe('member entity scope', () => {
       'user_2',
       async () => Response.json({ detail: 'private' }, { status: 409 }),
     );
+    const emptyRestricted = await putMemberEntityScope(
+      auth,
+      entityRequest('members/user_2/entity-scope', {
+        body: JSON.stringify({ legalEntityIds: [], mode: 'restricted' }),
+        method: 'PUT',
+      }),
+      'org_1',
+      'user_2',
+      fetchImplementation,
+    );
     const forgedMember = await putMemberEntityScope(
       auth,
       entityRequest('members/user_2/entity-scope', {
@@ -1151,6 +1161,9 @@ describe('member entity scope', () => {
     expect(await accepted.json()).toEqual({ mode: 'all' });
     expect(forgedEntity.status).toBe(400);
     expect(await forgedEntity.json()).toEqual({ error: 'invalid_body' });
+    // Access is granted, so a restricted body with no entity never reaches the API.
+    expect(emptyRestricted.status).toBe(400);
+    expect(await emptyRestricted.json()).toEqual({ error: 'invalid_body' });
     expect(ownerTarget.status).toBe(409);
     expect(await ownerTarget.json()).toEqual({
       error: 'entity_scope_rejected',
