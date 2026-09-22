@@ -2,15 +2,20 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
   type OnModuleDestroy,
 } from '@nestjs/common';
 import { runInTenantContext } from '@bap/db';
-import type { TenantContext } from '@bap/db';
+import type { InboxChannelKind, TenantContext } from '@bap/db';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 import type { DatabasePool } from '@bap/db/pool';
 import type { PoolClient } from 'pg';
 
+import {
+  channelTenant,
+  type ChannelPrincipalReader,
+} from '../channel-access.js';
 import type { EntityScopeSelector } from '../datasets/dataset-repository.js';
 import type { CreateDocumentRequest } from '../documents/contract.js';
 import {
@@ -19,6 +24,9 @@ import {
 } from '../documents/document-repository.js';
 import { entityFilter } from '../documents/sql.js';
 import type {
+  CreateInboxChannelRequest,
+  InboxChannel,
+  InboxChannelCredential,
   InboxEvent,
   InboxExtraction,
   InboxItem,
@@ -27,8 +35,10 @@ import type {
   InboxItemListEntry,
   InboxItemListQuery,
   InboxItemListResponse,
+  IssueInboxChannelCredentialResponse,
   ProviderInput,
   ProviderOutput,
+  UpdateInboxChannelRequest,
   UpdateInboxHintsRequest,
 } from './contract.js';
 
@@ -51,10 +61,18 @@ export interface ExtractionRecord {
   providerVersion: string;
 }
 
-export interface ReceiveUploadInput extends EntityScopeSelector {
+export interface ReceiveIntakeInput extends EntityScopeSelector {
   byteSize: number;
+  // Null for a manual upload; every other kind names the channel row the item came through.
+  channelId: string | null;
+  channelKind: InboxChannelKind;
+  // The caller's idempotency key; a replay answers the existing item and writes nothing.
+  externalId: string | null;
   mediaType: string;
+  // The credential display prefix that pushed the item; null for a manual upload.
+  origin: string | null;
   originalFilename: string | null;
+  payloadKind: 'file' | 'structured';
   // Runs last inside the transaction: a failed move rolls every row back, an earlier failure never moves the bytes.
   persist: () => Promise<void>;
   quotaBytes: number;
@@ -63,10 +81,26 @@ export interface ReceiveUploadInput extends EntityScopeSelector {
   storageKey: string;
 }
 
-export interface ReceiveUploadResult {
+export interface ReceiveIntakeResult {
   duplicateOfItemId: string | null;
   files: InboxItemFile[];
   item: InboxItem;
+}
+
+export interface ChannelSelector extends TenantContext {
+  channelId: string;
+}
+
+export interface CreateChannelInput extends TenantContext {
+  body: CreateInboxChannelRequest;
+}
+
+export interface UpdateChannelInput extends ChannelSelector {
+  body: UpdateInboxChannelRequest;
+}
+
+export interface RevokeCredentialInput extends ChannelSelector {
+  credentialId: string;
 }
 
 export interface UpdateHintsInput extends ReadItemInput {
@@ -115,6 +149,7 @@ export interface ItemFileRecord extends InboxItemFile {
 
 interface ItemRow {
   assignee_id: string | null;
+  channel_id: string | null;
   channel_kind: string;
   confidence: string | null;
   created_at: Date;
@@ -131,6 +166,7 @@ interface ItemRow {
   hint_text: string | null;
   id: string;
   legal_entity_id: string | null;
+  origin: string | null;
   partner_id: string | null;
   payload_kind: string;
   received_at: Date;
@@ -138,6 +174,25 @@ interface ItemRow {
   snoozed_until: Date | null;
   status: string;
   updated_at: Date;
+}
+
+interface ChannelRow {
+  created_at: Date;
+  enabled: boolean;
+  hint_kind: string | null;
+  id: string;
+  item_count: number;
+  kind: string;
+  legal_entity_id: string | null;
+  name: string;
+  updated_at: Date;
+}
+
+interface CredentialRow {
+  created_at: Date;
+  credential_id: string;
+  display_prefix: string;
+  last_used_at: Date | null;
 }
 
 interface ListRow extends ItemRow {
@@ -155,7 +210,7 @@ interface FileRow {
   storage_key: string;
 }
 
-const ITEM_COLUMNS = `i.id, i.legal_entity_id, i.channel_kind, i.payload_kind, i.status, i.detected_type,
+const ITEM_COLUMNS = `i.id, i.legal_entity_id, i.channel_kind, i.channel_id, i.origin, i.payload_kind, i.status, i.detected_type,
           i.confidence::text as confidence, i.hint_text, i.hint_legal_entity_id, i.hint_kind, i.hint_partner_id,
           i.hint_link_document_id, i.duplicate_of_item_id, i.document_id, i.dataset_id, i.partner_id,
           i.decided_by_kind, i.decided_by_user_id, i.routed_at, i.assignee_id, i.snoozed_until,
@@ -168,6 +223,7 @@ const SCOPE_FILTER = `($1::uuid[] is null
 function toItem(row: ItemRow): InboxItem {
   return {
     assigneeId: row.assignee_id,
+    channelId: row.channel_id,
     channelKind: row.channel_kind as InboxItem['channelKind'],
     confidence: row.confidence === null ? null : Number(row.confidence),
     createdAt: row.created_at.toISOString(),
@@ -184,6 +240,7 @@ function toItem(row: ItemRow): InboxItem {
     hintText: row.hint_text,
     id: row.id,
     legalEntityId: row.legal_entity_id,
+    origin: row.origin,
     partnerId: row.partner_id,
     payloadKind: row.payload_kind as InboxItem['payloadKind'],
     receivedAt: row.received_at.toISOString(),
@@ -353,10 +410,17 @@ async function appendEvent(
   reason: InboxEventReason | null = null,
 ): Promise<void> {
   // clock_timestamp, not now(): several events of one transaction must keep their insertion order.
+  // A channel is not a person, so its events carry no actor; the audit log still names the channel subject.
   await transaction.query(
     `insert into app.inbox_event (organization_id, item_id, kind, reason, actor_user_id, created_at)
      values ($1, $2, $3, $4, $5, clock_timestamp())`,
-    [input.organizationId, itemId, kind, reason, input.userId],
+    [
+      input.organizationId,
+      itemId,
+      kind,
+      reason,
+      input.role === 'channel' ? null : input.userId,
+    ],
   );
 }
 
@@ -399,15 +463,71 @@ async function insertExtraction(
 }
 
 // The whole intake in one transaction: blob, item, file, events and the sniff verdict, then the bytes move into place.
-export async function receiveUpload(
+export async function receiveIntake(
   pool: DatabasePool,
-  input: ReceiveUploadInput,
-): Promise<ReceiveUploadResult> {
+  input: ReceiveIntakeInput,
+): Promise<ReceiveIntakeResult> {
   return runInTenantContext(pool, input, async (transaction) => {
-    // One intake at a time per organization, so the quota sum and the duplicate lookup see every earlier blob.
+    // One intake at a time per organization, so the quota sum, the replay and the duplicate lookup see every earlier row.
     await transaction.query('select pg_advisory_xact_lock(hashtext($1))', [
       input.organizationId,
     ]);
+
+    // A channel item inherits the entity and the kind hint of its channel; a disabled or foreign channel is not found.
+    // Checked before the replay, so a replay never answers through a disabled or deleted channel.
+    let legalEntityId: string | null = null;
+    let hintKind: string | null = null;
+
+    if (input.channelId !== null) {
+      const channel = await transaction.query<{
+        hint_kind: string | null;
+        legal_entity_id: string | null;
+      }>(
+        `select legal_entity_id, hint_kind
+           from app.inbox_channel
+          where id = $1 and kind = $2 and enabled and deleted_at is null`,
+        [input.channelId, input.channelKind],
+      );
+      const row = channel.rows[0];
+
+      if (row === undefined) {
+        throw new NotFoundException();
+      }
+
+      legalEntityId = row.legal_entity_id;
+      hintKind = row.hint_kind;
+    }
+
+    // A replayed external id answers the item its channel already created and writes nothing.
+    if (input.externalId !== null && input.channelId !== null) {
+      const replayed = await transaction.query<{ id: string }>(
+        `select id from app.inbox_item
+          where organization_id = $1 and channel_id = $2 and external_id = $3`,
+        [input.organizationId, input.channelId, input.externalId],
+      );
+      const replayedId = replayed.rows[0]?.id;
+
+      if (replayedId !== undefined) {
+        const item = await loadItem(
+          transaction,
+          replayedId,
+          input.legalEntityIds,
+        );
+
+        if (item === null) {
+          throw new Error(
+            'The replayed item is not readable in its own scope.',
+          );
+        }
+
+        return {
+          duplicateOfItemId: item.duplicateOfItemId,
+          files: (await loadItemFiles(transaction, replayedId)).map(publicFile),
+          item,
+        };
+      }
+    }
+
     const existing = await transaction.query<{ id: string }>(
       'select id from app.blob where sha256 = $1',
       [input.sha256],
@@ -463,10 +583,22 @@ export async function receiveUpload(
 
     const inserted = await transaction.query<{ id: string }>(
       `insert into app.inbox_item
-         (organization_id, channel_kind, payload_kind, status, duplicate_of_item_id, created_by)
-       values ($1, 'upload', 'file', 'received', $2, $3)
+         (organization_id, channel_kind, channel_id, payload_kind, status, duplicate_of_item_id,
+          legal_entity_id, hint_kind, origin, external_id, created_by)
+       values ($1, $2, $3, $4, 'received', $5, $6, $7, $8, $9, $10)
        returning id`,
-      [input.organizationId, duplicateOfItemId, input.userId],
+      [
+        input.organizationId,
+        input.channelKind,
+        input.channelId,
+        input.payloadKind,
+        duplicateOfItemId,
+        legalEntityId,
+        hintKind,
+        input.origin,
+        input.externalId,
+        input.userId,
+      ],
     );
     const itemId = inserted.rows[0]?.id;
 
@@ -507,10 +639,18 @@ export async function receiveUpload(
       await appendEvent(transaction, input, itemId, 'discarded', 'duplicate');
     }
 
-    // Identifiers and kinds only: the audit log never carries the filename or the hash.
+    // Identifiers and kinds only: the audit log never carries the filename, the hash or the payload.
     await transaction.query(
       "select app.record_audit('inbox_item.received', 'inbox_item', $1, $2::jsonb)",
-      [itemId, JSON.stringify({ channelKind: 'upload', duplicate })],
+      [
+        itemId,
+        JSON.stringify({
+          channelId: input.channelId,
+          channelKind: input.channelKind,
+          duplicate,
+          payloadKind: input.payloadKind,
+        }),
+      ],
     );
 
     const item = await loadItem(transaction, itemId, input.legalEntityIds);
@@ -1046,29 +1186,338 @@ export async function readBlob(
   });
 }
 
-export abstract class InboxRepository {
+// The channel answers only for itself: the tenant transaction runs as the channel and RLS shows it its own row.
+export async function readChannelPrincipal(
+  pool: DatabasePool,
+  input: { channelId: string; organizationId: string },
+): Promise<boolean> {
+  return runInTenantContext(
+    pool,
+    channelTenant(input.organizationId, input.channelId),
+    async (transaction) => {
+      const found = await transaction.query(
+        'select 1 from app.inbox_channel where id = $1 and enabled and deleted_at is null',
+        [input.channelId],
+      );
+      return found.rows.length > 0;
+    },
+  );
+}
+
+const CHANNEL_COLUMNS = `c.id, c.kind, c.name, c.enabled, c.legal_entity_id, c.hint_kind, c.created_at, c.updated_at,
+          (select count(*)::int from app.inbox_item as i where i.channel_id = c.id) as item_count`;
+
+async function loadCredentials(
+  transaction: PoolClient,
+  channelId: string,
+): Promise<InboxChannelCredential[]> {
+  const result = await transaction.query<CredentialRow>(
+    'select credential_id, display_prefix, created_at, last_used_at from auth.list_channel_credentials($1)',
+    [channelId],
+  );
+
+  return result.rows.map((row) => ({
+    createdAt: row.created_at.toISOString(),
+    credentialId: row.credential_id,
+    displayPrefix: row.display_prefix,
+    lastUsedAt:
+      row.last_used_at === null ? null : row.last_used_at.toISOString(),
+  }));
+}
+
+async function toChannel(
+  transaction: PoolClient,
+  row: ChannelRow,
+): Promise<InboxChannel> {
+  return {
+    createdAt: row.created_at.toISOString(),
+    credentials: await loadCredentials(transaction, row.id),
+    enabled: row.enabled,
+    hintKind: row.hint_kind,
+    id: row.id,
+    itemCount: row.item_count,
+    kind: row.kind as InboxChannel['kind'],
+    legalEntityId: row.legal_entity_id,
+    name: row.name,
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+async function loadChannel(
+  transaction: PoolClient,
+  channelId: string,
+): Promise<InboxChannel | null> {
+  const result = await transaction.query<ChannelRow>(
+    `select ${CHANNEL_COLUMNS}
+       from app.inbox_channel as c
+      where c.id = $1 and c.deleted_at is null`,
+    [channelId],
+  );
+  const row = result.rows[0];
+
+  return row === undefined ? null : toChannel(transaction, row);
+}
+
+// A legal entity of another organization fails the composite foreign key, which is a not-visible entity, not a fault.
+function isForeignKeyViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === '23503'
+  );
+}
+
+export async function listChannels(
+  pool: DatabasePool,
+  input: TenantContext,
+): Promise<InboxChannel[]> {
+  return runInTenantContext(pool, input, async (transaction) => {
+    const result = await transaction.query<ChannelRow>(
+      `select ${CHANNEL_COLUMNS}
+         from app.inbox_channel as c
+        where c.deleted_at is null
+        order by c.created_at, c.id`,
+    );
+    const channels: InboxChannel[] = [];
+
+    for (const row of result.rows) {
+      channels.push(await toChannel(transaction, row));
+    }
+
+    return channels;
+  });
+}
+
+export async function readChannel(
+  pool: DatabasePool,
+  input: ChannelSelector,
+): Promise<InboxChannel | null> {
+  return runInTenantContext(pool, input, (transaction) =>
+    loadChannel(transaction, input.channelId),
+  );
+}
+
+export async function createChannel(
+  pool: DatabasePool,
+  input: CreateChannelInput,
+): Promise<InboxChannel | null> {
+  const { body } = input;
+
+  return runInTenantContext(pool, input, async (transaction) => {
+    let created: { rows: { id: string }[] };
+
+    try {
+      created = await transaction.query<{ id: string }>(
+        `insert into app.inbox_channel (organization_id, kind, name, legal_entity_id, hint_kind, created_by)
+         values ($1, $2, $3, $4::uuid, $5, $6)
+         returning id`,
+        [
+          input.organizationId,
+          body.kind,
+          body.name,
+          body.legalEntityId ?? null,
+          body.hintKind ?? null,
+          input.userId,
+        ],
+      );
+    } catch (error) {
+      if (isForeignKeyViolation(error)) {
+        return null;
+      }
+
+      throw error;
+    }
+
+    const channelId = created.rows[0]?.id;
+
+    if (channelId === undefined) {
+      throw new Error('The inbox channel insert returned no row.');
+    }
+
+    await transaction.query(
+      "select app.record_audit('inbox_channel.created', 'inbox_channel', $1, $2::jsonb)",
+      [channelId, JSON.stringify({ kind: body.kind })],
+    );
+
+    return loadChannel(transaction, channelId);
+  });
+}
+
+export async function updateChannel(
+  pool: DatabasePool,
+  input: UpdateChannelInput,
+): Promise<InboxChannel | null> {
+  const { body } = input;
+
+  return runInTenantContext(pool, input, async (transaction) => {
+    let updated: { rowCount: number | null };
+
+    try {
+      updated = await transaction.query(
+        `update app.inbox_channel
+            set name = case when $2 then $3 else name end,
+                enabled = case when $4 then $5 else enabled end,
+                legal_entity_id = case when $6 then $7::uuid else legal_entity_id end,
+                hint_kind = case when $8 then $9 else hint_kind end,
+                deleted_at = case when $10 then now() else deleted_at end,
+                updated_at = now()
+          where id = $1 and deleted_at is null`,
+        [
+          input.channelId,
+          body.name !== undefined,
+          body.name ?? null,
+          body.enabled !== undefined,
+          body.enabled ?? null,
+          body.legalEntityId !== undefined,
+          body.legalEntityId ?? null,
+          body.hintKind !== undefined,
+          body.hintKind ?? null,
+          body.deleted === true,
+        ],
+      );
+    } catch (error) {
+      if (isForeignKeyViolation(error)) {
+        return null;
+      }
+
+      throw error;
+    }
+
+    if (updated.rowCount === 0) {
+      return null;
+    }
+
+    await transaction.query(
+      "select app.record_audit('inbox_channel.updated', 'inbox_channel', $1, $2::jsonb)",
+      [
+        input.channelId,
+        JSON.stringify({
+          deleted: body.deleted === true,
+          enabled: body.enabled ?? null,
+        }),
+      ],
+    );
+
+    // A soft deleted channel is gone for the caller from this response on.
+    if (body.deleted === true) {
+      const gone = await transaction.query<ChannelRow>(
+        `select ${CHANNEL_COLUMNS} from app.inbox_channel as c where c.id = $1`,
+        [input.channelId],
+      );
+      const row = gone.rows[0];
+      return row === undefined ? null : toChannel(transaction, row);
+    }
+
+    return loadChannel(transaction, input.channelId);
+  });
+}
+
+// The definer decides everything: owner role, organization, the two-credential limit. Its errors map in the service.
+export async function issueCredential(
+  pool: DatabasePool,
+  input: ChannelSelector,
+): Promise<IssueInboxChannelCredentialResponse> {
+  return runInTenantContext(pool, input, async (transaction) => {
+    const issued = await transaction.query<{
+      credential_id: string;
+      display_prefix: string;
+      secret: string;
+    }>(
+      "select credential_id, secret, display_prefix from auth.issue_channel_credential($1, 'api_token')",
+      [input.channelId],
+    );
+    const row = issued.rows[0];
+
+    if (row === undefined) {
+      throw new Error('The credential issue returned no row.');
+    }
+
+    await transaction.query(
+      "select app.record_audit('inbox_channel_credential.issued', 'inbox_channel', $1, $2::jsonb)",
+      [input.channelId, JSON.stringify({ credentialId: row.credential_id })],
+    );
+
+    return {
+      credentialId: row.credential_id,
+      displayPrefix: row.display_prefix,
+      secret: row.secret,
+    };
+  });
+}
+
+// False when the credential is unknown, revoked, or not one of this channel's; the caller answers 404.
+export async function revokeCredential(
+  pool: DatabasePool,
+  input: RevokeCredentialInput,
+): Promise<boolean> {
+  return runInTenantContext(pool, input, async (transaction) => {
+    const active = await loadCredentials(transaction, input.channelId);
+
+    if (
+      !active.some(
+        (credential) => credential.credentialId === input.credentialId,
+      )
+    ) {
+      return false;
+    }
+
+    const revoked = await transaction.query<{ revoked: boolean }>(
+      'select auth.revoke_channel_credential($1) as revoked',
+      [input.credentialId],
+    );
+
+    if (revoked.rows[0]?.revoked !== true) {
+      return false;
+    }
+
+    await transaction.query(
+      "select app.record_audit('inbox_channel_credential.revoked', 'inbox_channel', $1, $2::jsonb)",
+      [input.channelId, JSON.stringify({ credentialId: input.credentialId })],
+    );
+
+    return true;
+  });
+}
+
+export abstract class InboxRepository implements ChannelPrincipalReader {
   abstract assignItem(input: AssignItemInput): Promise<InboxItemDetail | null>;
+  abstract createChannel(
+    input: CreateChannelInput,
+  ): Promise<InboxChannel | null>;
   abstract discardItem(
     input: DiscardItemInput,
   ): Promise<InboxItemDetail | null>;
+  abstract issueCredential(
+    input: ChannelSelector,
+  ): Promise<IssueInboxChannelCredentialResponse>;
+  abstract listChannels(input: TenantContext): Promise<InboxChannel[]>;
   abstract listItems(input: ListItemsInput): Promise<InboxItemListResponse>;
   abstract readBlob(input: ReadBlobInput): Promise<BlobRecord | null>;
+  abstract readChannel(input: ChannelSelector): Promise<InboxChannel | null>;
+  abstract readChannelPrincipal(input: {
+    channelId: string;
+    organizationId: string;
+  }): Promise<boolean>;
   abstract readItem(input: ReadItemInput): Promise<InboxItemDetail | null>;
   abstract readProviderInput(
     input: ReadItemInput,
   ): Promise<{ files: ItemFileRecord[]; input: ProviderInput } | null>;
-  abstract receiveUpload(
-    input: ReceiveUploadInput,
-  ): Promise<ReceiveUploadResult>;
+  abstract receiveIntake(
+    input: ReceiveIntakeInput,
+  ): Promise<ReceiveIntakeResult>;
   abstract recordExtraction(
     input: RecordExtractionInput,
   ): Promise<InboxItemDetail | null>;
   abstract restoreItem(input: ReadItemInput): Promise<InboxItemDetail | null>;
+  abstract revokeCredential(input: RevokeCredentialInput): Promise<boolean>;
   abstract routeToDocument(
     input: RouteToDocumentInput,
   ): Promise<InboxItemDetail | null>;
   abstract snoozeItem(input: SnoozeItemInput): Promise<InboxItemDetail | null>;
   abstract undoRoute(input: ReadItemInput): Promise<InboxItemDetail | null>;
+  abstract updateChannel(
+    input: UpdateChannelInput,
+  ): Promise<InboxChannel | null>;
   abstract updateHints(
     input: UpdateHintsInput,
   ): Promise<InboxItemDetail | null>;
@@ -1085,8 +1534,22 @@ export class DatabaseInboxRepository
     return assignItem(await this.getPool(), input);
   }
 
+  async createChannel(input: CreateChannelInput): Promise<InboxChannel | null> {
+    return createChannel(await this.getPool(), input);
+  }
+
   async discardItem(input: DiscardItemInput): Promise<InboxItemDetail | null> {
     return discardItem(await this.getPool(), input);
+  }
+
+  async issueCredential(
+    input: ChannelSelector,
+  ): Promise<IssueInboxChannelCredentialResponse> {
+    return issueCredential(await this.getPool(), input);
+  }
+
+  async listChannels(input: TenantContext): Promise<InboxChannel[]> {
+    return listChannels(await this.getPool(), input);
   }
 
   async listItems(input: ListItemsInput): Promise<InboxItemListResponse> {
@@ -1103,6 +1566,17 @@ export class DatabaseInboxRepository
     return readBlob(await this.getPool(), input);
   }
 
+  async readChannel(input: ChannelSelector): Promise<InboxChannel | null> {
+    return readChannel(await this.getPool(), input);
+  }
+
+  async readChannelPrincipal(input: {
+    channelId: string;
+    organizationId: string;
+  }): Promise<boolean> {
+    return readChannelPrincipal(await this.getPool(), input);
+  }
+
   async readItem(input: ReadItemInput): Promise<InboxItemDetail | null> {
     return readItem(await this.getPool(), input);
   }
@@ -1113,8 +1587,8 @@ export class DatabaseInboxRepository
     return readProviderInput(await this.getPool(), input);
   }
 
-  async receiveUpload(input: ReceiveUploadInput): Promise<ReceiveUploadResult> {
-    return receiveUpload(await this.getPool(), input);
+  async receiveIntake(input: ReceiveIntakeInput): Promise<ReceiveIntakeResult> {
+    return receiveIntake(await this.getPool(), input);
   }
 
   async recordExtraction(
@@ -1125,6 +1599,10 @@ export class DatabaseInboxRepository
 
   async restoreItem(input: ReadItemInput): Promise<InboxItemDetail | null> {
     return restoreItem(await this.getPool(), input);
+  }
+
+  async revokeCredential(input: RevokeCredentialInput): Promise<boolean> {
+    return revokeCredential(await this.getPool(), input);
   }
 
   async routeToDocument(
@@ -1139,6 +1617,10 @@ export class DatabaseInboxRepository
 
   async undoRoute(input: ReadItemInput): Promise<InboxItemDetail | null> {
     return undoRoute(await this.getPool(), input);
+  }
+
+  async updateChannel(input: UpdateChannelInput): Promise<InboxChannel | null> {
+    return updateChannel(await this.getPool(), input);
   }
 
   async updateHints(input: UpdateHintsInput): Promise<InboxItemDetail | null> {

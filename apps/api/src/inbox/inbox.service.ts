@@ -1,11 +1,13 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { open, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -13,6 +15,7 @@ import {
   PayloadTooLargeException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
+import type { InboxChannelKind, TenantContext } from '@bap/db';
 import { z } from 'zod';
 
 import { blobStorageKey, BlobStore } from '../blobs/blob-store.js';
@@ -20,10 +23,13 @@ import { MAX_UPLOAD_BYTES } from '../ingestion/contract.js';
 import type { ReceivedFile } from '../request-context.js';
 import { INLINE_MEDIA_TYPES } from './contract.js';
 import type {
+  InboxChannel,
   InboxHints,
+  InboxIntakeResponse,
   InboxItemDetail,
   InboxItemListResponse,
   InboxUploadResponse,
+  IssueInboxChannelCredentialResponse,
   ProviderOutput,
   RouteInboxItemToDocumentRequest,
 } from './contract.js';
@@ -32,11 +38,16 @@ import {
   QuotaExceededError,
   type AssignItemInput,
   type BlobRecord,
+  type ChannelSelector,
+  type CreateChannelInput,
   type DiscardItemInput,
   type EntityScopeSelector,
   type ListItemsInput,
   type ReadItemInput,
+  type ReceiveIntakeResult,
+  type RevokeCredentialInput,
   type SnoozeItemInput,
+  type UpdateChannelInput,
   type UpdateHintsInput,
 } from './inbox-repository.js';
 import {
@@ -66,6 +77,34 @@ const receivedFileSchema = z.object({
 
 export interface UploadInput extends EntityScopeSelector {
   file: ReceivedFile | undefined;
+}
+
+// A push through a channel: the channel row, the caller's idempotency key and who pushed (a display prefix).
+export interface ChannelIntakeInput extends TenantContext {
+  channelId: string;
+  externalId: string | null;
+  origin: string | null;
+}
+
+export interface FileIntakeInput extends ChannelIntakeInput {
+  file: ReceivedFile | undefined;
+}
+
+export interface StructuredIntakeInput extends ChannelIntakeInput {
+  externalId: string;
+  payload: Record<string, unknown>;
+}
+
+// One temporary file on disk plus everything the intake row needs beyond the bytes.
+interface StagedIntake extends EntityScopeSelector {
+  channelId: string | null;
+  channelKind: InboxChannelKind;
+  externalId: string | null;
+  origin: string | null;
+  originalFilename: string | null;
+  payloadKind: 'file' | 'structured';
+  size: number;
+  temporaryPath: string;
 }
 
 export interface RouteInput extends ReadItemInput {
@@ -122,6 +161,30 @@ function windows(byteSize: number): {
   return {
     head: [0, Math.max(0, window - 1)],
     tail: [Math.max(0, byteSize - window), Math.max(0, byteSize - 1)],
+  };
+}
+
+// The definer functions raise these; the service turns them into the response the route documents.
+function databaseErrorCode(error: unknown): {
+  code: string | undefined;
+  constraint: string | undefined;
+} {
+  const { code, constraint } =
+    typeof error === 'object' && error !== null
+      ? (error as { code?: unknown; constraint?: unknown })
+      : {};
+
+  return {
+    code: typeof code === 'string' ? code : undefined,
+    constraint: typeof constraint === 'string' ? constraint : undefined,
+  };
+}
+
+function toIntakeResponse(result: ReceiveIntakeResult): InboxIntakeResponse {
+  return {
+    duplicateOfItemId: result.duplicateOfItemId,
+    itemId: result.item.id,
+    status: result.item.status,
   };
 }
 
@@ -183,7 +246,6 @@ export class InboxService {
 
   async upload(input: UploadInput): Promise<InboxUploadResponse> {
     const received = input.file;
-    let cleanupTemporaryPath = received?.path ?? null;
 
     try {
       // A new item has no entity yet, so a restricted scope could never read back what it just uploaded.
@@ -201,7 +263,93 @@ export class InboxService {
         throw new BadRequestException();
       }
 
-      const { size, temporaryPath } = file.data;
+      return await this.receive({
+        ...input,
+        channelId: null,
+        channelKind: 'upload',
+        externalId: null,
+        origin: null,
+        originalFilename: file.data.originalname ?? null,
+        payloadKind: 'file',
+        size: file.data.size,
+        temporaryPath: file.data.temporaryPath,
+      });
+    } catch (error) {
+      // Covers a refusal before receive took over; after it the file is already gone and this is a no-op.
+      if (received?.path !== undefined) {
+        await this.blobs.deleteTemporary(received.path);
+      }
+
+      throw error;
+    }
+  }
+
+  // A file pushed through an API channel; the channel row decides the entity and the kind hint.
+  async intakeFile(input: FileIntakeInput): Promise<InboxIntakeResponse> {
+    const received = input.file;
+
+    try {
+      const file = receivedFileSchema.safeParse({
+        originalname: received?.originalname,
+        size: received?.size,
+        temporaryPath: received?.path,
+      });
+
+      if (!file.success) {
+        throw new BadRequestException();
+      }
+
+      return toIntakeResponse(
+        await this.receive({
+          ...input,
+          channelKind: 'api',
+          legalEntityIds: null,
+          originalFilename: file.data.originalname ?? null,
+          payloadKind: 'file',
+          size: file.data.size,
+          temporaryPath: file.data.temporaryPath,
+        }),
+      );
+    } catch (error) {
+      // Covers a refusal before receive took over; after it the file is already gone and this is a no-op.
+      if (received?.path !== undefined) {
+        await this.blobs.deleteTemporary(received.path);
+      }
+
+      throw error;
+    }
+  }
+
+  // A structured push is stored as its JSON bytes, so the item keeps the same one-file envelope as an upload.
+  async intakeStructured(
+    input: StructuredIntakeInput,
+  ): Promise<InboxIntakeResponse> {
+    const bytes = Buffer.from(JSON.stringify(input.payload), 'utf8');
+    const temporaryPath = join(
+      this.blobs.temporaryDirectory(),
+      `structured-${randomUUID()}`,
+    );
+    await writeFile(temporaryPath, bytes);
+
+    return toIntakeResponse(
+      await this.receive({
+        ...input,
+        channelKind: 'api',
+        legalEntityIds: null,
+        originalFilename: null,
+        payloadKind: 'structured',
+        size: bytes.length,
+        temporaryPath,
+      }),
+    );
+  }
+
+  // Hash, sniff, then one transaction; the temporary file is gone whatever happens.
+  private async receive(staged: StagedIntake): Promise<ReceiveIntakeResult> {
+    let cleanupTemporaryPath: string | null = staged.temporaryPath;
+
+    try {
+      const { size, temporaryPath } = staged;
       const sha256 = await sha256Of(temporaryPath);
       const range = windows(size);
       const sniffed = sniffBytes({
@@ -217,12 +365,16 @@ export class InboxService {
           range.tail[1] - range.tail[0] + 1,
         ),
       });
-      const storageKey = blobStorageKey(input.organizationId, sha256);
-      const result = await this.inbox.receiveUpload({
-        ...input,
+      const storageKey = blobStorageKey(staged.organizationId, sha256);
+
+      return await this.inbox.receiveIntake({
+        ...staged,
         byteSize: size,
-        mediaType: sniffed.mediaType,
-        originalFilename: file.data.originalname ?? null,
+        // A structured payload is JSON by construction; every file is what its bytes say.
+        mediaType:
+          staged.payloadKind === 'structured'
+            ? 'application/json'
+            : sniffed.mediaType,
         persist: async () => {
           await this.blobs.put({ key: storageKey, temporaryPath });
           // The temporary name is gone once moved, so nothing is left to clean up.
@@ -237,8 +389,6 @@ export class InboxService {
         },
         storageKey,
       });
-
-      return result;
     } catch (error) {
       if (error instanceof QuotaExceededError) {
         throw new PayloadTooLargeException();
@@ -250,6 +400,54 @@ export class InboxService {
         await this.blobs.deleteTemporary(cleanupTemporaryPath);
       }
     }
+  }
+
+  listChannels(input: TenantContext): Promise<InboxChannel[]> {
+    return this.inbox.listChannels(input);
+  }
+
+  readChannel(input: ChannelSelector): Promise<InboxChannel | null> {
+    return this.inbox.readChannel(input);
+  }
+
+  createChannel(input: CreateChannelInput): Promise<InboxChannel | null> {
+    return this.inbox.createChannel(input);
+  }
+
+  updateChannel(input: UpdateChannelInput): Promise<InboxChannel | null> {
+    return this.inbox.updateChannel(input);
+  }
+
+  // The definer's verdicts: a third active credential is a conflict, a missing channel is not found, a non-owner is forbidden.
+  async issueCredential(
+    input: ChannelSelector,
+  ): Promise<IssueInboxChannelCredentialResponse> {
+    try {
+      return await this.inbox.issueCredential(input);
+    } catch (error) {
+      const { code, constraint } = databaseErrorCode(error);
+
+      if (
+        code === '23514' &&
+        constraint === 'inbox_channel_credential_active_limit'
+      ) {
+        throw new ConflictException();
+      }
+
+      if (code === 'P0002') {
+        throw new NotFoundException();
+      }
+
+      if (code === '42501') {
+        throw new ForbiddenException();
+      }
+
+      throw error;
+    }
+  }
+
+  revokeCredential(input: RevokeCredentialInput): Promise<boolean> {
+    return this.inbox.revokeCredential(input);
   }
 
   // Re-runs the sniff on the first file and lets the stored hints outrank it.

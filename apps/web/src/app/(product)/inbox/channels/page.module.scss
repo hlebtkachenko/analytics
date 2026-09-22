@@ -1,0 +1,11 @@
+@use '@bap/design-system/tokens/spacing.scss' as spacing;
+
+.createForm {
+  max-inline-size: 32rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-02;
+}

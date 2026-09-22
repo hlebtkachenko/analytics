@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
   PayloadTooLargeException,
@@ -29,7 +31,7 @@ import {
   QuotaExceededError,
   type InboxRepository,
   type ItemFileRecord,
-  type ReceiveUploadInput,
+  type ReceiveIntakeInput,
   type RecordExtractionInput,
   type RouteToDocumentInput,
 } from './inbox-repository.js';
@@ -39,7 +41,14 @@ const ENTITY_ID = '4a2b7c1e-9f5d-4c3a-8b21-6e0f7d5a4c39';
 const PARTNER_ID = 'a0813274-5fbd-4c90-a187-c45fd3b0a295';
 const ITEM_ID = '6c4d9e30-1b7f-4e5c-ad43-801b9f7c6e51';
 const BLOB_ID = '9f702163-4eac-4b8f-9076-b34ec2af9184';
+const CHANNEL_ID = 'c2a35496-71df-4eb2-8309-e671f5d2c4b7';
 const QUOTA = 100_000;
+
+const channelTenant = {
+  organizationId: 'organization_1',
+  role: 'channel' as const,
+  userId: `channel_${CHANNEL_ID}`,
+};
 
 const tenant = {
   legalEntityIds: null,
@@ -50,6 +59,7 @@ const tenant = {
 
 const item: InboxItem = {
   assigneeId: null,
+  channelId: null,
   channelKind: 'upload',
   confidence: null,
   createdAt: '2026-09-16T06:00:00.000Z',
@@ -66,6 +76,7 @@ const item: InboxItem = {
   hintText: null,
   id: ITEM_ID,
   legalEntityId: null,
+  origin: null,
   partnerId: null,
   payloadKind: 'file',
   receivedAt: '2026-09-16T06:00:00.000Z',
@@ -96,20 +107,49 @@ describe('InboxService', () => {
     hintPartnerId: null,
     hintText: null,
   };
-  const received: ReceiveUploadInput[] = [];
+  const received: ReceiveIntakeInput[] = [];
   const extractions: RecordExtractionInput[] = [];
   const routed: RouteToDocumentInput[] = [];
 
   // The repository stub mirrors the real transaction order: quota, duplicate, then persist only for new bytes.
   const repository = {
     assignItem: vi.fn(),
+    createChannel: vi.fn(),
     discardItem: vi.fn(),
+    issueCredential: vi.fn(async (input: { channelId: string }) => {
+      if (input.channelId === 'limit') {
+        throw Object.assign(new Error('limit'), {
+          code: '23514',
+          constraint: 'inbox_channel_credential_active_limit',
+        });
+      }
+      if (input.channelId === 'missing') {
+        throw Object.assign(new Error('missing'), { code: 'P0002' });
+      }
+      if (input.channelId === 'admin') {
+        throw Object.assign(new Error('admin'), { code: '42501' });
+      }
+      if (input.channelId === 'other') {
+        throw Object.assign(new Error('other'), {
+          code: '23514',
+          constraint: 'inbox_channel_credential_kind_check',
+        });
+      }
+      return {
+        credentialId: CHANNEL_ID,
+        displayPrefix: 'AAAAAAAA',
+        secret: `bap_intake_${'A'.repeat(43)}`,
+      };
+    }),
+    listChannels: vi.fn(),
     listItems: vi.fn(),
     readBlob: vi.fn(async (input: { blobId: string }) =>
       storedFile === null || input.blobId !== storedFile.blobId
         ? null
         : { id: storedFile.blobId, ...storedFile },
     ),
+    readChannel: vi.fn(),
+    readChannelPrincipal: vi.fn(),
     readItem: vi.fn(),
     readProviderInput: vi.fn(async (input: { itemId: string }) =>
       input.itemId !== ITEM_ID || storedFile === null
@@ -126,7 +166,7 @@ describe('InboxService', () => {
             },
           },
     ),
-    receiveUpload: vi.fn(async (input: ReceiveUploadInput) => {
+    receiveIntake: vi.fn(async (input: ReceiveIntakeInput) => {
       received.push(input);
       if (input.sha256 === existingSha256) {
         return {
@@ -147,12 +187,14 @@ describe('InboxService', () => {
       return detail;
     }),
     restoreItem: vi.fn(),
+    revokeCredential: vi.fn(),
     routeToDocument: vi.fn(async (input: RouteToDocumentInput) => {
       routed.push(input);
       return detail;
     }),
     snoozeItem: vi.fn(),
     undoRoute: vi.fn(),
+    updateChannel: vi.fn(),
     updateHints: vi.fn(),
   } satisfies InboxRepository;
 
@@ -392,5 +434,97 @@ describe('InboxService', () => {
     await expect(
       service.openBlob({ ...tenant, blobId: 'missing', inline: false }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+  it('stores a structured payload as JSON bytes on the channel and leaves no temporary file', async () => {
+    const response = await service.intakeStructured({
+      ...channelTenant,
+      channelId: CHANNEL_ID,
+      externalId: 'erp-42',
+      origin: 'AAAAAAAA',
+      payload: { lines: [{ amount: '10.00' }], total: '10.00' },
+    });
+
+    expect(response).toEqual({
+      duplicateOfItemId: null,
+      itemId: ITEM_ID,
+      status: 'needs_review',
+    });
+    const input = received[0];
+    expect(input).toMatchObject({
+      channelId: CHANNEL_ID,
+      channelKind: 'api',
+      externalId: 'erp-42',
+      legalEntityIds: null,
+      mediaType: 'application/json',
+      origin: 'AAAAAAAA',
+      originalFilename: null,
+      payloadKind: 'structured',
+      role: 'channel',
+      userId: `channel_${CHANNEL_ID}`,
+    });
+    const bytes = Buffer.from(
+      JSON.stringify({ lines: [{ amount: '10.00' }], total: '10.00' }),
+    );
+    expect(input?.byteSize).toBe(bytes.length);
+    expect(input?.sha256).toBe(
+      createHash('sha256').update(bytes).digest('hex'),
+    );
+    expect(await store.stat(input?.storageKey ?? '')).toEqual({
+      byteSize: bytes.length,
+    });
+    expect(await readdir(store.temporaryDirectory())).toEqual([]);
+  });
+
+  it('pushes a file through the channel with the external id and never a restricted scope', async () => {
+    const bytes = fixtures.pdf();
+    const path = await stage(bytes, 'channel-file');
+
+    const response = await service.intakeFile({
+      ...channelTenant,
+      channelId: CHANNEL_ID,
+      externalId: null,
+      file: { originalname: 'invoice.pdf', path, size: bytes.length },
+      origin: null,
+    });
+
+    expect(response.itemId).toBe(ITEM_ID);
+    expect(received[0]).toMatchObject({
+      channelId: CHANNEL_ID,
+      channelKind: 'api',
+      externalId: null,
+      legalEntityIds: null,
+      mediaType: 'application/pdf',
+      originalFilename: 'invoice.pdf',
+      payloadKind: 'file',
+    });
+    expect(await readdir(store.temporaryDirectory())).toEqual([]);
+
+    await expect(
+      service.intakeFile({
+        ...channelTenant,
+        channelId: CHANNEL_ID,
+        externalId: null,
+        file: undefined,
+        origin: null,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('maps the credential definer verdicts to 409, 404 and 403 and passes the rest through', async () => {
+    await expect(
+      service.issueCredential({ ...tenant, channelId: CHANNEL_ID }),
+    ).resolves.toMatchObject({ displayPrefix: 'AAAAAAAA' });
+    await expect(
+      service.issueCredential({ ...tenant, channelId: 'limit' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(
+      service.issueCredential({ ...tenant, channelId: 'missing' }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      service.issueCredential({ ...tenant, channelId: 'admin' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.issueCredential({ ...tenant, channelId: 'other' }),
+    ).rejects.toThrow('other');
   });
 });

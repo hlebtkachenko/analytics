@@ -2,7 +2,7 @@ import type { DatabasePool } from '@bap/db/pool';
 import type { PoolClient } from 'pg';
 import { describe, expect, it } from 'vitest';
 
-import { receiveUpload, type ReceiveUploadInput } from './inbox-repository.js';
+import { receiveIntake, type ReceiveIntakeInput } from './inbox-repository.js';
 
 const ITEM_ID = '6c4d9e30-1b7f-4e5c-ad43-801b9f7c6e51';
 const BLOB_ID = '9f702163-4eac-4b8f-9076-b34ec2af9184';
@@ -10,6 +10,7 @@ const SHA256 = 'a'.repeat(64);
 
 const itemRow = {
   assignee_id: null,
+  channel_id: null,
   channel_kind: 'upload',
   confidence: '1.000',
   created_at: new Date('2026-09-16T06:00:00.000Z'),
@@ -26,6 +27,7 @@ const itemRow = {
   hint_text: null,
   id: ITEM_ID,
   legal_entity_id: null,
+  origin: null,
   partner_id: null,
   payload_kind: 'file',
   received_at: new Date('2026-09-16T06:00:00.000Z'),
@@ -78,13 +80,18 @@ function fakePool(itemVisible: boolean): {
   };
 }
 
-function uploadInput(persisted: string[]): ReceiveUploadInput {
+function uploadInput(persisted: string[]): ReceiveIntakeInput {
   return {
     byteSize: 17,
+    channelId: null,
+    channelKind: 'upload',
+    externalId: null,
     legalEntityIds: null,
     mediaType: 'application/pdf',
     organizationId: 'organization_1',
+    origin: null,
     originalFilename: 'placeholder.pdf',
+    payloadKind: 'file',
     persist: async () => {
       persisted.push('persist');
     },
@@ -108,7 +115,7 @@ function uploadInput(persisted: string[]): ReceiveUploadInput {
   };
 }
 
-describe('receiveUpload', () => {
+describe('receiveIntake', () => {
   it('takes the organization advisory lock first and moves the bytes last', async () => {
     const { pool, statements } = fakePool(true);
     const persisted: string[] = [];
@@ -119,7 +126,7 @@ describe('receiveUpload', () => {
       statements.push('persist');
     };
 
-    await receiveUpload(pool, input);
+    await receiveIntake(pool, input);
 
     // begin and the tenant settings come from runInTenantContext; the lock is the first intake statement.
     expect(statements[2]).toBe('select pg_advisory_xact_lock(hashtext($1))');
@@ -131,7 +138,7 @@ describe('receiveUpload', () => {
     const { pool, statements } = fakePool(false);
     const persisted: string[] = [];
 
-    await expect(receiveUpload(pool, uploadInput(persisted))).rejects.toThrow(
+    await expect(receiveIntake(pool, uploadInput(persisted))).rejects.toThrow(
       'not readable in its own scope',
     );
 

@@ -40,6 +40,37 @@ export function inboxItemActionPath(
   return `${inboxItemPath(organizationId, itemId)}/${action}`;
 }
 
+export function inboxChannelsPath(organizationId: string): string {
+  return `${inboxPath(organizationId)}/channels`;
+}
+
+export function inboxChannelPath(
+  organizationId: string,
+  channelId: string,
+): string {
+  return `${inboxChannelsPath(organizationId)}/${encodeURIComponent(channelId)}`;
+}
+
+export function inboxChannelCredentialsPath(
+  organizationId: string,
+  channelId: string,
+): string {
+  return `${inboxChannelPath(organizationId, channelId)}/credentials`;
+}
+
+export function inboxChannelCredentialPath(
+  organizationId: string,
+  channelId: string,
+  credentialId: string,
+): string {
+  return `${inboxChannelCredentialsPath(organizationId, channelId)}/${encodeURIComponent(credentialId)}`;
+}
+
+// The public push route lives at a fixed path on the same origin the owner is signed into.
+export function intakeCurlExample(origin: string, secret: string): string {
+  return `curl -X POST ${origin}/api/intake/v1/items -H "Authorization: Bearer ${secret}" -F file=@invoice.pdf`;
+}
+
 export function inboxBlobDownloadPath(
   organizationId: string,
   blobId: string,
