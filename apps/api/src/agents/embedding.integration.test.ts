@@ -24,6 +24,7 @@ import {
 } from '../worker/queue.js';
 import { summarizeDataset } from '../worker/summarize-dataset.js';
 import { WorkerMetrics } from '../worker/worker-metrics.js';
+import { endPools } from '../test-support/end-pools.js';
 import { enqueueEmbeddingBackfill } from './agent-queue.js';
 import { BACKFILL_EMBEDDINGS_QUEUE } from './contract.js';
 import {
@@ -253,7 +254,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await boss.stop({ graceful: false });
-  await Promise.all([apiPool.end(), migratorPool.end()]);
+  await endPools(apiPool, migratorPool);
   await container.stop();
 });
 

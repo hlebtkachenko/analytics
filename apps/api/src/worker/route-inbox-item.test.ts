@@ -80,6 +80,7 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
     hintLinkDocumentId: null,
     hintPartnerId: null,
     hintText: null,
+    humanTouched: false,
     id: ITEM_ID,
     legalEntityId: null,
     origin: null,

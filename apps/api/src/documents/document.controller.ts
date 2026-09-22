@@ -201,6 +201,9 @@ export class DocumentController {
   @ApiUnauthorizedResponse({ description: 'The resource token is invalid' })
   @ApiForbiddenResponse({ description: 'Organization access is denied' })
   @ApiNotFoundResponse({ description: 'The document is not visible' })
+  @ApiConflictResponse({
+    description: 'A later version supersedes the document (not_current)',
+  })
   async deleteDocument(
     @Param('organizationId', { schema: organizationIdentifierSchema })
     organizationId: string,

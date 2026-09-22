@@ -43,6 +43,8 @@ import {
 } from '../inbox/inbox-queue.js';
 import {
   adoptRule,
+  approveItem,
+  attachItem,
   assignItem,
   createChannel,
   createRule,
@@ -68,6 +70,7 @@ import {
   readRule,
   receiveIntake,
   recordExtraction,
+  reopenEmailItem,
   restoreItem,
   revokeCredential,
   routeToDocument,
@@ -80,6 +83,7 @@ import {
   type InboxRepository,
 } from '../inbox/inbox-repository.js';
 import * as fixtures from '../inbox/providers/__fixtures__/index.js';
+import { endPools } from '../test-support/end-pools.js';
 import { createQueue, createQueueClientFromConfiguration } from './queue.js';
 import { rerunInboxRule } from './rerun-inbox-rule.js';
 import { AUTO_ROUTE_PROVIDER, routeInboxItem } from './route-inbox-item.js';
@@ -299,6 +303,8 @@ beforeAll(async () => {
   store = new FilesystemBlobStore(directory);
   const repository: InboxRepository = {
     adoptRule: (input) => adoptRule(apiPool, input),
+    approveItem: (input) => approveItem(apiPool, input),
+    attachItem: (input) => attachItem(apiPool, input),
     assignItem: (input) => assignItem(apiPool, input),
     createChannel: (input) => createChannel(apiPool, input),
     createRule: (input) => createRule(apiPool, input),
@@ -321,6 +327,7 @@ beforeAll(async () => {
     readRule: (input) => readRule(apiPool, input),
     receiveIntake: (input) => receiveIntake(apiPool, input),
     recordExtraction: (input) => recordExtraction(apiPool, input),
+    reopenEmailItem: (input) => reopenEmailItem(apiPool, input),
     restoreItem: (input) => restoreItem(apiPool, input),
     revokeCredential: (input) => revokeCredential(apiPool, input),
     routeToDocument: (input) => routeToDocument(apiPool, input),
@@ -342,7 +349,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await boss.stop({ graceful: false });
-  await Promise.all([apiPool.end(), migratorPool.end()]);
+  await endPools(apiPool, migratorPool);
   await container.stop();
   await rm(directory, { force: true, recursive: true });
 });

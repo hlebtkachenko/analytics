@@ -24,15 +24,24 @@ import {
   type ChannelPrincipalReader,
 } from '../channel-access.js';
 import type { EntityScopeSelector } from '../datasets/dataset-repository.js';
-import { INVOICE_KINDS } from '../documents/contract.js';
+import {
+  createDocumentRequestSchema,
+  INVOICE_KINDS,
+} from '../documents/contract.js';
 import type { CreateDocumentRequest } from '../documents/contract.js';
 import {
   createDocumentInTransaction,
   deleteDocumentInTransaction,
+  documentTotalOf,
+  isDuplicateDocumentReference,
 } from '../documents/document-repository.js';
 import { entityFilter } from '../documents/sql.js';
 import {
   DETECTED_TYPES,
+  HUMAN_TOUCH_EVENT_KINDS,
+  INBOX_ASSIGNEE_NONE,
+  INBOX_CONFIDENCE_HIGH_FROM,
+  INBOX_CONFIDENCE_MEDIUM_FROM,
   MAX_ENABLED_INBOX_RULES,
   RULE_PROVIDER,
   RULE_PROVIDER_VERSION,
@@ -40,6 +49,7 @@ import {
 } from './contract.js';
 import type {
   CorrectionReasons,
+  DuplicateCandidate,
   CreateInboxChannelRequest,
   CreateInboxRuleRequest,
   InboxChannel,
@@ -62,6 +72,7 @@ import type {
   PutInboxRoutingTargetRequest,
   RouteInboxItemJob,
   RuleDraft,
+  SplitEmailItemJob,
   UpdateInboxChannelRequest,
   UpdateInboxHintsRequest,
   UpdateInboxRuleRequest,
@@ -69,8 +80,14 @@ import type {
 import {
   CORRECTION_FIELD_BY_DRAFT_KEY,
   composeDocumentDraft,
+  toCreateDocumentBody,
   type ComposedDocumentDraft,
 } from './draft-composer.js';
+import {
+  MANUAL_PROVIDER,
+  MANUAL_PROVIDER_VERSION,
+  manualProvider,
+} from './providers/manual.js';
 import {
   evaluateRules,
   ruleReasons,
@@ -170,12 +187,41 @@ export interface RecordExtractionInput extends ReadItemInput {
 }
 
 export interface RouteToDocumentInput extends ReadItemInput {
+  // The candidate of a duplicate_probable refusal the person chose to route past.
+  acknowledgeDuplicateOf?: string;
   // One line per draft field the person changed away from the suggestion; absent fields get no reason.
   correctionReasons: CorrectionReasons;
   document: CreateDocumentRequest;
   // The manual provider's verdict, stored so the decision keeps its provenance.
   extraction: ExtractionRecord;
   fileBlobIds: readonly string[];
+  // The current document of a reference_conflict refusal; the new one becomes its next version.
+  supersedesDocumentId?: string;
+}
+
+export interface AttachItemInput extends ReadItemInput {
+  documentId: string;
+}
+
+// The pre-check that stopped a route: the same object is the 409 body and the issue the extraction row keeps.
+export type RouteRefusal =
+  | { code: 'duplicate_probable'; candidates: DuplicateCandidate[] }
+  | { code: 'missing_required_field'; field: string }
+  | { code: 'reference_conflict'; documentId: string };
+
+export class RouteRefusedError extends Error {
+  // The extraction row the refusal commits; a missing field is reported without one.
+  constructor(
+    readonly refusal: RouteRefusal,
+    readonly extraction: ExtractionRecord | null,
+  ) {
+    super(refusal.code);
+  }
+}
+
+export interface ReopenedEmailItem {
+  detail: InboxItemDetail;
+  job: SplitEmailItemJob;
 }
 
 export interface RulePassInput extends TenantContext {
@@ -329,6 +375,7 @@ interface ItemRow {
   document_id: string | null;
   duplicate_of_item_id: string | null;
   hint_kind: string | null;
+  human_touched: boolean;
   hint_legal_entity_id: string | null;
   hint_link_document_id: string | null;
   hint_partner_id: string | null;
@@ -397,7 +444,11 @@ const ITEM_COLUMNS = `i.id, i.legal_entity_id, i.channel_kind, i.channel_id, i.o
           i.confidence::text as confidence, i.hint_text, i.hint_legal_entity_id, i.hint_kind, i.hint_partner_id,
           i.hint_link_document_id, i.duplicate_of_item_id, i.document_id, i.dataset_id, i.partner_id,
           i.decided_by_kind, i.decided_by_rule_id, i.decided_by_user_id, i.routed_at, i.assignee_id, i.snoozed_until,
-          i.received_at, i.created_at, i.updated_at`;
+          i.received_at, i.created_at, i.updated_at,
+          exists (select 1 from app.inbox_event as e
+                   where e.item_id = i.id and e.organization_id = i.organization_id
+                     and e.actor_user_id is not null
+                     and e.kind in (${HUMAN_TOUCH_EVENT_KINDS.map((kind) => `'${kind}'`).join(', ')})) as human_touched`;
 
 // An unrouted item has no entity, so only the unrestricted scope sees it; a restricted member sees its own entities.
 const SCOPE_FILTER = `($1::uuid[] is null
@@ -422,6 +473,7 @@ function toItem(row: ItemRow): InboxItem {
     hintLinkDocumentId: row.hint_link_document_id,
     hintPartnerId: row.hint_partner_id,
     hintText: row.hint_text,
+    humanTouched: row.human_touched,
     id: row.id,
     legalEntityId: row.legal_entity_id,
     origin: row.origin,
@@ -1338,10 +1390,30 @@ export async function listItems(
       entityFilter(input.legalEntityIds),
       query.status === undefined ? null : [...query.status],
       query.detectedType ?? null,
+      query.issue ?? null,
+      query.assigneeId ?? null,
+      query.confidence ?? null,
+      INBOX_CONFIDENCE_MEDIUM_FROM,
+      INBOX_CONFIDENCE_HIGH_FROM,
     ];
     const filter = `${SCOPE_FILTER}
        and ($2::text[] is null or i.status = any($2::text[]))
-       and ($3::text is null or i.detected_type = $3::text)`;
+       and ($3::text is null or i.detected_type = $3::text)
+       and ($4::text is null or exists (
+             select 1
+               from (select x.issues from app.inbox_item_extraction as x
+                      where x.item_id = i.id
+                      order by x.created_at desc, x.id desc
+                      limit 1) as newest
+              where newest.issues @> jsonb_build_array(jsonb_build_object('code', $4::text))))
+       and ($5::text is null or case when $5::text = '${INBOX_ASSIGNEE_NONE}'
+                                     then i.assignee_id is null
+                                     else i.assignee_id = $5::text end)
+       and ($6::text is null or case $6::text
+                                     when 'unknown' then i.confidence is null
+                                     when 'low' then i.confidence < $7::numeric
+                                     when 'medium' then i.confidence >= $7::numeric and i.confidence < $8::numeric
+                                     else i.confidence >= $8::numeric end)`;
     const total = await transaction.query<{ total: number }>(
       `select count(*)::int as total from app.inbox_item as i where ${filter}`,
       values,
@@ -1353,7 +1425,7 @@ export async function listItems(
                  from app.inbox_item as i
                 where ${filter}
                 order by i.received_at desc, i.id desc
-                limit $4 offset $5) as p
+                limit $9 offset $10) as p
         cross join lateral (
           select count(*)::int as file_count,
                  max(b.original_filename) filter (where f.position = 1) as primary_filename
@@ -1548,11 +1620,209 @@ export async function updateHints(
   });
 }
 
-export async function routeToDocument(
+// The pre-checks of a route, before the document insert: a reference the entity already uses under the kind,
+// and a probable duplicate by partner. Each refusal names what it found, so a person can choose.
+export async function checkRoutePreconditions(
+  transaction: PoolClient,
+  input: {
+    acknowledgeDuplicateOf?: string;
+    document: CreateDocumentRequest;
+    extraction: ExtractionRecord;
+    legalEntityIds: readonly string[] | null;
+    organizationId: string;
+    supersedesDocumentId?: string;
+  },
+): Promise<{ documentId: string; version: number } | null> {
+  const { document } = input;
+  const conflict =
+    document.reference === undefined
+      ? null
+      : await transaction.query<{ id: string; version: number }>(
+          `select id, version
+             from app.document
+            where legal_entity_id = $1 and kind = $2 and reference = $3 and is_current
+              for update`,
+          [document.legalEntityId, document.kind, document.reference],
+        );
+  const current = conflict?.rows[0] ?? null;
+
+  if (current !== null && input.supersedesDocumentId === undefined) {
+    throw new RouteRefusedError(
+      { code: 'reference_conflict', documentId: current.id },
+      input.extraction,
+    );
+  }
+
+  // A version names exactly the current row of its reference; anything else is a stale or forged request.
+  if (
+    input.supersedesDocumentId !== undefined &&
+    input.supersedesDocumentId !== current?.id
+  ) {
+    throw new BadRequestException();
+  }
+
+  if (document.partnerId !== undefined) {
+    const candidates = await findDuplicateCandidates(transaction, {
+      documentDate: document.documentDate,
+      excludeDocumentId: current?.id ?? null,
+      legalEntityIds: input.legalEntityIds,
+      organizationId: input.organizationId,
+      partnerId: document.partnerId,
+      reference: document.reference ?? null,
+      totalAmount: documentTotalOf(document),
+    });
+
+    if (candidates.length > 0 && input.acknowledgeDuplicateOf === undefined) {
+      throw new RouteRefusedError(
+        { candidates, code: 'duplicate_probable' },
+        input.extraction,
+      );
+    }
+
+    if (
+      input.acknowledgeDuplicateOf !== undefined &&
+      !candidates.some(
+        (candidate) => candidate.id === input.acknowledgeDuplicateOf,
+      )
+    ) {
+      throw new BadRequestException();
+    }
+  } else if (input.acknowledgeDuplicateOf !== undefined) {
+    // No partner means the duplicate check never ran, so an acknowledgement names a candidate that cannot exist.
+    throw new BadRequestException();
+  }
+
+  return current === null
+    ? null
+    : { documentId: current.id, version: current.version };
+}
+
+// Organization-wide within the caller's entities: the same supplier invoices several entities, and a partner is
+// organization-wide. Exact reference regardless of kind, or the same total within three days of the date.
+export async function findDuplicateCandidates(
+  transaction: PoolClient,
+  input: {
+    documentDate: string;
+    excludeDocumentId: string | null;
+    legalEntityIds: readonly string[] | null;
+    organizationId: string;
+    partnerId: string;
+    reference: string | null;
+    totalAmount: string | null;
+  },
+): Promise<DuplicateCandidate[]> {
+  const result = await transaction.query<{
+    document_date: string;
+    id: string;
+    reference: string | null;
+    total_amount: string | null;
+  }>(
+    `select id, reference, document_date::text as document_date, total_amount::text as total_amount
+       from app.document
+      where organization_id = $1
+        and ($7::uuid[] is null or legal_entity_id = any($7::uuid[]))
+        and partner_id = $2
+        and is_current
+        and id <> coalesce($5::uuid, '00000000-0000-0000-0000-000000000000')
+        and ((reference is not null and reference = $3)
+             or ($4::numeric is not null and total_amount = $4::numeric
+                 and document_date between $6::date - 3 and $6::date + 3))
+      order by document_date desc, id
+      limit 10`,
+    [
+      input.organizationId,
+      input.partnerId,
+      input.reference,
+      input.totalAmount,
+      input.excludeDocumentId,
+      input.documentDate,
+      entityFilter(input.legalEntityIds),
+    ],
+  );
+
+  return result.rows.map((row) => ({
+    documentDate: row.document_date,
+    id: row.id,
+    reference: row.reference,
+    totalAmount: row.total_amount,
+  }));
+}
+
+// The superseded row steps aside: not current, and without its event or open issues, so nothing counts twice.
+export async function supersedeDocument(
+  transaction: PoolClient,
+  documentId: string,
+): Promise<void> {
+  const flipped = await transaction.query(
+    'update app.document set is_current = false, updated_at = now() where id = $1 and is_current',
+    [documentId],
+  );
+
+  // Zero rows means another transaction versioned it first.
+  if (flipped.rowCount === 0) {
+    throw new ConflictException();
+  }
+
+  await transaction.query(
+    'delete from app.economic_event where document_id = $1',
+    [documentId],
+  );
+  await transaction.query(
+    'delete from app.data_issue where document_id = $1 and resolved_at is null',
+    [documentId],
+  );
+}
+
+// A refused route commits the extraction row with its issue in a transaction of its own, then answers 409.
+async function routeOrRefuse(
+  pool: DatabasePool,
+  input: ReadItemInput,
+  route: (transaction: PoolClient) => Promise<InboxItemDetail | null>,
+): Promise<InboxItemDetail | null> {
+  try {
+    return await runInTenantContext(pool, input, route);
+  } catch (error) {
+    if (!(error instanceof RouteRefusedError)) {
+      throw error;
+    }
+
+    const { extraction, refusal } = error;
+
+    if (refusal.code === 'missing_required_field' || extraction === null) {
+      throw error;
+    }
+
+    const issue =
+      refusal.code === 'reference_conflict'
+        ? {
+            code: refusal.code,
+            field: 'reference',
+            message: `A current document already carries this reference: ${refusal.documentId}.`,
+          }
+        : {
+            code: refusal.code,
+            message: `Probable duplicate of ${refusal.candidates.map((candidate) => candidate.id).join(', ')}.`,
+          };
+
+    await runInTenantContext(pool, input, (transaction) =>
+      insertExtraction(transaction, input, input.itemId, {
+        ...extraction,
+        output: {
+          ...extraction.output,
+          issues: [...extraction.output.issues, issue],
+        },
+      }),
+    );
+
+    throw new ConflictException(refusal);
+  }
+}
+
+export function routeToDocument(
   pool: DatabasePool,
   input: RouteToDocumentInput,
 ): Promise<InboxItemDetail | null> {
-  return runInTenantContext(pool, input, async (transaction) => {
+  return routeOrRefuse(pool, input, async (transaction) => {
     const before = await loadItem(
       transaction,
       input.itemId,
@@ -1579,42 +1849,137 @@ export async function routeToDocument(
       throw new BadRequestException();
     }
 
-    // The suggestion is computed from the pre-route state, before the manual row becomes the newest extraction.
-    const suggested = await loadRouteSuggestion(transaction, before, files);
+    return routeInTransaction(transaction, input, before, files);
+  });
+}
 
-    const created = await createDocumentInTransaction(transaction, {
-      ...input,
-      body: input.document,
-      inbox: { itemId: before.id, source: 'upload' },
-    });
+// Bulk approve: the composed suggestion is the draft, routed as the person with nothing acknowledged or superseded.
+export function approveItem(
+  pool: DatabasePool,
+  input: ReadItemInput,
+): Promise<InboxItemDetail | null> {
+  return routeOrRefuse(pool, input, async (transaction) => {
+    const before = await loadItem(
+      transaction,
+      input.itemId,
+      input.legalEntityIds,
+      true,
+    );
 
-    if (created === null) {
+    if (before === null) {
       return null;
     }
 
-    await insertExtraction(transaction, input, before.id, input.extraction);
-    await insertCorrections(transaction, input, before.id, suggested, {
-      currencyCode: input.document.currencyCode,
-      documentDate: input.document.documentDate,
-      kind: input.document.kind,
-      legalEntityId: input.document.legalEntityId,
-      partnerId: input.document.partnerId ?? null,
-      reference: input.document.reference ?? null,
-      title: input.document.title,
-    });
+    if (before.status !== 'needs_review' && before.status !== 'received') {
+      throw new ConflictException();
+    }
 
-    await finishRouteInTransaction(
+    const files = await loadItemFiles(transaction, before.id);
+    const composed = await loadRouteSuggestion(transaction, before, files);
+    const parsed =
+      composed.missing.length === 0
+        ? createDocumentRequestSchema.safeParse(
+            toCreateDocumentBody(composed.draft),
+          )
+        : null;
+    const field =
+      parsed === null
+        ? composed.missing[0]
+        : parsed.success
+          ? undefined
+          : String(parsed.error.issues[0]?.path[0] ?? 'kind');
+
+    if (parsed === null || !parsed.success) {
+      throw new RouteRefusedError(
+        { code: 'missing_required_field', field: field ?? 'kind' },
+        null,
+      );
+    }
+
+    const { document, output } = manualProvider(parsed.data);
+
+    return routeInTransaction(
       transaction,
-      input,
+      {
+        ...input,
+        correctionReasons: {},
+        document,
+        extraction: {
+          output,
+          provider: MANUAL_PROVIDER,
+          providerVersion: MANUAL_PROVIDER_VERSION,
+        },
+        fileBlobIds: files.map((file) => file.blobId),
+      },
       before,
-      created.document,
-      input.fileBlobIds,
-      { kind: 'user', userId: input.userId },
+      files,
     );
-
-    const after = await loadItem(transaction, before.id, input.legalEntityIds);
-    return after === null ? null : loadDetail(transaction, after);
   });
+}
+
+async function routeInTransaction(
+  transaction: PoolClient,
+  input: RouteToDocumentInput,
+  before: InboxItem,
+  files: readonly ItemFileRecord[],
+): Promise<InboxItemDetail | null> {
+  // The draft's entity is checked before either pre-check query runs, so neither can read outside the scope.
+  const entity = await transaction.query(
+    `select 1 from app.legal_entity
+      where id = $1 and ($2::uuid[] is null or id = any($2::uuid[]))`,
+    [input.document.legalEntityId, entityFilter(input.legalEntityIds)],
+  );
+
+  if (entity.rowCount === 0) {
+    return null;
+  }
+
+  // The suggestion is computed from the pre-route state, before the manual row becomes the newest extraction.
+  const suggested = await loadRouteSuggestion(transaction, before, files);
+  const superseded = await checkRoutePreconditions(transaction, input);
+
+  if (superseded !== null) {
+    await supersedeDocument(transaction, superseded.documentId);
+  }
+
+  const created = await createDocumentInTransaction(transaction, {
+    ...input,
+    body: input.document,
+    inbox: { itemId: before.id, source: 'upload' },
+    ...(superseded === null ? {} : { supersedes: superseded }),
+  });
+
+  if (created === null) {
+    // A superseded row was already flipped, so a null here must abort the transaction, not commit a dangling document.
+    throw new NotFoundException();
+  }
+
+  await insertExtraction(transaction, input, before.id, input.extraction);
+  await insertCorrections(transaction, input, before.id, suggested, {
+    currencyCode: input.document.currencyCode,
+    documentDate: input.document.documentDate,
+    kind: input.document.kind,
+    legalEntityId: input.document.legalEntityId,
+    partnerId: input.document.partnerId ?? null,
+    reference: input.document.reference ?? null,
+    title: input.document.title,
+  });
+
+  await finishRouteInTransaction(
+    transaction,
+    input,
+    before,
+    created.document,
+    input.fileBlobIds,
+    { kind: 'user', userId: input.userId },
+    {
+      acknowledgeDuplicateOf: input.acknowledgeDuplicateOf ?? null,
+      supersedesDocumentId: superseded?.documentId ?? null,
+    },
+  );
+
+  const after = await loadItem(transaction, before.id, input.legalEntityIds);
+  return after === null ? null : loadDetail(transaction, after);
 }
 
 // The draft a route suggests: the hints, the rules the newest rule extraction named, and the effective target.
@@ -1644,6 +2009,10 @@ export async function finishRouteInTransaction(
   document: { id: string; kind: string; legalEntityId: string },
   fileBlobIds: readonly string[],
   decision: RouteDecision,
+  audit: {
+    acknowledgeDuplicateOf: string | null;
+    supersedesDocumentId: string | null;
+  } = { acknowledgeDuplicateOf: null, supersedesDocumentId: null },
 ): Promise<void> {
   await transaction.query(
     `insert into app.document_file (document_id, organization_id, blob_id, position, created_by)
@@ -1677,6 +2046,7 @@ export async function finishRouteInTransaction(
     [
       item.id,
       JSON.stringify({
+        ...audit,
         decidedByKind: decision.kind,
         documentId: document.id,
         kind: document.kind,
@@ -1684,6 +2054,144 @@ export async function finishRouteInTransaction(
       }),
     ],
   );
+}
+
+// The item's files join an existing document at the next positions; the item is routed to it without a create.
+export async function attachItem(
+  pool: DatabasePool,
+  input: AttachItemInput,
+): Promise<InboxItemDetail | null> {
+  return runInTenantContext(pool, input, async (transaction) => {
+    const before = await loadItem(
+      transaction,
+      input.itemId,
+      input.legalEntityIds,
+      true,
+    );
+
+    if (before === null) {
+      return null;
+    }
+
+    if (before.status !== 'needs_review' && before.status !== 'received') {
+      throw new ConflictException();
+    }
+
+    const document = await transaction.query<{
+      id: string;
+      kind: string;
+      legal_entity_id: string;
+    }>(
+      `select id, kind, legal_entity_id
+         from app.document
+        where id = $1 and ($2::uuid[] is null or legal_entity_id = any($2::uuid[]))
+          for update`,
+      [input.documentId, entityFilter(input.legalEntityIds)],
+    );
+    const target = document.rows[0];
+
+    if (target === undefined) {
+      return null;
+    }
+
+    const files = await loadItemFiles(transaction, before.id);
+
+    // Nothing to add: attaching zero files would route the item without ever joining the document.
+    if (files.length === 0) {
+      throw new ConflictException('no_files');
+    }
+
+    const blobIds = files.map((file) => file.blobId);
+    const present = await transaction.query(
+      'select 1 from app.document_file where document_id = $1 and blob_id = any($2::uuid[])',
+      [target.id, blobIds],
+    );
+
+    // The same bytes twice on one document is the duplicate this action exists to avoid.
+    if ((present.rowCount ?? 0) > 0) {
+      throw new ConflictException('blob_already_attached');
+    }
+
+    await transaction.query(
+      `insert into app.document_file (document_id, organization_id, blob_id, position, created_by)
+       select $1, $2, blob_id,
+              coalesce((select max(position) from app.document_file where document_id = $1), 0) + position,
+              $4
+         from unnest($3::uuid[]) with ordinality as file(blob_id, position)`,
+      [target.id, input.organizationId, blobIds, input.userId],
+    );
+    await transaction.query(
+      `update app.inbox_item
+          set document_id = $2,
+              legal_entity_id = $3,
+              status = 'routed',
+              decided_by_kind = 'user',
+              decided_by_rule_id = null,
+              decided_by_user_id = $4,
+              routed_at = now(),
+              updated_at = now()
+        where id = $1`,
+      [before.id, target.id, target.legal_entity_id, input.userId],
+    );
+    await appendEvent(transaction, input, before.id, 'attached');
+    await transaction.query(
+      "select app.record_audit('inbox_item.attached', 'inbox_item', $1, $2::jsonb)",
+      [before.id, JSON.stringify({ documentId: target.id, kind: target.kind })],
+    );
+
+    const after = await loadItem(transaction, before.id, input.legalEntityIds);
+    return after === null ? null : loadDetail(transaction, after);
+  });
+}
+
+// A failed email parent goes back to received so the split job accepts it again; the caller enqueues the job.
+export async function reopenEmailItem(
+  pool: DatabasePool,
+  input: ReadItemInput,
+): Promise<ReopenedEmailItem | null> {
+  return runInTenantContext(pool, input, async (transaction) => {
+    const before = await loadItem(
+      transaction,
+      input.itemId,
+      input.legalEntityIds,
+      true,
+    );
+
+    if (before === null) {
+      return null;
+    }
+
+    if (
+      before.status !== 'failed' ||
+      before.payloadKind !== 'email' ||
+      before.channelId === null
+    ) {
+      throw new ConflictException();
+    }
+
+    await transaction.query(
+      "update app.inbox_item set status = 'received', updated_at = now() where id = $1",
+      [before.id],
+    );
+    await appendEvent(transaction, input, before.id, 'reopened');
+    await transaction.query(
+      "select app.record_audit('inbox_item.reopened', 'inbox_item', $1, '{}'::jsonb)",
+      [before.id],
+    );
+
+    const after = await loadItem(transaction, before.id, input.legalEntityIds);
+
+    return after === null
+      ? null
+      : {
+          detail: await loadDetail(transaction, after),
+          job: {
+            channelId: before.channelId,
+            itemId: before.id,
+            organizationId: input.organizationId,
+          },
+        };
+  });
 }
 
 // One row per suggested field the person changed; a field nothing suggested has no source and gets no row.
@@ -1745,13 +2253,60 @@ export async function undoRoute(
       throw new ConflictException();
     }
 
-    const deleted = await deleteDocumentInTransaction(transaction, {
-      ...input,
-      documentId: before.documentId,
-    });
+    const owner = await transaction.query<{ inbox_item_id: string | null }>(
+      `select inbox_item_id
+         from app.document
+        where id = $1 and ($2::uuid[] is null or legal_entity_id = any($2::uuid[]))
+          for update`,
+      [before.documentId, entityFilter(input.legalEntityIds)],
+    );
+    const document = owner.rows[0];
 
-    if (!deleted) {
+    if (document === undefined) {
       return null;
+    }
+
+    // This item created the document: the delete path removes it. Otherwise the item was attached to a document
+    // another item created, so only the rows this item brought go and the document stays.
+    if (document.inbox_item_id === before.id) {
+      let deleted: boolean;
+
+      try {
+        deleted = await deleteDocumentInTransaction(transaction, {
+          ...input,
+          documentId: before.documentId,
+        });
+      } catch (error) {
+        // The restored predecessor's reference can now collide with a current document; answer the same as a route.
+        if (isDuplicateDocumentReference(error)) {
+          throw new ConflictException();
+        }
+
+        throw error;
+      }
+
+      if (!deleted) {
+        return null;
+      }
+    } else {
+      await transaction.query(
+        `delete from app.document_file
+          where document_id = $1
+            and blob_id in (select blob_id from app.inbox_item_file where item_id = $2)`,
+        [before.documentId, before.id],
+      );
+      await transaction.query(
+        `update app.inbox_item
+            set document_id = null,
+                status = 'needs_review',
+                decided_by_kind = null,
+                decided_by_user_id = null,
+                routed_at = null,
+                updated_at = now()
+          where id = $1`,
+        [before.id],
+      );
+      await appendEvent(transaction, input, before.id, 'unrouted');
     }
 
     await transaction.query(
@@ -2856,7 +3411,9 @@ export async function adoptRule(
 
 export abstract class InboxRepository implements ChannelPrincipalReader {
   abstract adoptRule(input: AdoptRuleInput): Promise<InboxRule | null>;
+  abstract approveItem(input: ReadItemInput): Promise<InboxItemDetail | null>;
   abstract assignItem(input: AssignItemInput): Promise<InboxItemDetail | null>;
+  abstract attachItem(input: AttachItemInput): Promise<InboxItemDetail | null>;
   abstract createChannel(
     input: CreateChannelInput,
   ): Promise<InboxChannel | null>;
@@ -2899,6 +3456,9 @@ export abstract class InboxRepository implements ChannelPrincipalReader {
   abstract recordExtraction(
     input: RecordExtractionInput,
   ): Promise<InboxItemDetail | null>;
+  abstract reopenEmailItem(
+    input: ReadItemInput,
+  ): Promise<ReopenedEmailItem | null>;
   abstract restoreItem(input: ReadItemInput): Promise<InboxItemDetail | null>;
   abstract revokeCredential(input: RevokeCredentialInput): Promise<boolean>;
   abstract routeToDocument(
@@ -2929,8 +3489,16 @@ export class DatabaseInboxRepository
     return adoptRule(await this.getPool(), input);
   }
 
+  async approveItem(input: ReadItemInput): Promise<InboxItemDetail | null> {
+    return approveItem(await this.getPool(), input);
+  }
+
   async assignItem(input: AssignItemInput): Promise<InboxItemDetail | null> {
     return assignItem(await this.getPool(), input);
+  }
+
+  async attachItem(input: AttachItemInput): Promise<InboxItemDetail | null> {
+    return attachItem(await this.getPool(), input);
   }
 
   async createRule(input: CreateRuleInput): Promise<InboxRule | null> {
@@ -3040,6 +3608,12 @@ export class DatabaseInboxRepository
     input: RecordExtractionInput,
   ): Promise<InboxItemDetail | null> {
     return recordExtraction(await this.getPool(), input);
+  }
+
+  async reopenEmailItem(
+    input: ReadItemInput,
+  ): Promise<ReopenedEmailItem | null> {
+    return reopenEmailItem(await this.getPool(), input);
   }
 
   async restoreItem(input: ReadItemInput): Promise<InboxItemDetail | null> {

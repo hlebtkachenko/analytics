@@ -629,6 +629,7 @@ export default function InboxRulesPage() {
         emptyLabel={t('inboxRules.empty')}
         errorLabel={t('inboxRules.error')}
         rows={rows}
+        search
         size="md"
         state={
           failed

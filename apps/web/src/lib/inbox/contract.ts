@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 import {
   createDocumentRequestSchema,
+  decimalStringSchema,
+  documentDateSchema,
   documentKindSchema,
   identifierSchema,
 } from '../documents/contract.ts';
@@ -89,6 +91,7 @@ export const inboxEventKindSchema = z.enum([
   'assigned',
   'hint_added',
   'failed',
+  'attached',
 ]);
 export const inboxDiscardReasonSchema = z.enum([
   'irrelevant',
@@ -118,10 +121,18 @@ export const inboxEventReasonSchema = z.enum([
 ]);
 export const inboxIssueCodeSchema = z.enum([
   'duplicate_exact',
+  'duplicate_probable',
   'entity_unresolved',
   'missing_required_field',
   'reference_conflict',
   ...inboxUnprocessableReasonSchema.options,
+]);
+// The four bands the list filter names; the API owns the thresholds.
+export const inboxConfidenceBandSchema = z.enum([
+  'low',
+  'medium',
+  'high',
+  'unknown',
 ]);
 export const providerStepSchema = z.enum(['sniff', 'hint', 'rule', 'manual']);
 
@@ -153,6 +164,8 @@ export const inboxItemSchema = inboxHintsSchema
     detectedType: tokenSchema.nullable(),
     documentId: identifierSchema.nullable(),
     duplicateOfItemId: identifierSchema.nullable(),
+    // A person set a hint, assigned, restored, reopened or unrouted it: the automation leaves it alone.
+    humanTouched: z.boolean(),
     id: identifierSchema,
     legalEntityId: identifierSchema.nullable(),
     // The credential display prefix that pushed the item; never what was pushed.
@@ -424,9 +437,17 @@ const csvStatusSchema = z
       .max(inboxItemStatusSchema.options.length),
   );
 
+// The literal that filters the list to unassigned items.
+export const INBOX_ASSIGNEE_NONE = 'none';
+
 export const inboxItemListQuerySchema = z
   .object({
+    assigneeId: z
+      .union([z.literal(INBOX_ASSIGNEE_NONE), subjectIdentifierSchema])
+      .optional(),
+    confidence: inboxConfidenceBandSchema.optional(),
     detectedType: tokenSchema.optional(),
+    issue: inboxIssueCodeSchema.optional(),
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce
       .number()
@@ -452,12 +473,91 @@ export const correctionReasonsSchema = z
 
 export const routeInboxItemToDocumentRequestSchema = z
   .object({
+    // Names one candidate of a duplicate_probable answer, so the same route proceeds.
+    acknowledgeDuplicateOf: identifierSchema.optional(),
     correctionReasons: correctionReasonsSchema.optional(),
     document: createDocumentRequestSchema,
     fileBlobIds: z.array(identifierSchema).min(1).max(MAX_INBOX_FILES),
+    // Names the current document of a reference_conflict answer, so the new row becomes its next version.
+    supersedesDocumentId: identifierSchema.optional(),
   })
   .strict()
   .refine((body) => new Set(body.fileBlobIds).size === body.fileBlobIds.length);
+
+export const inboxDuplicateCandidateSchema = z
+  .object({
+    documentDate: documentDateSchema,
+    id: identifierSchema,
+    reference: z.string().nullable(),
+    totalAmount: decimalStringSchema.nullable(),
+  })
+  .strict();
+
+// The two 409 bodies a route can answer; the page needs their ids, not only the code.
+export const inboxRouteConflictSchema = z.discriminatedUnion('code', [
+  z.object({
+    code: z.literal('reference_conflict'),
+    documentId: identifierSchema,
+  }),
+  z.object({
+    candidates: z.array(inboxDuplicateCandidateSchema).min(1),
+    code: z.literal('duplicate_probable'),
+  }),
+]);
+
+export const attachInboxItemRequestSchema = z
+  .object({ documentId: identifierSchema })
+  .strict();
+
+export const MAX_INBOX_BULK_ITEMS = 100;
+export const inboxBulkActionSchema = z.enum([
+  'assign',
+  'snooze',
+  'discard',
+  'approve',
+]);
+
+// The field of the action is required and the others refused, so one body never carries a stray value.
+export const bulkInboxItemsRequestSchema = z
+  .object({
+    action: inboxBulkActionSchema,
+    assigneeId: subjectIdentifierSchema.nullable().optional(),
+    itemIds: z.array(identifierSchema).min(1).max(MAX_INBOX_BULK_ITEMS),
+    reason: inboxDiscardReasonSchema.optional(),
+    snoozedUntil: z.iso.datetime().nullable().optional(),
+  })
+  .strict()
+  .refine((body) => new Set(body.itemIds).size === body.itemIds.length)
+  .refine(
+    (body) =>
+      (body.assigneeId !== undefined) === (body.action === 'assign') &&
+      (body.snoozedUntil !== undefined) === (body.action === 'snooze') &&
+      (body.reason !== undefined) === (body.action === 'discard'),
+  );
+
+// Why one id of a bulk request was refused; the single-item routes answer the same cases by status.
+export const inboxBulkRefusalCodeSchema = z.enum([
+  'not_found',
+  'not_open',
+  'invalid',
+  'reference_conflict',
+  'duplicate_probable',
+  'missing_required_field',
+]);
+
+export const bulkInboxItemsResponseSchema = z
+  .object({
+    results: z.array(
+      z
+        .object({
+          code: inboxBulkRefusalCodeSchema.optional(),
+          itemId: identifierSchema,
+          status: z.enum(['ok', 'refused']),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
 
 export const discardInboxItemRequestSchema = z
   .object({ reason: inboxDiscardReasonSchema })
@@ -770,4 +870,21 @@ export type UpdateInboxHintsRequest = z.input<
 >;
 export type UpdateInboxSettingsRequest = z.infer<
   typeof updateInboxSettingsRequestSchema
+>;
+export type AttachInboxItemRequest = z.infer<
+  typeof attachInboxItemRequestSchema
+>;
+export type BulkInboxItemsRequest = z.infer<typeof bulkInboxItemsRequestSchema>;
+export type BulkInboxItemsResponse = z.infer<
+  typeof bulkInboxItemsResponseSchema
+>;
+export type InboxBulkAction = z.infer<typeof inboxBulkActionSchema>;
+export type InboxBulkRefusalCode = z.infer<typeof inboxBulkRefusalCodeSchema>;
+export type InboxConfidenceBand = z.infer<typeof inboxConfidenceBandSchema>;
+export type InboxDuplicateCandidate = z.infer<
+  typeof inboxDuplicateCandidateSchema
+>;
+export type InboxRouteConflict = z.infer<typeof inboxRouteConflictSchema>;
+export type RouteInboxItemToDocumentRequest = z.input<
+  typeof routeInboxItemToDocumentRequestSchema
 >;

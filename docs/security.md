@@ -594,6 +594,26 @@ organization whose author is currently a verified owner or admin, raising when
 when the setting is empty and on any reason other than
 `rule_author_unavailable`.
 
+Amended 2026-09-17 (1b-actions): `POST .../items/bulk` runs each of up to 100
+distinct item ids through the existing single-item repository function in its
+own transaction, in body order inside one request, so a refusal on one id (409
+not open, 404 not visible) never rolls back another; the response carries one
+`{ itemId, status, code? }` per id and the audit entry is one row per changed
+item, the same as the single-item actions. Like every route in this spec, bulk
+resolves `manageDocuments` through the controller's `manage` helper
+(`inbox.controller.ts:574-584`), which a `channel_` subject never passes, so the
+channel principal cannot call bulk, attach, or the versioning and fingerprint
+routes either. Attach runs as one transaction: it locks the target document row,
+inserts the item's `document_file` rows, and routes the item, so a concurrent
+attach or delete of the same document serializes against it; undo discriminates
+by `document.inbox_item_id`, deleting only the attaching item's `document_file`
+rows and leaving the document when another item created it, or deleting the
+document itself in the same transaction as the unroute when this item created
+it. `POST .../items/:itemId/process` on a `failed` email parent re-enqueues
+`split_email_item` instead of re-sniffing; its children stay idempotent by
+`external_id`, so a re-run resumes at the first child that does not exist yet
+rather than duplicating an already-split attachment.
+
 ## Temporary organization action boundary
 
 The 6 organization pages, now including `/[orgSlug]/entities`, are deliberately

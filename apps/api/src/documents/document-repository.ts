@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   type OnModuleDestroy,
 } from '@nestjs/common';
@@ -50,6 +51,8 @@ export interface CreateDocumentInput extends EntityScopeSelector {
   body: CreateDocumentRequest;
   // Internal to the inbox route: the item the document was routed from, never part of the public create body.
   inbox?: { itemId: string; source: DocumentSource };
+  // Internal to the inbox version route: the current row this document replaces, already flipped by the caller.
+  supersedes?: { documentId: string; version: number };
 }
 
 export interface UpdateDocumentInput extends ReadDocumentInput {
@@ -119,6 +122,7 @@ const SUMMARY_SELECT = `select d.id,
 
 // Every list filter is a bound parameter; only the sort column and its direction come from a closed whitelist.
 const LIST_FILTER = `($1::uuid[] is null or d.legal_entity_id = any($1::uuid[]))
+       and ($9::boolean is null or d.is_current = $9::boolean)
        and ($2::uuid is null or d.legal_entity_id = $2::uuid)
        and ($3::text[] is null or d.kind = any($3::text[]))
        and ($4::text[] is null or d.status = any($4::text[]))
@@ -176,6 +180,7 @@ function filterValues(input: ListDocumentsInput): unknown[] {
     query.dateFrom ?? null,
     query.dateTo ?? null,
     query.q === undefined ? null : likePattern(query.q),
+    query.current === 'all' ? null : query.current === 'true',
   ];
 }
 
@@ -207,7 +212,7 @@ export async function listDocuments(
       `${SUMMARY_SELECT}
         where ${LIST_FILTER}
         order by ${SORT_COLUMNS[query.sort]} ${query.order === 'asc' ? 'asc' : 'desc'}, d.id desc
-        limit $9 offset $10`,
+        limit $10 offset $11`,
       [...values, query.pageSize, (query.page - 1) * query.pageSize],
     );
 
@@ -380,6 +385,42 @@ async function loadDetail(
       order by l.created_at, l.id`,
     [documentId, entityIds],
   );
+  const files = await transaction.query<{
+    blob_id: string;
+    byte_size: string;
+    media_type: string;
+    original_filename: string | null;
+    position: number;
+  }>(
+    `select f.blob_id, f.position, b.original_filename, b.media_type, b.byte_size::text as byte_size
+       from app.document_file as f
+       join app.blob as b on b.id = f.blob_id and b.organization_id = f.organization_id
+      where f.document_id = $1
+      order by f.position`,
+    [documentId],
+  );
+  const inboxItems = await transaction.query<{
+    channel_kind: string;
+    id: string;
+    received_at: Date;
+    status: string;
+  }>(
+    `select id, status, received_at, channel_kind
+       from app.inbox_item
+      where document_id = $1
+      order by received_at, id`,
+    [documentId],
+  );
+  const chain = await transaction.query<{
+    superseded_by: string | null;
+    supersedes: string | null;
+  }>(
+    `select d.supersedes_document_id as supersedes,
+            (select n.id from app.document as n where n.supersedes_document_id = d.id limit 1) as superseded_by
+       from app.document as d
+      where d.id = $1`,
+    [documentId],
+  );
   const invoiceRow = invoice.rows[0];
   const eventRow = event.rows[0];
 
@@ -388,6 +429,20 @@ async function loadDetail(
       attributes.rows.map((row) => [row.key, row.value]),
     ),
     document: summary,
+    files: files.rows.map((row) => ({
+      blobId: row.blob_id,
+      byteSize: Number(row.byte_size),
+      filename: row.original_filename,
+      mediaType: row.media_type,
+      position: row.position,
+    })),
+    inboxItems: inboxItems.rows.map((row) => ({
+      channelKind:
+        row.channel_kind as DocumentDetail['inboxItems'][number]['channelKind'],
+      id: row.id,
+      receivedAt: row.received_at.toISOString(),
+      status: row.status as DocumentDetail['inboxItems'][number]['status'],
+    })),
     event:
       eventRow === undefined
         ? null
@@ -463,6 +518,8 @@ async function loadDetail(
       kind: row.kind as DocumentLink['kind'],
       toDocumentId: row.to_document_id,
     })),
+    supersededByDocumentId: chain.rows[0]?.superseded_by ?? null,
+    supersedesDocumentId: chain.rows[0]?.supersedes ?? null,
   };
 }
 
@@ -659,6 +716,51 @@ async function writeAttributes(
   );
 }
 
+function invoiceTotals(body: CreateDocumentRequest): {
+  advanceTotal: ReturnType<typeof parseDecimal>;
+  baseTotal: ReturnType<typeof parseDecimal>;
+  grossTotal: ReturnType<typeof parseDecimal>;
+  roundingAmount: ReturnType<typeof parseDecimal>;
+  vatTotal: ReturnType<typeof parseDecimal>;
+} {
+  let baseTotal = DECIMAL_ZERO;
+  let vatTotal = DECIMAL_ZERO;
+  let advanceTotal = DECIMAL_ZERO;
+
+  for (const line of body.invoice?.lines ?? []) {
+    const base = parseDecimal(line.baseAmount);
+    const vat = parseDecimal(line.vatAmount);
+
+    // The three totals are the supply value of the invoice, so a deduction line feeds the advance total instead.
+    if (line.lineKind === 'advance_deduction') {
+      advanceTotal = addDecimal(advanceTotal, addDecimal(base, vat));
+      continue;
+    }
+
+    baseTotal = addDecimal(baseTotal, base);
+    vatTotal = addDecimal(vatTotal, vat);
+  }
+
+  return {
+    advanceTotal,
+    baseTotal,
+    grossTotal: addDecimal(baseTotal, vatTotal),
+    roundingAmount: parseDecimal(body.invoice?.roundingAmount ?? '0'),
+    vatTotal,
+  };
+}
+
+// Invoice totals are computed from the lines, so a client value is only used when there is no invoice.
+// What the paper says to pay before the advance is deducted; the database generates the amount due from it.
+export function documentTotalOf(body: CreateDocumentRequest): string | null {
+  if (body.invoice === undefined) {
+    return body.totalAmount ?? null;
+  }
+
+  const { grossTotal, roundingAmount } = invoiceTotals(body);
+  return formatDecimal(addDecimal(grossTotal, roundingAmount));
+}
+
 // Returns null when the legal entity or the partner is absent or out of scope, so a stranger learns nothing.
 export async function createDocument(
   pool: DatabasePool,
@@ -698,33 +800,14 @@ export async function createDocumentInTransaction(
     }
   }
 
-  let baseTotal = DECIMAL_ZERO;
-  let vatTotal = DECIMAL_ZERO;
-  let advanceTotal = DECIMAL_ZERO;
-
-  for (const line of body.invoice?.lines ?? []) {
-    const base = parseDecimal(line.baseAmount);
-    const vat = parseDecimal(line.vatAmount);
-
-    // The three totals are the supply value of the invoice, so a deduction line feeds the advance total instead.
-    if (line.lineKind === 'advance_deduction') {
-      advanceTotal = addDecimal(advanceTotal, addDecimal(base, vat));
-      continue;
-    }
-
-    baseTotal = addDecimal(baseTotal, base);
-    vatTotal = addDecimal(vatTotal, vat);
-  }
-
-  const grossTotal = addDecimal(baseTotal, vatTotal);
-  const roundingAmount = parseDecimal(body.invoice?.roundingAmount ?? '0');
-  // What the paper says to pay before the advance is deducted; the database generates the amount due from it.
-  const invoiceTotal = addDecimal(grossTotal, roundingAmount);
+  const { advanceTotal, baseTotal, grossTotal, roundingAmount, vatTotal } =
+    invoiceTotals(body);
   const created = await transaction.query<{ id: string }>(
     `insert into app.document
          (organization_id, legal_entity_id, kind, reference, title, partner_id, document_date,
-          valid_from, valid_to, currency_code, total_amount, notes, created_by, source, inbox_item_id)
-       values ($1, $2, $3, $4, $5, $6, $7::date, $8::date, $9::date, $10, $11, $12, $13, $14, $15)
+          valid_from, valid_to, currency_code, total_amount, notes, created_by, source, inbox_item_id,
+          version, supersedes_document_id)
+       values ($1, $2, $3, $4, $5, $6, $7::date, $8::date, $9::date, $10, $11, $12, $13, $14, $15, $16, $17)
        returning id`,
     [
       input.organizationId,
@@ -737,14 +820,13 @@ export async function createDocumentInTransaction(
       body.validFrom ?? null,
       body.validTo ?? null,
       body.currencyCode,
-      // Invoice totals are computed from the lines, so a client value is only used when there is no invoice.
-      body.invoice === undefined
-        ? (body.totalAmount ?? null)
-        : formatDecimal(invoiceTotal),
+      documentTotalOf(body),
       body.notes ?? null,
       input.userId,
       input.inbox?.source ?? 'manual',
       input.inbox?.itemId ?? null,
+      input.supersedes === undefined ? 1 : input.supersedes.version + 1,
+      input.supersedes?.documentId ?? null,
     ],
   );
   const documentId = created.rows[0]?.id;
@@ -1047,16 +1129,26 @@ export async function deleteDocumentInTransaction(
   transaction: PoolClient,
   input: ReadDocumentInput,
 ): Promise<boolean> {
-  const visible = await transaction.query(
-    `select 1
+  const visible = await transaction.query<{
+    is_current: boolean;
+    supersedes_document_id: string | null;
+  }>(
+    `select is_current, supersedes_document_id
        from app.document
       where id = $1
-        and ($2::uuid[] is null or legal_entity_id = any($2::uuid[]))`,
+        and ($2::uuid[] is null or legal_entity_id = any($2::uuid[]))
+        for update`,
     [input.documentId, entityFilter(input.legalEntityIds)],
   );
+  const target = visible.rows[0];
 
-  if (visible.rowCount === 0) {
+  if (target === undefined) {
     return false;
+  }
+
+  // A later version points at this row; deleting it would orphan the chain.
+  if (!target.is_current) {
+    throw new ConflictException('not_current');
   }
 
   // The entity stays: a person bound it, and deleting the document does not unbind it.
@@ -1091,11 +1183,71 @@ export async function deleteDocumentInTransaction(
     return false;
   }
 
+  // The predecessor becomes current again and derives its own event, the same as an undo of the version route.
+  if (target.supersedes_document_id !== null) {
+    await restoreSupersededDocument(
+      transaction,
+      input.organizationId,
+      target.supersedes_document_id,
+    );
+  }
+
   await transaction.query(
     "select app.record_audit('document.deleted', 'document', $1, '{}'::jsonb)",
     [input.documentId],
   );
   return true;
+}
+
+async function restoreSupersededDocument(
+  transaction: PoolClient,
+  organizationId: string,
+  documentId: string,
+): Promise<void> {
+  const restored = await transaction.query<{
+    document_date: string;
+    kind: string;
+    legal_entity_id: string;
+    partner_id: string | null;
+  }>(
+    `update app.document
+        set is_current = true, updated_at = now()
+      where id = $1
+      returning kind, legal_entity_id, partner_id, document_date::text as document_date`,
+    [documentId],
+  );
+  const row = restored.rows[0];
+
+  if (row === undefined) {
+    return;
+  }
+
+  // Only an invoice derives an event; every other kind has no header row and nothing to rebuild.
+  const header = await transaction.query(
+    'select 1 from app.invoice where document_id = $1',
+    [documentId],
+  );
+
+  if (header.rowCount === 0) {
+    return;
+  }
+
+  const invoice = await loadDerivationInput(transaction, documentId);
+
+  await rederive(
+    transaction,
+    organizationId,
+    {
+      documentDate: row.document_date,
+      id: documentId,
+      kind: row.kind as DocumentKind,
+      legalEntityId: row.legal_entity_id,
+      partnerId: row.partner_id,
+      roundingAmount: invoice.roundingAmount,
+      taxPointDate: invoice.taxPointDate,
+    },
+    invoice.lines,
+  );
 }
 
 export async function createDocumentLink(

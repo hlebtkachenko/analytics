@@ -333,10 +333,11 @@ crosses the entity scope, because the draft's `legalEntityId` is checked against
 version chain carry `organization_id` through their composite keys
 (`document_file_document_fkey`, `document_supersedes_fkey`), so an attach or a
 version can never cross organizations. Bulk is bounded at 100 ids and one
-rate-limit unit. Audit entries (`inbox_item.attached`, `inbox_item.routed` with
-`supersedesDocumentId` or `acknowledgeDuplicateOf`, `inbox_item.bulk` with the
-action and the ids) carry ids and enum values only; logs carry operation, code
-and ids, never a filename, a reference or a total.
+rate-limit unit; it writes the same per-item audit entries as the single-item
+routes, not a separate bulk row. Audit entries (`inbox_item.attached`,
+`inbox_item.routed` with `supersedesDocumentId` or `acknowledgeDuplicateOf`)
+carry ids and enum values only; logs carry operation, code and ids, never a
+filename, a reference or a total.
 
 ## Verification
 

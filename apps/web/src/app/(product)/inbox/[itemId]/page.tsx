@@ -2,9 +2,15 @@
 
 import {
   Button,
+  Column,
+  ComboBox,
+  ContainedList,
+  ContainedListItem,
   Form,
+  Grid,
   InlineNotification,
   Link,
+  Modal,
   Select,
   SelectItem,
   Stack,
@@ -25,18 +31,28 @@ import { useTranslation } from 'react-i18next';
 import PageContainer from '../../../../components/page-container';
 import { useToast } from '../../../../components/shell/toast';
 import { getJson, isAbortError } from '../../../../lib/datasets/client';
-import { sendJson, withOrganization } from '../../../../lib/documents/client';
+import {
+  documentsPath,
+  sendJson,
+  withOrganization,
+} from '../../../../lib/documents/client';
 import {
   createDocumentRequestSchema,
   documentKindSchema,
+  documentListResponseSchema,
 } from '../../../../lib/documents/contract.ts';
-import type { DocumentKind } from '../../../../lib/documents/contract.ts';
+import type {
+  DocumentKind,
+  DocumentSummary,
+} from '../../../../lib/documents/contract.ts';
 import { documentKindLabelKeys } from '../../../../lib/documents/labels.ts';
 import {
+  attachInboxItem,
   inboxBlobDownloadPath,
   inboxBlobInlinePath,
   inboxItemActionPath,
   inboxItemPath,
+  routeInboxItemToDocument,
 } from '../../../../lib/inbox/client';
 import type { InboxItemAction } from '../../../../lib/inbox/client';
 import {
@@ -49,6 +65,8 @@ import type {
   InboxCorrectionField,
   InboxDiscardReason,
   InboxItemDetail,
+  InboxRouteConflict,
+  RouteInboxItemToDocumentRequest,
   UpdateInboxHintsRequest,
 } from '../../../../lib/inbox/contract.ts';
 import {
@@ -196,6 +214,15 @@ export default function InboxItemPage() {
     useState<InboxDiscardReason>('irrelevant');
   const [assigneeId, setAssigneeId] = useState('');
   const [snoozedUntil, setSnoozedUntil] = useState('');
+  // The route the API refused with a named conflict, kept so a choice can resend it with one more field.
+  const [pendingRoute, setPendingRoute] =
+    useState<RouteInboxItemToDocumentRequest>();
+  const [conflict, setConflict] = useState<InboxRouteConflict>();
+  const [attachQuery, setAttachQuery] = useState('');
+  const [attachTargetId, setAttachTargetId] = useState('');
+  const [attachCandidates, setAttachCandidates] = useState<DocumentSummary[]>(
+    [],
+  );
 
   // The result carries the read it answered, so a reload never shows another item.
   const detailKey = `${organizationId}:${itemId}:${String(refreshCount)}`;
@@ -236,6 +263,33 @@ export default function InboxItemPage() {
       controller.abort();
     };
   }, [detailKey, itemId, organizationId]);
+
+  // The documents list BFF with a search term, the same picker the document page uses for a link.
+  useEffect(() => {
+    if (organizationId.length === 0 || attachQuery.trim().length === 0) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const query = new URLSearchParams({
+      page: '1',
+      pageSize: '25',
+      q: attachQuery.trim(),
+    });
+    void getJson(documentsPath(organizationId, query), controller.signal)
+      .then((payload) => documentListResponseSchema.parse(payload))
+      .then((payload) => {
+        setAttachCandidates(payload.documents);
+      })
+      .catch((error: unknown) => {
+        if (!isAbortError(error)) {
+          setAttachCandidates([]);
+        }
+      });
+    return () => {
+      controller.abort();
+    };
+  }, [attachQuery, organizationId]);
 
   const suggested =
     detail === undefined
@@ -321,13 +375,69 @@ export default function InboxItemPage() {
         correctionReasons[correctionFields[key]] = reason;
       }
     }
-    await write('route/document', {
+    await submitRoute({
       ...(Object.keys(correctionReasons).length === 0
         ? {}
         : { correctionReasons }),
       document: parsed.data,
       fileBlobIds: detail.files.map((file) => file.blobId),
     });
+  }
+
+  // A 409 names a conflict the person resolves here; every other answer is a route or a failure.
+  async function submitRoute(
+    body: RouteInboxItemToDocumentRequest,
+  ): Promise<void> {
+    setBusy(true);
+    setWriteFailed(false);
+    setConflict(undefined);
+    const outcome = await routeInboxItemToDocument(
+      organizationId,
+      itemId,
+      body,
+    );
+    setBusy(false);
+    if (outcome.kind === 'routed') {
+      setPendingRoute(undefined);
+      setRefreshCount((count) => count + 1);
+    } else if (outcome.kind === 'conflict') {
+      setPendingRoute(body);
+      setConflict(outcome.conflict);
+    } else {
+      setWriteFailed(true);
+    }
+  }
+
+  async function attachToDocument(documentId: string): Promise<void> {
+    setConflict(undefined);
+    setBusy(true);
+    setWriteFailed(false);
+    const outcome = await attachInboxItem(organizationId, itemId, documentId);
+    setBusy(false);
+    if (outcome.kind === 'attached') {
+      setRefreshCount((count) => count + 1);
+      notify({ kind: 'success', title: t('inbox.attached') });
+    } else if (outcome.kind === 'not_found') {
+      notify({ kind: 'error', title: t('inbox.attachNotFound') });
+    } else if (outcome.kind === 'conflict') {
+      notify({
+        kind: 'error',
+        title: t(
+          outcome.code === 'not_open'
+            ? 'inbox.attachNotOpen'
+            : 'inbox.attachAlreadyAttached',
+        ),
+      });
+    } else {
+      setWriteFailed(true);
+    }
+  }
+
+  function documentHref(id: string): string {
+    return withOrganization(
+      `/documents/${encodeURIComponent(id)}`,
+      organization.slug,
+    );
   }
 
   // The rule page reads these to prefill its create modal from what the person just decided.
@@ -385,10 +495,27 @@ export default function InboxItemPage() {
 
   return (
     <PageContainer>
-      <Link href={withOrganization('/inbox', organization.slug)}>
-        {t('inbox.backToInbox')}
-      </Link>
-      <h1>{t('inbox.detail')}</h1>
+      <Stack gap={3}>
+        <h1>{t('inbox.detail')}</h1>
+        {item === undefined ? null : (
+          <div className={styles.summary!}>
+            <Tag size="sm" type={inboxStatusTagTypes[item.status]}>
+              {t(inboxStatusLabelKeys[item.status])}
+            </Tag>
+            <span>{item.receivedAt}</span>
+            {item.duplicateOfItemId === null ? null : (
+              <Link href={itemHref(item.duplicateOfItemId)}>
+                {t('inbox.duplicateOf')}
+              </Link>
+            )}
+            {item.documentId === null ? null : (
+              <Link href={documentHref(item.documentId)}>
+                {t('inbox.openDocument')}
+              </Link>
+            )}
+          </div>
+        )}
+      </Stack>
       {state === 'error' ? (
         <InlineNotification
           kind="error"
@@ -406,522 +533,692 @@ export default function InboxItemPage() {
         />
       ) : null}
       {item === undefined || detail === undefined ? null : (
-        <Stack gap={6}>
-          <div className={styles.summary!}>
-            <Tag size="sm" type={inboxStatusTagTypes[item.status]}>
-              {t(inboxStatusLabelKeys[item.status])}
-            </Tag>
-            <span>{item.receivedAt}</span>
-            {item.duplicateOfItemId === null ? null : (
-              <Link href={itemHref(item.duplicateOfItemId)}>
-                {t('inbox.duplicateOf')}
-              </Link>
-            )}
-            {item.documentId === null ? null : (
-              <Link
-                href={withOrganization(
-                  `/documents/${encodeURIComponent(item.documentId)}`,
-                  organization.slug,
-                )}
-              >
-                {t('inbox.openDocument')}
-              </Link>
-            )}
-          </div>
-
-          <section aria-label={t('inbox.preview')}>
-            <h2>{t('inbox.preview')}</h2>
-            {previewFile === undefined ? (
-              <p>{t('inbox.noPreview')}</p>
-            ) : isBlobQuarantined(previewFile) ? (
-              <InlineNotification
-                hideCloseButton
-                kind="warning"
-                lowContrast
-                subtitle={t('inbox.quarantinedHelp')}
-                title={t('inbox.quarantined')}
-              />
-            ) : (
-              <iframe
-                className={styles.preview!}
-                // A sandboxed frame disables plugins, and Chromium's PDF viewer is one, so only images are sandboxed.
-                {...(previewFile.mediaType === 'application/pdf'
-                  ? {}
-                  : { sandbox: '' })}
-                src={inboxBlobInlinePath(organizationId, previewFile.blobId)}
-                title={t('inbox.previewFrame')}
-              />
-            )}
-          </section>
-
-          <section aria-label={t('inbox.files')}>
-            <StructuredListWrapper aria-label={t('inbox.files')}>
-              <StructuredListHead>
-                <StructuredListRow head>
-                  <StructuredListCell head>
-                    {t('inbox.columnFileName')}
-                  </StructuredListCell>
-                  <StructuredListCell head>
-                    {t('inbox.download')}
-                  </StructuredListCell>
-                </StructuredListRow>
-              </StructuredListHead>
-              <StructuredListBody>
-                {detail.files.map((file) => {
-                  const name = file.originalFilename ?? file.sha256;
-                  return (
-                    <StructuredListRow key={file.blobId}>
-                      <StructuredListCell>
-                        {name} ({file.mediaType}, {String(file.byteSize)} B)
-                      </StructuredListCell>
-                      <StructuredListCell>
-                        {isBlobQuarantined(file) ? (
-                          <Tag size="sm" type="red">
-                            {t('inbox.quarantined')}
-                          </Tag>
-                        ) : (
-                          <Link
-                            href={inboxBlobDownloadPath(
-                              organizationId,
-                              file.blobId,
-                            )}
-                          >
-                            {t('inbox.downloadNamed', { name })}
-                          </Link>
-                        )}
-                      </StructuredListCell>
-                    </StructuredListRow>
-                  );
-                })}
-              </StructuredListBody>
-            </StructuredListWrapper>
-          </section>
-
-          <section aria-label={t('inbox.explanation')}>
-            <h2>{t('inbox.explanation')}</h2>
-            <p>
-              {t('inbox.routingTarget')}:{' '}
-              {t(
-                detail.routingTarget.destination === null
-                  ? inboxRoutingDestinationNoneLabelKey
-                  : inboxRoutingDestinationLabelKeys[
-                      detail.routingTarget.destination
-                    ],
-              )}
-              {detail.routingTarget.documentKind === null
-                ? ''
-                : `, ${t(documentKindLabelKeys[detail.routingTarget.documentKind])}`}{' '}
-              (
-              {t(
-                detail.routingTarget.source === 'organization'
-                  ? 'inbox.routingTargetOrganization'
-                  : 'inbox.routingTargetPlatform',
-              )}
-              )
-            </p>
-            {extraction === null ? (
-              <p>{t('inbox.explanationEmpty')}</p>
-            ) : (
-              <Stack gap={4}>
-                <p>
-                  {t('inbox.decidedBy')}:{' '}
-                  {item.decidedByKind === null
-                    ? t('inbox.notAvailable')
-                    : t(inboxDecidedByLabelKeys[item.decidedByKind]!)}
-                  {'. '}
-                  {t('inbox.confidence')}:{' '}
-                  {String(Math.round(extraction.confidence * 100))} %{'. '}
-                  {t('inbox.detectedType')}:{' '}
-                  {extraction.detectedType ?? t('inbox.notAvailable')}
-                </p>
-                {extraction.reasons.length > 0 ? (
-                  <ul aria-label={t('inbox.reasons')}>
-                    {extraction.reasons.map((reason, index) => (
-                      <li key={`${reason.step}-${String(index)}`}>
-                        {t('inbox.reasonSentence', {
-                          evidence: reason.evidence,
-                          step: reason.step,
-                        })}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                {extraction.issues.map((issue, index) => (
-                  <InlineNotification
-                    hideCloseButton
-                    key={`${issue.code}-${String(index)}`}
-                    kind="warning"
-                    lowContrast
-                    subtitle={issue.message}
-                    title={issue.code}
-                  />
-                ))}
-              </Stack>
-            )}
-            {detail.corrections.length === 0 ? null : (
-              <Stack gap={3}>
-                <h3>{t('inbox.corrections')}</h3>
-                <ul aria-label={t('inbox.corrections')}>
-                  {detail.corrections.map((correction, index) => (
-                    <li key={`${correction.field}-${String(index)}`}>
-                      {t('inbox.correctionLine', {
-                        field: t(
-                          inboxCorrectionFieldLabelKeys[correction.field],
-                        ),
-                        final:
-                          correction.finalValue ?? t('inbox.correctionNone'),
-                        source: t(
-                          inboxCorrectionSourceLabelKeys[correction.source],
-                        ),
-                        suggested:
-                          correction.suggestedValue ??
-                          t('inbox.correctionNone'),
-                      })}
-                      {correction.reason === null
-                        ? ''
-                        : ` ${correction.reason}`}
-                    </li>
-                  ))}
-                </ul>
-              </Stack>
-            )}
-          </section>
-
-          {canManage ? (
-            <Form
-              aria-label={t('inbox.hintsTitle')}
-              onSubmit={(event) => {
-                event.preventDefault();
-                void saveHints();
-              }}
-            >
-              <Stack gap={5}>
-                <h2>{t('inbox.hintsTitle')}</h2>
-                <TextArea
-                  id="inbox-hint-text"
-                  labelText={t('inbox.hintText')}
-                  onChange={(event) => {
-                    setHintText(event.target.value);
-                  }}
-                  value={hintText}
-                />
-                <Select
-                  id="inbox-hint-entity"
-                  labelText={t('inbox.entity')}
-                  onChange={(event) => {
-                    setHintLegalEntityId(event.target.value);
-                  }}
-                  value={hintLegalEntityId}
-                >
-                  <SelectItem text={t('inbox.entityNone')} value="" />
-                  {legalEntities.map((entity) => (
-                    <SelectItem
-                      key={entity.id}
-                      text={entity.name}
-                      value={entity.id}
+        <Grid className={styles.columns!}>
+          <Column lg={10} md={8} sm={4}>
+            <Stack gap={6}>
+              <Tile>
+                <Stack gap={5}>
+                  <h2 className={styles.sectionHeading!}>
+                    {t('inbox.preview')}
+                  </h2>
+                  {previewFile === undefined ? (
+                    <p>{t('inbox.noPreview')}</p>
+                  ) : isBlobQuarantined(previewFile) ? (
+                    <InlineNotification
+                      hideCloseButton
+                      kind="warning"
+                      lowContrast
+                      subtitle={t('inbox.quarantinedHelp')}
+                      title={t('inbox.quarantined')}
                     />
-                  ))}
-                </Select>
-                <TextInput
-                  id="inbox-hint-kind"
-                  labelText={t('inbox.hintKind')}
-                  onChange={(event) => {
-                    setHintKind(event.target.value);
-                  }}
-                  value={hintKind}
-                />
-                <TextInput
-                  id="inbox-hint-partner"
-                  labelText={t('inbox.hintPartnerId')}
-                  onChange={(event) => {
-                    setHintPartnerId(event.target.value);
-                  }}
-                  value={hintPartnerId}
-                />
-                <TextInput
-                  id="inbox-hint-link"
-                  labelText={t('inbox.hintLinkDocumentId')}
-                  onChange={(event) => {
-                    setHintLinkDocumentId(event.target.value);
-                  }}
-                  value={hintLinkDocumentId}
-                />
-                <div className={styles.actions!}>
-                  <Button disabled={busy} kind="secondary" type="submit">
-                    {t('inbox.saveHints')}
-                  </Button>
-                  <Button
-                    disabled={busy || !open}
-                    onClick={() => {
-                      void write('process');
-                    }}
-                    type="button"
-                  >
-                    {t('inbox.process')}
-                  </Button>
-                </div>
-              </Stack>
-            </Form>
-          ) : null}
-
-          {canManage && open && fields !== undefined ? (
-            <Form
-              aria-label={t('inbox.draftTitle')}
-              onSubmit={(event) => {
-                event.preventDefault();
-                void routeToDocument();
-              }}
-            >
-              <Stack gap={5}>
-                <h2>{t('inbox.draftTitle')}</h2>
-                {draftInvalid ? (
-                  <InlineNotification
-                    kind="error"
-                    lowContrast
-                    role="alert"
-                    title={t('inbox.draftInvalid')}
-                  />
-                ) : null}
-                <Select
-                  id="inbox-draft-entity"
-                  labelText={t('inbox.draftEntity')}
-                  onChange={(event) => {
-                    updateDraft({ legalEntityId: event.target.value });
-                  }}
-                  value={fields.legalEntityId}
-                >
-                  {legalEntities.map((entity) => (
-                    <SelectItem
-                      key={entity.id}
-                      text={entity.name}
-                      value={entity.id}
+                  ) : (
+                    <iframe
+                      className={styles.preview!}
+                      // A sandboxed frame disables plugins, and Chromium's PDF viewer is one, so only images are sandboxed.
+                      {...(previewFile.mediaType === 'application/pdf'
+                        ? {}
+                        : { sandbox: '' })}
+                      src={inboxBlobInlinePath(
+                        organizationId,
+                        previewFile.blobId,
+                      )}
+                      title={t('inbox.previewFrame')}
                     />
-                  ))}
-                </Select>
-                <Select
-                  id="inbox-draft-kind"
-                  labelText={t('inbox.draftKind')}
-                  onChange={(event) => {
-                    updateDraft({ kind: asKind(event.target.value) });
-                  }}
-                  value={fields.kind}
-                >
-                  {documentKindSchema.options.map((kind) => (
-                    <SelectItem
-                      key={kind}
-                      text={t(documentKindLabelKeys[kind])}
-                      value={kind}
-                    />
-                  ))}
-                </Select>
-                <TextInput
-                  id="inbox-draft-title"
-                  labelText={t('inbox.draftTitleField')}
-                  onChange={(event) => {
-                    updateDraft({ title: event.target.value });
-                  }}
-                  value={fields.title}
-                />
-                <TextInput
-                  id="inbox-draft-date"
-                  labelText={t('inbox.draftDate')}
-                  onChange={(event) => {
-                    updateDraft({ documentDate: event.target.value });
-                  }}
-                  placeholder="yyyy-mm-dd"
-                  value={fields.documentDate}
-                />
-                <TextInput
-                  id="inbox-draft-currency"
-                  labelText={t('inbox.draftCurrency')}
-                  onChange={(event) => {
-                    updateDraft({ currencyCode: event.target.value });
-                  }}
-                  value={fields.currencyCode}
-                />
-                <TextInput
-                  id="inbox-draft-reference"
-                  labelText={t('inbox.draftReference')}
-                  onChange={(event) => {
-                    updateDraft({ reference: event.target.value });
-                  }}
-                  value={fields.reference}
-                />
-                <TextInput
-                  id="inbox-draft-partner"
-                  labelText={t('inbox.draftPartner')}
-                  onChange={(event) => {
-                    updateDraft({ partnerId: event.target.value });
-                  }}
-                  value={fields.partnerId}
-                />
-                {changedFields.map((key) => {
-                  const field = correctionFields[key];
-                  const label = t(inboxCorrectionFieldLabelKeys[field]);
-                  return (
-                    <TextInput
-                      helperText={t('inbox.correctionReasonHelp')}
-                      id={`inbox-draft-reason-${field}`}
-                      key={field}
-                      labelText={t('inbox.correctionReason', { field: label })}
-                      maxLength={500}
-                      onChange={(event) => {
-                        setReasons({ ...reasons, [field]: event.target.value });
-                      }}
-                      value={reasons[field] ?? ''}
-                    />
-                  );
-                })}
-                <div className={styles.actions!}>
-                  <Button disabled={busy} type="submit">
-                    {t('inbox.routeToDocument')}
-                  </Button>
-                </div>
-              </Stack>
-            </Form>
-          ) : null}
-
-          {canManage ? (
-            <Tile>
-              <Stack gap={5}>
-                <div className={styles.actions!}>
-                  {item.status === 'routed' ? (
-                    <Button
-                      disabled={busy}
-                      kind="danger--tertiary"
-                      onClick={() => {
-                        void write('route/undo');
-                      }}
-                      type="button"
-                    >
-                      {t('inbox.undoRoute')}
-                    </Button>
-                  ) : null}
-                  {item.status === 'discarded' ? (
-                    <Button
-                      disabled={busy}
-                      kind="secondary"
-                      onClick={() => {
-                        void write('restore');
-                      }}
-                      type="button"
-                    >
-                      {t('inbox.restore')}
-                    </Button>
-                  ) : null}
-                  {open ? null : (
-                    <Button
-                      href={createRuleHref()}
-                      kind="tertiary"
-                      title={t('inbox.createRuleHelp')}
-                    >
-                      {t('inbox.createRule')}
-                    </Button>
                   )}
-                </div>
-                {open ? (
-                  <div className={styles.actions!}>
-                    <Select
-                      id="inbox-discard-reason"
-                      labelText={t('inbox.discardReason')}
-                      onChange={(event) => {
-                        setDiscardReason(asDiscardReason(event.target.value));
-                      }}
-                      value={discardReason}
-                    >
-                      {inboxDiscardReasonSchema.options.map((reason) => (
-                        <SelectItem
-                          key={reason}
-                          text={t(inboxDiscardReasonLabelKeys[reason])}
-                          value={reason}
+                  <StructuredListWrapper
+                    aria-label={t('inbox.files')}
+                    isCondensed
+                  >
+                    <StructuredListHead>
+                      <StructuredListRow head>
+                        <StructuredListCell head>
+                          {t('inbox.columnFileName')}
+                        </StructuredListCell>
+                        <StructuredListCell head>
+                          {t('inbox.download')}
+                        </StructuredListCell>
+                      </StructuredListRow>
+                    </StructuredListHead>
+                    <StructuredListBody>
+                      {detail.files.map((file) => {
+                        const name = file.originalFilename ?? file.sha256;
+                        return (
+                          <StructuredListRow key={file.blobId}>
+                            <StructuredListCell>
+                              {name} ({file.mediaType}, {String(file.byteSize)}{' '}
+                              B)
+                            </StructuredListCell>
+                            <StructuredListCell>
+                              {isBlobQuarantined(file) ? (
+                                <Tag size="sm" type="red">
+                                  {t('inbox.quarantined')}
+                                </Tag>
+                              ) : (
+                                <Link
+                                  href={inboxBlobDownloadPath(
+                                    organizationId,
+                                    file.blobId,
+                                  )}
+                                >
+                                  {t('inbox.downloadNamed', { name })}
+                                </Link>
+                              )}
+                            </StructuredListCell>
+                          </StructuredListRow>
+                        );
+                      })}
+                    </StructuredListBody>
+                  </StructuredListWrapper>
+                </Stack>
+              </Tile>
+
+              <Tile>
+                <Stack gap={5}>
+                  <h2 className={styles.sectionHeading!}>
+                    {t('inbox.explanation')}
+                  </h2>
+                  <p>
+                    {t('inbox.routingTarget')}:{' '}
+                    {t(
+                      detail.routingTarget.destination === null
+                        ? inboxRoutingDestinationNoneLabelKey
+                        : inboxRoutingDestinationLabelKeys[
+                            detail.routingTarget.destination
+                          ],
+                    )}
+                    {detail.routingTarget.documentKind === null
+                      ? ''
+                      : `, ${t(documentKindLabelKeys[detail.routingTarget.documentKind])}`}{' '}
+                    (
+                    {t(
+                      detail.routingTarget.source === 'organization'
+                        ? 'inbox.routingTargetOrganization'
+                        : 'inbox.routingTargetPlatform',
+                    )}
+                    )
+                  </p>
+                  {extraction === null ? (
+                    <p>{t('inbox.explanationEmpty')}</p>
+                  ) : (
+                    <Stack gap={4}>
+                      <p>
+                        {t('inbox.decidedBy')}:{' '}
+                        {item.decidedByKind === null
+                          ? t('inbox.notAvailable')
+                          : t(inboxDecidedByLabelKeys[item.decidedByKind]!)}
+                        {'. '}
+                        {t('inbox.confidence')}:{' '}
+                        {String(Math.round(extraction.confidence * 100))} %
+                        {'. '}
+                        {t('inbox.detectedType')}:{' '}
+                        {extraction.detectedType ?? t('inbox.notAvailable')}
+                      </p>
+                      {extraction.reasons.length > 0 ? (
+                        <ul aria-label={t('inbox.reasons')}>
+                          {extraction.reasons.map((reason, index) => (
+                            <li key={`${reason.step}-${String(index)}`}>
+                              {t('inbox.reasonSentence', {
+                                evidence: reason.evidence,
+                                step: reason.step,
+                              })}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      {extraction.issues.map((issue, index) => (
+                        <InlineNotification
+                          hideCloseButton
+                          key={`${issue.code}-${String(index)}`}
+                          kind="warning"
+                          lowContrast
+                          subtitle={issue.message}
+                          title={issue.code}
                         />
                       ))}
-                    </Select>
-                    <Button
-                      disabled={busy}
-                      kind="danger--tertiary"
-                      onClick={() => {
-                        void write('discard', { reason: discardReason });
-                      }}
-                      type="button"
-                    >
-                      {t('inbox.discard')}
-                    </Button>
-                  </div>
-                ) : null}
-                <div className={styles.actions!}>
-                  <TextInput
-                    id="inbox-assignee"
-                    labelText={t('inbox.assignee')}
-                    onChange={(event) => {
-                      setAssigneeId(event.target.value);
+                    </Stack>
+                  )}
+                  {detail.corrections.length === 0 ? null : (
+                    <Stack gap={3}>
+                      <h3>{t('inbox.corrections')}</h3>
+                      <ul aria-label={t('inbox.corrections')}>
+                        {detail.corrections.map((correction, index) => (
+                          <li key={`${correction.field}-${String(index)}`}>
+                            {t('inbox.correctionLine', {
+                              field: t(
+                                inboxCorrectionFieldLabelKeys[correction.field],
+                              ),
+                              final:
+                                correction.finalValue ??
+                                t('inbox.correctionNone'),
+                              source: t(
+                                inboxCorrectionSourceLabelKeys[
+                                  correction.source
+                                ],
+                              ),
+                              suggested:
+                                correction.suggestedValue ??
+                                t('inbox.correctionNone'),
+                            })}
+                            {correction.reason === null
+                              ? ''
+                              : ` ${correction.reason}`}
+                          </li>
+                        ))}
+                      </ul>
+                    </Stack>
+                  )}
+                </Stack>
+              </Tile>
+
+              <Tile>
+                <ContainedList
+                  kind="on-page"
+                  label={t('inbox.events')}
+                  size="sm"
+                >
+                  {detail.events.map((event) => (
+                    <ContainedListItem key={event.id}>
+                      <span className={styles.eventTime!}>
+                        {event.createdAt}
+                      </span>{' '}
+                      {event.kind}
+                      {event.reason === null ? '' : ` (${event.reason})`}
+                    </ContainedListItem>
+                  ))}
+                </ContainedList>
+              </Tile>
+            </Stack>
+          </Column>
+          <Column lg={6} md={8} sm={4}>
+            <Stack gap={6}>
+              {canManage ? (
+                <Tile>
+                  <Form
+                    aria-label={t('inbox.hintsTitle')}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void saveHints();
                     }}
-                    placeholder={t('inbox.assigneePlaceholder')}
-                    value={assigneeId}
-                  />
+                  >
+                    <Stack gap={5}>
+                      <h2 className={styles.sectionHeading!}>
+                        {t('inbox.hintsTitle')}
+                      </h2>
+                      <TextArea
+                        id="inbox-hint-text"
+                        labelText={t('inbox.hintText')}
+                        onChange={(event) => {
+                          setHintText(event.target.value);
+                        }}
+                        value={hintText}
+                      />
+                      <Select
+                        id="inbox-hint-entity"
+                        labelText={t('inbox.entity')}
+                        onChange={(event) => {
+                          setHintLegalEntityId(event.target.value);
+                        }}
+                        value={hintLegalEntityId}
+                      >
+                        <SelectItem text={t('inbox.entityNone')} value="" />
+                        {legalEntities.map((entity) => (
+                          <SelectItem
+                            key={entity.id}
+                            text={entity.name}
+                            value={entity.id}
+                          />
+                        ))}
+                      </Select>
+                      <TextInput
+                        id="inbox-hint-kind"
+                        labelText={t('inbox.hintKind')}
+                        onChange={(event) => {
+                          setHintKind(event.target.value);
+                        }}
+                        value={hintKind}
+                      />
+                      <TextInput
+                        id="inbox-hint-partner"
+                        labelText={t('inbox.hintPartnerId')}
+                        onChange={(event) => {
+                          setHintPartnerId(event.target.value);
+                        }}
+                        value={hintPartnerId}
+                      />
+                      <TextInput
+                        id="inbox-hint-link"
+                        labelText={t('inbox.hintLinkDocumentId')}
+                        onChange={(event) => {
+                          setHintLinkDocumentId(event.target.value);
+                        }}
+                        value={hintLinkDocumentId}
+                      />
+                      <div className={styles.actions!}>
+                        <Button disabled={busy} kind="secondary" type="submit">
+                          {t('inbox.saveHints')}
+                        </Button>
+                        <Button
+                          disabled={busy || !open}
+                          onClick={() => {
+                            void write('process');
+                          }}
+                          type="button"
+                        >
+                          {t('inbox.process')}
+                        </Button>
+                      </div>
+                    </Stack>
+                  </Form>
+                </Tile>
+              ) : null}
+
+              {canManage && open && fields !== undefined ? (
+                <Tile>
+                  <Form
+                    aria-label={t('inbox.draftTitle')}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void routeToDocument();
+                    }}
+                  >
+                    <Stack gap={5}>
+                      <h2 className={styles.sectionHeading!}>
+                        {t('inbox.draftTitle')}
+                      </h2>
+                      {draftInvalid ? (
+                        <InlineNotification
+                          kind="error"
+                          lowContrast
+                          role="alert"
+                          title={t('inbox.draftInvalid')}
+                        />
+                      ) : null}
+                      {conflict?.code === 'reference_conflict' &&
+                      pendingRoute !== undefined ? (
+                        <Stack gap={3}>
+                          <InlineNotification
+                            hideCloseButton
+                            kind="warning"
+                            lowContrast
+                            role="alert"
+                            subtitle={t('inbox.referenceConflictHelp')}
+                            title={t('inbox.referenceConflict')}
+                          />
+                          <div className={styles.actions!}>
+                            <Link href={documentHref(conflict.documentId)}>
+                              {t('inbox.openDocument')}
+                            </Link>
+                            <Button
+                              disabled={busy}
+                              kind="secondary"
+                              onClick={() => {
+                                void submitRoute({
+                                  ...pendingRoute,
+                                  supersedesDocumentId: conflict.documentId,
+                                });
+                              }}
+                              type="button"
+                            >
+                              {t('inbox.registerNewVersion')}
+                            </Button>
+                          </div>
+                        </Stack>
+                      ) : null}
+                      <Select
+                        id="inbox-draft-entity"
+                        labelText={t('inbox.draftEntity')}
+                        onChange={(event) => {
+                          updateDraft({ legalEntityId: event.target.value });
+                        }}
+                        value={fields.legalEntityId}
+                      >
+                        {legalEntities.map((entity) => (
+                          <SelectItem
+                            key={entity.id}
+                            text={entity.name}
+                            value={entity.id}
+                          />
+                        ))}
+                      </Select>
+                      <Select
+                        id="inbox-draft-kind"
+                        labelText={t('inbox.draftKind')}
+                        onChange={(event) => {
+                          updateDraft({ kind: asKind(event.target.value) });
+                        }}
+                        value={fields.kind}
+                      >
+                        {documentKindSchema.options.map((kind) => (
+                          <SelectItem
+                            key={kind}
+                            text={t(documentKindLabelKeys[kind])}
+                            value={kind}
+                          />
+                        ))}
+                      </Select>
+                      <TextInput
+                        id="inbox-draft-title"
+                        labelText={t('inbox.draftTitleField')}
+                        onChange={(event) => {
+                          updateDraft({ title: event.target.value });
+                        }}
+                        value={fields.title}
+                      />
+                      <TextInput
+                        id="inbox-draft-date"
+                        labelText={t('inbox.draftDate')}
+                        onChange={(event) => {
+                          updateDraft({ documentDate: event.target.value });
+                        }}
+                        placeholder="yyyy-mm-dd"
+                        value={fields.documentDate}
+                      />
+                      <TextInput
+                        id="inbox-draft-currency"
+                        labelText={t('inbox.draftCurrency')}
+                        onChange={(event) => {
+                          updateDraft({ currencyCode: event.target.value });
+                        }}
+                        value={fields.currencyCode}
+                      />
+                      <TextInput
+                        id="inbox-draft-reference"
+                        labelText={t('inbox.draftReference')}
+                        onChange={(event) => {
+                          updateDraft({ reference: event.target.value });
+                        }}
+                        value={fields.reference}
+                      />
+                      <TextInput
+                        id="inbox-draft-partner"
+                        labelText={t('inbox.draftPartner')}
+                        onChange={(event) => {
+                          updateDraft({ partnerId: event.target.value });
+                        }}
+                        value={fields.partnerId}
+                      />
+                      {changedFields.map((key) => {
+                        const field = correctionFields[key];
+                        const label = t(inboxCorrectionFieldLabelKeys[field]);
+                        return (
+                          <TextInput
+                            helperText={t('inbox.correctionReasonHelp')}
+                            id={`inbox-draft-reason-${field}`}
+                            key={field}
+                            labelText={t('inbox.correctionReason', {
+                              field: label,
+                            })}
+                            maxLength={500}
+                            onChange={(event) => {
+                              setReasons({
+                                ...reasons,
+                                [field]: event.target.value,
+                              });
+                            }}
+                            value={reasons[field] ?? ''}
+                          />
+                        );
+                      })}
+                      <div className={styles.actions!}>
+                        <Button disabled={busy} type="submit">
+                          {t('inbox.routeToDocument')}
+                        </Button>
+                      </div>
+                    </Stack>
+                  </Form>
+                </Tile>
+              ) : null}
+
+              {canManage && open ? (
+                <Tile>
+                  <Form
+                    aria-label={t('inbox.attachTitle')}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void attachToDocument(attachTargetId);
+                    }}
+                  >
+                    <Stack gap={5}>
+                      <h2 className={styles.sectionHeading!}>
+                        {t('inbox.attachTitle')}
+                      </h2>
+                      <p>{t('inbox.attachHelp')}</p>
+                      <ComboBox
+                        id="inbox-attach-target"
+                        items={attachCandidates}
+                        itemToString={(candidate) =>
+                          candidate === null ? '' : candidate.title
+                        }
+                        onChange={(change) => {
+                          setAttachTargetId(change.selectedItem?.id ?? '');
+                        }}
+                        onInputChange={(value) => {
+                          setAttachQuery(value);
+                        }}
+                        selectedItem={
+                          attachCandidates.find(
+                            (candidate) => candidate.id === attachTargetId,
+                          ) ?? null
+                        }
+                        titleText={t('inbox.attachTarget')}
+                      />
+                      <div className={styles.actions!}>
+                        <Button
+                          disabled={busy || attachTargetId.length === 0}
+                          kind="secondary"
+                          type="submit"
+                        >
+                          {t('inbox.attach')}
+                        </Button>
+                      </div>
+                    </Stack>
+                  </Form>
+                </Tile>
+              ) : null}
+
+              {canManage ? (
+                <Tile>
+                  <Stack gap={5}>
+                    <h2 className={styles.sectionHeading!}>
+                      {t('inbox.actions')}
+                    </h2>
+                    <div className={styles.actions!}>
+                      {item.status === 'routed' ? (
+                        <Button
+                          disabled={busy}
+                          kind="danger--tertiary"
+                          onClick={() => {
+                            void write('route/undo');
+                          }}
+                          type="button"
+                        >
+                          {t('inbox.undoRoute')}
+                        </Button>
+                      ) : null}
+                      {item.status === 'discarded' ? (
+                        <Button
+                          disabled={busy}
+                          kind="secondary"
+                          onClick={() => {
+                            void write('restore');
+                          }}
+                          type="button"
+                        >
+                          {t('inbox.restore')}
+                        </Button>
+                      ) : null}
+                      {open ? null : (
+                        <Button
+                          href={createRuleHref()}
+                          kind="tertiary"
+                          title={t('inbox.createRuleHelp')}
+                        >
+                          {t('inbox.createRule')}
+                        </Button>
+                      )}
+                    </div>
+                    {open ? (
+                      <div className={styles.actions!}>
+                        <Select
+                          id="inbox-discard-reason"
+                          labelText={t('inbox.discardReason')}
+                          onChange={(event) => {
+                            setDiscardReason(
+                              asDiscardReason(event.target.value),
+                            );
+                          }}
+                          value={discardReason}
+                        >
+                          {inboxDiscardReasonSchema.options.map((reason) => (
+                            <SelectItem
+                              key={reason}
+                              text={t(inboxDiscardReasonLabelKeys[reason])}
+                              value={reason}
+                            />
+                          ))}
+                        </Select>
+                        <Button
+                          disabled={busy}
+                          kind="danger--tertiary"
+                          onClick={() => {
+                            void write('discard', { reason: discardReason });
+                          }}
+                          type="button"
+                        >
+                          {t('inbox.discard')}
+                        </Button>
+                      </div>
+                    ) : null}
+                    <div className={styles.actions!}>
+                      <TextInput
+                        id="inbox-assignee"
+                        labelText={t('inbox.assignee')}
+                        onChange={(event) => {
+                          setAssigneeId(event.target.value);
+                        }}
+                        placeholder={t('inbox.assigneePlaceholder')}
+                        value={assigneeId}
+                      />
+                      <Button
+                        disabled={busy}
+                        kind="tertiary"
+                        onClick={() => {
+                          void write('assign', {
+                            assigneeId: nullable(assigneeId),
+                          });
+                        }}
+                        type="button"
+                      >
+                        {t('inbox.assign')}
+                      </Button>
+                    </div>
+                    <div className={styles.actions!}>
+                      <TextInput
+                        id="inbox-snooze"
+                        labelText={t('inbox.snoozedUntil')}
+                        onChange={(event) => {
+                          setSnoozedUntil(event.target.value);
+                        }}
+                        type="datetime-local"
+                        value={snoozedUntil}
+                      />
+                      <Button
+                        disabled={busy || snoozedUntil.length === 0}
+                        kind="tertiary"
+                        onClick={() => {
+                          void write('snooze', {
+                            snoozedUntil: new Date(snoozedUntil).toISOString(),
+                          });
+                        }}
+                        type="button"
+                      >
+                        {t('inbox.snooze')}
+                      </Button>
+                      <Button
+                        disabled={busy || item.snoozedUntil === null}
+                        kind="ghost"
+                        onClick={() => {
+                          void write('snooze', { snoozedUntil: null });
+                        }}
+                        type="button"
+                      >
+                        {t('inbox.snoozeClear')}
+                      </Button>
+                    </div>
+                  </Stack>
+                </Tile>
+              ) : null}
+            </Stack>
+          </Column>
+        </Grid>
+      )}
+      {conflict?.code === 'duplicate_probable' && pendingRoute !== undefined ? (
+        <Modal
+          modalHeading={t('inbox.duplicateProbable')}
+          onRequestClose={() => {
+            setConflict(undefined);
+          }}
+          open
+          passiveModal
+        >
+          <Stack gap={5}>
+            <p>{t('inbox.duplicateProbableHelp')}</p>
+            <ul aria-label={t('inbox.duplicateCandidates')}>
+              {conflict.candidates.map((candidate) => (
+                <li className={styles.actions!} key={candidate.id}>
+                  <Link href={documentHref(candidate.id)}>
+                    {candidate.reference ?? candidate.id}
+                  </Link>
+                  <span>
+                    {candidate.documentDate}
+                    {candidate.totalAmount === null
+                      ? ''
+                      : `, ${candidate.totalAmount}`}
+                  </span>
                   <Button
                     disabled={busy}
                     kind="tertiary"
                     onClick={() => {
-                      void write('assign', {
-                        assigneeId: nullable(assigneeId),
-                      });
+                      void attachToDocument(candidate.id);
                     }}
+                    size="sm"
                     type="button"
                   >
-                    {t('inbox.assign')}
+                    {t('inbox.attachToCandidate')}
                   </Button>
-                </div>
-                <div className={styles.actions!}>
-                  <TextInput
-                    id="inbox-snooze"
-                    labelText={t('inbox.snoozedUntil')}
-                    onChange={(event) => {
-                      setSnoozedUntil(event.target.value);
-                    }}
-                    type="datetime-local"
-                    value={snoozedUntil}
-                  />
-                  <Button
-                    disabled={busy || snoozedUntil.length === 0}
-                    kind="tertiary"
-                    onClick={() => {
-                      void write('snooze', {
-                        snoozedUntil: new Date(snoozedUntil).toISOString(),
-                      });
-                    }}
-                    type="button"
-                  >
-                    {t('inbox.snooze')}
-                  </Button>
-                  <Button
-                    disabled={busy || item.snoozedUntil === null}
-                    kind="ghost"
-                    onClick={() => {
-                      void write('snooze', { snoozedUntil: null });
-                    }}
-                    type="button"
-                  >
-                    {t('inbox.snoozeClear')}
-                  </Button>
-                </div>
-              </Stack>
-            </Tile>
-          ) : null}
-
-          <section aria-label={t('inbox.events')}>
-            <h2>{t('inbox.events')}</h2>
-            <ul>
-              {detail.events.map((event) => (
-                <li key={event.id}>
-                  {event.createdAt}: {event.kind}
-                  {event.reason === null ? '' : ` (${event.reason})`}
                 </li>
               ))}
             </ul>
-          </section>
-        </Stack>
-      )}
+            <div className={styles.actions!}>
+              <Button
+                disabled={busy}
+                kind="danger--tertiary"
+                onClick={() => {
+                  setConflict(undefined);
+                  void write('discard', { reason: 'duplicate' });
+                }}
+                type="button"
+              >
+                {t('inbox.discardAsDuplicate')}
+              </Button>
+              <Button
+                disabled={busy}
+                kind="secondary"
+                onClick={() => {
+                  // Any listed candidate satisfies the acknowledgement; the first stands for the answer.
+                  void submitRoute({
+                    ...pendingRoute,
+                    acknowledgeDuplicateOf: conflict.candidates[0]!.id,
+                  });
+                }}
+                type="button"
+              >
+                {t('inbox.routeAnyway')}
+              </Button>
+            </div>
+          </Stack>
+        </Modal>
+      ) : null}
     </PageContainer>
   );
 }

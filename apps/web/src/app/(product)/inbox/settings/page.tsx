@@ -12,6 +12,7 @@ import {
   Stack,
   Tag,
   TextInput,
+  Tile,
 } from '@bap/design-system/react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -444,9 +445,11 @@ export default function InboxSettingsPage() {
         </Select>
       ) : null}
       {loaded === undefined ? null : (
-        <section aria-label={t('inboxSettings.quotaTitle')}>
+        <Tile>
           <Stack gap={5}>
-            <h2>{t('inboxSettings.quotaTitle')}</h2>
+            <h2 className={styles.sectionHeading!}>
+              {t('inboxSettings.quotaTitle')}
+            </h2>
             {quotaAboveCap ? (
               <InlineNotification
                 kind="error"
@@ -514,7 +517,7 @@ export default function InboxSettingsPage() {
               </p>
             )}
           </Stack>
-        </section>
+        </Tile>
       )}
       <DataGrid
         columns={columns}
@@ -522,6 +525,7 @@ export default function InboxSettingsPage() {
         emptyLabel={t('inboxSettings.notAvailable')}
         errorLabel={t('inboxSettings.error')}
         rows={rows}
+        search
         size="md"
         state={
           failed

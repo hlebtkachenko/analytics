@@ -222,6 +222,20 @@ under the item's explanation panel; nothing learns from it.
 `created_by = current_setting('bap.user_id', true)` pins a rule's author,
 changed only by an explicit adopt.
 
+Migration `20260917.0006` adds the Phase 1b-actions layer, the `attached` event
+kind only; it carries no new table, column, or policy. Routing an item to
+Documents now checks a reference conflict and a partner fingerprint before it
+creates a document, and can write a new version instead: the transaction flips
+the superseded row's `is_current` off, inserts the new row with
+`version = old.version + 1` and `supersedes_document_id`, and re-derives in
+place of the old row's deleted event and unresolved data issues. Attach routes
+an item's files onto an existing document without creating one, inserting
+`document_file` rows and reusing the same route-and-event path; its undo
+discriminates by `document.inbox_item_id` so it removes only the attaching
+item's files or the whole document, whichever the item created. Bulk runs up to
+100 item ids through the existing single-item actions, one transaction per id,
+inside one request.
+
 ## Workspace dependency rules
 
 ```mermaid
@@ -416,11 +430,11 @@ described in [ADR 0014](docs/adr/0014-durable-blob-storage.md) and
 Uploaded bytes behind an inbox item or a document are durable, never deleted
 after intake. The per-organization quota setting, routing target settings, and
 the orphan blob sweep land with Phase 1b-runtime; the `inbox_rule` table, rules,
-corrections, and auto-route land with Phase 1b-rules. Split, the versioning
-route, fingerprint duplicates, attach-to-existing, and bulk actions remain
-deferred to Phase 1b-actions; ARES, AI, OCR, any connector, the credential
-vault, retention, and channel health remain deferred to the connections and
-setup track; see [the inbox plan](docs/planning/inbox.md) for the full list.
+corrections, and auto-route land with Phase 1b-rules; the versioning route,
+fingerprint duplicates, attach-to-existing, and bulk actions land with Phase
+1b-actions. Split, ARES, AI, OCR, any connector, the credential vault,
+retention, and channel health remain deferred to the connections and setup
+track; see [the inbox plan](docs/planning/inbox.md) for the full list.
 
 Metric definitions, aggregation and transformation semantics beyond derivation,
 derived datasets, cross-dataset joins, dataset editing and versioning, custom

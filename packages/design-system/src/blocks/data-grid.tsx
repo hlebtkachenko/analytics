@@ -495,7 +495,7 @@ export function DataGrid(props: DataGridProps) {
   // The wrapper clips it to the column so wide skeletons do not bleed out.
   if (state === 'loading' && loadingMode === 'skeleton') {
     return (
-      <div className={styles.skeletonWrap}>
+      <div className={cx(styles.container, styles.skeletonWrap)}>
         <DataTableSkeleton
           columnCount={columnCount}
           rowCount={Math.min(activePageSize, 8)}
@@ -508,7 +508,11 @@ export function DataGrid(props: DataGridProps) {
 
   if (state === 'error') {
     return (
-      <TableContainer description={description} title={title}>
+      <TableContainer
+        className={styles.container}
+        description={description}
+        title={title}
+      >
         <InlineNotification
           hideCloseButton
           kind="error"
@@ -520,7 +524,11 @@ export function DataGrid(props: DataGridProps) {
   }
 
   return (
-    <TableContainer description={description} title={title}>
+    <TableContainer
+      className={styles.container}
+      description={description}
+      title={title}
+    >
       {showToolbar && (
         <TableToolbar>
           {batchActions.length > 0 && (
@@ -533,6 +541,7 @@ export function DataGrid(props: DataGridProps) {
                 <TableBatchAction
                   key={action.id}
                   onClick={() => action.onClick([...selected])}
+                  tabIndex={selectedCount > 0 ? 0 : -1}
                 >
                   {action.label}
                 </TableBatchAction>

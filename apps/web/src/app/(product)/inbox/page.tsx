@@ -1,14 +1,24 @@
 'use client';
 
 import { DataGrid } from '@bap/design-system/blocks';
-import type { GridColumn, GridRow } from '@bap/design-system/blocks';
+import type {
+  BatchAction,
+  GridColumn,
+  GridRow,
+} from '@bap/design-system/blocks';
 import {
   Button,
+  Column,
+  Grid,
   InlineNotification,
   Link,
+  Modal,
   Select,
   SelectItem,
+  Stack,
   Tag,
+  TextInput,
+  Tile,
 } from '@bap/design-system/react';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -18,22 +28,42 @@ import UploadDropZone from '../../../components/inbox/upload-drop-zone';
 import PageContainer from '../../../components/page-container';
 import { getJson, isAbortError } from '../../../lib/datasets/client';
 import { withOrganization } from '../../../lib/documents/client';
-import { inboxItemsPath } from '../../../lib/inbox/client';
+import { bulkInboxItems, inboxItemsPath } from '../../../lib/inbox/client';
 import {
   DEFAULT_INBOX_PAGE_SIZE,
+  inboxBulkActionSchema,
+  inboxConfidenceBandSchema,
+  inboxDiscardReasonSchema,
+  inboxIssueCodeSchema,
   inboxItemListResponseSchema,
 } from '../../../lib/inbox/contract.ts';
 import type {
+  BulkInboxItemsRequest,
+  BulkInboxItemsResponse,
+  InboxBulkAction,
+  InboxConfidenceBand,
+  InboxDiscardReason,
+  InboxIssueCode,
   InboxItemListResponse,
   InboxItemStatus,
 } from '../../../lib/inbox/contract.ts';
 import {
+  inboxBulkActionLabelKeys,
+  inboxBulkRefusalCodeLabelKeys,
+  inboxConfidenceBandLabelKeys,
+  inboxDiscardReasonLabelKeys,
+  inboxItemState,
+  inboxItemStateLabelKeys,
+  inboxItemStateTagTypes,
   inboxStatusFilterLabelKeys,
   inboxStatusFilters,
   inboxStatusLabelKeys,
   inboxStatusTagTypes,
 } from '../../../lib/inbox/labels.ts';
-import type { InboxStatusFilter } from '../../../lib/inbox/labels.ts';
+import type {
+  InboxItemState,
+  InboxStatusFilter,
+} from '../../../lib/inbox/labels.ts';
 import { useLegalEntities } from '../../../lib/organizations/use-legal-entities';
 import { useOrganizationAccess } from '../../../lib/organizations/use-organization-access';
 import { useOrganizationSelection } from '../../../lib/organizations/use-organization-selection';
@@ -56,7 +86,28 @@ function storedPageSize(value: string | null): number {
   return pageSizes.includes(size) ? size : DEFAULT_INBOX_PAGE_SIZE;
 }
 
+// A stored filter value is taken only when the contract still names it; anything else is no filter.
+function storedIssue(value: string | null): InboxIssueCode | '' {
+  const parsed = inboxIssueCodeSchema.safeParse(value);
+  return parsed.success ? parsed.data : '';
+}
+
+function storedConfidence(value: string | null): InboxConfidenceBand | '' {
+  const parsed = inboxConfidenceBandSchema.safeParse(value);
+  return parsed.success ? parsed.data : '';
+}
+
+function asDiscardReason(value: string): InboxDiscardReason {
+  const parsed = inboxDiscardReasonSchema.safeParse(value);
+  return parsed.success ? parsed.data : 'irrelevant';
+}
+
 type ListResult = Readonly<{ key: string; value?: InboxItemListResponse }>;
+// The batch action a person picked and the ids it will run on, while its modal asks for the field.
+type PendingBulk = Readonly<{
+  action: InboxBulkAction;
+  ids: readonly string[];
+}>;
 
 export default function InboxPage() {
   const { t } = useTranslation();
@@ -73,16 +124,43 @@ export default function InboxPage() {
   const [pageSize, setPageSize] = useState(() =>
     storedPageSize(searchParams.get('pageSize')),
   );
+  const [issue, setIssue] = useState(() =>
+    storedIssue(searchParams.get('issue')),
+  );
+  const [confidence, setConfidence] = useState(() =>
+    storedConfidence(searchParams.get('confidence')),
+  );
+  const [assignee, setAssignee] = useState(
+    () => searchParams.get('assigneeId') ?? '',
+  );
+  const [assigneeDraft, setAssigneeDraft] = useState(assignee);
   const [refreshCount, setRefreshCount] = useState(0);
   const [result, setResult] = useState<ListResult>();
+  const [pending, setPending] = useState<PendingBulk>();
+  const [bulkAssignee, setBulkAssignee] = useState('');
+  const [bulkSnoozedUntil, setBulkSnoozedUntil] = useState('');
+  const [bulkReason, setBulkReason] =
+    useState<InboxDiscardReason>('irrelevant');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkFailed, setBulkFailed] = useState(false);
+  const [bulkResult, setBulkResult] = useState<BulkInboxItemsResponse>();
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
     params.set('status', inboxStatusFilters[filter].join(','));
+    if (issue.length > 0) {
+      params.set('issue', issue);
+    }
+    if (assignee.length > 0) {
+      params.set('assigneeId', assignee);
+    }
+    if (confidence.length > 0) {
+      params.set('confidence', confidence);
+    }
     params.set('page', String(page));
     params.set('pageSize', String(pageSize));
     return params;
-  }, [filter, page, pageSize]);
+  }, [assignee, confidence, filter, issue, page, pageSize]);
   const queryKey = `${query.toString()}#${String(refreshCount)}`;
 
   useEffect(() => {
@@ -113,10 +191,19 @@ export default function InboxPage() {
       params.set('organization', organization.slug);
     }
     params.set('filter', filter);
+    if (issue.length > 0) {
+      params.set('issue', issue);
+    }
+    if (assignee.length > 0) {
+      params.set('assigneeId', assignee);
+    }
+    if (confidence.length > 0) {
+      params.set('confidence', confidence);
+    }
     params.set('page', String(page));
     params.set('pageSize', String(pageSize));
     window.history.replaceState(null, '', `?${params.toString()}`);
-  }, [filter, organization.slug, page, pageSize]);
+  }, [assignee, confidence, filter, issue, organization.slug, page, pageSize]);
 
   const refresh = useCallback(() => {
     setRefreshCount((count) => count + 1);
@@ -146,6 +233,58 @@ export default function InboxPage() {
     legalEntities.map((entity) => [entity.id, entity.name]),
   );
 
+  // One request for the page of ids; the answer is counted per id, never trusted as a whole.
+  async function runBulk(): Promise<void> {
+    if (pending === undefined) {
+      return;
+    }
+    const body: BulkInboxItemsRequest = {
+      action: pending.action,
+      itemIds: [...pending.ids],
+      ...(pending.action === 'assign'
+        ? {
+            assigneeId:
+              bulkAssignee.trim().length === 0 ? null : bulkAssignee.trim(),
+          }
+        : pending.action === 'snooze'
+          ? { snoozedUntil: new Date(bulkSnoozedUntil).toISOString() }
+          : pending.action === 'discard'
+            ? { reason: bulkReason }
+            : {}),
+    };
+    setBulkBusy(true);
+    setBulkFailed(false);
+    try {
+      setBulkResult(await bulkInboxItems(organizationId, body));
+      setPending(undefined);
+      refresh();
+    } catch {
+      setBulkFailed(true);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  const batchActions: readonly BatchAction[] =
+    inboxBulkActionSchema.options.map((action) => ({
+      id: action,
+      label: t(inboxBulkActionLabelKeys[action]),
+      onClick: (ids) => {
+        setBulkResult(undefined);
+        setPending({ action, ids });
+      },
+    }));
+  const refused =
+    bulkResult?.results.filter((entry) => entry.status === 'refused') ?? [];
+  const refusedIds = refused.map((entry) => entry.itemId);
+  const refusedSummary = refused
+    .map((entry) =>
+      entry.code === undefined
+        ? entry.itemId
+        : `${entry.itemId} (${t(inboxBulkRefusalCodeLabelKeys[entry.code])})`,
+    )
+    .join(', ');
+
   // The first file names the item; the rest are counted, e.g. "invoice.pdf +2".
   function fileLabel(primaryFilename: string | null, fileCount: number) {
     const name = primaryFilename ?? t('inbox.notAvailable');
@@ -165,6 +304,18 @@ export default function InboxPage() {
         return (
           <Tag size="sm" type={inboxStatusTagTypes[status]}>
             {t(inboxStatusLabelKeys[status])}
+          </Tag>
+        );
+      },
+    },
+    {
+      header: t('inbox.columnState'),
+      key: 'state',
+      renderCell: (row) => {
+        const state = row['state'] as InboxItemState;
+        return (
+          <Tag size="sm" type={inboxItemStateTagTypes[state]}>
+            {t(inboxItemStateLabelKeys[state])}
           </Tag>
         );
       },
@@ -198,6 +349,7 @@ export default function InboxPage() {
         : (entityNames.get(item.legalEntityId) ?? item.legalEntityId),
     open: item.id,
     receivedAt: item.receivedAt,
+    state: inboxItemState(item),
     status: item.status,
   }));
 
@@ -274,33 +426,121 @@ export default function InboxPage() {
         </Select>
       ) : null}
       {canManage ? (
-        <UploadDropZone
-          itemHref={itemHref}
-          onUploaded={refresh}
-          organizationId={organizationId}
+        <Tile>
+          <UploadDropZone
+            itemHref={itemHref}
+            onUploaded={refresh}
+            organizationId={organizationId}
+          />
+        </Tile>
+      ) : null}
+      <Grid>
+        <Column lg={4} md={4} sm={4}>
+          <Select
+            id="inbox-filter"
+            labelText={t('inbox.filterStatus')}
+            onChange={(event) => {
+              const next = event.target.value;
+              setFilter(isFilter(next) ? next : 'all');
+              setPage(1);
+            }}
+            value={filter}
+          >
+            {filterKeys.map((key) => (
+              <SelectItem
+                key={key}
+                text={t(inboxStatusFilterLabelKeys[key])}
+                value={key}
+              />
+            ))}
+          </Select>
+        </Column>
+        <Column lg={4} md={4} sm={4}>
+          <Select
+            id="inbox-filter-issue"
+            labelText={t('inbox.filterIssue')}
+            onChange={(event) => {
+              setIssue(storedIssue(event.target.value));
+              setPage(1);
+            }}
+            value={issue}
+          >
+            <SelectItem text={t('inbox.filterIssueAny')} value="" />
+            {inboxIssueCodeSchema.options.map((code) => (
+              <SelectItem key={code} text={code} value={code} />
+            ))}
+          </Select>
+        </Column>
+        <Column lg={4} md={4} sm={4}>
+          <Select
+            id="inbox-filter-confidence"
+            labelText={t('inbox.filterConfidence')}
+            onChange={(event) => {
+              setConfidence(storedConfidence(event.target.value));
+              setPage(1);
+            }}
+            value={confidence}
+          >
+            <SelectItem text={t('inbox.confidenceAny')} value="" />
+            {inboxConfidenceBandSchema.options.map((band) => (
+              <SelectItem
+                key={band}
+                text={t(inboxConfidenceBandLabelKeys[band])}
+                value={band}
+              />
+            ))}
+          </Select>
+        </Column>
+        <Column lg={4} md={4} sm={4}>
+          <TextInput
+            helperText={t('inbox.filterAssigneeHelp')}
+            id="inbox-filter-assignee"
+            labelText={t('inbox.filterAssignee')}
+            onBlur={() => {
+              setAssignee(assigneeDraft.trim());
+              setPage(1);
+            }}
+            onChange={(event) => {
+              setAssigneeDraft(event.target.value);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                setAssignee(assigneeDraft.trim());
+                setPage(1);
+              }
+            }}
+            value={assigneeDraft}
+          />
+        </Column>
+      </Grid>
+      {bulkFailed ? (
+        <InlineNotification
+          kind="error"
+          lowContrast
+          role="alert"
+          title={t('inbox.writeFailed')}
         />
       ) : null}
-      <div className={styles.filters!}>
-        <Select
-          id="inbox-filter"
-          labelText={t('inbox.filterStatus')}
-          onChange={(event) => {
-            const next = event.target.value;
-            setFilter(isFilter(next) ? next : 'all');
-            setPage(1);
-          }}
-          value={filter}
-        >
-          {filterKeys.map((key) => (
-            <SelectItem
-              key={key}
-              text={t(inboxStatusFilterLabelKeys[key])}
-              value={key}
-            />
-          ))}
-        </Select>
-      </div>
+      {bulkResult === undefined ? null : (
+        <InlineNotification
+          kind={refusedIds.length === 0 ? 'success' : 'warning'}
+          lowContrast
+          role="status"
+          {...(refusedIds.length === 0
+            ? {}
+            : {
+                subtitle: t('inbox.bulkRefused', {
+                  ids: refusedSummary,
+                }),
+              })}
+          title={t('inbox.bulkResult', {
+            ok: String(bulkResult.results.length - refusedIds.length),
+            total: String(bulkResult.results.length),
+          })}
+        />
+      )}
       <DataGrid
+        batchActions={canManage ? batchActions : []}
         columns={columns}
         description={t('inbox.listDescription')}
         emptyLabel={t(filter === 'all' ? 'inbox.empty' : 'inbox.emptyFiltered')}
@@ -315,6 +555,7 @@ export default function InboxPage() {
         pagination
         paginationMode="server"
         rows={rows}
+        selection={canManage ? 'multi' : 'none'}
         size="md"
         state={
           failed
@@ -328,6 +569,68 @@ export default function InboxPage() {
         title={t('inbox.listTitle')}
         totalItems={list?.total ?? 0}
       />
+      {pending === undefined ? null : (
+        <Modal
+          modalHeading={t(inboxBulkActionLabelKeys[pending.action])}
+          onRequestClose={() => {
+            setPending(undefined);
+          }}
+          onRequestSubmit={() => {
+            void runBulk();
+          }}
+          open
+          primaryButtonDisabled={
+            bulkBusy ||
+            (pending.action === 'snooze' && bulkSnoozedUntil.length === 0)
+          }
+          primaryButtonText={t(inboxBulkActionLabelKeys[pending.action])}
+          secondaryButtonText={t('inbox.cancel')}
+        >
+          <Stack gap={5}>
+            <p>{t('inbox.bulkSelected', { count: pending.ids.length })}</p>
+            {pending.action === 'assign' ? (
+              <TextInput
+                id="inbox-bulk-assignee"
+                labelText={t('inbox.assignee')}
+                onChange={(event) => {
+                  setBulkAssignee(event.target.value);
+                }}
+                placeholder={t('inbox.assigneePlaceholder')}
+                value={bulkAssignee}
+              />
+            ) : null}
+            {pending.action === 'snooze' ? (
+              <TextInput
+                id="inbox-bulk-snooze"
+                labelText={t('inbox.snoozedUntil')}
+                onChange={(event) => {
+                  setBulkSnoozedUntil(event.target.value);
+                }}
+                type="datetime-local"
+                value={bulkSnoozedUntil}
+              />
+            ) : null}
+            {pending.action === 'discard' ? (
+              <Select
+                id="inbox-bulk-reason"
+                labelText={t('inbox.discardReason')}
+                onChange={(event) => {
+                  setBulkReason(asDiscardReason(event.target.value));
+                }}
+                value={bulkReason}
+              >
+                {inboxDiscardReasonSchema.options.map((reason) => (
+                  <SelectItem
+                    key={reason}
+                    text={t(inboxDiscardReasonLabelKeys[reason])}
+                    value={reason}
+                  />
+                ))}
+              </Select>
+            ) : null}
+          </Stack>
+        </Modal>
+      )}
     </PageContainer>
   );
 }

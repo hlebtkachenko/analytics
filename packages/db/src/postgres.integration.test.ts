@@ -26,6 +26,7 @@ import {
   withTenantContext,
 } from './index.js';
 import type { TenantContext } from './index.js';
+import { endPools } from './integration-support.js';
 import { executeEraseUser } from './cli.js';
 
 const postgresImage =
@@ -292,14 +293,14 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await Promise.all([
-    apiPool.end(),
-    authPool.end(),
-    backupPool.end(),
-    migratorPool.end(),
-    reportingPool.end(),
-    rootPool.end(),
-  ]);
+  await endPools(
+    apiPool,
+    authPool,
+    backupPool,
+    migratorPool,
+    reportingPool,
+    rootPool,
+  );
   await container.stop();
 });
 

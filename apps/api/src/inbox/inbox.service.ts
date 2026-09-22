@@ -9,6 +9,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Inject,
   Injectable,
   InternalServerErrorException,
@@ -27,6 +28,8 @@ import { MAX_UPLOAD_BYTES } from '../ingestion/contract.js';
 import type { ReceivedFile } from '../request-context.js';
 import { EMAIL_MEDIA_TYPE, INLINE_MEDIA_TYPES } from './contract.js';
 import type {
+  BulkInboxItemsRequest,
+  BulkInboxItemsResponse,
   InboxChannel,
   InboxHints,
   InboxIntakeResponse,
@@ -44,8 +47,10 @@ import type {
 import {
   InboxRepository,
   QuotaExceededError,
+  RouteRefusedError,
   type AdoptRuleInput,
   type AssignItemInput,
+  type AttachItemInput,
   type BlobRecord,
   type ChannelSelector,
   type CreateChannelInput,
@@ -135,6 +140,10 @@ interface StagedIntake extends EntityScopeSelector {
 
 export interface RouteInput extends ReadItemInput {
   body: RouteInboxItemToDocumentRequest;
+}
+
+export interface BulkInput extends EntityScopeSelector {
+  body: BulkInboxItemsRequest;
 }
 
 export interface OpenBlobInput extends EntityScopeSelector {
@@ -254,6 +263,41 @@ function toIntakeResponse(result: ReceiveIntakeResult): InboxIntakeResponse {
   };
 }
 
+// The per-id verdict of a bulk action: the single-item refusals by status, and a route's own refusal by code.
+function bulkRefusalCode(
+  error: unknown,
+): BulkInboxItemsResponse['results'][number]['code'] {
+  if (error instanceof RouteRefusedError) {
+    return error.refusal.code;
+  }
+
+  if (error instanceof HttpException) {
+    const body = error.getResponse();
+    const code =
+      typeof body === 'object' && body !== null
+        ? (body as { code?: unknown }).code
+        : undefined;
+
+    if (code === 'reference_conflict' || code === 'duplicate_probable') {
+      return code;
+    }
+
+    if (error.getStatus() === 404) {
+      return 'not_found';
+    }
+
+    if (error.getStatus() === 409) {
+      return 'not_open';
+    }
+
+    if (error.getStatus() === 400) {
+      return 'invalid';
+    }
+  }
+
+  throw error;
+}
+
 // A person's hint outranks the sniff for the type and the entity; the reasons keep both steps visible.
 export function applyHints(
   output: ProviderOutput,
@@ -333,7 +377,7 @@ export class InboxService {
         throw new BadRequestException();
       }
 
-      return await this.receive({
+      const result = await this.receive({
         ...input,
         channelId: null,
         channelKind: 'upload',
@@ -344,6 +388,13 @@ export class InboxService {
         size: file.data.size,
         temporaryPath: file.data.temporaryPath,
       });
+
+      // The strict response contract refuses the replay and route-job fields the receive result carries.
+      return {
+        duplicateOfItemId: result.duplicateOfItemId,
+        files: result.files,
+        item: result.item,
+      };
     } catch (error) {
       // Covers a refusal before receive took over; after it the file is already gone and this is a no-op.
       if (received?.path !== undefined) {
@@ -620,6 +671,29 @@ export class InboxService {
       return null;
     }
 
+    // A failed email parent is split again, not sniffed: the children already made are idempotent.
+    if (
+      loaded.input.item.status === 'failed' &&
+      loaded.input.item.payloadKind === 'email'
+    ) {
+      const reopened = await this.inbox.reopenEmailItem(input);
+
+      if (reopened === null) {
+        return null;
+      }
+
+      try {
+        await this.queue.enqueueSplitEmailItem(reopened.job);
+      } catch {
+        // The item is received again; the maintenance requeue picks it up like any lost split.
+        this.logger.error(
+          `Enqueue of split_email_item failed for item ${reopened.job.itemId}.`,
+        );
+      }
+
+      return reopened.detail;
+    }
+
     const first = loaded.files[0];
 
     if (first === undefined) {
@@ -658,6 +732,9 @@ export class InboxService {
 
     return this.inbox.routeToDocument({
       ...input,
+      ...(input.body.acknowledgeDuplicateOf === undefined
+        ? {}
+        : { acknowledgeDuplicateOf: input.body.acknowledgeDuplicateOf }),
       correctionReasons: input.body.correctionReasons ?? {},
       document,
       extraction: {
@@ -666,7 +743,61 @@ export class InboxService {
         providerVersion: MANUAL_PROVIDER_VERSION,
       },
       fileBlobIds: input.body.fileBlobIds,
+      ...(input.body.supersedesDocumentId === undefined
+        ? {}
+        : { supersedesDocumentId: input.body.supersedesDocumentId }),
     });
+  }
+
+  attachItem(input: AttachItemInput): Promise<InboxItemDetail | null> {
+    return this.inbox.attachItem(input);
+  }
+
+  // One transaction per id in body order; a refusal on one item never rolls back another.
+  async bulk(input: BulkInput): Promise<BulkInboxItemsResponse> {
+    const { body } = input;
+    const results: BulkInboxItemsResponse['results'] = [];
+
+    for (const itemId of body.itemIds) {
+      const selector = {
+        ...input,
+        itemId,
+        legalEntityIds: input.legalEntityIds,
+      };
+
+      try {
+        const detail = await (body.action === 'assign'
+          ? this.inbox.assignItem({
+              ...selector,
+              assigneeId: body.assigneeId ?? null,
+            })
+          : body.action === 'snooze'
+            ? this.inbox.snoozeItem({
+                ...selector,
+                snoozedUntil: body.snoozedUntil ?? null,
+              })
+            : body.action === 'discard'
+              ? this.inbox.discardItem({
+                  ...selector,
+                  reason: body.reason ?? 'irrelevant',
+                })
+              : this.inbox.approveItem(selector));
+
+        results.push(
+          detail === null
+            ? { code: 'not_found', itemId, status: 'refused' }
+            : { itemId, status: 'ok' },
+        );
+      } catch (error) {
+        results.push({
+          code: bulkRefusalCode(error),
+          itemId,
+          status: 'refused',
+        });
+      }
+    }
+
+    return { results };
   }
 
   listRules(input: TenantContext): Promise<InboxRule[]> {

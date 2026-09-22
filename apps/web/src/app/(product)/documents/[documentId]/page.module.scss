@@ -1,4 +1,10 @@
 @use '@bap/design-system/tokens/spacing.scss' as spacing;
+@use '@bap/design-system/tokens/type.scss' as type;
+
+// Tile sections keep the same heading scale as the bare page sections.
+.sectionHeading {
+  @include type.type-style('heading-03');
+}
 
 .actions {
   align-items: center;

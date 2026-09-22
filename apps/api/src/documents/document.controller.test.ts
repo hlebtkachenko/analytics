@@ -139,8 +139,12 @@ const detail: DocumentDetail = {
     variableSymbol: null,
     vatTotal: '210.0000',
   },
+  files: [],
+  inboxItems: [],
   issues: [],
   links: [],
+  supersededByDocumentId: null,
+  supersedesDocumentId: null,
 };
 
 const documentLink: DocumentLink = {
@@ -435,6 +439,7 @@ describe('application document routes', () => {
 
     // Identifiers are lower-cased and the search term is trimmed at the boundary.
     expect(listCalls[0]?.query).toEqual({
+      current: 'true',
       dateFrom: '2026-01-01',
       dateTo: '2026-12-31',
       kind: ['issued_invoice', 'received_invoice'],

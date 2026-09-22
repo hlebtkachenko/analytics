@@ -15,6 +15,7 @@ import {
   withTenantContext,
 } from './index.js';
 import type { TenantContext } from './index.js';
+import { endPools } from './integration-support.js';
 
 const postgresImage =
   'pgvector/pgvector:pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a';
@@ -249,12 +250,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await Promise.all([
-    apiPool.end(),
-    authPool.end(),
-    migratorPool.end(),
-    rootPool.end(),
-  ]);
+  await endPools(apiPool, authPool, migratorPool, rootPool);
   await container.stop();
 });
 
@@ -264,12 +260,12 @@ describe('inbox email channel', () => {
     const compatibility = await checkMigrationCompatibility(apiPool);
 
     expect(result.applied).toEqual([]);
-    expect(result.currentVersion).toBe('20260917.0005');
-    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260917.0005');
+    expect(result.currentVersion).toBe('20260917.0006');
+    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260917.0006');
     expect(compatibility).toEqual({
       compatible: true,
-      expectedVersion: '20260917.0005',
-      version: '20260917.0005',
+      expectedVersion: '20260917.0006',
+      version: '20260917.0006',
     });
 
     const indexes = await rootPool.query<{ indexdef: string }>(

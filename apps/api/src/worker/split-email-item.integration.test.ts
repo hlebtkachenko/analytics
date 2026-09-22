@@ -41,6 +41,8 @@ import type {
 import { InboxService } from '../inbox/inbox.service.js';
 import {
   adoptRule,
+  approveItem,
+  attachItem,
   assignItem,
   createChannel,
   createRule,
@@ -64,6 +66,7 @@ import {
   readProviderInput,
   receiveIntake,
   recordExtraction,
+  reopenEmailItem,
   restoreItem,
   revokeCredential,
   routeToDocument,
@@ -76,6 +79,7 @@ import {
 } from '../inbox/inbox-repository.js';
 import * as fixtures from '../inbox/providers/__fixtures__/index.js';
 import type { BlobScanner, ScanOutcome } from '../scanning/clamd-client.js';
+import { endPools } from '../test-support/end-pools.js';
 import {
   runInboxMaintenance,
   type InboxMaintenanceReport,
@@ -401,6 +405,8 @@ beforeAll(async () => {
   store = new FilesystemBlobStore(directory);
   const repository: InboxRepository = {
     adoptRule: (input) => adoptRule(apiPool, input),
+    approveItem: (input) => approveItem(apiPool, input),
+    attachItem: (input) => attachItem(apiPool, input),
     assignItem: (input) => assignItem(apiPool, input),
     createRule: (input) => createRule(apiPool, input),
     deleteRule: (input) => deleteRule(apiPool, input),
@@ -424,6 +430,7 @@ beforeAll(async () => {
     readProviderInput: (input) => readProviderInput(apiPool, input),
     receiveIntake: (input) => receiveIntake(apiPool, input),
     recordExtraction: (input) => recordExtraction(apiPool, input),
+    reopenEmailItem: (input) => reopenEmailItem(apiPool, input),
     restoreItem: (input) => restoreItem(apiPool, input),
     revokeCredential: (input) => revokeCredential(apiPool, input),
     routeToDocument: (input) => routeToDocument(apiPool, input),
@@ -443,7 +450,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await Promise.all([apiPool.end(), migratorPool.end()]);
+  await endPools(apiPool, migratorPool);
   await container.stop();
   await rm(directory, { force: true, recursive: true });
 });
