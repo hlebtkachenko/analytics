@@ -11,12 +11,33 @@
   position: relative;
 }
 
-// Scroll region that hosts sticky headers, virtualization, and infinite scroll.
-// Its own stacking context contains the sticky-header and pinned z-indexes.
+// Positioning and stacking context; overflow is opt-in so a static grid never gutters.
 .scroll {
-  overflow: auto;
   position: relative;
   z-index: 0;
+}
+
+// Vertical scroll region; the stable gutter keeps the body's right edge fixed.
+.scrollVertical {
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+// Horizontal-only scroll; clipping the block axis avoids the double-scrollbar cascade.
+.scrollHorizontal {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+// The same gutter on toolbar and footer so their edge matches the scrolled body.
+.gutter {
+  overflow: hidden;
+  scrollbar-gutter: stable;
+}
+
+// Keep toolbar content in place under the active batch bar; the extra class beats Carbon's rule.
+.toolbar :global(.cds--batch-actions--active ~ .cds--toolbar-content) {
+  transform: none;
 }
 
 // Pin the header row while the body scrolls vertically.
@@ -33,6 +54,24 @@
   table-layout: fixed;
   inline-size: max-content;
   min-inline-size: 100%;
+}
+
+// Fit to container: fixed layout, sized columns keep width, overflow truncates.
+.fitLayout {
+  table-layout: fixed;
+  inline-size: 100%;
+}
+
+.fitLayout th,
+.fitLayout td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// The selection column has no column definition, so it is sized here.
+.fitLayout :global(.cds--table-column-checkbox) {
+  inline-size: 3rem;
 }
 
 // Pinned body cells stay opaque with the row background so scrolling content
@@ -106,7 +145,19 @@ tbody tr:global(.cds--data-table--selected) td.pinned {
   background: var(--cds-layer-selected);
 }
 
-.alignEnd {
+// Doubled class to outrank Carbon's .cds--data-table td alignment.
+.alignEnd,
+.alignEnd.alignEnd {
+  text-align: end;
+}
+
+// Sortable header: justify Carbon's space-between flex row to the end.
+.alignEnd :global(.cds--table-sort__flex) {
+  justify-content: flex-end;
+}
+
+// Non-sortable header: end-align the label text to match the cells.
+.alignEnd :global(.cds--table-header-label) {
   text-align: end;
 }
 

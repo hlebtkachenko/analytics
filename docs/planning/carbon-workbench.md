@@ -34,7 +34,7 @@ pinned release.
 
 - Every installed public React, pictogram, and chart export, plus exhaustive
   generated metadata for every installed upstream icon export.
-- The exact curated 29-icon BAP application facade and executable explorer,
+- The exact curated 51-icon BAP application facade and executable explorer,
   alongside the complete 1,575-export pictogram facade and explorer.
 - Recursive namespace members, compound children, hooks, contexts, constants,
   preview APIs, unstable APIs, aliases, and deprecated names.
@@ -110,7 +110,7 @@ chapter is original BAP prose with source and modified-work attribution.
 
 - Frozen install under Node 24.20 and pnpm 11.
 - Exact mode-specific full-facade parity plus exact parity for the curated
-  29-icon application facade.
+  51-icon application facade.
 - Zero unclassified public exports and zero unmapped pinned sources.
 - Default and Playground coverage for each renderable item.
 - Valid chart, diagram, icon, and pictogram fixtures.

@@ -99,11 +99,15 @@ export type DataGridProps = Readonly<{
   rows: readonly GridRow[];
   title?: string;
   description?: string;
+  // Accessible name for the table when no visible title is shown.
+  ariaLabel?: string;
 
   // Density and look.
   size?: DensitySize;
   zebra?: boolean;
   wrapCells?: boolean;
+  // Fit to container: fixed 100% layout, unsized columns share the rest and truncate.
+  fitContainer?: boolean;
 
   // Sorting.
   sortable?: boolean;

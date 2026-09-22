@@ -46,10 +46,16 @@ export function useColumnLayout(
     () => columns.map((column) => column.key),
     [columns],
   );
+  // Only declared widths are authoritative; the table layout sizes the rest.
   const defaultWidths = useMemo(
     () =>
       Object.fromEntries(
-        columns.map((column) => [column.key, column.width ?? 160]),
+        columns
+          .filter(
+            (column): column is GridColumn & { width: number } =>
+              column.width !== undefined,
+          )
+          .map((column) => [column.key, column.width]),
       ),
     [columns],
   );

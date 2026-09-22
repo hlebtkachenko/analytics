@@ -328,6 +328,11 @@ const ROW_CONTROL_SELECTOR = [
   '.cds--table-column-menu',
   '.cds--checkbox',
   '.cds--table-expand',
+  'a',
+  'button',
+  'input',
+  'label',
+  '.cds--table-column-checkbox',
 ].join(', ');
 
 // True when a click started inside a row's menu, checkbox, or expand control.
@@ -350,9 +355,11 @@ export function DataGrid(props: DataGridProps) {
     rows,
     title,
     description,
+    ariaLabel,
     size = 'sm',
     zebra = false,
     wrapCells = false,
+    fitContainer = false,
     sortable = false,
     multiSort = false,
     initialSort = [],
@@ -647,11 +654,16 @@ export function DataGrid(props: DataGridProps) {
   // .pinned classes so pinned cells can track zebra, hover, and selection.
   const stickyStyle = (key: string): CSSProperties =>
     key in leftFor ? { position: 'sticky', left: leftFor[key] ?? 0 } : {};
-  const columnStyle = (column: GridColumn): CSSProperties => ({
-    width: layout.widths[column.key] ?? DEFAULT_WIDTH,
-    minWidth: layout.widths[column.key] ?? DEFAULT_WIDTH,
-    ...stickyStyle(column.key),
-  });
+  // Pinned and resizable grids size every column; a plain grid lets the browser fit it.
+  const authoritativeWidths = hasPinned || resizableColumns;
+  const columnStyle = (column: GridColumn): CSSProperties => {
+    const stored = layout.widths[column.key];
+    const width = stored ?? (authoritativeWidths ? DEFAULT_WIDTH : undefined);
+    return {
+      ...(width === undefined ? {} : { width, minWidth: width }),
+      ...stickyStyle(column.key),
+    };
+  };
 
   // The last frozen data column carries the seam divider.
   const pinnedColumnKeys = visibleColumns
@@ -725,6 +737,15 @@ export function DataGrid(props: DataGridProps) {
   const isEmpty = state === 'empty' || orderedRows.length === 0;
   const showOverlay = state === 'loading' && loadingMode === 'overlay';
 
+  // Only a row-scrolling grid gets a vertical scroll region.
+  const verticalScroll =
+    Boolean(scrollMaxHeight) || stickyHeader || infiniteScroll;
+  // Non-fit grids get a horizontal-only scroll region unless they already scroll both ways.
+  const horizontalScroll = !fitContainer && !verticalScroll;
+  // Gutter the toolbar and footer to track a scrolled body; static grids need no wrapper.
+  const wrapGutter = (node: ReactNode): ReactNode =>
+    verticalScroll ? <div className={styles.gutter}>{node}</div> : node;
+
   // The skeleton stands in for the whole grid while first data loads.
   // The wrapper clips it to the column so wide skeletons do not bleed out.
   if (state === 'loading' && loadingMode === 'skeleton') {
@@ -759,7 +780,7 @@ export function DataGrid(props: DataGridProps) {
   }
 
   const toolbar = showToolbar ? (
-    <TableToolbar>
+    <TableToolbar className={styles.toolbar}>
       {batchActions.length > 0 && (
         <TableBatchActions
           onCancel={clearSelection}
@@ -830,25 +851,52 @@ export function DataGrid(props: DataGridProps) {
       description={description}
       title={title}
     >
-      {toolbar}
+      {toolbar && wrapGutter(toolbar)}
 
       <div className={styles.viewport}>
         <div
           aria-busy={showOverlay}
-          className={styles.scroll}
+          className={cx(
+            styles.scroll,
+            verticalScroll && styles.scrollVertical,
+            horizontalScroll && styles.scrollHorizontal,
+          )}
           onScroll={virtualized ? viewport.onScroll : undefined}
           ref={scrollRef}
           style={scrollMaxHeight ? { maxHeight: scrollMaxHeight } : undefined}
         >
           <Table
-            aria-label={title ?? 'Data grid'}
+            aria-label={title ?? ariaLabel ?? 'Data grid'}
             className={cx(
               (stickyHeader || Boolean(scrollMaxHeight)) && styles.stickyHead,
               (hasPinned || resizableColumns) && styles.fixedLayout,
+              fitContainer && styles.fitLayout,
             )}
             size={size}
             useZebraStyles={zebra}
           >
+            {fitContainer && (
+              // Carbon sizes the sort button, not the th, so a fixed layout needs a colgroup.
+              <colgroup>
+                {expandable && <col style={{ width: 48 }} />}
+                {(selection === 'multi' || selection === 'single') && (
+                  <col style={{ width: 48 }} />
+                )}
+                {rowNumbers && <col style={{ width: NUMBER_WIDTH }} />}
+                {visibleColumns.map((column) => {
+                  const columnWidth = layout.widths[column.key];
+                  return (
+                    <col
+                      key={column.key}
+                      {...(columnWidth === undefined
+                        ? {}
+                        : { style: { width: columnWidth } })}
+                    />
+                  );
+                })}
+                {hasRowActions && <col style={{ width: 48 }} />}
+              </colgroup>
+            )}
             <TableHead>
               <TableRow>
                 {expandable && (
@@ -1168,28 +1216,31 @@ export function DataGrid(props: DataGridProps) {
         )}
       </div>
 
-      {footer}
+      {footer != null && wrapGutter(footer)}
 
-      {pagination && !virtualized && !infiniteScroll && (
-        <Pagination
-          onChange={({ page: nextPage, pageSize: nextSize }) => {
-            if (serverPaging) onPageChange?.(nextPage, nextSize);
-            else {
-              setClientPage(nextPage);
-              setClientPageSize(nextSize);
+      {pagination &&
+        !virtualized &&
+        !infiniteScroll &&
+        wrapGutter(
+          <Pagination
+            onChange={({ page: nextPage, pageSize: nextSize }) => {
+              if (serverPaging) onPageChange?.(nextPage, nextSize);
+              else {
+                setClientPage(nextPage);
+                setClientPageSize(nextSize);
+              }
+            }}
+            page={serverPaging ? activePage : safePage}
+            pageSize={activePageSize}
+            pageSizes={[...pageSizes]}
+            size={size === 'xs' || size === 'sm' ? 'sm' : 'lg'}
+            totalItems={
+              serverPaging
+                ? (totalItems ?? orderedRows.length)
+                : orderedRows.length
             }
-          }}
-          page={serverPaging ? activePage : safePage}
-          pageSize={activePageSize}
-          pageSizes={[...pageSizes]}
-          size={size === 'xs' || size === 'sm' ? 'sm' : 'lg'}
-          totalItems={
-            serverPaging
-              ? (totalItems ?? orderedRows.length)
-              : orderedRows.length
-          }
-        />
-      )}
+          />,
+        )}
     </TableContainer>
   );
 }
