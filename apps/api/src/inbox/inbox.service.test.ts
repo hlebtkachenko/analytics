@@ -45,6 +45,7 @@ import {
   type InboxRepository,
   type ItemFileRecord,
   type ReceiveIntakeInput,
+  type ReceiveIntakeResult,
   type RecordExtractionInput,
   type RouteToDocumentInput,
   type UpdateInboxSettingsInput,
@@ -121,7 +122,7 @@ describe('InboxService', () => {
   let usedBytes = 0;
   let existingSha256: string | null = null;
   let storedFile: ItemFileRecord | null = null;
-  let blobScanStatus: BlobScanStatus = 'not_scanned';
+  let blobScanStatus: BlobScanStatus = 'clean';
   let hints: ProviderInput['hints'] = {
     hintKind: null,
     hintLegalEntityId: null,
@@ -286,30 +287,32 @@ describe('InboxService', () => {
             },
           },
     ),
-    receiveIntake: vi.fn(async (input: ReceiveIntakeInput) => {
-      received.push(input);
-      if (input.sha256 === existingSha256) {
+    receiveIntake: vi.fn(
+      async (input: ReceiveIntakeInput): Promise<ReceiveIntakeResult> => {
+        received.push(input);
+        if (input.sha256 === existingSha256) {
+          return {
+            duplicateOfItemId: ITEM_ID,
+            files: [],
+            item: { ...item, status: 'discarded' as const },
+            replayed: false,
+            routeJob: null,
+          };
+        }
+        if (usedBytes + input.byteSize > input.quotaBytes) {
+          throw new QuotaExceededError();
+        }
+        await input.persist();
+        usedBytes += input.byteSize;
         return {
-          duplicateOfItemId: ITEM_ID,
+          duplicateOfItemId: null,
           files: [],
-          item: { ...item, status: 'discarded' as const },
+          item,
           replayed: false,
           routeJob: null,
         };
-      }
-      if (usedBytes + input.byteSize > input.quotaBytes) {
-        throw new QuotaExceededError();
-      }
-      await input.persist();
-      usedBytes += input.byteSize;
-      return {
-        duplicateOfItemId: null,
-        files: [],
-        item,
-        replayed: false,
-        routeJob: null,
-      };
-    }),
+      },
+    ),
     recordExtraction: vi.fn(async (input: RecordExtractionInput) => {
       extractions.push(input);
       return detail;
@@ -364,7 +367,7 @@ describe('InboxService', () => {
     enqueued.length = 0;
     enqueueFails = false;
     existingSha256 = null;
-    blobScanStatus = 'not_scanned';
+    blobScanStatus = 'clean';
   });
 
   it('hashes, sniffs and stores a new upload, then leaves no temporary file', async () => {
@@ -407,6 +410,75 @@ describe('InboxService', () => {
       sha256: input?.sha256 ?? '',
       storageKey: input?.storageKey ?? '',
     };
+  });
+
+  // One stored file the scanner has not answered for yet, and a rule pass that asked for a route.
+  const unscannedIntake =
+    (bytes: Buffer) =>
+    async (input: ReceiveIntakeInput): Promise<ReceiveIntakeResult> => {
+      received.push(input);
+      await input.persist();
+      return {
+        duplicateOfItemId: null,
+        files: [
+          {
+            blobId: BLOB_ID,
+            byteSize: bytes.length,
+            mediaType: 'application/pdf',
+            originalFilename: 'placeholder.pdf',
+            position: 1,
+            scanStatus: 'not_scanned' as const,
+            sha256: input.sha256,
+          },
+        ],
+        item,
+        replayed: false,
+        routeJob: {
+          itemId: item.id,
+          organizationId: input.organizationId,
+          ruleId: null,
+        },
+      };
+    };
+
+  it('enqueues the scan of a new upload instead of the route the rules asked for', async () => {
+    const bytes = fixtures.pdf();
+    const path = await stage(bytes, 'scan-1');
+    repository.receiveIntake.mockImplementationOnce(unscannedIntake(bytes));
+
+    await service.upload({
+      ...tenant,
+      file: { originalname: 'placeholder.pdf', path, size: bytes.length },
+    });
+
+    expect(scanned).toEqual([
+      {
+        itemId: item.id,
+        organizationId: tenant.organizationId,
+        userId: tenant.userId,
+      },
+    ]);
+    expect(queue.enqueueRouteInboxItem).not.toHaveBeenCalled();
+
+    // The same push through an API channel names the channel as its principal instead of the uploader.
+    repository.receiveIntake.mockImplementationOnce(unscannedIntake(bytes));
+    await service.intakeFile({
+      ...channelTenant,
+      channelId: CHANNEL_ID,
+      externalId: null,
+      file: {
+        originalname: 'placeholder.pdf',
+        path: await stage(bytes, 'scan-2'),
+        size: bytes.length,
+      },
+      origin: null,
+    });
+
+    expect(scanned[1]).toEqual({
+      channelId: CHANNEL_ID,
+      itemId: item.id,
+      organizationId: channelTenant.organizationId,
+    });
   });
 
   it('answers a duplicate without moving bytes and deletes the temporary file', async () => {
@@ -670,6 +742,18 @@ describe('InboxService', () => {
     await expect(
       service.openBlob({ ...tenant, blobId: 'missing', inline: false }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('refuses a blob the scanner has not answered for on download and inline alike', async () => {
+    blobScanStatus = 'not_scanned';
+
+    for (const inline of [false, true]) {
+      await expect(
+        service.openBlob({ ...tenant, blobId: BLOB_ID, inline }),
+      ).rejects.toMatchObject({ message: 'blob_scan_pending', status: 409 });
+    }
+
+    blobScanStatus = 'clean';
   });
 
   it('quarantines an infected or unscannable blob on download and inline alike', async () => {
