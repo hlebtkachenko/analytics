@@ -694,17 +694,23 @@ async function loadDetail(
   transaction: PoolClient,
   item: InboxItem,
 ): Promise<InboxItemDetail> {
-  const sender = await transaction.query<{ sender: string | null }>(
-    'select sender from app.inbox_item where id = $1',
-    [item.id],
-  );
+  const sender = await transaction.query<{
+    sender: string | null;
+    sender_authenticated: boolean;
+  }>('select sender, sender_authenticated from app.inbox_item where id = $1', [
+    item.id,
+  ]);
 
   return {
     corrections: await loadCorrections(transaction, item.id),
     events: await loadEvents(transaction, item.id),
     extraction: await loadLatestExtraction(transaction, item.id),
     files: (await loadItemFiles(transaction, item.id)).map(publicFile),
-    item: { ...item, sender: sender.rows[0]?.sender ?? null },
+    item: {
+      ...item,
+      sender: sender.rows[0]?.sender ?? null,
+      senderAuthenticated: sender.rows[0]?.sender_authenticated ?? false,
+    },
     routingTarget: routingTargetFor(
       item.detectedType,
       await loadRoutingTargetOverrides(transaction),

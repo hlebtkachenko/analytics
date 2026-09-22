@@ -504,6 +504,16 @@ export default function InboxItemPage() {
               severity={inboxStatusSeverity[item.status]}
             />
             <span>{item.receivedAt}</span>
+            {item.sender === null ? null : (
+              <StatusIndicator
+                label={t(
+                  item.senderAuthenticated
+                    ? 'inbox.senderAuthenticated'
+                    : 'inbox.senderUnverified',
+                )}
+                severity={item.senderAuthenticated ? 'success' : 'neutral'}
+              />
+            )}
             {item.duplicateOfItemId === null ? null : (
               <Link href={itemHref(item.duplicateOfItemId)}>
                 {t('inbox.duplicateOf')}
