@@ -2081,6 +2081,15 @@ function blobDispositionFilename(
   return sanitised.length > 0 ? sanitised : `blob-${blobId}`;
 }
 
+// The two 409 codes of the blob routes; an unreadable body falls back to the quarantine code.
+async function blobConflictCode(response: Response): Promise<string> {
+  const body: unknown = await response.json().catch(() => null);
+  const code = (body as { code?: unknown } | null)?.code;
+  return code === 'blob_scan_pending'
+    ? 'blob_scan_pending'
+    : 'blob_quarantined';
+}
+
 async function streamInboxBlob(
   auth: BffAuth,
   request: Request,
@@ -2134,10 +2143,13 @@ async function streamInboxBlob(
       return upstreamFailure(operation, 'unreachable');
     }
 
-    // The API's 409 is the quarantine gate on an infected or unscannable blob; the browser reads the code.
+    // The API's 409 is the scan gate: quarantined for a bad verdict, pending while the scan has not answered.
     return jsonResponse(
       {
-        error: response.status === 409 ? 'blob_quarantined' : 'blob_rejected',
+        error:
+          response.status === 409
+            ? await blobConflictCode(response)
+            : 'blob_rejected',
       },
       response.status,
     );

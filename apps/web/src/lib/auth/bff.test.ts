@@ -2298,6 +2298,21 @@ describe('inbox blob routes', () => {
       expect(response.headers.get('cache-control')).toBe('private, no-store');
     }
   });
+
+  it('passes the pending 409 through as blob_scan_pending', async () => {
+    const pending = async () =>
+      new Response('{"code":"blob_scan_pending"}', { status: 409 });
+    const download = await getInboxBlobDownload(
+      auth,
+      inboxRequest(`blobs/${BLOB_ID}/download`),
+      'org_1',
+      BLOB_ID,
+      pending,
+    );
+
+    expect(download.status).toBe(409);
+    expect(await download.json()).toEqual({ error: 'blob_scan_pending' });
+  });
 });
 
 const CHANNEL_ID = '00000000-0000-4000-8000-000000000060';

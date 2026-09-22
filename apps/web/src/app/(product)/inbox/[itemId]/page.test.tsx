@@ -377,6 +377,37 @@ describe('InboxItemPage', () => {
     },
   );
 
+  it('shows a scan pending indicator instead of the preview and the download', async () => {
+    const otherBlobId = '00000000-0000-4000-8000-000000000061';
+    const fetchMock = respondWith({
+      events: [],
+      extraction: null,
+      files: [
+        file('application/pdf', 'not_scanned'),
+        {
+          ...file('application/zip'),
+          blobId: otherBlobId,
+          originalFilename: 'clean.zip',
+          position: 2,
+        },
+      ],
+      item: inboxItem,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderItemPage();
+
+    // Once in the preview tile and once in the file row; the scanned sibling keeps its link.
+    expect(await screen.findAllByText('Scan pending')).toHaveLength(2);
+    expect(screen.queryByTitle('File preview')).toBeNull();
+    expect(
+      screen.queryByRole('link', { name: 'Download placeholder.bin' }),
+    ).toBeNull();
+    expect(
+      screen.getByRole('link', { name: 'Download clean.zip' }),
+    ).toBeVisible();
+  });
+
   it('prefills the draft from the extraction, explains it, and routes with every blob', async () => {
     const fetchMock = respondWith({
       events: [],
