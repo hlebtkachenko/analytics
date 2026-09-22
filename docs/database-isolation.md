@@ -499,7 +499,15 @@ blob, inbox item, extraction, event, document file and channel tombstones, plus
 the member `resource_id` tombstone on `app.audit_log`. It is needed because
 `20260920.0001` replaced the function with a body that predates the inbox
 tables, and an applied migration cannot be edited in place.
-`DATABASE_MIGRATION_COMPATIBILITY` is now `20260922.0006` in
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
+`20260922.0006` after this migration.
+
+Migration `20260922.0007` re-declares `app.erase_user` once more, because
+`20260922.0006` sorts after the automation migrations and replaced the routing
+target, setting, rule and correction erasure rules `20260917.0004` and
+`20260917.0005` had added. Its body is the automation body plus the member
+`resource_id` tombstone on `app.audit_log`, so no stack loses a rule.
+`DATABASE_MIGRATION_COMPATIBILITY` is now `20260922.0007` in
 `packages/db/src/access.ts`.
 
 ## Tenant policy contract
