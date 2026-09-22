@@ -94,12 +94,9 @@ function configurationFor(role: DatabaseRole): DatabaseConfiguration {
   };
 }
 
-// Pools for one role; the guard mirrors the database suites.
+// Pools for one role.
 function poolFor(role: DatabaseRole): DatabasePool {
-  const pool = createDatabasePool(configurationFor(role));
-  // pg emits 'error' on idle clients when the backend dies at teardown; swallow it so the container shutdown race is not an unhandled error.
-  pool.on('error', () => undefined);
-  return pool;
+  return createDatabasePool(configurationFor(role));
 }
 
 async function asTenant<T>(

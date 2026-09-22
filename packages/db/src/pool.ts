@@ -32,5 +32,8 @@ export function createDatabasePool(
     poolOptions.ssl = { rejectUnauthorized: true };
   }
 
-  return new Pool(poolOptions);
+  const pool = new Pool(poolOptions);
+  // pg emits idle client failures on the pool and Node exits without a listener; the pool drops that client and reconnects on the next checkout.
+  pool.on('error', () => undefined);
+  return pool;
 }
