@@ -141,6 +141,8 @@ export interface ReceiveIntakeInput extends EntityScopeSelector {
   quotaBytes: number;
   // The parsed envelope sender a child inherits; null until the split has read the MIME.
   sender: string | null;
+  // The DKIM alignment verdict a child inherits; false for every path that has no verified sender.
+  senderAuthenticated: boolean;
   sha256: string;
   // Null for an email: the worker scans and splits it, so the item stays received and nothing is classified yet.
   sniff: ExtractionRecord | null;
@@ -918,8 +920,9 @@ export async function receiveIntakeInTransaction(
   const inserted = await transaction.query<{ id: string }>(
     `insert into app.inbox_item
          (organization_id, channel_kind, channel_id, payload_kind, status, duplicate_of_item_id,
-          legal_entity_id, hint_kind, origin, external_id, parent_item_id, sender, created_by)
-       values ($1, $2, $3, $4, 'received', $5, $6, $7, $8, $9, $10, $11, $12)
+          legal_entity_id, hint_kind, origin, external_id, parent_item_id, sender,
+          sender_authenticated, created_by)
+       values ($1, $2, $3, $4, 'received', $5, $6, $7, $8, $9, $10, $11, $12, $13)
        returning id`,
     [
       input.organizationId,
@@ -933,6 +936,7 @@ export async function receiveIntakeInTransaction(
       input.externalId,
       input.parentItemId,
       input.sender,
+      input.senderAuthenticated,
       input.userId,
     ],
   );

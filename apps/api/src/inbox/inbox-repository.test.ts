@@ -106,6 +106,7 @@ function uploadInput(persisted: string[]): ReceiveIntakeInput {
     quotaBytes: 1_000,
     role: 'owner',
     sender: null,
+    senderAuthenticated: false,
     sha256: SHA256,
     sniff: {
       output: {

@@ -163,10 +163,13 @@ interface MimePart {
 function buildMime(input: {
   attachments?: MimePart[];
   from?: string;
+  // Extra header lines a test needs, such as the Mailgun verdict and a DKIM signature.
+  headers?: readonly string[];
   text?: string;
 }): Buffer {
   const boundary = `----bap-${Math.random().toString(16).slice(2)}`;
   const lines: string[] = [
+    ...(input.headers ?? []),
     `From: ${input.from ?? 'Sender <sender@example.org>'}`,
     'To: in-0123456789abcdef0123456789abcdef@in.bap.invalid',
     'Subject: Invoice',
@@ -320,9 +323,11 @@ async function children(parentId: string) {
       payload_kind: string;
       scan_status: string;
       sender: string | null;
+      sender_authenticated: boolean;
       status: string;
     }>(
-      `select i.id, i.external_id, i.payload_kind, i.status, i.sender, b.scan_status
+      `select i.id, i.external_id, i.payload_kind, i.status, i.sender,
+              i.sender_authenticated, b.scan_status
          from app.inbox_item as i
          join app.inbox_item_file as f on f.item_id = i.id
          join app.blob as b on b.id = f.blob_id
@@ -341,8 +346,12 @@ async function parentState(itemId: string) {
     itemId,
   });
   const row = await runInTenantContext(apiPool, owner, (transaction) =>
-    transaction.query<{ scan_status: string; sender: string | null }>(
-      `select i.sender, b.scan_status
+    transaction.query<{
+      scan_status: string;
+      sender: string | null;
+      sender_authenticated: boolean;
+    }>(
+      `select i.sender, i.sender_authenticated, b.scan_status
          from app.inbox_item as i
          join app.inbox_item_file as f on f.item_id = i.id
          join app.blob as b on b.id = f.blob_id
@@ -355,6 +364,7 @@ async function parentState(itemId: string) {
     issues: detail?.extraction?.issues.map((issue) => issue.code) ?? [],
     scanStatus: row.rows[0]?.scan_status,
     sender: row.rows[0]?.sender ?? null,
+    senderAuthenticated: row.rows[0]?.sender_authenticated ?? false,
     status: detail?.item.status,
   };
 }
@@ -612,6 +622,64 @@ describe('splitEmailItem', () => {
     await run(itemId, scanner);
     expect((await children(itemId)).length).toBe(2);
     expect(scanner.calls).toBe(3);
+  });
+
+  it('records DKIM alignment on the parent and every child, and nothing without the headers', async () => {
+    const itemId = await intake(
+      buildMime({
+        attachments: [
+          {
+            content: fixtures.pdf(),
+            contentType: 'application/pdf',
+            filename: 'invoice.pdf',
+          },
+        ],
+        from: 'Billing <billing@example.org>',
+        headers: [
+          'X-Mailgun-Dkim-Check-Result: Pass',
+          'DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;',
+          '\td=example.org; s=mail; h=from:to:subject; bh=Zm9v; b=YmFy',
+        ],
+        text: 'see attached',
+      }),
+      'token-dkim',
+    );
+
+    await run(itemId, new FakeScanner());
+
+    expect(await parentState(itemId)).toMatchObject({
+      sender: 'billing@example.org',
+      senderAuthenticated: true,
+      status: 'needs_review',
+    });
+    expect(await children(itemId)).toMatchObject([
+      { sender: 'billing@example.org', sender_authenticated: true },
+    ]);
+
+    // The same message without the two headers stays unauthenticated.
+    const plainId = await intake(
+      buildMime({
+        attachments: [
+          {
+            content: fixtures.text(),
+            contentType: 'text/plain',
+            filename: 'note.txt',
+          },
+        ],
+        from: 'Billing <billing@example.org>',
+        text: 'see attached',
+      }),
+      'token-no-dkim',
+    );
+
+    await run(plainId, new FakeScanner());
+
+    expect(await parentState(plainId)).toMatchObject({
+      senderAuthenticated: false,
+    });
+    expect(await children(plainId)).toMatchObject([
+      { sender_authenticated: false },
+    ]);
   });
 
   it('makes a text child when there is no attachment and none when the message is empty', async () => {

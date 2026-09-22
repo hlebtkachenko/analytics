@@ -522,6 +522,8 @@ export class InboxService {
         },
         quotaBytes: this.quotaBytes,
         sender: null,
+        // An upload and an API-channel item carry no sender at all, so nothing is authenticated.
+        senderAuthenticated: false,
         sha256,
         sniff:
           sniffed === null
