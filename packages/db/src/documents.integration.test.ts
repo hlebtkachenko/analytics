@@ -76,13 +76,16 @@ let reportingPool: Pool;
 let rootPool: Pool;
 
 function poolFor(user: string, password: string): Pool {
-  return new Pool({
+  const pool = new Pool({
     database: container.getDatabase(),
     host: container.getHost(),
     password,
     port: container.getPort(),
     user,
   });
+  // pg emits 'error' on idle clients when the backend dies at teardown; swallow it so the container shutdown race is not an unhandled error.
+  pool.on('error', () => undefined);
+  return pool;
 }
 
 async function asOwner<T>(
@@ -212,12 +215,12 @@ describe('documents register isolation', () => {
     const compatibility = await checkMigrationCompatibility(apiPool);
 
     expect(result.applied).toEqual([]);
-    expect(result.currentVersion).toBe('20260917.0006');
-    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260917.0006');
+    expect(result.currentVersion).toBe('20260922.0005');
+    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260922.0005');
     expect(compatibility).toEqual({
       compatible: true,
-      expectedVersion: '20260917.0006',
-      version: '20260917.0006',
+      expectedVersion: '20260922.0005',
+      version: '20260922.0005',
     });
   });
 
@@ -1062,14 +1065,18 @@ describe('documents register isolation', () => {
     const source = new URL('../drizzle/', import.meta.url);
     const directory = await mkdtemp(join(tmpdir(), 'bap-migrations-'));
     await rootPool.query(`create database ${backfillDatabase}`);
-    const poolOn = (user: string): Pool =>
-      new Pool({
+    const poolOn = (user: string): Pool => {
+      const pool = new Pool({
         database: backfillDatabase,
         host: container.getHost(),
         password: testPassword,
         port: container.getPort(),
         user,
       });
+      // Same idle-client shutdown guard as poolFor, for the disposable backfill database.
+      pool.on('error', () => undefined);
+      return pool;
+    };
     const backfillRootPool = poolOn('postgres');
     const backfillMigratorPool = poolOn('bap_migrator');
     const backfillApiPool = poolOn('bap_api');

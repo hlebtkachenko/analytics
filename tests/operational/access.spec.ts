@@ -25,14 +25,13 @@ publicTest('protects the public BAP access boundary', async ({ page }) => {
   expect(metrics.status()).toBe(404);
   const root = await page.request.get('/', { maxRedirects: 0 });
   expect(root.status()).toBe(307);
-  expect(root.headers()['location']).toMatch(/\/organizations$/);
-  const organizations = await page.request.get('/organizations', {
+  expect(root.headers()['location']).toMatch(/\/workspaces$/);
+  const workspaces = await page.request.get('/workspaces', {
     maxRedirects: 0,
   });
-  expect(organizations.status()).toBe(307);
-  expect(organizations.headers()['location']).toBe(
-    '/sign-in?next=%2Forganizations',
-  );
+  expect(workspaces.status()).toBe(307);
+  // The default landing page carries no next parameter.
+  expect(workspaces.headers()['location']).toBe('/sign-in');
   // Every slug answers the same signed-out redirect, so nothing about slug existence leaks.
   const organizationSlugPage = await page.request.get('/bap-operational', {
     maxRedirects: 0,
@@ -92,7 +91,12 @@ test('protects the authenticated BAP access contract without browser token leaka
     });
   });
 
+  // The former /access route only forwards; the diagnostic lives under the account area.
+  const forwarded = await page.request.get('/access', { maxRedirects: 0 });
+  authenticatedExpect(forwarded.status()).toBe(307);
+  authenticatedExpect(forwarded.headers()['location']).toBe('/account/access');
   await page.goto('/access');
+  await authenticatedExpect(page).toHaveURL(/\/account\/access$/);
   await authenticatedExpect(
     page.getByRole('heading', { name: 'Organization access' }),
   ).toBeVisible();
@@ -176,11 +180,25 @@ test('protects the authenticated BAP access contract without browser token leaka
   await authenticatedExpect(
     page.getByRole('heading', { exact: true, name: 'Account' }),
   ).toBeVisible();
+  // The password form lives on the security page, reached through the header account panel.
+  const accountPanel = page.getByRole('banner');
+  await accountPanel
+    .getByRole('button', { exact: true, name: 'Account' })
+    .click();
+  await authenticatedExpect(
+    accountPanel.getByText('Operational Owner'),
+  ).toBeVisible();
+  await authenticatedExpect(accountPanel.getByText(email)).toBeVisible();
+  await accountPanel
+    .getByRole('link', { name: 'Security and sessions' })
+    .click();
+  await authenticatedExpect(page).toHaveURL(/\/account\/security$/);
   await authenticatedExpect(
     page.getByRole('form', { name: 'Change password' }),
   ).toBeVisible();
 
-  await primaryNavigation.getByRole('link', { name: 'Access' }).click();
+  // Access left the rail; the account area holds the diagnostic.
+  await page.goto('/account/access');
   await authenticatedExpect(
     page.getByText('Application API role: owner'),
   ).toBeVisible();

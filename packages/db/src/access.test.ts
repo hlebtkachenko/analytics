@@ -1,13 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  countUnreadNotifications,
+  createNotification,
+  deleteAllNotifications,
+  deleteNotification,
   ensureInitialOrganizationQuota,
   findOrganizationIdBySlug,
+  findUserSessionToken,
   getOrganizationCreationQuota,
+  listNotifications,
+  listUserSessions,
+  listWorkspaceMemberships,
+  markNotificationRead,
+  markNotificationsRead,
   organizationCreationLimitReached,
   resolveMembership,
   resolveOrganizationRoute,
   setOrganizationQuota,
+  transferOwnership,
 } from './access.js';
 import type { DatabasePool } from './pool.js';
 
@@ -370,6 +381,156 @@ describe('organization accessors', () => {
     ).resolves.toBeNull();
   });
 
+  it('lists the caller workspaces with their own role and status in one query', async () => {
+    const createdAt = new Date('2026-09-01T00:00:00.000Z');
+    const joinedAt = new Date('2026-09-05T00:00:00.000Z');
+    const query = vi.fn(async () => ({
+      rows: [
+        {
+          id: 'organization-1',
+          name: 'Organization One',
+          slug: 'organization-one',
+          role: 'owner',
+          status: 'active',
+          created_at: createdAt,
+          joined_at: joinedAt,
+          member_count: 4,
+        },
+        {
+          id: 'organization-3',
+          name: 'Organization Three',
+          slug: 'organization-three',
+          role: 'member',
+          status: 'inactive',
+          created_at: createdAt,
+          joined_at: joinedAt,
+          // pg can hand back the count as a string; the row builder coerces it.
+          member_count: '2',
+        },
+        {
+          id: 'organization-2',
+          name: 'Organization Two',
+          slug: 'organization-two',
+          role: 'legacy-role',
+          status: 'active',
+          created_at: createdAt,
+          joined_at: joinedAt,
+          member_count: 1,
+        },
+      ],
+    }));
+    const pool = { query } as unknown as DatabasePool;
+
+    // The inactive membership is returned; the row with an unparseable role is dropped.
+    await expect(listWorkspaceMemberships(pool, 'user-1')).resolves.toEqual([
+      {
+        id: 'organization-1',
+        name: 'Organization One',
+        slug: 'organization-one',
+        role: 'owner',
+        status: 'active',
+        createdAt,
+        joinedAt,
+        memberCount: 4,
+      },
+      {
+        id: 'organization-3',
+        name: 'Organization Three',
+        slug: 'organization-three',
+        role: 'member',
+        status: 'inactive',
+        createdAt,
+        joinedAt,
+        memberCount: 2,
+      },
+    ]);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /from auth\.organization as organization\s+inner join auth\.member as membership/,
+      ),
+      ['user-1'],
+    );
+    // The active-only predicate is gone so every membership is returned.
+    expect(query).toHaveBeenCalledWith(
+      expect.not.stringContaining("membership.status = 'active'"),
+      ['user-1'],
+    );
+  });
+
+  it('lists the caller own sessions without exposing the token', async () => {
+    const createdAt = new Date('2026-09-01T00:00:00.000Z');
+    const updatedAt = new Date('2026-09-02T00:00:00.000Z');
+    const expiresAt = new Date('2026-09-10T00:00:00.000Z');
+    const query = vi.fn(async () => ({
+      rows: [
+        {
+          id: 'session-1',
+          created_at: createdAt,
+          updated_at: updatedAt,
+          expires_at: expiresAt,
+          ip_address: '203.0.113.7',
+          user_agent: 'Mozilla/5.0',
+        },
+        {
+          id: 'session-2',
+          created_at: createdAt,
+          updated_at: createdAt,
+          expires_at: expiresAt,
+          ip_address: null,
+          user_agent: null,
+        },
+      ],
+    }));
+    const pool = { query } as unknown as DatabasePool;
+
+    const sessions = await listUserSessions(pool, 'user-1');
+
+    expect(sessions).toEqual([
+      {
+        id: 'session-1',
+        createdAt,
+        updatedAt,
+        expiresAt,
+        ipAddress: '203.0.113.7',
+        userAgent: 'Mozilla/5.0',
+      },
+      {
+        id: 'session-2',
+        createdAt,
+        updatedAt: createdAt,
+        expiresAt,
+        ipAddress: null,
+        userAgent: null,
+      },
+    ]);
+    for (const session of sessions) {
+      expect(session).not.toHaveProperty('token');
+    }
+    expect(query).toHaveBeenCalledWith(
+      expect.stringMatching(/from auth\.session\s+where user_id = \$1/),
+      ['user-1'],
+    );
+  });
+
+  it.each([
+    { expected: 'token-1', rows: [{ token: 'token-1' }] },
+    { expected: null, rows: [] },
+  ])(
+    'resolves a session token scoped to the caller',
+    async ({ expected, rows }) => {
+      const query = vi.fn(async () => ({ rows }));
+      const pool = { query } as unknown as DatabasePool;
+
+      await expect(
+        findUserSessionToken(pool, 'user-1', 'session-1'),
+      ).resolves.toBe(expected);
+      expect(query).toHaveBeenCalledWith(
+        'select token from auth.session where id = $1 and user_id = $2',
+        ['session-1', 'user-1'],
+      );
+    },
+  );
+
   it.each([
     { expected: 'organization-1', rows: [{ id: 'organization-1' }] },
     { expected: null, rows: [] },
@@ -388,4 +549,172 @@ describe('organization accessors', () => {
       );
     },
   );
+
+  it('transfers ownership through the definer function', async () => {
+    const query = vi.fn(async () => ({ rows: [] }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(
+      transferOwnership(pool, 'organization-1', 'user-1', 'user-2'),
+    ).resolves.toBeUndefined();
+    expect(query).toHaveBeenCalledWith(
+      'select auth.transfer_ownership($1, $2, $3)',
+      ['organization-1', 'user-1', 'user-2'],
+    );
+  });
+});
+
+describe('notification accessors', () => {
+  it('inserts a notification scoped to the owning user', async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 1 }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(
+      createNotification(pool, {
+        userId: 'user-1',
+        kind: 'member.joined',
+        title: 'Ada joined Acme',
+        body: 'Joined as member',
+        href: '/acme/members',
+      }),
+    ).resolves.toBeUndefined();
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('into auth.notification'),
+      [
+        'user-1',
+        'member.joined',
+        'Ada joined Acme',
+        'Joined as member',
+        '/acme/members',
+      ],
+    );
+  });
+
+  it('defaults an absent body and href to null on insert', async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 1 }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await createNotification(pool, {
+      userId: 'user-1',
+      kind: 'member.joined',
+      title: 'Ada joined Acme',
+    });
+    expect(query).toHaveBeenCalledWith(expect.any(String), [
+      'user-1',
+      'member.joined',
+      'Ada joined Acme',
+      null,
+      null,
+    ]);
+  });
+
+  it('lists the caller notifications newest first with a limit param', async () => {
+    const createdAt = new Date('2026-09-20T10:00:00.000Z');
+    const query = vi.fn(async () => ({
+      rows: [
+        {
+          id: 'notification-1',
+          user_id: 'user-1',
+          kind: 'member.joined',
+          title: 'Ada joined Acme',
+          body: 'Joined as member',
+          href: '/acme/members',
+          read_at: null,
+          created_at: createdAt,
+        },
+      ],
+    }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(listNotifications(pool, 'user-1')).resolves.toEqual([
+      {
+        id: 'notification-1',
+        userId: 'user-1',
+        kind: 'member.joined',
+        title: 'Ada joined Acme',
+        body: 'Joined as member',
+        href: '/acme/members',
+        readAt: null,
+        createdAt,
+      },
+    ]);
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toEqual(expect.stringContaining('where user_id = $1'));
+    expect(sql).toEqual(expect.stringMatching(/order by created_at desc/));
+    expect(sql).toEqual(expect.stringContaining('limit $2'));
+    expect(params).toEqual(['user-1', 20]);
+  });
+
+  it('honours an explicit notification limit', async () => {
+    const query = vi.fn(async () => ({ rows: [] }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await listNotifications(pool, 'user-1', 5);
+    expect(query).toHaveBeenCalledWith(expect.any(String), ['user-1', 5]);
+  });
+
+  it('counts only unread notifications for the caller', async () => {
+    const query = vi.fn(async () => ({ rows: [{ unread_count: '3' }] }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(countUnreadNotifications(pool, 'user-1')).resolves.toBe(3);
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toEqual(expect.stringContaining('where user_id = $1'));
+    expect(sql).toEqual(expect.stringContaining('read_at is null'));
+    expect(params).toEqual(['user-1']);
+  });
+
+  it('marks the caller unread notifications read and returns the row count', async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 2 }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(markNotificationsRead(pool, 'user-1')).resolves.toBe(2);
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toEqual(expect.stringContaining('where user_id = $1'));
+    expect(sql).toEqual(expect.stringContaining('read_at is null'));
+    expect(params).toEqual(['user-1']);
+  });
+
+  it('marks a single caller notification read scoped by user and id', async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 1 }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(
+      markNotificationRead(pool, 'user-1', 'notification-1'),
+    ).resolves.toBe(1);
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toEqual(expect.stringContaining('user_id = $1'));
+    expect(sql).toEqual(expect.stringContaining('id = $2'));
+    expect(sql).toEqual(expect.stringContaining('read_at is null'));
+    expect(params).toEqual(['user-1', 'notification-1']);
+  });
+
+  it('deletes a single caller notification scoped by user and id', async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 1 }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(
+      deleteNotification(pool, 'user-1', 'notification-1'),
+    ).resolves.toBe(1);
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toEqual(
+      expect.stringContaining('delete from auth.notification'),
+    );
+    expect(sql).toEqual(expect.stringContaining('user_id = $1'));
+    expect(sql).toEqual(expect.stringContaining('id = $2'));
+    expect(params).toEqual(['user-1', 'notification-1']);
+  });
+
+  it('deletes every caller notification scoped by user', async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 4 }));
+    const pool = { query } as unknown as DatabasePool;
+
+    await expect(deleteAllNotifications(pool, 'user-1')).resolves.toBe(4);
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toEqual(
+      expect.stringContaining('delete from auth.notification'),
+    );
+    expect(sql).toEqual(expect.stringContaining('user_id = $1'));
+    expect(params).toEqual(['user-1']);
+  });
 });

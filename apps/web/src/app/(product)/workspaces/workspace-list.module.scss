@@ -1,0 +1,16 @@
+@use '@bap/design-system/tokens/spacing.scss' as spacing;
+
+.actionsRow {
+  display: flex;
+  gap: spacing.$spacing-03;
+}
+
+// The page title sits on one line with its primary create action on the right,
+// and wraps the action below the title inside a narrow viewport.
+.titleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}

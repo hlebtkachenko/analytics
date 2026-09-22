@@ -1,13 +1,13 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import NewOrganizationPage from './page';
-
 const mocks = vi.hoisted(() => ({
-  createOrganizationAction: vi.fn(),
+  createWorkspaceAction: vi.fn(),
   getOrganizationCreationQuota: vi.fn(),
   getSession: vi.fn(),
+  inviteMemberWithScopeAction: vi.fn(),
   pool: {},
+  push: vi.fn(),
   redirect: vi.fn(() => {
     throw new Error('NEXT_REDIRECT');
   }),
@@ -16,15 +16,27 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@bap/db/access', () => ({
   getOrganizationCreationQuota: mocks.getOrganizationCreationQuota,
 }));
-vi.mock('../../../../../lib/auth/server', () => ({
+vi.mock('../../../../lib/auth/server', () => ({
   getAuth: async () => ({ api: { getSession: mocks.getSession } }),
   getAuthPool: async () => mocks.pool,
 }));
-vi.mock('../../../../../lib/organizations/actions', () => ({
-  createOrganizationAction: mocks.createOrganizationAction,
+vi.mock('../../../../lib/organizations/actions', () => ({
+  createWorkspaceAction: mocks.createWorkspaceAction,
+  inviteMemberWithScopeAction: mocks.inviteMemberWithScopeAction,
 }));
 vi.mock('next/headers', () => ({ headers: async () => new Headers() }));
-vi.mock('next/navigation', () => ({ redirect: mocks.redirect }));
+vi.mock('next/navigation', () => ({
+  redirect: mocks.redirect,
+  useRouter: () => ({ push: mocks.push }),
+}));
+
+import { I18nProvider } from '../../../../i18n/client-provider';
+import NewOrganizationPage from './page';
+
+async function renderPage() {
+  const ui = await NewOrganizationPage();
+  return render(<I18nProvider>{ui}</I18nProvider>);
+}
 
 afterEach(cleanup);
 
@@ -36,41 +48,40 @@ describe('NewOrganizationPage', () => {
     });
   });
 
-  it('shows remaining quota and keeps the slug prefilled from name', async () => {
+  it('shows remaining quota and keeps the slug derived from the name', async () => {
     mocks.getOrganizationCreationQuota.mockResolvedValue({
       attributedTotal: 1,
       grantedTotal: 3,
       remainingTotal: 2,
     });
 
-    render(await NewOrganizationPage({ searchParams: Promise.resolve({}) }));
+    await renderPage();
 
-    expect(screen.getByText('Remaining creation quota: 2')).toBeVisible();
+    expect(screen.getByText('Remaining of granted quota: 2')).toBeVisible();
     const name = screen.getByLabelText('Name');
     const slug = screen.getByLabelText('Slug');
     expect(name).toHaveValue('Initial Name');
     expect(slug).toHaveValue('initial-name');
-    fireEvent.change(name, { target: { value: 'Revised Organization' } });
-    expect(slug).toHaveValue('revised-organization');
+    fireEvent.change(name, { target: { value: 'Revised Workspace' } });
+    expect(slug).toHaveValue('revised-workspace');
   });
 
-  it('replaces the complete form with one sentence at zero quota', async () => {
+  it('keeps the wizard mounted at zero quota with the warning shown', async () => {
     mocks.getOrganizationCreationQuota.mockResolvedValue({
       attributedTotal: 1,
       grantedTotal: 1,
       remainingTotal: 0,
     });
 
-    render(await NewOrganizationPage({ searchParams: Promise.resolve({}) }));
+    await renderPage();
 
     expect(
-      screen.getByText(
-        'Organization creation is not available for this account.',
-      ),
+      screen.getByText('Workspace creation is not available for this account.'),
     ).toBeVisible();
+    // The wizard is never swapped out, so its first step stays mounted.
     expect(
-      screen.queryByRole('form', { name: 'Create organization' }),
-    ).not.toBeInTheDocument();
+      screen.getByRole('form', { name: 'Create workspace' }),
+    ).toBeInTheDocument();
   });
 
   it('fails closed to zero when quota cannot be read', async () => {
@@ -78,9 +89,9 @@ describe('NewOrganizationPage', () => {
       new Error('private database detail'),
     );
 
-    render(await NewOrganizationPage({ searchParams: Promise.resolve({}) }));
+    await renderPage();
 
-    expect(screen.getByText('Remaining creation quota: 0')).toBeVisible();
+    expect(screen.getByText('Remaining of granted quota: 0')).toBeVisible();
     expect(document.body).not.toHaveTextContent('private database detail');
   });
 });

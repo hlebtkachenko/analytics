@@ -9,11 +9,28 @@ describe('buildTrail', () => {
     ]);
   });
 
+  it('labels the notifications module rather than its raw segment', () => {
+    expect(buildTrail(['(product)', 'notifications'])).toEqual([
+      { current: true, href: '/notifications', label: 'Notifications' },
+    ]);
+  });
+
   it('scopes a child label by its parent module', () => {
     expect(buildTrail(['documents', 'new']).at(-1)?.label).toBe('New document');
-    expect(buildTrail(['organizations', 'new']).at(-1)?.label).toBe(
-      'Create organization',
+    expect(buildTrail(['workspaces', 'new']).at(-1)?.label).toBe(
+      'Create workspace',
     );
+  });
+
+  it('scopes the account children by the account module', () => {
+    expect(buildTrail(['(product)', 'account', 'security'])).toEqual([
+      { current: false, href: '/account', label: 'Account' },
+      { current: true, href: '/account/security', label: 'Security' },
+    ]);
+    expect(buildTrail(['account', 'preferences']).at(-1)?.label).toBe(
+      'Preferences',
+    );
+    expect(buildTrail(['account', 'access']).at(-1)?.label).toBe('Access');
   });
 
   it('names the inbox channels child rather than falling back to Item', () => {
@@ -81,7 +98,7 @@ describe('buildTrail', () => {
         slug: 'placeholder-holding',
       }),
     ).toEqual([
-      { current: false, href: '/organizations', label: 'Organizations' },
+      { current: false, href: '/workspaces', label: 'Workspaces' },
       {
         current: false,
         href: '/placeholder-holding',

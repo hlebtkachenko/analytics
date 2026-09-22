@@ -1,5 +1,6 @@
 import {
   entityScopeOpenApiSchema,
+  entityScopeRequestSchema as sharedEntityScopeRequestSchema,
   entityScopeSchema,
   legalEntityKindSchema,
   legalEntityNameSchema,
@@ -50,10 +51,33 @@ export type UpdateLegalEntityRequest = z.infer<
   typeof updateLegalEntityRequestSchema
 >;
 
-// The request and the response are the same shape, so a client can read a scope and write it back unchanged.
-export const entityScopeRequestSchema = entityScopeSchema;
+// Reading a scope stays permissive, but writing one must grant access: a restricted scope needs
+// at least one entity, so an empty restricted body is refused with 400.
+export const entityScopeRequestSchema = sharedEntityScopeRequestSchema;
 
 export type EntityScopeRequest = z.infer<typeof entityScopeRequestSchema>;
+
+// The two member statuses; the request and the response share the shape.
+export const memberStatusValueSchema = z.enum(['active', 'inactive']);
+
+export const memberStatusRequestSchema = z
+  .object({ status: memberStatusValueSchema })
+  .strict();
+
+export type MemberStatusRequest = z.infer<typeof memberStatusRequestSchema>;
+
+export const memberStatusResponseSchema = memberStatusRequestSchema;
+
+export type MemberStatusResponse = z.infer<typeof memberStatusResponseSchema>;
+
+export const memberStatusOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    status: { enum: ['active', 'inactive'], type: 'string' },
+  },
+  required: ['status'],
+  type: 'object',
+};
 
 // One entry per stored scope row: a member without a row is implicitly unrestricted and is left out.
 export const memberEntityScopeListResponseSchema = z

@@ -1,0 +1,173 @@
+// Carbon Tabs is the grid item here, so the tab panel must be allowed to shrink.
+// Carbon's tab panel also adds 16px of inset padding, which pushes the table off
+// the grid column line the heading and tabs sit on and makes it read as a floating
+// slab. Drop the horizontal inset so the table aligns to the grid; keep the
+// vertical rhythm below the tab bar.
+.tabPanel {
+  min-inline-size: 0;
+
+  &:global(.cds--tab-content) {
+    padding-inline: 0;
+  }
+}
+
+// The table fills its grid column instead of floating at its intrinsic width.
+// A raw render-prop DataTable has no scroll wrapper, so let the container scroll
+// its own overflow and keep a wide table from pushing the page past a 320px
+// viewport.
+.tableContainer {
+  inline-size: 100%;
+  overflow-x: auto;
+}
+
+// Carbon caps popover content at 368px, which clips the third filter column.
+// Let the panel size to its columns instead.
+.filterPopover:global(.cds--popover-content) {
+  max-inline-size: none;
+}
+
+// Funnel trigger with an applied-filter count badge.
+.filterTrigger {
+  position: relative;
+  display: inline-flex;
+}
+
+.filterCount {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 1rem;
+  block-size: 1rem;
+  padding-inline: 0.25rem;
+  border-radius: 0.5rem;
+  background: var(--cds-background-brand);
+  color: var(--cds-text-on-color);
+  font-size: 0.625rem;
+  line-height: 1;
+  pointer-events: none;
+}
+
+// Batch-updates filter panel opened from the toolbar funnel button.
+.filterPanel {
+  inline-size: max-content;
+  max-inline-size: 90vw;
+}
+
+.filterColumns {
+  display: flex;
+  padding: 1rem;
+}
+
+.filterColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-inline-size: 8rem;
+  padding-inline: 1.5rem;
+
+  &:first-child {
+    padding-inline-start: 0;
+  }
+
+  &:last-child {
+    padding-inline-end: 0;
+  }
+
+  & + & {
+    border-inline-start: 1px solid var(--cds-border-subtle-01);
+  }
+}
+
+.filterHeading {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: 0.75rem;
+  letter-spacing: 0.32px;
+  line-height: 1rem;
+}
+
+.filterOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+// Two equal-width flush footer buttons span the full panel width.
+.filterFooter {
+  display: flex;
+
+  :global(.cds--btn) {
+    flex: 1;
+    max-inline-size: none;
+  }
+}
+
+.memberDetails {
+  padding: 1.5rem 1rem 1.75rem;
+
+  dl {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2rem;
+    margin: 0;
+  }
+
+  dl div {
+    display: grid;
+    gap: 0.25rem;
+    min-inline-size: 0;
+  }
+
+  dt {
+    font-weight: 600;
+  }
+
+  dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+// Screen-reader-only header text so the action and detail columns are not empty.
+.visuallyHidden {
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  padding: 0;
+  white-space: nowrap;
+  border: 0;
+}
+
+.scopeEntities {
+  padding: 0;
+  border: 0;
+  margin: 0;
+
+  legend {
+    margin-block-end: 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+}
+
+.scopeEntityOptions {
+  display: grid;
+  max-block-size: 14rem;
+  gap: 0.75rem;
+  overflow-y: auto;
+  padding: 0.75rem;
+  border-block: 1px solid var(--cds-border-subtle-01);
+}
+
+@media (max-width: 42rem) {
+  .memberDetails dl {
+    grid-template-columns: 1fr;
+  }
+}

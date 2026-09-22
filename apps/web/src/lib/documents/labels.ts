@@ -1,3 +1,5 @@
+import type { StatusSeverity } from '../../components/status-indicator.tsx';
+
 import type {
   DataIssue,
   DocumentKind,
@@ -32,15 +34,13 @@ export const documentStatusLabelKeys: Readonly<Record<DocumentStatus, string>> =
     verified: 'documents.statusVerified',
   };
 
-export type StatusTagType = 'blue' | 'cool-gray' | 'gray' | 'green';
-
-export const documentStatusTagTypes: Readonly<
-  Record<DocumentStatus, StatusTagType>
+export const documentStatusSeverity: Readonly<
+  Record<DocumentStatus, StatusSeverity>
 > = {
-  archived: 'cool-gray',
-  needs_review: 'blue',
-  registered: 'gray',
-  verified: 'green',
+  archived: 'neutral',
+  needs_review: 'warning',
+  registered: 'neutral',
+  verified: 'success',
 };
 
 export const invoiceLineCategoryLabelKeys: Readonly<

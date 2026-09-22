@@ -1,4 +1,3 @@
-import type { StatusTagType } from '../documents/labels.ts';
 import type {
   InboxBulkAction,
   InboxBulkRefusalCode,
@@ -22,8 +21,11 @@ export const inboxStatusLabelKeys: Readonly<Record<InboxItemStatus, string>> = {
   routed: 'inbox.statusRouted',
 };
 
+// The Carbon Tag types this column renders; documents now use the status indicator instead.
+type InboxStatusTagType = 'blue' | 'cool-gray' | 'gray' | 'green' | 'red';
+
 export const inboxStatusTagTypes: Readonly<
-  Record<InboxItemStatus, StatusTagType | 'red'>
+  Record<InboxItemStatus, InboxStatusTagType>
 > = {
   discarded: 'cool-gray',
   failed: 'red',
@@ -160,7 +162,7 @@ export const inboxItemStateLabelKeys: Readonly<Record<InboxItemState, string>> =
   };
 
 export const inboxItemStateTagTypes: Readonly<
-  Record<InboxItemState, StatusTagType | 'red'>
+  Record<InboxItemState, InboxStatusTagType>
 > = {
   discarded: 'red',
   routed: 'green',

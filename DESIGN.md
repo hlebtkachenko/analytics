@@ -21,12 +21,12 @@ charts, diagrams, icons, and pictograms. The committed generated catalog and
 closed-world source mappings make the same release discoverable without access
 to Carbon websites.
 
-Application icons come from the exact curated 29-export
+Application icons come from the exact curated 27-export
 `@bap/design-system/icons` entrypoint. Add a named export only with a real use
 on an existing Carbon page. Prefer the Carbon component's icon prop, retain
 visible action text, keep repeated glyphs decorative to assistive technology,
 and use only Carbon's 16, 20, 24, or 32px artboards. The executable workbench
-renders those 29 glyphs and all 1,575 pictograms; the generated catalog alone
+renders those 27 glyphs and all 1,575 pictograms; the generated catalog alone
 retains the exhaustive upstream icon inventory. Product applications must never
 import `@carbon/icons-react` directly.
 
@@ -36,20 +36,20 @@ dashboard or analytics visual design. Do not add another component system,
 utility CSS framework, raw palette values, or copied Carbon source.
 
 Authenticated `app/(product)` routes share a Carbon UI Shell product shell: a
-header branded "Afframe Analytics" with single-purpose panels for search,
-notifications, help, settings, workspace switching, and account, over a
-pinned-persistable left icon rail for Access, Organizations, Datasets,
-Documents, Account, and a workspace section, rendered from the shell's
-`railDestinations` array. Identity and invitation routes remain outside that
-shell. The layout owns the single `main-content` landmark and renders small
-Carbon breadcrumbs for subordinate views, including the inline dataset view. The
-five temporary organization pages and the temporary account page remain a
-deliberate source-level exception: their page modules keep the exact throwaway
-markers, plain semantic HTML, and zero CSS, design-system, or icon imports, and
-no longer render their own `<main>` or native breadcrumbs now that the layout
-owns both. Converting their page content to Carbon is future work.
+header branded "Afframe Analytics" with single-purpose panels for search, help,
+account, and workspace switching, over a pinned-persistable left icon rail for
+Workspaces, Datasets, Documents, and Account, and a workspace section, rendered
+from the shell's `railDestinations` array. Identity and invitation routes remain
+outside that shell. The layout owns the single `main-content` landmark and
+renders small Carbon breadcrumbs for subordinate views, including the inline
+dataset view. The `/account` area is now Carbon: profile, security, and
+preferences pages plus the access diagnostic at `/account/access`, each rendered
+inside `PageContainer`. The `/workspaces` list and create pages and the
+`/[orgSlug]` landing, `/[orgSlug]/entities`, `/[orgSlug]/members`, and
+`/[orgSlug]/settings` pages are now Carbon; converting the remaining page
+content to Carbon is future work.
 
-Every other product page renders its content inside the shared `PageContainer`
+Every product page renders its content inside the shared `PageContainer`
 scaffold; the `bap/product-page-container` ESLint rule enforces it and bans
 inline layout styles, so pages compose inside the shell and never hand-roll
 layout. See [Building a product page](docs/development.md).

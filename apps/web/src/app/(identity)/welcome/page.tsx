@@ -1,37 +1,43 @@
-import { Link, Stack } from '@bap/design-system/react';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
-import { translate } from '../../../i18n/server';
 import { getAuth } from '../../../lib/auth/server';
+import OnboardingView from './onboarding-view';
+import type { OnboardingInvitation } from './onboarding-view';
 
 export default async function WelcomePage() {
-  let authenticated = false;
+  const requestHeaders = await headers();
+
+  let user: Readonly<{ name: string }> | null = null;
   try {
     const auth = await getAuth();
-    authenticated = Boolean(
-      await auth.api.getSession({ headers: await headers() }),
-    );
+    const session = await auth.api.getSession({ headers: requestHeaders });
+    if (session) {
+      user = { name: session.user.name ?? '' };
+    }
   } catch {
-    authenticated = false;
+    user = null;
   }
 
-  if (!authenticated) {
+  if (user === null) {
     redirect('/sign-in');
     return null;
   }
 
-  const continueLabel = await translate('welcome.continue');
-  const summary = await translate('welcome.summary');
-  const title = await translate('welcome.title');
+  // Surface any pending invitation from the same source the organizations page reads.
+  let invitations: OnboardingInvitation[] = [];
+  try {
+    const auth = await getAuth();
+    const pending = await auth.api.listUserInvitations({
+      headers: requestHeaders,
+    });
+    invitations = pending.map((invitation) => ({
+      id: invitation.id,
+      organizationName: invitation.organizationName,
+    }));
+  } catch {
+    invitations = [];
+  }
 
-  return (
-    <main>
-      <Stack gap={7}>
-        <h1>{title}</h1>
-        <p>{summary}</p>
-        <Link href="/access">{continueLabel}</Link>
-      </Stack>
-    </main>
-  );
+  return <OnboardingView invitations={invitations} name={user.name} />;
 }

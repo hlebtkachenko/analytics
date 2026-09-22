@@ -173,7 +173,7 @@ legal entities, and `app.directive_account` carries no tenant column at all,
 because the shared chart of accounts is identical for every organization. See
 [documents](docs/documents.md) for the full model.
 
-Migration `20260916.0001` adds the Inbox and the durable blob register on the
+Migration `20260916.0002` adds the Inbox and the durable blob register on the
 same tenancy shape: `app.blob`, `app.inbox_item`, `app.inbox_item_file`,
 `app.inbox_item_extraction`, `app.inbox_event`, and `app.document_file` each
 carry `organization_id` for row level security, and `app.inbox_item` carries a
@@ -277,7 +277,7 @@ owns the model-provider boundary. The web streaming chat route consumes it
 directly, and the worker entrypoint built from `apps/api` consumes it for
 dataset summarization and embedding.
 
-The client-only `@bap/design-system/icons` entrypoint is an exact 29-export
+The client-only `@bap/design-system/icons` entrypoint is an exact 27-export
 curated named facade, not a mirror of the full upstream icon module. Application
 code imports no `@carbon/icons-react` symbol directly. The generated catalog
 retains the complete installed upstream inventory for upgrade inspection, while
@@ -358,31 +358,42 @@ session user id through `bap_auth`. React `cache` deduplicates that whole
 resolution within 1 request only. Every negative or failed lookup becomes the
 same 404, and no slug-to-id mapping is cached across requests. The BFF,
 application API, reporting API, RLS context, and service membership resolver
-remain id-only. The root route redirects to `/organizations`; that index and the
-first descendant `[orgSlug]` page are now the deliberately plain Phase 10
-organization loop. The index lists current memberships and links quota-gated
-creation. Descendant pages expose navigation, members, pending invitations,
-name/slug settings, and, since ADR 0011, legal entities at
-`/[orgSlug]/entities`. Every mutation is a server action which resolves the slug
-through the same member gate and supplies the resulting organization id to
-Better Auth; no browser-supplied id or ambient active organization selects a
-tenant.
+remain id-only. The root route redirects to `/workspaces`. The `/workspaces`
+index and `/workspaces/new` are Carbon pages inside `PageContainer`: the index
+lists the caller's workspaces with their role through a narrow `@bap/db`
+membership accessor, shows a get-started checklist when empty, and lists pending
+invitations with accept and decline server actions; the create page renders a
+Carbon form with live slug validation and quota-gated creation. Since ADR 0011
+the landing page at `/[orgSlug]`, the legal entities page at
+`/[orgSlug]/entities`, the members page at `/[orgSlug]/members`, and the
+settings page at `/[orgSlug]/settings` are Carbon pages that read from the BFF
+and Better Auth, so the temporary `[orgSlug]` loop is gone. The landing page
+reads members, invitations, entities, and datasets counts server-side and
+exposes navigation only; the others mutate by client call. The shared slug
+resolver maps the route server-side and each read and client mutation carries
+the resolved organization id; no browser-supplied id or ambient active
+organization selects a tenant.
 
-These six pages are explicitly throwaway milestone UI. They use semantic HTML,
-native forms, no page CSS, and no design-system import. The layout and shared
-slug resolver remain durable. Publishing the literal `/organizations` route also
-advances the reserved database and TypeScript slug contract through migration
-`20260831.0004`.
+The landing page renders inside the shared Carbon product shell like the other
+organization pages. The layout and shared slug resolver remain durable.
+Publishing the literal `/organizations` route advanced the reserved database and
+TypeScript slug contract through migration `20260831.0004`, and migration
+`20260916.0001` reserves the flat workspace routes.
 
 Authenticated `app/(product)` routes share a server layout that renders the
 client `ProductShell`, a Carbon UI Shell header branded "Afframe Analytics" over
-a pinned-persistable left icon rail for Access, Organizations, Datasets, Inbox,
-Documents, Account, and a workspace section shown when an organization is
-active. The `/inbox` page drops multi-file uploads, reviews their detected type,
-hints, and routing draft, and routes them into Documents. Header actions open
-single-purpose panels for search, notifications, help, settings, workspace
-switching, and account, the last holding the light/dark/system theme control and
-sign out. The shell is not rendered around identity, invitation, or
+a pinned-persistable left icon rail for Workspaces, Datasets, Inbox, Documents,
+and Account, and a workspace section shown when an organization is active. The
+`/inbox` page drops multi-file uploads, reviews their detected type, hints, and
+routing draft, and routes them into Documents. The account area holds Carbon
+profile, security, and preferences pages plus the access diagnostic at
+`/account/access`; `/access` redirects there. Header actions open single-purpose
+panels for search, help, account, and workspace switching. The search panel
+builds a client index from the rail destinations, the signed-in account's
+workspaces, and the active workspace's legal entities. The help panel links the
+public docs, the running version, and an optional feedback address. The account
+panel holds identity, the account links, the light/dark/system theme control,
+and sign out. The shell is not rendered around identity, invitation, or
 design-system reference routes. The layout owns the single `main-content`
 landmark and renders small Carbon breadcrumbs from the route segments, including
 subordinate organization pages and the inline dataset detail. The complete

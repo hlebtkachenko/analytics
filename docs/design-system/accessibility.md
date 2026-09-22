@@ -35,7 +35,7 @@ equivalent is mandatory.
 ## Verification
 
 The design-system checks verify theme synchronization, the chart-table fallback,
-mode-specific full-facade parity, the exact curated 29-icon facade, generated
+mode-specific full-facade parity, the exact curated icon facade, generated
 inventories, source coverage, and the static workbench. Before merging product
 UI, add focused keyboard, VoiceOver, axe, localization, zoom, and reduced-motion
 assertions for the actual interaction.

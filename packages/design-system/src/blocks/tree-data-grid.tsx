@@ -272,12 +272,20 @@ export function TreeDataGrid({
   const showToolbar = search || expandAllControl;
 
   return (
-    <TableContainer description={description} title={title}>
+    <TableContainer
+      className={styles.root}
+      description={description}
+      title={title}
+    >
       {showToolbar && (
         <TableToolbar>
           <TableToolbarContent>
             {search && (
+              // Name the search landmark from the title so multi-grid pages stay unique
               <TableToolbarSearch
+                labelText={
+                  title === undefined ? 'Search rows' : `Search ${title}`
+                }
                 onChange={(event) =>
                   handleSearch(
                     typeof event === 'string' ? '' : event.target.value,

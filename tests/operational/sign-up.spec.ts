@@ -6,7 +6,7 @@ import { expect, test as publicTest } from '@playwright/test';
 import type { APIResponse, Page, Response } from '@playwright/test';
 
 import { test } from './authenticated-test';
-import { postSignInProbe, signInThroughForm } from './sign-in';
+import { postSignInProbe } from './sign-in';
 
 const execFileAsync = promisify(execFile);
 const mailpitUrl =
@@ -17,11 +17,6 @@ const operationalOrganizationId =
 const operationalOrganizationSlug =
   process.env.BAP_OPERATIONAL_ORGANIZATION_SLUG ?? 'bap-operational';
 const operationalPassword = process.env.BAP_OPERATIONAL_PASSWORD ?? '';
-// The workflow also seeds synthetic admin and member accounts, which this proof must not address.
-const seededMemberEmails = [
-  process.env.BAP_OPERATIONAL_ADMIN_EMAIL ?? 'admin@bap.invalid',
-  process.env.BAP_OPERATIONAL_MEMBER_EMAIL ?? 'member@bap.invalid',
-];
 
 publicTest.describe.configure({ mode: 'serial' });
 
@@ -498,10 +493,18 @@ test('proves invitation-only registration, acceptance, and membership management
     assertPasswordAbsent(await readJson(closedResponse), password);
 
     await page.goto(`/${operationalOrganizationSlug}/members`);
-    await page.getByLabel('Email').fill(email);
-    await page.getByLabel('Role').first().selectOption('member');
-    await page.getByRole('button', { name: 'Send invitation' }).click();
-    await expect(page).toHaveURL(/\/members\?result=success$/);
+    await page.getByRole('button', { name: 'Invite member' }).click();
+    const inviteDialog = page.getByRole('dialog', { name: 'Invite member' });
+    await expect(inviteDialog).toBeVisible();
+    await inviteDialog.getByLabel('Email').fill(email);
+    await inviteDialog.getByLabel('Role').selectOption('member');
+    // Invitation now grants entity access; the all-entities mode enables the primary button.
+    await inviteDialog
+      .getByLabel('Entity access', { exact: true })
+      .selectOption('all');
+    await inviteDialog.getByRole('button', { name: 'Send invitation' }).click();
+    await expect(page.getByText('The invitation was sent.')).toBeVisible();
+    await expect(inviteDialog).toBeHidden();
 
     const invitationId = await page.evaluate(
       async ({ email: recipient, organizationId }) => {
@@ -677,73 +680,73 @@ test('proves invitation-only registration, acceptance, and membership management
     await verificationRedirect.completed;
     verificationRedirect = undefined;
 
-    await recipientPage.goto('/access');
-    const signedOutPromise = recipientPage.waitForResponse(
-      (response) =>
-        response.request().method() === 'POST' &&
-        new URL(response.url()).pathname === '/api/auth/sign-out',
+    // The welcome page confirms the verified name and lists the pending invitation for inline acceptance.
+    await expect(recipientPage.getByLabel('Display name')).toHaveValue(
+      body.name,
     );
-    await recipientPage.getByRole('button', { name: 'Sign out' }).click();
-    expect((await signedOutPromise).ok()).toBe(true);
-    await expect(recipientPage).toHaveURL(/\/sign-in$/);
-    await signInThroughForm(recipientPage, email, password);
-    await expect(recipientPage).toHaveURL(/\/access$/);
-
-    await navigateToSensitivePath(recipientPage, `/invitation/${invitationId}`);
     await expect(
-      recipientPage.getByText('Organization: BAP Operational'),
-    ).toBeVisible();
-    await expect(recipientPage.getByText('Role: member')).toBeVisible();
-    const accept = recipientPage.getByRole('button', {
-      name: 'Accept invitation',
+      recipientPage.getByRole('link', { name: 'Continue to BAP' }),
+    ).toHaveAttribute('href', '/access');
+    const invitationForm = recipientPage.getByRole('form', {
+      name: 'BAP Operational',
     });
-    await expect(accept.locator('svg.cds--btn__icon')).toHaveAttribute(
-      'aria-hidden',
-      'true',
-    );
-    const acceptedPromise = recipientPage.waitForResponse(
-      (response) =>
-        response.request().method() === 'POST' &&
-        new URL(response.url()).pathname ===
-          '/api/auth/organization/accept-invitation',
-    );
-    await accept.click();
-    expect((await acceptedPromise).ok()).toBe(true);
+    await expect(invitationForm).toBeVisible();
+    await invitationForm.getByRole('button', { name: 'Accept' }).click();
+    // Accepting is a server action that lands the new member on the workspace list.
     await expect
       .poll(() => new URL(recipientPage.url()).pathname, {
-        message: 'Invitation acceptance did not reach access.',
+        message: 'Invitation acceptance did not reach the workspace list.',
       })
-      .toBe('/access');
+      .toBe('/workspaces');
+    // The accepted membership is a workspace row, and the header switcher lists it.
+    await expect(
+      recipientPage.getByRole('cell', { name: 'BAP Operational' }),
+    ).toBeVisible();
+    await recipientPage
+      .getByRole('banner')
+      .getByRole('button', { exact: true, name: 'Workspaces' })
+      .click();
+    await expect(
+      recipientPage
+        .getByRole('banner')
+        .getByRole('list', { name: 'Workspaces' })
+        .getByRole('link', { name: 'BAP Operational' }),
+    ).toHaveAttribute('href', `/${operationalOrganizationSlug}`);
+    await recipientPage.goto('/account/access');
     await expect(
       recipientPage.getByText('Application API role: member'),
     ).toBeVisible();
 
     await page.goto(`/${operationalOrganizationSlug}/members`);
-    // The invitee address stays out of every locator, so only the seeded addresses are excluded.
-    const memberEntry = (role: RegExp) => {
-      let entries = page
-        .locator('section[aria-labelledby="members-heading"] p')
-        .filter({ hasText: role });
-      for (const seeded of seededMemberEmails) {
-        entries = entries.filter({ hasNotText: seeded });
-      }
-      return entries.locator('..');
-    };
-    let member = memberEntry(/, member$/);
-    await expect(member).toHaveCount(1);
-    const roleForm = member.getByRole('form', { name: /^Change role for / });
-    await roleForm.getByLabel('Role').selectOption('admin');
-    await roleForm.getByRole('button', { name: 'Change role' }).click();
-    await expect(page).toHaveURL(/\/members\?result=success$/);
-    member = memberEntry(/, admin$/);
-    await expect(member).toHaveCount(1);
+    // The invitee is the accepted member row, promoted then removed by the owner.
+    const memberRow = () => page.getByRole('row').filter({ hasText: email });
+    await expect(memberRow()).toHaveCount(1);
+    await expect(
+      memberRow().getByRole('cell', { exact: true, name: 'Member' }),
+    ).toBeVisible();
 
-    await member
-      .getByRole('form', { name: /^Remove / })
-      .getByRole('button', { name: 'Remove member' })
-      .click();
-    await expect(page).toHaveURL(/\/members\?result=success$/);
-    await expect(memberEntry(/, admin$/)).toHaveCount(0);
+    await memberRow().getByRole('button', { name: 'Actions for' }).click();
+    await page.getByRole('menuitem', { name: 'Change role' }).click();
+    const roleDialog = page.getByRole('dialog', {
+      name: /^Change role for /,
+    });
+    await expect(roleDialog).toBeVisible();
+    await roleDialog.getByLabel('Role').selectOption('admin');
+    await roleDialog.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByText('The member role was updated.')).toBeVisible();
+    await expect(roleDialog).toBeHidden();
+    await expect(
+      memberRow().getByRole('cell', { exact: true, name: 'Admin' }),
+    ).toBeVisible();
+
+    await memberRow().getByRole('button', { name: 'Actions for' }).click();
+    await page.getByRole('menuitem', { exact: true, name: 'Remove' }).click();
+    const removeDialog = page.getByRole('dialog', { name: /^Remove / });
+    await expect(removeDialog).toBeVisible();
+    await removeDialog.getByRole('button', { name: 'Remove member' }).click();
+    await expect(page.getByText('The member was removed.')).toBeVisible();
+    await expect(removeDialog).toBeHidden();
+    await expect(memberRow()).toHaveCount(0);
   } finally {
     await verificationRedirect?.stop();
     await recipientContext.close();

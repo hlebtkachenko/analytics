@@ -31,6 +31,7 @@ import { useTranslation } from 'react-i18next';
 
 import PageContainer from '../../../../components/page-container';
 import { useToast } from '../../../../components/shell/toast';
+import { StatusIndicator } from '../../../../components/status-indicator';
 import { getJson, isAbortError } from '../../../../lib/datasets/client';
 import {
   documentLinkPath,
@@ -59,7 +60,7 @@ import {
   documentKindLabelKeys,
   documentLinkKindLabelKeys,
   documentStatusLabelKeys,
-  documentStatusTagTypes,
+  documentStatusSeverity,
   invoiceLineCategoryLabelKeys,
   invoiceLineKindLabelKeys,
   vatModeLabelKeys,
@@ -281,9 +282,10 @@ export default function DocumentDetailPage() {
         <Stack gap={5}>
           <h2 id="document-overview-heading">{t('documents.overviewTitle')}</h2>
           <p>
-            <Tag size="md" type={documentStatusTagTypes[document.status]}>
-              {t(documentStatusLabelKeys[document.status])}
-            </Tag>
+            <StatusIndicator
+              label={t(documentStatusLabelKeys[document.status])}
+              severity={documentStatusSeverity[document.status]}
+            />
             <Tag size="md" type="outline">
               {t(documentKindLabelKeys[document.kind])}
             </Tag>

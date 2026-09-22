@@ -129,7 +129,12 @@ jobs:
               --arg role "$role" \
               '{email: $email, password: env.BAP_OPERATIONAL_PASSWORD, name: $name, organizationSlug: $organization_slug, role: $role}')
             result=$(printf '%s' "$input" | docker compose --profile bootstrap -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml run --rm --no-deps -T -e BAP_E2E_SETUP=true bootstrap-owner node apps/web/dist-cli/cli/create-synthetic-account.js)
-            printf '%s' "$result" | jq -er 'select(.status == "created") | .userId | select(type == "string" and test("^[A-Za-z0-9_-]{1,128}$"))' >/dev/null
+            member_user_id=$(printf '%s' "$result" | jq -er 'select(.status == "created") | .userId | select(type == "string" and test("^[A-Za-z0-9_-]{1,128}$"))')
+            # Entity access is granted, never assumed: seed the non-owner an all-entities scope so
+            # it can reach entities. The owner-restricts-member proof later overwrites the member.
+            printf "insert into app.member_entity_scope (organization_id, user_id, mode, updated_by) values ('%s', '%s', 'all', '%s') on conflict (organization_id, user_id) do nothing;\n" \
+              "$BAP_OPERATIONAL_ORGANIZATION_ID" "$member_user_id" "$BAP_OPERATIONAL_USER_ID" |
+              docker compose -f compose.yaml -f compose.development.yaml -f compose.mailpit.yaml exec -T -u postgres database psql -U postgres -d "${POSTGRES_DB:-bap}" -v ON_ERROR_STOP=1
           done
 
       - name: Allow the temporary organization loop

@@ -5,19 +5,25 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as icons from './icons.js';
 
 const expectedNames = [
+  'Add',
   'AiGenerate',
   'ArrowLeft',
   'ArrowRight',
   'Asleep',
   'Checkmark',
+  'CheckmarkFilled',
   'Close',
   'DataSet',
   'Document',
   'DocumentAdd',
+  'DotMark',
   'Download',
   'Email',
   'Enterprise',
+  'ErrorFilled',
+  'Filter',
   'Help',
+  'InformationFilled',
   'Launch',
   'Light',
   'Login',
@@ -34,6 +40,7 @@ const expectedNames = [
   'UserFollow',
   'UserMultiple',
   'View',
+  'WarningFilled',
 ] as const;
 
 afterEach(cleanup);

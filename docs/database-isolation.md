@@ -105,6 +105,19 @@ roles continue to use only the fixed
 `auth.resolve_membership(subject_id, organization_id)` function and gain no slug
 lookup.
 
+`auth.member` carries a `status` column (`active` or `inactive`, defaulting to
+`active` with a CHECK constraint, added by migration `20260920.0001` as a fast
+default with no table rewrite). `auth.resolve_membership`, the route accessor,
+the workspace switcher read, and `countSoleOwnedOrganizations` all filter on
+`status = 'active'`, so an inactive member resolves as no membership everywhere.
+Status changes go through `auth.set_member_status(subject_user_id, new_status)`,
+a `SECURITY DEFINER` function owned by `bap_owner` and executable only by
+`bap_api`. It reads organization, actor, and role from the transaction context,
+refuses an empty context, a status outside the two values, a non-owner acting on
+another member, and a self-change other than deactivation, and under a
+per-organization advisory lock refuses to deactivate the last active owner.
+`bap_api` holds no direct DML on `auth.member`; the definer is the only writer.
+
 Migration `20260831.0004` reserves the newly published literal `/organizations`
 route. It checks for an existing colliding organization before dropping the
 previous stable named constraint, then recreates that constraint with all 16
@@ -124,17 +137,20 @@ no direct execution to runtime roles.
 
 `app.erase_user(text)` is an invoker-rights, fixed-search-path function. The
 eraser role has schema usage, function execution, SELECT/UPDATE on only
-`audit_log.user_id`, `dataset.created_by`, `legal_entity.created_by`,
-`member_entity_scope.updated_by`, `legal_entity_access.created_by`,
-`document.created_by`, `partner.created_by`, and `document_link.created_by`,
-plus SELECT on the two scope tables' `user_id` and DELETE on those two tables so
-a subject's own scope rows disappear. `data_grants.user_id` was removed with
-that table under ADR 0011. It has no other table-wide grant. The database CLI
-connects as `bap_migrator`, sets owner to lock and validate the pending request,
-sets eraser for the app function, returns to owner to consume the request, and
-commits once. A live or unrequested id is refused before eraser role entry.
-`bap_auth` retains zero access to schema `app`, and `bap_api` retains no UPDATE
-on `app.audit_log`.
+`audit_log.user_id`, `audit_log.resource_id`, `dataset.created_by`,
+`legal_entity.created_by`, `member_entity_scope.updated_by`,
+`legal_entity_access.created_by`, `document.created_by`, `partner.created_by`,
+and `document_link.created_by`, plus SELECT on `audit_log.resource_type` to
+target member rows, SELECT on the two scope tables' `user_id`, and DELETE on
+those two tables so a subject's own scope rows disappear. A member action
+records its subject as `audit_log.resource_id`, so erasure tombstones that
+identifier too, keeping the audited action while carrying no name or email in
+`metadata`. `data_grants.user_id` was removed with that table under ADR 0011. It
+has no other table-wide grant. The database CLI connects as `bap_migrator`, sets
+owner to lock and validate the pending request, sets eraser for the app
+function, returns to owner to consume the request, and commits once. A live or
+unrequested id is refused before eraser role entry. `bap_auth` retains zero
+access to schema `app`, and `bap_api` retains no UPDATE on `app.audit_log`.
 
 The public sign-up edge limiter also stays behind `@bap/db`. One statement
 inserts or atomically advances a hashed, namespaced `auth.rate_limit` key before
@@ -146,10 +162,10 @@ prunes expired rows from only the edge namespace on every consume. A partial
 `last_request` index supports that cleanup; Better Auth's own keys are retained.
 
 Migration `20260910.0001` implements ADR 0011's two-level tenancy.
-`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
-`20260910.0001`; rolling application code back after this migration leaves
-readiness at 503 until code expecting that exact version is deployed or the
-expected version is deliberately advanced.
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
+`20260910.0001` after this migration; rolling application code back after this
+migration leaves readiness at 503 until code expecting that exact version is
+deployed or the expected version is deliberately advanced.
 
 It adds
 `app.legal_entity(id, organization_id, name, kind, registration_number, created_by, created_at, updated_at)`,
@@ -231,7 +247,9 @@ get SELECT. The eraser gains `created_by` column grants on `app.document`,
 `app.partner`, and `app.document_link`, and `app.erase_user` tombstones those 3
 columns alongside the existing ones. The migration also reserves the `documents`
 organization slug with the `20260831.0004` guard-then-replace pattern, bringing
-`organization_slug_reserved_check` to 17 literals.
+`organization_slug_reserved_check` to 17 literals; migration `20260916.0001`
+later appends the five flat workspace routes with the same pattern, for 22
+literals.
 
 Three constraints exist because the application boundary is not the only writer.
 `document_current_reference_key` is unique on
@@ -274,7 +292,7 @@ and grants are otherwise table level and unchanged.
 `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
 `20260915.0001` after this migration.
 
-Migration `20260916.0001` adds the Inbox intake tables of ADR 0014 and ADR 0015:
+Migration `20260916.0002` adds the Inbox intake tables of ADR 0014 and ADR 0015:
 `app.blob` (content addressed per organization, unique on
 `(organization_id, sha256)`), `app.inbox_item` (the intake envelope, with a
 nullable `legal_entity_id`, typed destination columns `document_id`,
@@ -293,9 +311,12 @@ SELECT. The eraser gains column grants on `blob.created_by`,
 `inbox_item.decided_by_user_id`, `inbox_item_extraction.created_by`,
 `inbox_event.actor_user_id` and `document_file.created_by`, and `app.erase_user`
 tombstones all 7. The migration reserves the `inbox` organization slug with the
-guard-then-replace pattern, bringing `organization_slug_reserved_check` to 18
+guard-then-replace pattern, rebuilding `organization_slug_reserved_check` to 18
+literals and dropping the five flat workspace routes migration `20260916.0001`
+had added. Migration `20260922.0005` re-adds `inbox` after the platform route
+reservations rebuild the list without it, so the final constraint holds 25
 literals. `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
-`20260916.0001` after this migration.
+`20260916.0002` after this migration, and is now `20260922.0005`.
 
 Migration `20260917.0001` adds the channel principal of ADR 0016. `bap.role`
 gains the value `channel`, which is not a membership role: a channel runs as
@@ -341,9 +362,10 @@ before the insert instead of reading it back. `auth."user"` gains
 raises on a `channel_` subject and tombstones `inbox_channel.created_by`, for
 which the eraser gains column grants. The migration installs the trusted
 `pgcrypto` extension for `gen_random_bytes`. `DATABASE_MIGRATION_COMPATIBILITY`
-in `packages/db/src/access.ts` is now `20260917.0001`; rolling application code
-back after this migration leaves readiness at 503 until code expecting that
-exact version is deployed or the expected version is deliberately advanced.
+in `packages/db/src/access.ts` was `20260917.0001` after this migration; rolling
+application code back after this migration leaves readiness at 503 until code
+expecting that exact version is deployed or the expected version is deliberately
+advanced.
 
 Migration `20260917.0002` adds the fourth definer function of ADR 0016,
 `auth.list_channel_credentials(channel_id)`: `bap_api` holds no SELECT on
@@ -358,7 +380,7 @@ from the transaction settings, the same checks as `issue_channel_credential` and
 tier's public intake route calls `auth.resolve_channel_credential` and reads or
 upserts `auth.rate_limit` in that namespace, both on the `bap_auth` pool.
 `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
-`20260917.0002`.
+`20260917.0002` after this migration.
 
 Migration `20260917.0003` delivers the email channel of ADR 0016.
 `app.inbox_item` gains a nullable `sender` column (`length between 1 and 320`,
@@ -387,8 +409,8 @@ full address as the secret once and writes it plain into
 address when the revoked row is an `email_address`.
 `auth.resolve_channel_credential` is unchanged: the email caller lowercases the
 local part and hashes exactly that, never the whole address.
-`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
-`20260917.0003`.
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
+`20260917.0003` after this migration.
 
 Migration `20260917.0004` adds the runtime layer of 1b-runtime.
 `app.inbox_routing_target` (`organization_id`, `detected_type`, `destination`,
@@ -418,7 +440,7 @@ UPDATE need `app.role_is_owner()` and there is no DELETE policy. Three more
 `inbox_routing_target.updated_by` and `organization_inbox_setting.created_by`;
 both tables get full DML for `bap_api` and SELECT for `bap_reporting` and
 `bap_backup`. `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts`
-is now `20260917.0004`.
+was `20260917.0004` after this migration.
 
 Migration `20260917.0005` adds the rules layer of 1b-rules. `app.inbox_rule`
 carries closed, nullable condition columns (`channel_id`, `sender_pattern`,
@@ -454,22 +476,22 @@ The eraser gains column grants on `inbox_rule.created_by`,
 SELECT, INSERT, UPDATE on `inbox_rule` and SELECT, INSERT on `inbox_correction`,
 and `bap_reporting` and `bap_backup` get SELECT on both.
 `inbox_event_reason_check` gains `rule_author_unavailable`.
-`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
-`20260917.0005`.
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
+`20260917.0005` after this migration.
 
 Migration `20260917.0006` adds the actions layer of 1b-actions.
-`inbox_event_kind_check` (`20260916.0001_inbox.sql:254-257`) gains `attached`,
+`inbox_event_kind_check` (`20260916.0002_inbox.sql:254-257`) gains `attached`,
 the event kind an item's route to an existing document writes instead of
 `routed`. No new table, no new column, and no policy change: the attach route
 writes only `app.document_file`, gated by `document_file_insert`
-(`20260916.0001_inbox.sql:477-482`, `app.role_can_write()`), and
+(`20260916.0002_inbox.sql:477-482`, `app.role_can_write()`), and
 `app.inbox_item`, where `inbox_item_channel_update`
 (`20260917.0001_inbox_channels.sql:356-371`) already keeps a channel subject out
 of `document_id` and the decided-by columns; the versioning, fingerprint, and
 bulk routes below write only `app.document`, `app.economic_event`,
 `app.data_issue`, and `app.inbox_item` the same way, through policies this
 migration does not touch. `DATABASE_MIGRATION_COMPATIBILITY` in
-`packages/db/src/access.ts` is now `20260917.0006`.
+`packages/db/src/access.ts` was `20260917.0006` after this migration.
 
 ## Tenant policy contract
 

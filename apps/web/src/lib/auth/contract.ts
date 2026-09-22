@@ -7,6 +7,9 @@ export const disabledAuthPaths = new Set([
   '/delete-user/callback',
   '/organization/delete',
   '/organization/get-active-member',
+  // Membership removal and self-leave are replaced by member status: a membership is deactivated, never deleted.
+  '/organization/leave',
+  '/organization/remove-member',
   '/organization/set-active',
   '/token',
 ]);

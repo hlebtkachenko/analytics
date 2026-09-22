@@ -70,12 +70,27 @@ const organizationIdSchema = z
 const subjectIdSchema = organizationIdSchema;
 const legalEntityIdSchema = z.string().uuid();
 const legalEntityKindSchema = z.enum(['company', 'sole_trader']);
-// Mirrors the entity scope contract in @bap/security, which apps/web must not import.
+// Mirrors the entity scope contract in @bap/security, which apps/web must not import. A resolved
+// scope may be restricted with an empty list (a member with no grant), so reads stay permissive.
 const entityScopeSchema = z.discriminatedUnion('mode', [
   z.object({ mode: z.literal('all') }).strict(),
   z
     .object({
       legalEntityIds: z.array(legalEntityIdSchema).max(MAX_LEGAL_ENTITIES),
+      mode: z.literal('restricted'),
+    })
+    .strict(),
+]);
+// Mirrors the entity scope write contract: granting access needs at least one entity, so a
+// restricted body with an empty list is refused before a resource token is minted for it.
+const entityScopeWriteSchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('all') }).strict(),
+  z
+    .object({
+      legalEntityIds: z
+        .array(legalEntityIdSchema)
+        .min(1)
+        .max(MAX_LEGAL_ENTITIES),
       mode: z.literal('restricted'),
     })
     .strict(),
@@ -141,6 +156,11 @@ const legalEntityUpdateBodySchema = legalEntityCreateBodySchema
     registrationNumber: registrationNumberSchema.nullable().optional(),
   })
   .refine((body) => Object.keys(body).length > 0);
+
+// Mirrors the member status contract in @bap/api, which apps/web must not import.
+const memberStatusSchema = z
+  .object({ status: z.enum(['active', 'inactive']) })
+  .strict();
 
 // The owner-only bulk read: one row per member with a stored scope, an omission meaning all.
 const memberEntityScopeListSchema = z
@@ -762,6 +782,7 @@ export type OrganizationAccess = z.infer<typeof accessResponseSchema>;
 export {
   accessResponseSchema,
   entityScopeSchema,
+  entityScopeWriteSchema,
   legalEntityCreateBodySchema,
   legalEntityIdSchema,
   legalEntityKindSchema,
@@ -1165,7 +1186,7 @@ export async function putMemberEntityScope(
     return subject.failure;
   }
 
-  const body = await readJsonBody(request, entityScopeSchema);
+  const body = await readJsonBody(request, entityScopeWriteSchema);
 
   if ('failure' in body) {
     return body.failure;
@@ -1186,6 +1207,46 @@ export async function putMemberEntityScope(
       operation: 'putMemberEntityScope',
       path: `members/${encodeURIComponent(subject.value)}/entity-scope`,
       schema: entityScopeSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function putMemberStatus(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  userId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const subject = parsedSubjectId(userId);
+
+  if ('failure' in subject) {
+    return subject.failure;
+  }
+
+  const body = await readJsonBody(request, memberStatusSchema);
+
+  if ('failure' in body) {
+    return body.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      body: body.data,
+      errorCode: 'member_status_rejected',
+      method: 'PUT',
+      operation: 'putMemberStatus',
+      path: `members/${encodeURIComponent(subject.value)}/status`,
+      schema: memberStatusSchema,
       successStatus: 200,
     },
     fetchImplementation,

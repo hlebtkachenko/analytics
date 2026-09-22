@@ -143,7 +143,7 @@ BEFORE UPDATE OF created_by ON app.inbox_rule
 FOR EACH ROW
 EXECUTE FUNCTION app.guard_inbox_rule_created_by();
 
--- The pointer 20260916.0001 left dangling: a rule that decided an item is never hard-deleted.
+-- The pointer 20260916.0002 left dangling: a rule that decided an item is never hard-deleted.
 ALTER TABLE app.inbox_item
   ADD CONSTRAINT inbox_item_decided_by_rule_fkey FOREIGN KEY (decided_by_rule_id, organization_id)
     REFERENCES app.inbox_rule(id, organization_id) ON DELETE RESTRICT;

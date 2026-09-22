@@ -3,14 +3,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  createLegalEntity,
+  readDatasets,
   readLegalEntities,
-  readMemberEntityScope,
   readMemberEntityScopes,
   readOrganizationAccess,
-  removeLegalEntity,
-  updateLegalEntity,
-  writeMemberEntityScope,
 } from './entities';
 
 const mocks = vi.hoisted(() => ({
@@ -79,45 +75,40 @@ describe('server-side legal entity reads and writes', () => {
     );
   });
 
-  it('reads the access contract and one member entity scope', async () => {
-    const fetchMock = vi.fn(async (input: string) =>
-      input.endsWith('/access')
-        ? Response.json({
-            capabilities: {
-              createEntities: true,
-              deleteEntities: true,
-              manageDocuments: true,
-              manageEntityAccess: true,
-              manageMembers: true,
-              manageOrganization: true,
-              readDocuments: true,
-              updateEntities: true,
-              uploadData: true,
-              useAi: true,
-            },
-            entityScope: { mode: 'all' },
-            organizationId: 'organization-1',
-            role: 'owner',
-            service: 'application-api',
-          })
-        : Response.json({
-            legalEntityIds: [LEGAL_ENTITY_ID],
-            mode: 'restricted',
-          }),
+  it('reads the access contract', async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        capabilities: {
+          createEntities: true,
+          deleteEntities: true,
+          manageDocuments: true,
+          manageEntityAccess: true,
+          manageMembers: true,
+          manageOrganization: true,
+          readDocuments: true,
+          updateEntities: true,
+          uploadData: true,
+          useAi: true,
+        },
+        entityScope: { mode: 'all' },
+        organizationId: 'organization-1',
+        role: 'owner',
+        service: 'application-api',
+      }),
     );
     vi.stubGlobal('fetch', fetchMock);
 
     const access = await readOrganizationAccess('organization-1');
-    const scope = await readMemberEntityScope('organization-1', 'user-2');
 
     expect(access?.role).toBe('owner');
     expect(access?.entityScope).toEqual({ mode: 'all' });
-    expect(scope).toEqual({
-      legalEntityIds: [LEGAL_ENTITY_ID],
-      mode: 'restricted',
-    });
-    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
-      'http://api:3001/v1/organizations/organization-1/members/user-2/entity-scope',
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      'http://api:3001/v1/organizations/organization-1/access',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer resource-token',
+        }),
+      }),
     );
   });
 
@@ -157,6 +148,44 @@ describe('server-side legal entity reads and writes', () => {
     expect(scopes?.has('user-4')).toBe(false);
   });
 
+  it('reads the scope-wide dataset list in one request', async () => {
+    const dataset = {
+      createdAt: '2026-09-11T06:00:00.000Z',
+      description: null,
+      id: '2f1c9a44-3e21-4b88-9f0a-6c7d2e5b1a90',
+      legalEntityId: LEGAL_ENTITY_ID,
+      name: 'Placeholder ledger',
+      rowCount: 12,
+      status: 'ready',
+      updatedAt: '2026-09-11T06:05:00.000Z',
+    };
+    const fetchMock = vi.fn(async () => Response.json({ datasets: [dataset] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const datasets = await readDatasets('organization-1');
+
+    expect(datasets).toEqual([dataset]);
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      'http://api:3001/v1/organizations/organization-1/datasets',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer resource-token',
+        }),
+      }),
+    );
+  });
+
+  it('reports an unavailable dataset read as null', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({ error: 'datasets_unavailable' }, { status: 403 }),
+      ),
+    );
+
+    await expect(readDatasets('organization-1')).resolves.toBeNull();
+  });
+
   it('reports an unavailable bulk scope read as null', async () => {
     vi.stubGlobal(
       'fetch',
@@ -164,54 +193,6 @@ describe('server-side legal entity reads and writes', () => {
     );
 
     await expect(readMemberEntityScopes('organization-1')).resolves.toBeNull();
-  });
-
-  it('sends every write as JSON and reports a refusal as false', async () => {
-    const fetchMock = vi.fn(async (_input: string, init: RequestInit) =>
-      init.method === 'DELETE'
-        ? new Response(null, { status: 204 })
-        : Response.json(legalEntity, {
-            status: init.method === 'POST' ? 201 : 200,
-          }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
-    const created = await createLegalEntity('organization-1', {
-      kind: 'company',
-      name: 'Placeholder Holding',
-    });
-    const updated = await updateLegalEntity('organization-1', LEGAL_ENTITY_ID, {
-      name: 'Renamed Holding',
-    });
-    const removed = await removeLegalEntity('organization-1', LEGAL_ENTITY_ID);
-
-    expect([created, updated, removed]).toEqual([true, true, true]);
-    expect(fetchMock.mock.calls.map((call) => call[1].method)).toEqual([
-      'POST',
-      'PATCH',
-      'DELETE',
-    ]);
-    expect(fetchMock.mock.calls[0]?.[1].body).toBe(
-      JSON.stringify({ kind: 'company', name: 'Placeholder Holding' }),
-    );
-
-    const cleared = await updateLegalEntity('organization-1', LEGAL_ENTITY_ID, {
-      registrationNumber: null,
-    });
-
-    expect(cleared).toBe(true);
-    expect(fetchMock.mock.calls[3]?.[1].body).toBe(
-      JSON.stringify({ registrationNumber: null }),
-    );
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => Response.json({ detail: 'private' }, { status: 409 })),
-    );
-
-    await expect(
-      writeMemberEntityScope('organization-1', 'user-2', { mode: 'all' }),
-    ).resolves.toBe(false);
   });
 
   it('returns null when the session is unverified', async () => {

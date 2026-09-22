@@ -2,5 +2,5 @@ import type { Route } from 'next';
 import { redirect } from 'next/navigation';
 
 export default function HomePage() {
-  redirect('/organizations' as Route);
+  redirect('/workspaces' as Route);
 }

@@ -2,7 +2,6 @@ export type Crumb = Readonly<{ current: boolean; href: string; label: string }>;
 
 // The module label for a top-level segment, and the label a shared descendant reuses.
 export const moduleLabels: Readonly<Record<string, string>> = {
-  access: 'Access',
   account: 'Account',
   assistant: 'AI Assistant',
   datasets: 'Datasets',
@@ -10,17 +9,23 @@ export const moduleLabels: Readonly<Record<string, string>> = {
   entities: 'Entities',
   inbox: 'Inbox',
   members: 'Members',
-  organizations: 'Organizations',
+  notifications: 'Notifications',
   settings: 'Settings',
+  workspaces: 'Workspaces',
 };
 
 // Child labels are scoped by their parent module, so `new` never reads the same
 // under two modules. Add the parent, then the child segment, to name one.
 const childLabels: Readonly<Record<string, Readonly<Record<string, string>>>> =
   {
+    account: {
+      access: 'Access',
+      preferences: 'Preferences',
+      security: 'Security',
+    },
     documents: { analytics: 'Analytics', new: 'New document' },
     inbox: { channels: 'Channels', rules: 'Rules', settings: 'Settings' },
-    organizations: { new: 'Create organization' },
+    workspaces: { new: 'Create workspace' },
   };
 
 // The label an unknown child segment takes, so an opaque identifier never reaches the trail.
@@ -64,8 +69,8 @@ export function buildTrail(
     // A workspace slug route: Organizations, then the organization, then descendants.
     crumbs.push({
       current: false,
-      href: '/organizations',
-      label: moduleLabels.organizations!,
+      href: '/workspaces',
+      label: moduleLabels.workspaces!,
     });
     href = `/${first}`;
     crumbs.push({

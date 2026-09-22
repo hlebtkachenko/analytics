@@ -97,7 +97,7 @@ demo_create_accounts() {
   printf '== 4/6 Creating the owner, admin, and member accounts\n'
   bootstrap_compose build bootstrap-owner
 
-  local owner_input owner_result member_input role role_email role_name
+  local owner_input owner_result owner_user_id member_input member_user_id role role_email role_name
   owner_input=$(jq -cn \
     --arg email "$BAP_OPERATIONAL_EMAIL" \
     --arg name 'Operational Owner' \
@@ -107,6 +107,8 @@ demo_create_accounts() {
   owner_result=$(create_account "$owner_input")
   BAP_OPERATIONAL_ORGANIZATION_ID=$(printf '%s' "$owner_result" |
     jq -er 'select(.status == "created") | .organizationId | select(type == "string" and test("^[A-Za-z0-9_-]{1,128}$"))')
+  owner_user_id=$(printf '%s' "$owner_result" |
+    jq -er 'select(.status == "created") | .userId | select(type == "string" and test("^[A-Za-z0-9_-]{1,128}$"))')
   export BAP_OPERATIONAL_ORGANIZATION_ID
   export BAP_OPERATIONAL_ORGANIZATION_SLUG="$organization_slug"
 
@@ -124,10 +126,25 @@ demo_create_accounts() {
       --arg organization_slug "$organization_slug" \
       --arg role "$role" \
       '{email: $email, password: env.BAP_OPERATIONAL_PASSWORD, name: $name, organizationSlug: $organization_slug, role: $role}')
-    create_account "$member_input" |
-      jq -er 'select(.status == "created") | .userId | select(type == "string" and test("^[A-Za-z0-9_-]{1,128}$"))' >/dev/null
+    member_user_id=$(create_account "$member_input" |
+      jq -er 'select(.status == "created") | .userId | select(type == "string" and test("^[A-Za-z0-9_-]{1,128}$"))')
+    # Entity access is granted, never assumed, so a directly seeded member now needs an explicit
+    # all-entities scope to keep the demo usable; the accounts are synthetic and local only.
+    demo_grant_all_entity_scope "$BAP_OPERATIONAL_ORGANIZATION_ID" "$member_user_id" "$owner_user_id"
     printf 'Added %s as %s.\n' "$role_email" "$role"
   done
+}
+
+# Grants one synthetic member the all-entities scope through the superuser, which bypasses row
+# level security. Used only by the local demos; production membership scope flows through invites.
+# The ids are already validated against ^[A-Za-z0-9_-]{1,128}$, so quoting them is injection safe.
+demo_grant_all_entity_scope() {
+  local organization_id=$1 user_id=$2 granted_by=$3
+  printf "insert into app.member_entity_scope (organization_id, user_id, mode, updated_by) values ('%s', '%s', 'all', '%s') on conflict (organization_id, user_id) do nothing;\n" \
+    "$organization_id" "$user_id" "$granted_by" |
+    compose exec -T database sh -c \
+      'PGPASSWORD=$(cat /run/credentials/database-password) psql --set ON_ERROR_STOP=1 --username postgres --dbname "'"${POSTGRES_DB:-bap}"'"' \
+      >/dev/null
 }
 
 demo_grant_quota() {

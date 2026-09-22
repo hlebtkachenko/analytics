@@ -80,7 +80,7 @@ export default function InvitationClient() {
       setAcceptFailed(true);
       return;
     }
-    router.replace('/access');
+    router.replace('/workspaces');
   }
 
   return (

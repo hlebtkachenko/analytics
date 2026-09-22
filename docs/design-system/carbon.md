@@ -150,9 +150,9 @@ site, and never import `@carbon/icons-react` from an application.
 The pictogram facade is separate from icons and exports all 1,575 installed
 Carbon React pictograms. Pictograms communicate broader concepts and are not
 compact control glyphs. The workbench virtualizes the complete 1,575-pictogram
-inventory and the exact 29-icon application set. The generated catalog, rather
-than the executable icon facade or explorer, preserves exhaustive metadata for
-the complete installed upstream icon inventory.
+inventory and the exact curated application icon set. The generated catalog,
+rather than the executable icon facade or explorer, preserves exhaustive
+metadata for the complete installed upstream icon inventory.
 
 The charts facade exports the 25 standard React chart components: area, stacked
 area, grouped/simple/stacked bar, boxplot, bubble, bullet, choropleth, donut,

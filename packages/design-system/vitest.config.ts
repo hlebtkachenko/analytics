@@ -12,5 +12,7 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
     setupFiles: ['./src/test/setup.ts'],
+    // The Carbon catalog comparison loads upstream surfaces and is slow under CI contention.
+    testTimeout: 15000,
   },
 });

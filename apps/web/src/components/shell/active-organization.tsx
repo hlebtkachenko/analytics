@@ -4,7 +4,8 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
 export type ActiveOrganizationValue =
-  Readonly<{ name: string; role: string; slug: string }> | undefined;
+  | Readonly<{ id: string; name: string; role: string; slug: string }>
+  | undefined;
 
 type ActiveOrganizationContextValue = Readonly<{
   organization: ActiveOrganizationValue;
@@ -42,16 +43,17 @@ export function ActiveOrganizationProvider({
 // Rendered by the workspace layout to publish the resolved organization so the
 // shell breadcrumb and rail can label it; clears itself when the route leaves.
 export function ActiveOrganization({
+  id,
   name,
   role,
   slug,
-}: Readonly<{ name: string; role: string; slug: string }>) {
+}: Readonly<{ id: string; name: string; role: string; slug: string }>) {
   const { setOrganization } = useContext(ActiveOrganizationContext);
 
   useEffect(() => {
-    setOrganization({ name, role, slug });
+    setOrganization({ id, name, role, slug });
     return () => setOrganization(undefined);
-  }, [name, role, slug, setOrganization]);
+  }, [id, name, role, slug, setOrganization]);
 
   return null;
 }

@@ -480,7 +480,7 @@ describe('inbox rules', () => {
       },
     ]);
 
-    // The dangling pointer of 20260916.0001 is now a composite, restricting foreign key.
+    // The dangling pointer of 20260916.0002 is now a composite, restricting foreign key.
     await expect(
       rootPool.query<{ condeferrable: boolean; confdeltype: string }>(
         `select confdeltype, condeferrable from pg_constraint
