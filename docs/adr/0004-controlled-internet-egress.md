@@ -30,6 +30,13 @@ flag would leave the service without a default route despite the new network.
 another attached network is also routable, as `data` is under the development
 overlay.
 
+Amended 2026-09-17 ([ADR 0016](0016-channel-principal.md), Phase 1a-email): the
+`internet-egress` allowlist gains `freshclam`, which fetches ClamAV signature
+updates, so the members are now `web`, `worker`, and `freshclam`. `clamd` itself
+joins no routable network; it sits on a dedicated internal `scan` network shared
+only with `worker`, and `scripts/verify-compose.mjs` enforces that exact
+membership.
+
 ## Consequences
 
 The web application reaches external providers directly, while `api` and

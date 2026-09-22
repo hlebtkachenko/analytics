@@ -1614,6 +1614,7 @@ const inboxFile = {
   mediaType: 'application/pdf',
   originalFilename: 'placeholder.pdf',
   position: 1,
+  scanStatus: 'clean',
   sha256: 'a'.repeat(64),
 };
 
@@ -1989,6 +1990,36 @@ describe('inbox blob routes', () => {
     expect(malformed.status).toBe(404);
     expect(fetchImplementation).not.toHaveBeenCalled();
     expect(unsupported.status).toBe(415);
+    expect(await unsupported.json()).toEqual({ error: 'blob_rejected' });
+  });
+
+  it('passes the quarantine 409 through as blob_quarantined on both blob routes', async () => {
+    const quarantined = async () =>
+      new Response('{"code":"blob_quarantined"}', {
+        headers: { 'x-upstream': 'leak' },
+        status: 409,
+      });
+    const download = await getInboxBlobDownload(
+      auth,
+      inboxRequest(`blobs/${BLOB_ID}/download`),
+      'org_1',
+      BLOB_ID,
+      quarantined,
+    );
+    const inline = await getInboxBlobInline(
+      auth,
+      inboxRequest(`blobs/${BLOB_ID}/inline`),
+      'org_1',
+      BLOB_ID,
+      quarantined,
+    );
+
+    for (const response of [download, inline]) {
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: 'blob_quarantined' });
+      expect(response.headers.get('x-upstream')).toBeNull();
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+    }
   });
 });
 
@@ -2005,6 +2036,7 @@ const inboxChannel = {
       lastUsedAt: null,
     },
   ],
+  emailAddress: null,
   enabled: true,
   hintKind: 'invoice',
   id: CHANNEL_ID,
@@ -2059,17 +2091,25 @@ describe('inbox channels', () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(2);
   });
 
-  it('creates an API channel from a validated body and refuses another kind', async () => {
+  it('creates an api or email channel from a validated body and refuses another kind', async () => {
     const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe(
         'http://api:3001/v1/organizations/org_1/inbox/channels',
       );
       expect(init?.method).toBe('POST');
-      expect(JSON.parse(String(init?.body))).toEqual({
-        kind: 'api',
-        name: 'Placeholder push',
-      });
-      return Response.json(inboxChannel, { status: 201 });
+      const body = JSON.parse(String(init?.body));
+      expect(['api', 'email']).toContain(body.kind);
+      return Response.json(
+        {
+          ...inboxChannel,
+          ...body,
+          emailAddress:
+            body.kind === 'email'
+              ? `in-${'b'.repeat(32)}@in.bap.localhost`
+              : null,
+        },
+        { status: 201 },
+      );
     });
 
     const created = await postInboxChannel(
@@ -2082,7 +2122,7 @@ describe('inbox channels', () => {
       'org_1',
       fetchImplementation,
     );
-    const refused = await postInboxChannel(
+    const mailbox = await postInboxChannel(
       auth,
       inboxRequest('channels', {
         body: JSON.stringify({ kind: 'email', name: 'Placeholder mail' }),
@@ -2092,10 +2132,22 @@ describe('inbox channels', () => {
       'org_1',
       fetchImplementation,
     );
+    const refused = await postInboxChannel(
+      auth,
+      inboxRequest('channels', {
+        body: JSON.stringify({ kind: 'upload', name: 'Placeholder drop' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      }),
+      'org_1',
+      fetchImplementation,
+    );
 
     expect(created.status).toBe(201);
+    expect(mailbox.status).toBe(201);
+    expect((await mailbox.json()).emailAddress).toMatch(/^in-[0-9a-f]{32}@/);
     expect(refused.status).toBe(400);
-    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
   });
 
   it('patches a channel, maps a 403 to the rejection code and refuses a delete without disable', async () => {

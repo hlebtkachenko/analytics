@@ -1,4 +1,7 @@
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { request as httpRequest } from 'node:http';
+import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -42,7 +45,8 @@ import type { InboxChannel } from './contract.js';
 import { InboxChannelController } from './inbox-channel.controller.js';
 import { InboxRepository } from './inbox-repository.js';
 import { InboxService } from './inbox.service.js';
-import type { FileIntakeInput } from './inbox.service.js';
+import type { EmailIntakeInput, FileIntakeInput } from './inbox.service.js';
+import { MAX_EMAIL_BYTES } from '../runtime-configuration.js';
 
 const CHANNEL_ID = '4a2b7c1e-9f5d-4c3a-8b21-6e0f7d5a4c39';
 const OTHER_CHANNEL_ID = '6c4d9e30-1b7f-4e5c-ad43-801b9f7c6e51';
@@ -63,6 +67,7 @@ const channel: InboxChannel = {
       lastUsedAt: null,
     },
   ],
+  emailAddress: null,
   enabled: true,
   hintKind: null,
   id: CHANNEL_ID,
@@ -137,6 +142,10 @@ describe('application inbox channel routes', () => {
         await rm(input.file.path, { force: true });
       }
       return accepted;
+    }),
+    intakeEmail: record('intakeEmail', async (input: EmailIntakeInput) => {
+      await rm(input.temporaryPath, { force: true });
+      return { ...accepted, status: 'received' };
     }),
     intakeStructured: record('intakeStructured', () => ({
       ...accepted,
@@ -358,9 +367,15 @@ describe('application inbox channel routes', () => {
       role: 'owner',
     });
 
-    // Email channels arrive in Phase 1a-email; a foreign entity is not visible.
+    // An email channel is created the same way; its address comes from the credential route.
     await as('owner', 'post', '/inbox/channels')
       .send({ kind: 'email', name: 'mail' })
+      .expect(201);
+    expect(calls.createChannel?.[1]).toMatchObject({
+      body: { kind: 'email', name: 'mail' },
+    });
+    await as('owner', 'post', '/inbox/channels')
+      .send({ kind: 'mcp', name: 'x' })
       .expect(400);
     await as('owner', 'post', '/inbox/channels')
       .send({ kind: 'api', name: 'x', legalEntityId: ENTITY_ID })
@@ -437,6 +452,145 @@ describe('application inbox channel routes', () => {
     ).expect(404);
   });
 
+  const emailPath = `/inbox/channels/${CHANNEL_ID}/email`;
+  const eml = Buffer.from('From: a@example.org\r\nSubject: x\r\n\r\nhi\r\n');
+
+  it('accepts a raw email from the channel token with the provider token and origin', async () => {
+    const response = await as('channel', 'post', emailPath)
+      .set('Content-Type', 'message/rfc822')
+      .set('X-BAP-Intake-External-Id', 'mailgun-token.1_2-3')
+      .set('X-BAP-Intake-Origin', 'abcdef01')
+      .set('X-BAP-Intake-Sender', 'sender@example.org')
+      .send(eml)
+      .expect(202);
+
+    expect(response.body).toEqual({ ...accepted, status: 'received' });
+    expect(calls.intakeEmail?.[0]).toMatchObject({
+      channelId: CHANNEL_ID,
+      externalId: 'mailgun-token.1_2-3',
+      organizationId: 'organization_1',
+      origin: 'abcdef01',
+      role: 'channel',
+      size: eml.length,
+      userId: `channel_${CHANNEL_ID}`,
+    });
+    // The sender header is validated, never handed on: the worker reads it from the MIME.
+    expect(calls.intakeEmail?.[0]).not.toHaveProperty('sender');
+    expect((calls.intakeEmail?.[0] as EmailIntakeInput).temporaryPath).toMatch(
+      /\/tmp\/email-[0-9a-f-]{36}$/,
+    );
+    expect(await readdir(join(blobDirectory, 'tmp'))).toEqual([]);
+  });
+
+  it('refuses a person, a bad header, a wrong content type and an oversize message on the email route', async () => {
+    await as('owner', 'post', emailPath)
+      .set('Content-Type', 'message/rfc822')
+      .set('X-BAP-Intake-External-Id', 'token')
+      .send(eml)
+      .expect(403);
+    await as('channel', 'post', `/inbox/channels/${OTHER_CHANNEL_ID}/email`)
+      .set('Content-Type', 'message/rfc822')
+      .set('X-BAP-Intake-External-Id', 'token')
+      .send(eml)
+      .expect(404);
+
+    // No external id, an external id with a forbidden character or too long, a non-ASCII sender, a short origin.
+    await as('channel', 'post', emailPath)
+      .set('Content-Type', 'message/rfc822')
+      .send(eml)
+      .expect(400);
+    for (const headers of [
+      { 'X-BAP-Intake-External-Id': 'has space' },
+      { 'X-BAP-Intake-External-Id': 'x'.repeat(65) },
+      { 'X-BAP-Intake-External-Id': 'token', 'X-BAP-Intake-Origin': 'short' },
+      {
+        'X-BAP-Intake-External-Id': 'token',
+        'X-BAP-Intake-Sender': 'tab\there',
+      },
+    ]) {
+      await as('channel', 'post', emailPath)
+        .set('Content-Type', 'message/rfc822')
+        .set(headers)
+        .send(eml)
+        .expect(400);
+    }
+
+    await as('channel', 'post', emailPath)
+      .set('Content-Type', 'text/plain')
+      .set('X-BAP-Intake-External-Id', 'token')
+      .send(eml)
+      .expect(415);
+    await as('channel', 'post', emailPath)
+      .set('Content-Type', 'message/rfc822')
+      .set('X-BAP-Intake-External-Id', 'token')
+      .set('Content-Length', String(MAX_EMAIL_BYTES + 1))
+      .send(eml)
+      .expect(413);
+    await as('channel', 'post', emailPath)
+      .set('Content-Type', 'message/rfc822')
+      .set('X-BAP-Intake-External-Id', 'token')
+      .send(Buffer.alloc(0))
+      .expect(400);
+
+    expect(calls.intakeEmail).toBeUndefined();
+    expect(await readdir(join(blobDirectory, 'tmp'))).toEqual([]);
+  });
+
+  it('answers 413 while streaming a message past the cap and leaves no temporary file', async () => {
+    // A chunked body declares no length, so only the byte counter on the stream can refuse it.
+    const server = application.getHttpServer() as Server;
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    const address = server.address() as AddressInfo;
+    const status = await new Promise<number>((resolve, reject) => {
+      const outgoing = httpRequest(
+        {
+          headers: {
+            authorization: 'Bearer channel',
+            'content-type': 'message/rfc822',
+            'transfer-encoding': 'chunked',
+            'x-bap-intake-external-id': 'token',
+          },
+          host: '127.0.0.1',
+          method: 'POST',
+          path: `/v1/organizations/organization_1${emailPath}`,
+          port: address.port,
+        },
+        (incoming) => {
+          incoming.resume();
+          resolve(incoming.statusCode ?? 0);
+        },
+      );
+      // The server answers and closes while the client is still writing, which is a write error, not a failure.
+      outgoing.on('error', (error: NodeJS.ErrnoException) => {
+        if (error.code !== 'EPIPE' && error.code !== 'ECONNRESET') {
+          reject(error);
+        }
+      });
+      const chunk = Buffer.alloc(1_000_000, 65);
+      let written = 0;
+      const push = (): void => {
+        while (written <= MAX_EMAIL_BYTES) {
+          written += chunk.length;
+          if (!outgoing.write(chunk)) {
+            outgoing.once('drain', push);
+            return;
+          }
+        }
+        outgoing.end();
+      };
+      push();
+    });
+
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+
+    expect(status).toBe(413);
+    expect(calls.intakeEmail).toBeUndefined();
+    expect(await readdir(join(blobDirectory, 'tmp'))).toEqual([]);
+  });
+
   it('publishes the channel routes in OpenAPI', () => {
     const document = SwaggerModule.createDocument(
       application,
@@ -448,6 +602,7 @@ describe('application inbox channel routes', () => {
       '/v1/organizations/{organizationId}/inbox/channels/{channelId}',
       '/v1/organizations/{organizationId}/inbox/channels/{channelId}/credentials',
       '/v1/organizations/{organizationId}/inbox/channels/{channelId}/credentials/{credentialId}',
+      '/v1/organizations/{organizationId}/inbox/channels/{channelId}/email',
       '/v1/organizations/{organizationId}/inbox/channels/{channelId}/items',
     ]);
   });

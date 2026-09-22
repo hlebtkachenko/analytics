@@ -124,25 +124,30 @@ verifyPortCollision(
   },
   15432,
 );
-verifyModel('Compose production contract', 'production', productionFiles, {
+const productionEnvironment = {
+  BAP_INTAKE_DOMAIN: 'in.bap.invalid',
   BAP_PUBLIC_HOST: 'bap.invalid',
   BAP_PUBLIC_ORIGIN: 'https://bap.invalid',
-});
+};
+
+verifyModel(
+  'Compose production contract',
+  'production',
+  productionFiles,
+  productionEnvironment,
+);
 verifyModel(
   'Compose operations contract',
   'operations',
   productionFiles,
-  {
-    BAP_PUBLIC_HOST: 'bap.invalid',
-    BAP_PUBLIC_ORIGIN: 'https://bap.invalid',
-  },
+  productionEnvironment,
   ['operations'],
 );
 verifyRejectedModel(
   'Compose blob storage read-write backup',
   'operations',
   productionFiles,
-  { BAP_PUBLIC_HOST: 'bap.invalid', BAP_PUBLIC_ORIGIN: 'https://bap.invalid' },
+  productionEnvironment,
   ['operations'],
   (configuration) => {
     for (const mount of configuration.services.backup.volumes) {
@@ -157,7 +162,7 @@ verifyRejectedModel(
   'Compose blob storage extra member',
   'operations',
   productionFiles,
-  { BAP_PUBLIC_HOST: 'bap.invalid', BAP_PUBLIC_ORIGIN: 'https://bap.invalid' },
+  productionEnvironment,
   ['operations'],
   (configuration) => {
     configuration.services['reporting-api'].volumes = [
@@ -165,6 +170,28 @@ verifyRejectedModel(
     ];
   },
   'Unexpected blob storage members: api,backup,reporting-api,restore,worker',
+);
+verifyRejectedModel(
+  'Compose clamd on the data network',
+  'production',
+  productionFiles,
+  productionEnvironment,
+  [],
+  (configuration) => {
+    configuration.services.clamd.networks.data = null;
+  },
+  'clamd must use only the scan network',
+);
+verifyRejectedModel(
+  'Compose freshclam missing',
+  'production',
+  productionFiles,
+  productionEnvironment,
+  [],
+  (configuration) => {
+    delete configuration.services.freshclam;
+  },
+  'Unexpected internet egress members: web,worker',
 );
 verifyModel(
   'Compose bootstrap contract',

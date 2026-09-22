@@ -11,8 +11,10 @@ import {
   NotFoundException,
   Param,
   Patch,
+  PayloadTooLargeException,
   Post,
   Req,
+  UnsupportedMediaTypeException,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -27,16 +29,21 @@ import {
   ApiConsumes,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiHeader,
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiPayloadTooLargeResponse,
   ApiUnauthorizedResponse,
+  ApiUnsupportedMediaTypeResponse,
 } from '@nestjs/swagger';
 import type { TenantContext } from '@bap/db';
 import { organizationIdentifierSchema } from '@bap/security';
+import { randomUUID } from 'node:crypto';
+import { open } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { Readable } from 'node:stream';
 import { z } from 'zod';
 
 import { BlobStore } from '../blobs/blob-store.js';
@@ -49,7 +56,10 @@ import { MAX_UPLOAD_BYTES } from '../ingestion/contract.js';
 import { MembershipResolver } from '../membership-resolver.js';
 import type { AuthenticatedRequest } from '../request-context.js';
 import { ResourceJwtGuard } from '../resource-jwt.guard.js';
-import { loadRuntimeConfiguration } from '../runtime-configuration.js';
+import {
+  loadRuntimeConfiguration,
+  MAX_EMAIL_BYTES,
+} from '../runtime-configuration.js';
 import { SubjectRateLimitGuard } from '../subject-rate-limit.guard.js';
 import { allowedEntityIds, resolveTenantAccess } from '../tenant-access.js';
 import type { TenantAccess } from '../tenant-access.js';
@@ -57,6 +67,10 @@ import {
   createInboxChannelBodyOpenApiSchema,
   createInboxChannelRequestSchema,
   credentialIdentifierSchema,
+  EMAIL_MEDIA_TYPE,
+  emailExternalIdSchema,
+  emailIntakeBodyOpenApiSchema,
+  emailSenderHeaderSchema,
   fileIntakeBodyOpenApiSchema,
   fileIntakeFieldsSchema,
   inboxChannelIdentifierSchema,
@@ -87,6 +101,39 @@ import { InboxService } from './inbox.service.js';
 // The credential display prefix the web resolved before minting the channel token; display metadata only.
 const ORIGIN_HEADER = 'x-bap-intake-origin';
 const originHeaderSchema = z.string().regex(/^[A-Za-z0-9_-]{8}$/);
+// The email route's provider token (the replay key) and the envelope sender, validated and never logged.
+const EXTERNAL_ID_HEADER = 'x-bap-intake-external-id';
+const SENDER_HEADER = 'x-bap-intake-sender';
+
+class EmailTooLargeError extends Error {}
+
+// Counts the bytes as they land on disk and stops past the cap, so a lying content-length changes nothing.
+// The request is left undestroyed on purpose: a destroyed socket could not carry the 413 back to the caller.
+async function writeCapped(
+  source: Readable,
+  path: string,
+  limit: number,
+): Promise<number> {
+  const handle = await open(path, 'wx');
+  let size = 0;
+
+  try {
+    for await (const chunk of source.iterator({ destroyOnReturn: false })) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += bytes.length;
+
+      if (size > limit) {
+        throw new EmailTooLargeError();
+      }
+
+      await handle.write(bytes);
+    }
+  } finally {
+    await handle.close();
+  }
+
+  return size;
+}
 
 // One file part plus at most the externalId text field; the sniff decides what the bytes are, never the client.
 const multerOptions: MulterModuleOptions = {
@@ -216,6 +263,123 @@ export class InboxChannelController {
     );
   }
 
+  @Post(':organizationId/inbox/channels/:channelId/email')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @UseGuards(ResourceJwtGuard, SubjectRateLimitGuard)
+  @ApiConsumes(EMAIL_MEDIA_TYPE)
+  @ApiOperation({
+    summary: 'Receive one raw email through an email channel token',
+  })
+  @ApiHeader({
+    description: 'The provider token of this delivery; the replay key',
+    name: 'X-BAP-Intake-External-Id',
+    required: true,
+  })
+  @ApiHeader({
+    description: 'The credential display prefix that received the mail',
+    name: 'X-BAP-Intake-Origin',
+    required: false,
+  })
+  @ApiHeader({
+    description: 'The envelope sender as the provider reported it',
+    name: 'X-BAP-Intake-Sender',
+    required: false,
+  })
+  @ApiBody({ schema: emailIntakeBodyOpenApiSchema })
+  @ApiAcceptedResponse({ schema: inboxIntakeResponseOpenApiSchema })
+  @ApiBadRequestResponse({ description: 'A header or the body is unusable' })
+  @ApiUnauthorizedResponse(unauthorized)
+  @ApiForbiddenResponse({ description: 'Only a channel token may submit mail' })
+  @ApiNotFoundResponse(channelNotFound)
+  @ApiPayloadTooLargeResponse({
+    description: 'The message exceeds the email cap or the organization quota',
+  })
+  @ApiUnsupportedMediaTypeResponse({
+    description: 'The body must be message/rfc822',
+  })
+  async receiveEmail(
+    @Param('organizationId', { schema: organizationIdentifierSchema })
+    organizationId: string,
+    @Param('channelId', { schema: inboxChannelIdentifierSchema })
+    channelId: string,
+    @Req() request: AuthenticatedRequest & Readable,
+  ): Promise<InboxIntakeResponse> {
+    // A person never submits an .eml here: the route exists for the webhook's channel token only.
+    if (!isChannelSubject(request.resourcePrincipal?.subject ?? '')) {
+      throw new ForbiddenException();
+    }
+
+    const access = await resolveChannelAccess({
+      channelId,
+      channels: this.channels,
+      organizationId,
+      request,
+    });
+    const origin = originHeaderSchema
+      .optional()
+      .safeParse(request.headers[ORIGIN_HEADER]);
+    const externalId = emailExternalIdSchema.safeParse(
+      request.headers[EXTERNAL_ID_HEADER],
+    );
+    // Validated so a broken forwarder is refused; the worker stores the sender it parses from the MIME instead.
+    const sender = emailSenderHeaderSchema
+      .optional()
+      .safeParse(request.headers[SENDER_HEADER]);
+
+    if (!origin.success || !externalId.success || !sender.success) {
+      throw new BadRequestException();
+    }
+
+    const contentType = request.headers['content-type'];
+
+    if (
+      typeof contentType !== 'string' ||
+      contentType.split(';', 1)[0]?.trim().toLowerCase() !== EMAIL_MEDIA_TYPE
+    ) {
+      throw new UnsupportedMediaTypeException();
+    }
+
+    const declared = Number(request.headers['content-length'] ?? 0);
+
+    if (Number.isFinite(declared) && declared > MAX_EMAIL_BYTES) {
+      throw new PayloadTooLargeException();
+    }
+
+    const temporaryPath = join(
+      this.blobs.temporaryDirectory(),
+      `email-${randomUUID()}`,
+    );
+    let size: number;
+
+    try {
+      size = await writeCapped(request, temporaryPath, MAX_EMAIL_BYTES);
+    } catch (error) {
+      await this.blobs.deleteTemporary(temporaryPath);
+
+      if (error instanceof EmailTooLargeError) {
+        throw new PayloadTooLargeException();
+      }
+
+      throw error;
+    }
+
+    if (size === 0) {
+      await this.blobs.deleteTemporary(temporaryPath);
+      throw new BadRequestException();
+    }
+
+    return inboxIntakeResponseSchema.parse(
+      await this.inbox.intakeEmail({
+        ...channelTenant(access.organizationId, access.channelId),
+        channelId: access.channelId,
+        externalId: externalId.data,
+        origin: origin.data ?? null,
+        size,
+        temporaryPath,
+      }),
+    );
+  }
+
   @Get(':organizationId/inbox/channels')
   @UseGuards(ResourceJwtGuard, SubjectRateLimitGuard)
   @ApiOperation({
@@ -238,10 +402,10 @@ export class InboxChannelController {
 
   @Post(':organizationId/inbox/channels')
   @UseGuards(ResourceJwtGuard, SubjectRateLimitGuard)
-  @ApiOperation({ summary: 'Create an API channel' })
+  @ApiOperation({ summary: 'Create an API or an email channel' })
   @ApiBody({ schema: createInboxChannelBodyOpenApiSchema })
   @ApiCreatedResponse({ schema: inboxChannelOpenApiSchema })
-  @ApiBadRequestResponse({ description: 'Only API channels can be created' })
+  @ApiBadRequestResponse({ description: 'The channel body is unusable' })
   @ApiUnauthorizedResponse(unauthorized)
   @ApiForbiddenResponse(forbidden)
   @ApiNotFoundResponse({ description: 'The legal entity is not visible' })
@@ -308,7 +472,8 @@ export class InboxChannelController {
   @Post(':organizationId/inbox/channels/:channelId/credentials')
   @UseGuards(ResourceJwtGuard, SubjectRateLimitGuard)
   @ApiOperation({
-    summary: 'Issue an intake credential; the secret is shown exactly once',
+    summary:
+      'Issue an intake credential: an API token shown exactly once, or the intake address of an email channel',
   })
   @ApiCreatedResponse({
     schema: issueInboxChannelCredentialResponseOpenApiSchema,
@@ -317,7 +482,8 @@ export class InboxChannelController {
   @ApiForbiddenResponse(forbidden)
   @ApiNotFoundResponse(channelNotFound)
   @ApiConflictResponse({
-    description: 'The channel already holds two active credentials',
+    description:
+      'The channel already holds its active credentials: two API tokens, or one email address',
   })
   async issueCredential(
     @Param('organizationId', { schema: organizationIdentifierSchema })

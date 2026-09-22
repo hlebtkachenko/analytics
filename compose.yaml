@@ -47,8 +47,11 @@ services:
       BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
       BAP_DATABASE_PORT: 5432
       BAP_DATABASE_USER: bap_auth
+      BAP_INBOUND_MAX_IN_FLIGHT: ${BAP_INBOUND_MAX_IN_FLIGHT:-4}
+      BAP_INTAKE_DOMAIN: ${BAP_INTAKE_DOMAIN:-in.bap.localhost}
       BAP_MAIL_SENDER: ${BAP_MAIL_SENDER:-no-reply@bap.localhost}
       BAP_MAIL_TRANSPORT: ${BAP_MAIL_TRANSPORT:-resend}
+      BAP_MAILGUN_WEBHOOK_SIGNING_KEY_FILE: /run/credentials/mailgun-webhook-signing-key
       BAP_PUBLIC_ORIGIN: ${BAP_PUBLIC_ORIGIN:-http://localhost:3000}
       BAP_RESEND_API_KEY_FILE: /run/credentials/resend-api-key
       BETTER_AUTH_SECRET_FILE: /run/credentials/auth-secret
@@ -91,6 +94,8 @@ services:
         target: /run/credentials/resend-api-key
       - source: ai_provider_config
         target: /run/credentials/ai-provider-config
+      - source: mailgun_webhook_signing_key
+        target: /run/credentials/mailgun-webhook-signing-key
     cap_drop:
       - ALL
     security_opt:
@@ -149,6 +154,7 @@ services:
       BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
       BAP_DATABASE_PORT: 5432
       BAP_DATABASE_USER: bap_api
+      BAP_INTAKE_DOMAIN: ${BAP_INTAKE_DOMAIN:-in.bap.localhost}
       BAP_JWKS_URL: http://web:3000/api/auth/jwks
       BAP_PUBLIC_ORIGIN: ${BAP_PUBLIC_ORIGIN:-http://localhost:3000}
       BAP_UPLOAD_STAGING_DIR: /var/lib/bap/uploads
@@ -241,6 +247,8 @@ services:
       BAP_AI_PROVIDER_CONFIG_FILE: /run/credentials/ai-provider-config
       BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION: ${BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION:-1073741824}
       BAP_BLOB_STORAGE_DIR: /var/lib/bap/blobs
+      BAP_CLAMAV_HOST: clamd
+      BAP_CLAMAV_PORT: 3310
       BAP_DATABASE_HOST: database
       BAP_DATABASE_NAME: ${POSTGRES_DB:-bap}
       BAP_DATABASE_PASSWORD_FILE: /run/credentials/database-password
@@ -275,6 +283,8 @@ services:
         gw_priority: 100
       data:
         priority: 10
+      scan:
+        priority: 10
     secrets:
       - source: bap_api_password
         target: /run/credentials/database-password
@@ -284,6 +294,87 @@ services:
     volumes:
       - upload_staging:/var/lib/bap/uploads
       - blob_storage:/var/lib/bap/blobs
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  clamd:
+    image: clamav/clamav:1.5.4@sha256:9cb27d7660bdf66e9878c832cb433dd8aa152cfbe16f3c2c0084c80b04ae22b4
+    # Docker Hub publishes ClamAV for amd64 only; Apple Silicon hosts run it under emulation.
+    platform: linux/amd64
+    # The image entrypoint needs a writable root and chown, so the daemon runs directly.
+    entrypoint: ['clamd']
+    command: ['--config-file=/etc/clamav/clamd.conf']
+    depends_on:
+      freshclam:
+        condition: service_healthy
+    expose:
+      - '3310'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'clamdscan',
+          '--ping',
+          '1',
+          '--config-file=/etc/clamav/clamd.conf',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 180s
+    init: true
+    networks:
+      - scan
+    read_only: true
+    tmpfs:
+      - /run/clamav:uid=100,gid=101,mode=0750
+      - /tmp:uid=100,gid=101,mode=0700
+    user: '100:101'
+    # Signatures are read here and written only by freshclam.
+    volumes:
+      - ./infrastructure/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
+      - clamav_signatures:/var/lib/clamav:ro
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  freshclam:
+    image: clamav/clamav:1.5.4@sha256:9cb27d7660bdf66e9878c832cb433dd8aa152cfbe16f3c2c0084c80b04ae22b4
+    platform: linux/amd64
+    entrypoint: ['freshclam']
+    command:
+      [
+        '--daemon',
+        '--foreground',
+        '--stdout',
+        '--config-file=/etc/clamav/freshclam.conf',
+      ]
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'test -f /var/lib/clamav/main.cvd || test -f /var/lib/clamav/main.cld',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    init: true
+    networks:
+      internet-egress:
+        priority: 100
+        gw_priority: 100
+    read_only: true
+    tmpfs:
+      - /run/clamav:uid=100,gid=101,mode=0750
+      - /tmp:uid=100,gid=101,mode=0700
+    user: '100:101'
+    volumes:
+      - ./infrastructure/clamav/freshclam.conf:/etc/clamav/freshclam.conf:ro
+      - clamav_signatures:/var/lib/clamav
     cap_drop:
       - ALL
     security_opt:
@@ -576,6 +667,8 @@ networks:
     internal: true
   internet-egress: {}
   operations-egress: {}
+  scan:
+    internal: true
 
 secrets:
   postgres_admin_password:
@@ -596,6 +689,8 @@ secrets:
     file: ${BAP_RESEND_API_KEY_FILE:-.secrets/resend_api_key}
   ai_provider_config:
     file: ${BAP_AI_PROVIDER_CONFIG_FILE:-.secrets/ai_provider_config}
+  mailgun_webhook_signing_key:
+    file: ${BAP_MAILGUN_WEBHOOK_SIGNING_KEY_FILE:-.secrets/mailgun_webhook_signing_key}
   restic_password:
     file: ${RESTIC_PASSWORD_FILE:-.secrets/restic_password}
   restic_repository:
@@ -605,6 +700,7 @@ volumes:
   blob_storage:
   caddy_config:
   caddy_data:
+  clamav_signatures:
   postgres_data:
   restic_repository_data:
   restore_postgres_data:

@@ -29,7 +29,11 @@ scheduler.
 Worker runtime: a second entrypoint in the application API image, running as
 `bap_api`, which is `NOBYPASSRLS`. No new database role is introduced. The
 worker cannot mint resource JWTs, reads tenant data only through
-`withTenantContext`, and re-resolves membership at dequeue.
+`withTenantContext`, and re-resolves membership at dequeue. Amended 2026-09-17:
+a worker job may instead run under a channel principal, whose payload carries
+`{ organizationId, channelId, itemId }`, resolved at dequeue against the enabled
+channel row ([ADR 0016](0016-channel-principal.md)); the ids-only payload rule
+from the Consequences section still applies.
 
 Transactional mail: use Resend, with the API key mounted as a credential file.
 The transport is selected explicitly rather than inferred from the key, because

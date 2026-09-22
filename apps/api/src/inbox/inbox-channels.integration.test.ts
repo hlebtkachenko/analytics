@@ -32,6 +32,7 @@ import {
 import { channelTenant, resolveChannelAccess } from '../channel-access.js';
 import type { MembershipResolver } from '../membership-resolver.js';
 import { resolveTenantAccess } from '../tenant-access.js';
+import type { SplitEmailItemJob } from './contract.js';
 import { InboxService } from './inbox.service.js';
 import {
   assignItem,
@@ -83,6 +84,9 @@ const stranger: TenantContext = {
   userId: 'user-3',
 };
 const allEntities = { legalEntityIds: null };
+
+const INTAKE_DOMAIN = 'in.bap.invalid';
+const enqueued: SplitEmailItemJob[] = [];
 
 let entityId = '';
 let channelId = '';
@@ -206,7 +210,11 @@ beforeAll(async () => {
     updateChannel: (input) => updateChannel(apiPool, input),
     updateHints: (input) => updateHints(apiPool, input),
   };
-  service = new InboxService(repository, store, QUOTA);
+  service = new InboxService(repository, store, QUOTA, INTAKE_DOMAIN, {
+    enqueueSplitEmailItem: async (job) => {
+      enqueued.push(job);
+    },
+  });
   // The real membership path, so a channel subject is refused exactly as the routes refuse it.
   memberships = {
     checkReadiness: async () => true,

@@ -49,6 +49,25 @@ const problemDetails: Record<
   },
 };
 
+// A route may name a machine-readable reason (a lowercase token) beside the generic problem of its status.
+const PROBLEM_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+
+function problemCode(exception: unknown): string | undefined {
+  if (!(exception instanceof HttpException)) {
+    return undefined;
+  }
+
+  const body = exception.getResponse();
+  const message =
+    typeof body === 'object' && body !== null
+      ? (body as { message?: unknown }).message
+      : body;
+
+  return typeof message === 'string' && PROBLEM_CODE_PATTERN.test(message)
+    ? message
+    : undefined;
+}
+
 @Catch()
 export class ProblemExceptionFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {
@@ -70,8 +89,11 @@ export class ProblemExceptionFilter implements ExceptionFilter {
           : 'Service error',
     };
 
+    const code = problemCode(exception);
+
     response.setHeader('Content-Type', 'application/problem+json');
     response.status(status).json({
+      ...(code === undefined ? {} : { code }),
       detail: problem.detail,
       instance: request.url.split('?', 1)[0] || '/',
       status,

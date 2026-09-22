@@ -7,8 +7,15 @@
 	respond @private 404
 
 	# 25MB is the upload ceiling; the block form is required, the one line form parses to no limit.
-	request_body {
+	@upload not path /api/inbound/*
+	request_body @upload {
 		max_size 25MB
+	}
+
+	# Mailgun posts a 25MB message plus form overhead, so the inbound webhook gets its own ceiling.
+	@inbound path /api/inbound/*
+	request_body @inbound {
+		max_size 30MB
 	}
 
 	header {

@@ -357,8 +357,38 @@ from the transaction settings, the same checks as `issue_channel_credential` and
 `auth.rate_limit(last_request)` where `"key" LIKE 'bap-edge:intake:%'`. The web
 tier's public intake route calls `auth.resolve_channel_credential` and reads or
 upserts `auth.rate_limit` in that namespace, both on the `bap_auth` pool.
-`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
 `20260917.0002`.
+
+Migration `20260917.0003` delivers the email channel of ADR 0016.
+`app.inbox_item` gains a nullable `sender` column (`length between 1 and 320`,
+the envelope sender from the parsed MIME, display only) and column comments on
+`origin` and `sender`: `origin` is the credential display prefix for every
+channel kind, never a sender address. `app.inbox_channel.email_address` gains
+the partial unique index `inbox_channel_email_address_key`, platform-wide
+because every organization shares the intake domain. The definer
+`app.record_blob_scan(blob_id, status)` (`SECURITY DEFINER`, owner `bap_owner`,
+EXECUTE to `bap_api`) lets the worker record `clean`, `infected` or `failed` on
+the one blob of the caller's organization and raises `no_data_found` (`P0002`)
+for any other; because `app.blob` is FORCE RLS and `blob_update` still requires
+`app.role_can_write()`, the definer relies on the new policy
+`blob_maintenance_update ON app.blob FOR UPDATE TO bap_owner` scoped to
+`bap.organization_id`, the shape of `inbox_channel_maintenance_select`, so a
+channel still updates zero rows directly.
+`auth.issue_channel_credential(uuid, text)` is dropped and recreated as
+`auth.issue_channel_credential(channel_id, kind, intake_domain default null)`:
+the kind must match the channel kind (`inbox_channel_credential_kind_match`),
+the active limit is per kind (two `api_token`, one `email_address`, both under
+`inbox_channel_credential_active_limit`), and an `email_address` credential
+requires the domain (`invalid_parameter_value`), mints `in-<32 lowercase hex>`
+as the local part, stores `secret_sha256` of that local part only, returns the
+full address as the secret once and writes it plain into
+`inbox_channel.email_address`. `auth.revoke_channel_credential` clears that
+address when the revoked row is an `email_address`.
+`auth.resolve_channel_credential` is unchanged: the email caller lowercases the
+local part and hashes exactly that, never the whole address.
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
+`20260917.0003`.
 
 ## Tenant policy contract
 
