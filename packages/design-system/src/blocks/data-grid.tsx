@@ -677,7 +677,7 @@ export function DataGrid(props: DataGridProps) {
   if (state === 'error') {
     return (
       <TableContainer
-        className={cx(styles.root, styles.container)}
+        className={styles.container}
         description={description}
         title={title}
       >
@@ -767,7 +767,7 @@ export function DataGrid(props: DataGridProps) {
 
   return (
     <TableContainer
-      className={cx(styles.root, styles.container)}
+      className={styles.container}
       description={inlineHeader ? undefined : description}
       title={inlineHeader ? undefined : title}
     >

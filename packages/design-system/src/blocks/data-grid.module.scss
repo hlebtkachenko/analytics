@@ -1,10 +1,3 @@
-// Carbon Stack and other layouts are grids, whose items default to a
-// max-content minimum. Zero the block root's minimum so a wide table shrinks
-// with the parent and scrolls inside .scroll instead of stretching the page.
-.root {
-  min-inline-size: 0;
-}
-
 // The container never widens its parent: inline-size containment keeps a wide
 // table out of the intrinsic sizing of a Stack or grid track, so the table
 // scrolls inside the container instead of stretching the page.

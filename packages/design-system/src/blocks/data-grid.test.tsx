@@ -257,7 +257,7 @@ describe('DataGrid', () => {
   it('marks its root so it shrinks inside a grid or flex parent', () => {
     const { container } = render(<DataGrid columns={columns} rows={rows} />);
     const root = container.firstElementChild as HTMLElement;
-    expect(root).toHaveClass(styles.root!);
+    expect(root).toHaveClass(styles.container!);
   });
 
   it('narrows rows to the applied filter selection', () => {
