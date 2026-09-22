@@ -1,7 +1,7 @@
 @use '@bap/design-system/tokens/spacing.scss' as spacing;
 
 .headingRow {
-  align-items: center;
+  align-items: flex-start;
   display: flex;
   flex-wrap: wrap;
   gap: spacing.$spacing-05;
@@ -9,7 +9,76 @@
 }
 
 .headingActions {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: spacing.$spacing-03;
+}
+
+// Zero Carbon's tab panel inline padding so the grid shares the page-grid edges.
+.tabsRow :global(.cds--tab-content) {
+  padding-inline: 0;
+}
+
+// The filter tags, the filter panel and the grid stack under the tab row.
+.gridStack {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-05;
+  margin-block-start: spacing.$spacing-05;
+}
+
+.filterTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-02;
+}
+
+.filterPanel {
+  display: grid;
+  gap: spacing.$spacing-05;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+
+.itemCell {
+  align-items: center;
+  display: flex;
+  gap: spacing.$spacing-03;
+  min-inline-size: 0;
+}
+
+.itemIcon {
+  color: var(--cds-icon-secondary);
+  flex: none;
+}
+
+// The filename takes the remaining width and truncates with an ellipsis.
+.itemName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moreFiles {
+  color: var(--cds-text-secondary);
+  flex: none;
+}
+
+.dropOverlay {
+  align-items: center;
+  background-color: var(--cds-background-overlay, rgba(0, 0, 0, 0.5));
+  color: var(--cds-text-on-color);
+  display: flex;
+  font-size: 1.25rem;
+  inset: 0;
+  justify-content: center;
+  pointer-events: none;
+  position: fixed;
+  z-index: 9000;
+}
+
+.dropOverlayInner {
+  border: 2px dashed var(--cds-text-on-color);
+  border-radius: 0.25rem;
+  padding: spacing.$spacing-07;
 }

@@ -1,0 +1,25 @@
+@use '@bap/design-system/tokens/spacing.scss' as spacing;
+
+.preview {
+  block-size: 32rem;
+  border: 1px solid var(--cds-border-subtle);
+  inline-size: 100%;
+}
+
+.previewImage {
+  block-size: auto;
+  border: 1px solid var(--cds-border-subtle);
+  inline-size: 100%;
+  max-block-size: 32rem;
+  object-fit: contain;
+}
+
+.previewText {
+  background: var(--cds-layer);
+  border: 1px solid var(--cds-border-subtle);
+  max-block-size: 32rem;
+  overflow: auto;
+  padding: spacing.$spacing-04;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

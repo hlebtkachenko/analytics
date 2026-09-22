@@ -1,27 +1,58 @@
 @use '@bap/design-system/tokens/spacing.scss' as spacing;
 @use '@bap/design-system/tokens/type.scss' as type;
 
+// The two panes share the page grid; the row gap keeps them readable when stacked below lg.
+.columns {
+  row-gap: spacing.$spacing-06;
+}
+
+.title {
+  @include type.type-style('heading-04');
+}
+
+.received {
+  color: var(--cds-text-secondary);
+}
+
+.note {
+  color: var(--cds-text-secondary);
+}
+
 .summary {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: spacing.$spacing-05;
+  margin-block-start: spacing.$spacing-03;
 }
 
-// The two detail columns share the page grid; the row gap keeps the stacked
-// order readable when they collapse below lg.
-.columns {
-  row-gap: spacing.$spacing-06;
+.sectionHead {
+  align-items: baseline;
+  display: flex;
+  gap: spacing.$spacing-04;
+}
+
+// The centre pane clears the sticky bar, so no field hides under it at any scroll.
+.centrePane {
+  padding-block-end: spacing.$spacing-10;
+}
+
+// Zero Carbon's tab panel inline padding so the form panels share the title and page-grid edges.
+.centrePane :global(.cds--tab-content) {
+  padding-inline: 0;
 }
 
 .sectionHeading {
   @include type.type-style('heading-03');
 }
 
-.preview {
-  block-size: 32rem;
-  border: 1px solid var(--cds-border-subtle);
-  inline-size: 100%;
+// The filename truncates so it never runs under the Download action.
+.fileName {
+  display: block;
+  overflow: hidden;
+  padding-inline-end: spacing.$spacing-08;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .eventTime {
@@ -30,8 +61,22 @@
 }
 
 .actions {
-  align-items: flex-end;
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: spacing.$spacing-03;
+}
+
+// The sticky action bar is opaque and above the form so no field shows through.
+.bottomBar {
+  align-items: center;
+  background: var(--cds-background);
+  border-block-start: 1px solid var(--cds-border-subtle);
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-03;
+  padding-block: spacing.$spacing-04;
+  position: sticky;
+  z-index: 1;
 }

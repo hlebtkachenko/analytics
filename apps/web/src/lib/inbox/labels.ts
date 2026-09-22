@@ -213,18 +213,6 @@ export const inboxListStatusLabelKeys: Readonly<
   snoozed: 'inbox.list.statusSnoozed',
 };
 
-export const inboxListStatusTagTypes: Readonly<
-  Record<InboxListStatusWord, StatusTagType | 'red' | 'teal'>
-> = {
-  discarded: 'cool-gray',
-  failed: 'red',
-  needs_review: 'blue',
-  processing: 'gray',
-  received: 'gray',
-  routed: 'green',
-  snoozed: 'teal',
-};
-
 type InboxChannelKind = (typeof inboxChannelKindSchema.options)[number];
 
 // One word per source, so a channel kind code never reaches the screen.

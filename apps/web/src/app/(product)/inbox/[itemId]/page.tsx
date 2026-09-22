@@ -6,33 +6,38 @@ import {
   ComboBox,
   ContainedList,
   ContainedListItem,
-  Form,
   Grid,
   InlineNotification,
   Link,
   Modal,
+  OverflowMenu,
+  OverflowMenuItem,
   Select,
   SelectItem,
   Stack,
-  StructuredListBody,
-  StructuredListCell,
-  StructuredListHead,
-  StructuredListRow,
-  StructuredListWrapper,
-  TextArea,
+  Tab,
+  TabList,
+  TabPanel,
+  TabPanels,
+  Tabs,
+  Tag,
   TextInput,
-  Tile,
 } from '@bap/design-system/react';
-import { useParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import type { Route } from 'next';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import type { ReactElement } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import OriginalPreview from '../../../../components/documents/original-preview';
+import PartnerPicker from '../../../../components/documents/partner-picker';
 import PageContainer from '../../../../components/page-container';
 import { useToast } from '../../../../components/shell/toast';
 import { StatusIndicator } from '../../../../components/status-indicator';
 import { getJson, isAbortError } from '../../../../lib/datasets/client';
 import {
   documentsPath,
+  optional,
   sendJson,
   withOrganization,
 } from '../../../../lib/documents/client';
@@ -40,6 +45,7 @@ import {
   createDocumentRequestSchema,
   documentKindSchema,
   documentListResponseSchema,
+  isInvoiceKind,
 } from '../../../../lib/documents/contract.ts';
 import type {
   DocumentKind,
@@ -49,37 +55,48 @@ import { documentKindLabelKeys } from '../../../../lib/documents/labels.ts';
 import {
   attachInboxItem,
   inboxBlobDownloadPath,
-  inboxBlobInlinePath,
   inboxItemActionPath,
   inboxItemPath,
+  inboxItemsPath,
   routeInboxItemToDocument,
 } from '../../../../lib/inbox/client';
 import type { InboxItemAction } from '../../../../lib/inbox/client';
 import {
   inboxDiscardReasonSchema,
   inboxItemDetailSchema,
+  inboxItemListResponseSchema,
   isBlobQuarantined,
   isBlobScanPending,
-  isInlineMediaType,
 } from '../../../../lib/inbox/contract.ts';
 import type {
   InboxCorrectionField,
   InboxDiscardReason,
   InboxItemDetail,
+  InboxItemFile,
   InboxRouteConflict,
   RouteInboxItemToDocumentRequest,
-  UpdateInboxHintsRequest,
 } from '../../../../lib/inbox/contract.ts';
 import {
   inboxCorrectionFieldLabelKeys,
   inboxCorrectionSourceLabelKeys,
-  inboxDecidedByLabelKeys,
   inboxDiscardReasonLabelKeys,
+  inboxEventKindLabelKeys,
+  inboxEventReasonLabelKeys,
+  inboxIssueCodeLabelKeys,
+  inboxListStatusLabelKeys,
   inboxRoutingDestinationLabelKeys,
   inboxRoutingDestinationNoneLabelKey,
-  inboxStatusLabelKeys,
   inboxStatusSeverity,
+  inboxTabQuery,
+  isInboxTab,
 } from '../../../../lib/inbox/labels.ts';
+import {
+  providerReadFile,
+  sectionStatus,
+} from '../../../../lib/inbox/section-status.ts';
+import type { SectionStatus } from '../../../../lib/inbox/section-status.ts';
+import { useMembers } from '../../../../lib/inbox/use-members';
+import { formatDateTime } from '../../../../lib/format.ts';
 import { useLegalEntities } from '../../../../lib/organizations/use-legal-entities';
 import { useOrganizationAccess } from '../../../../lib/organizations/use-organization-access';
 import { useOrganizationSelection } from '../../../../lib/organizations/use-organization-selection';
@@ -87,6 +104,7 @@ import styles from './page.module.scss';
 
 type LoadState = 'error' | 'idle' | 'loading';
 type DetailResult = Readonly<{ key: string; value?: InboxItemDetail }>;
+type OverflowModal = 'assign' | 'attach' | 'discard' | 'snooze';
 
 // The draft fields the person can still change; everything else in the draft passes through untouched.
 type DraftFields = Readonly<{
@@ -99,7 +117,6 @@ type DraftFields = Readonly<{
   title: string;
 }>;
 
-// The draft field each correction column records; the API compares the same seven.
 const correctionFields: Readonly<
   Record<keyof DraftFields, InboxCorrectionField>
 > = {
@@ -155,12 +172,7 @@ function senderDomain(sender: string | null): string | null {
   return domain.length === 0 ? null : `@${domain.toLowerCase()}`;
 }
 
-// A blank field is an absent field; the contract trims whatever is actually sent.
-function optional(value: string): string | undefined {
-  return value.trim().length === 0 ? undefined : value;
-}
-
-// A blank hint clears the stored one, which is what null means on the wire.
+// A blank value clears the stored one, which is what null means on the wire.
 function nullable(value: string): string | null {
   return value.trim().length === 0 ? null : value.trim();
 }
@@ -190,27 +202,28 @@ function draftFields(
 export default function InboxItemPage() {
   const { t } = useTranslation();
   const { notify } = useToast();
+  const router = useRouter();
   const parameters = useParams<{ itemId: string }>();
   const itemId = parameters.itemId;
+  const searchParams = useSearchParams();
+  const tabParameter = searchParams.get('tab');
+  const tab = isInboxTab(tabParameter) ? tabParameter : 'toReview';
   const organization = useOrganizationSelection();
   const organizationId = organization.organizationId;
   const { access } = useOrganizationAccess(organizationId);
   const canManage = access?.capabilities.manageDocuments ?? false;
   const legalEntities = useLegalEntities(organizationId);
+  const members = useMembers(organizationId);
   const [result, setResult] = useState<DetailResult>();
   const [refreshCount, setRefreshCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [writeFailed, setWriteFailed] = useState(false);
   const [draftInvalid, setDraftInvalid] = useState(false);
-  const [hintText, setHintText] = useState('');
-  const [hintKind, setHintKind] = useState('');
-  const [hintLegalEntityId, setHintLegalEntityId] = useState('');
-  const [hintPartnerId, setHintPartnerId] = useState('');
-  const [hintLinkDocumentId, setHintLinkDocumentId] = useState('');
   const [draft, setDraft] = useState<DraftFields>();
   const [reasons, setReasons] = useState<
     Partial<Record<InboxCorrectionField, string>>
   >({});
+  const [openModal, setOpenModal] = useState<OverflowModal>();
   const [discardReason, setDiscardReason] =
     useState<InboxDiscardReason>('irrelevant');
   const [assigneeId, setAssigneeId] = useState('');
@@ -224,6 +237,10 @@ export default function InboxItemPage() {
   const [attachCandidates, setAttachCandidates] = useState<DocumentSummary[]>(
     [],
   );
+  const [selectedBlobId, setSelectedBlobId] = useState('');
+  const [neighbours, setNeighbours] = useState<
+    Readonly<{ next?: string | undefined; previous?: string | undefined }>
+  >({});
 
   // The result carries the read it answered, so a reload never shows another item.
   const detailKey = `${organizationId}:${itemId}:${String(refreshCount)}`;
@@ -245,13 +262,9 @@ export default function InboxItemPage() {
       .then((payload) => inboxItemDetailSchema.parse(payload))
       .then((payload) => {
         setResult({ key: detailKey, value: payload });
-        setHintText(payload.item.hintText ?? '');
-        setHintKind(payload.item.hintKind ?? '');
-        setHintLegalEntityId(payload.item.hintLegalEntityId ?? '');
-        setHintPartnerId(payload.item.hintPartnerId ?? '');
-        setHintLinkDocumentId(payload.item.hintLinkDocumentId ?? '');
         setAssigneeId(payload.item.assigneeId ?? '');
         setSnoozedUntil(payload.item.snoozedUntil?.slice(0, 16) ?? '');
+        setSelectedBlobId(payload.files[0]?.blobId ?? '');
         setDraft(undefined);
         setReasons({});
       })
@@ -265,7 +278,41 @@ export default function InboxItemPage() {
     };
   }, [detailKey, itemId, organizationId]);
 
-  // The documents list BFF with a search term, the same picker the document page uses for a link.
+  // The neighbours in the tab the user came from, read once so Prev and Next can walk it.
+  useEffect(() => {
+    if (organizationId.length === 0) {
+      return;
+    }
+
+    // The first page of the tab is read to find the neighbours.
+    const query = inboxTabQuery(tab);
+    query.set('page', '1');
+    query.set('pageSize', '100');
+    const controller = new AbortController();
+    void getJson(inboxItemsPath(organizationId, query), controller.signal)
+      .then((payload) => inboxItemListResponseSchema.parse(payload))
+      .then((payload) => {
+        const index = payload.items.findIndex((entry) => entry.id === itemId);
+        if (index === -1) {
+          setNeighbours({});
+          return;
+        }
+        setNeighbours({
+          next: payload.items[index + 1]?.id,
+          previous: payload.items[index - 1]?.id,
+        });
+      })
+      .catch((error: unknown) => {
+        if (!isAbortError(error)) {
+          setNeighbours({});
+        }
+      });
+    return () => {
+      controller.abort();
+    };
+  }, [itemId, organizationId, tab]);
+
+  // The documents list BFF with a search term, the same picker the attach modal uses for a link.
   useEffect(() => {
     if (organizationId.length === 0 || attachQuery.trim().length === 0) {
       return;
@@ -292,6 +339,10 @@ export default function InboxItemPage() {
     };
   }, [attachQuery, organizationId]);
 
+  const files = detail?.files ?? [];
+  const selectedFile =
+    files.find((file) => file.blobId === selectedBlobId) ?? files[0];
+
   const suggested =
     detail === undefined
       ? undefined
@@ -310,50 +361,46 @@ export default function InboxItemPage() {
   }
 
   // Every action answers with the refreshed detail, so the page rereads it rather than trusting the answer.
-  async function write(
-    action: InboxItemAction,
-    body?: unknown,
-    method: 'PATCH' | 'POST' = 'POST',
-  ): Promise<boolean> {
-    setBusy(true);
-    setWriteFailed(false);
-    try {
-      await sendJson(
-        {
-          ...(body === undefined ? {} : { body }),
-          method,
-          path: inboxItemActionPath(organizationId, itemId, action),
-        },
-        inboxItemDetailSchema,
-      );
-      setRefreshCount((count) => count + 1);
-      return true;
-    } catch {
-      setWriteFailed(true);
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveHints(): Promise<void> {
-    const body: UpdateInboxHintsRequest = {
-      hintKind: nullable(hintKind),
-      hintLegalEntityId: nullable(hintLegalEntityId),
-      hintLinkDocumentId: nullable(hintLinkDocumentId),
-      hintPartnerId: nullable(hintPartnerId),
-      hintText: nullable(hintText),
-    };
-    if (await write('hints', body, 'PATCH')) {
-      notify({ kind: 'success', title: t('inbox.hintsSaved') });
-    }
-  }
+  const write = useCallback(
+    async (
+      action: InboxItemAction,
+      body?: unknown,
+      method: 'PATCH' | 'POST' = 'POST',
+    ): Promise<boolean> => {
+      setBusy(true);
+      setWriteFailed(false);
+      try {
+        await sendJson(
+          {
+            ...(body === undefined ? {} : { body }),
+            method,
+            path: inboxItemActionPath(organizationId, itemId, action),
+          },
+          inboxItemDetailSchema,
+        );
+        setOpenModal(undefined);
+        setRefreshCount((count) => count + 1);
+        return true;
+      } catch {
+        setWriteFailed(true);
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [itemId, organizationId],
+  );
 
   async function routeToDocument(): Promise<void> {
     if (detail === undefined || fields === undefined) {
       return;
     }
-    const passthrough = detail.extraction?.draft ?? {};
+    // Only the keys the document request accepts pass through; a provider's own keys, such as a rule's matchedRuleIds, never do.
+    const passthrough = Object.fromEntries(
+      Object.entries(detail.extraction?.draft ?? {}).filter(
+        ([key]) => key in createDocumentRequestSchema.shape,
+      ),
+    );
     const parsed = createDocumentRequestSchema.safeParse({
       ...passthrough,
       currencyCode: fields.currencyCode,
@@ -416,6 +463,7 @@ export default function InboxItemPage() {
     const outcome = await attachInboxItem(organizationId, itemId, documentId);
     setBusy(false);
     if (outcome.kind === 'attached') {
+      setOpenModal(undefined);
       setRefreshCount((count) => count + 1);
       notify({ kind: 'success', title: t('inbox.attached') });
     } else if (outcome.kind === 'not_found') {
@@ -439,6 +487,14 @@ export default function InboxItemPage() {
       `/documents/${encodeURIComponent(id)}`,
       organization.slug,
     );
+  }
+
+  function itemHref(id: string): string {
+    const suffix =
+      organization.slug.length > 0
+        ? `&organization=${encodeURIComponent(organization.slug)}`
+        : '';
+    return `/inbox/${encodeURIComponent(id)}?tab=${tab}${suffix}`;
   }
 
   // The rule page reads these to prefill its create modal from what the person just decided.
@@ -477,57 +533,580 @@ export default function InboxItemPage() {
     return `/inbox/rules?${query.toString()}`;
   }
 
-  function itemHref(id: string): string {
-    return withOrganization(
-      `/inbox/${encodeURIComponent(id)}`,
-      organization.slug,
-    );
-  }
-
   const item = detail?.item;
-  const extraction = detail?.extraction ?? null;
   const open =
     item !== undefined &&
     item.status !== 'routed' &&
     item.status !== 'discarded';
-  const previewFile = detail?.files.find((file) =>
-    isInlineMediaType(file.mediaType),
+
+  const entityName = (id: string | null): string | null =>
+    id === null
+      ? null
+      : (legalEntities.find((entity) => entity.id === id)?.name ?? null);
+
+  // The actor of an event or a decision, resolved to a name the reader knows; codes never reach the screen.
+  const actorName = useCallback(
+    (id: string | null): string => {
+      if (id === null) {
+        return t('inbox.activity.automation');
+      }
+      if (id.startsWith('channel_')) {
+        return item?.origin === null || item?.origin === undefined
+          ? t('inbox.activity.channel')
+          : t('inbox.activity.channelOrigin', { origin: item.origin });
+      }
+      // While the list is loading or a load failed it is undefined, so a neutral name shows, never "former".
+      if (members === undefined) {
+        return t('inbox.activity.member');
+      }
+      const member = members.find((entry) => entry.id === id);
+      return member?.name ?? t('inbox.activity.formerMember');
+    },
+    [item, members, t],
   );
+
+  // Keyboard J and K walk the neighbours, but never while a field has focus or a modal is open.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.key !== 'j' && event.key !== 'k') {
+        return;
+      }
+      if (
+        openModal !== undefined ||
+        conflict !== undefined ||
+        document.body.classList.contains('cds--body--with-modal-open')
+      ) {
+        return;
+      }
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLInputElement ||
+        active instanceof HTMLTextAreaElement ||
+        active instanceof HTMLSelectElement ||
+        (active instanceof HTMLElement && active.isContentEditable)
+      ) {
+        return;
+      }
+      const target = event.key === 'j' ? neighbours.next : neighbours.previous;
+      if (target !== undefined) {
+        router.push(itemHref(target) as Route);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+    };
+  });
+
+  const invoice = fields !== undefined && isInvoiceKind(fields.kind);
+
+  // The one primary verb by status; an invoice waits for the parser, so its File button is disabled.
+  function primaryButton(): ReactElement | null {
+    if (item === undefined) {
+      return null;
+    }
+    if (item.status === 'routed') {
+      return item.documentId === null ? null : (
+        <Button href={documentHref(item.documentId)}>
+          {t('inbox.openDocument')}
+        </Button>
+      );
+    }
+    if (item.status === 'discarded') {
+      return (
+        <Button
+          disabled={busy}
+          onClick={() => {
+            void write('restore');
+          }}
+        >
+          {t('inbox.restore')}
+        </Button>
+      );
+    }
+    if (item.status === 'failed') {
+      return (
+        <Button
+          disabled={busy}
+          onClick={() => {
+            void write('process');
+          }}
+        >
+          {t('inbox.item.recheck')}
+        </Button>
+      );
+    }
+    if (item.status === 'received' || item.status === 'processing') {
+      return (
+        <Button
+          disabled={busy || item.status === 'processing'}
+          onClick={() => {
+            void write('process');
+          }}
+        >
+          {t('inbox.process')}
+        </Button>
+      );
+    }
+    return (
+      <Button
+        disabled={busy || invoice}
+        onClick={() => {
+          void routeToDocument();
+        }}
+      >
+        {t('inbox.item.fileAsDocument')}
+      </Button>
+    );
+  }
+
+  // The routing target as one sentence, the destination and kind by their labels, never their codes.
+  function routingSentence(): string {
+    if (detail === undefined) {
+      return '';
+    }
+    const target = detail.routingTarget;
+    const destination = t(
+      target.destination === null
+        ? inboxRoutingDestinationNoneLabelKey
+        : inboxRoutingDestinationLabelKeys[target.destination],
+    );
+    const source = t(
+      target.source === 'organization'
+        ? 'inbox.routingTargetOrganization'
+        : 'inbox.routingTargetPlatform',
+    );
+    if (target.documentKind === null) {
+      return t('inbox.item.checkRouting', { destination, source });
+    }
+    return t('inbox.item.checkRoutingKind', {
+      destination,
+      kind: t(documentKindLabelKeys[target.documentKind]),
+      source,
+    });
+  }
+
+  // The sentence that files or discards the item, keyed on how the decision was made; a rule never names a person.
+  function decidedSentence(): string {
+    if (item === undefined) {
+      return '';
+    }
+    if (item.status === 'discarded') {
+      const discardedEvent = [...(detail?.events ?? [])]
+        .reverse()
+        .find((event) => event.kind === 'discarded');
+      const actor = actorName(
+        item.decidedByUserId ?? discardedEvent?.actorUserId ?? null,
+      );
+      const reason =
+        discardedEvent?.reason === null || discardedEvent === undefined
+          ? null
+          : t(inboxEventReasonLabelKeys[discardedEvent.reason]!);
+      return reason === null
+        ? t('inbox.item.discardedReasonless', { actor })
+        : t('inbox.item.discardedBy', { actor, reason });
+    }
+    const date = filedDate();
+    if (item.decidedByKind === 'rule') {
+      return t('inbox.item.filedByRule', {
+        date,
+        name: item.decidedByRuleName ?? t('inbox.activity.automation'),
+      });
+    }
+    if (item.decidedByKind === 'user') {
+      return t('inbox.item.filedByUser', {
+        date,
+        name: actorName(item.decidedByUserId),
+      });
+    }
+    if (item.decidedByKind === 'target_default') {
+      return t('inbox.item.filedByDefault', { date });
+    }
+    if (item.decidedByKind === 'hint') {
+      return t('inbox.item.filedByChannel', { date });
+    }
+    return t('inbox.item.filedAutomatically', { date });
+  }
+
+  // A rule auto-filed the item and nothing read the file: spell out the honest derivation.
+  function isAutoFiled(): boolean {
+    return (
+      item?.status === 'routed' &&
+      item.decidedByKind === 'rule' &&
+      !providerReadFile(detail?.extraction?.provider)
+    );
+  }
+
+  function autoFiledLines(): string[] {
+    if (item === undefined || fields === undefined) {
+      return [decidedSentence()];
+    }
+    const lines: string[] = [
+      t('inbox.item.derivedByRule', {
+        entity: entityName(fields.legalEntityId) ?? t('inbox.entityNone'),
+        kind: t(documentKindLabelKeys[fields.kind]),
+        name: item.decidedByRuleName ?? t('inbox.activity.automation'),
+      }),
+    ];
+    const filename = files[0]?.originalFilename;
+    if (
+      filename !== undefined &&
+      filename !== null &&
+      fields.title === filename
+    ) {
+      lines.push(t('inbox.item.derivedTitleFilename'));
+    }
+    if (fields.documentDate === item.receivedAt.slice(0, 10)) {
+      lines.push(t('inbox.item.derivedDateReceived'));
+    }
+    lines.push(t('inbox.item.derivedNothingRead'));
+    return lines;
+  }
+
+  // The local date and time the item was filed, from the routed event, else its arrival.
+  function filedDate(): string {
+    const routed = detail?.events.find((event) => event.kind === 'routed');
+    const iso = routed?.createdAt ?? item?.receivedAt;
+    return iso === undefined ? '' : formatDateTime(iso);
+  }
+
+  // What still needs a person, one plain sentence each; the panel switches voice on this list being empty.
+  function problems(): string[] {
+    if (detail === undefined || fields === undefined) {
+      return [];
+    }
+    const list: string[] = [];
+    if (fields.legalEntityId.length === 0) {
+      list.push(t('inbox.item.missingEntity'));
+    }
+    // The Document section carries a Missing tag on an empty title or date, so the panel names them too.
+    if (fields.title.trim().length === 0) {
+      list.push(t('inbox.item.addTitle'));
+    }
+    if (fields.documentDate.trim().length === 0) {
+      list.push(t('inbox.item.addDate'));
+    }
+    if (item?.duplicateOfItemId != null) {
+      list.push(t('inbox.item.issueDuplicateExact'));
+    }
+    for (const issue of detail.extraction?.issues ?? []) {
+      if (issue.code === 'reference_conflict') {
+        list.push(
+          t('inbox.item.issueReferenceConflict', {
+            reference: fields.reference.length === 0 ? '' : fields.reference,
+          }),
+        );
+      } else if (issue.code === 'missing_required_field') {
+        list.push(t('inbox.item.issueMissingField', { field: issue.message }));
+      } else if (issue.code !== 'duplicate_exact') {
+        list.push(t(inboxIssueCodeLabelKeys[issue.code]));
+      }
+    }
+    return list;
+  }
+
+  // What already holds, listed only when nothing is missing; the passed checks read as sentences.
+  function checks(): string[] {
+    if (detail === undefined || fields === undefined) {
+      return [];
+    }
+    const list = [routingSentence()];
+    if (item?.duplicateOfItemId == null) {
+      list.push(t('inbox.item.checkNoDuplicate'));
+    }
+    const name = entityName(fields.legalEntityId);
+    if (name !== null) {
+      list.push(t('inbox.item.checkEntity', { name }));
+    }
+    return list;
+  }
+
+  type Panel = Readonly<{
+    lines: string[];
+    link?: Readonly<{ href: string; text: string }>;
+    tone: 'error' | 'info' | 'success' | 'warning';
+    title: string;
+  }>;
+
+  // The filed panel points at the document by its title or reference, else a plain label.
+  function documentLinkText(): string {
+    if (fields === undefined) {
+      return t('inbox.openDocument');
+    }
+    if (fields.title.trim().length > 0) {
+      return fields.title;
+    }
+    if (fields.reference.trim().length > 0) {
+      return fields.reference;
+    }
+    return t('inbox.openDocument');
+  }
+
+  function panel(): Panel {
+    if (item?.status === 'routed') {
+      return {
+        lines: isAutoFiled() ? autoFiledLines() : [decidedSentence()],
+        tone: 'success',
+        title: t('inbox.item.filedTitle'),
+        ...(item.documentId === null
+          ? {}
+          : {
+              link: {
+                href: documentHref(item.documentId),
+                text: documentLinkText(),
+              },
+            }),
+      };
+    }
+    if (item?.status === 'discarded') {
+      return {
+        lines: [decidedSentence()],
+        tone: 'info',
+        title: t('inbox.item.discardedTitle'),
+      };
+    }
+    if (invoice) {
+      return {
+        lines: [t('inbox.item.invoiceBody')],
+        tone: 'info',
+        title: t('inbox.item.invoiceTitle'),
+      };
+    }
+    const open2 = problems();
+    if (open2.length === 0) {
+      return {
+        lines: checks(),
+        tone: 'success',
+        title: t('inbox.item.readyTitle'),
+      };
+    }
+    return {
+      lines: open2,
+      tone: 'warning',
+      title: t('inbox.item.needsInputTitle'),
+    };
+  }
+
+  // A provider read the file, a person confirmed the values, or only defaults filled them.
+  const providerRead = providerReadFile(detail?.extraction?.provider);
+  const humanConfirmed =
+    (detail?.corrections.length ?? 0) > 0 ||
+    item?.decidedByKind === 'user' ||
+    (item?.humanTouched ?? false);
+  const whereChanged =
+    changedFields.includes('legalEntityId') || changedFields.includes('kind');
+  const documentChanged = draftFieldKeys.some(
+    (key) =>
+      key !== 'legalEntityId' && key !== 'kind' && changedFields.includes(key),
+  );
+
+  const whereStatus: SectionStatus = sectionStatus({
+    humanConfirmed: humanConfirmed || whereChanged,
+    providerRead,
+    requiredFilled: fields !== undefined && fields.legalEntityId.length > 0,
+  });
+  const documentStatus: SectionStatus = sectionStatus({
+    humanConfirmed: humanConfirmed || documentChanged,
+    providerRead,
+    requiredFilled:
+      fields !== undefined &&
+      fields.title.trim().length > 0 &&
+      fields.documentDate.trim().length > 0,
+  });
+
+  function sectionTag(status: SectionStatus): ReactElement {
+    if (status === 'complete') {
+      return (
+        <Tag size="sm" type="green">
+          {t('inbox.item.tagComplete')}
+        </Tag>
+      );
+    }
+    return (
+      <Tag size="sm" type="gray">
+        {t(
+          status === 'missing'
+            ? 'inbox.item.tagMissing'
+            : 'inbox.item.tagDefaults',
+        )}
+      </Tag>
+    );
+  }
+
+  // A changed prefilled field reveals an optional one-line reason that travels as the correction reason.
+  function reasonInput(key: keyof DraftFields): ReactElement | null {
+    if (!changedFields.includes(key)) {
+      return null;
+    }
+    const field = correctionFields[key];
+    return (
+      <TextInput
+        helperText={t('inbox.correctionReasonHelp')}
+        id={`inbox-reason-${field}`}
+        labelText={t('inbox.correctionReason', {
+          field: t(inboxCorrectionFieldLabelKeys[field]),
+        })}
+        maxLength={500}
+        onChange={(event) => {
+          setReasons({ ...reasons, [field]: event.target.value });
+        }}
+        value={reasons[field] ?? ''}
+      />
+    );
+  }
+
+  // The activity, corrections and events merged newest first, each a sentence with a resolved actor and time.
+  type Entry = Readonly<{ id: string; text: string; time: string }>;
+  function activityEntries(): Entry[] {
+    if (detail === undefined) {
+      return [];
+    }
+    const events: Entry[] = detail.events.map((event) => {
+      let text: string;
+      if (event.kind === 'rule_matched') {
+        text = t('inbox.activity.ruleMatched', {
+          rule: item?.decidedByRuleName ?? t('inbox.activity.automation'),
+        });
+      } else if (event.kind === 'routed') {
+        text =
+          item?.decidedByKind === 'rule'
+            ? t('inbox.activity.routedByRule', {
+                rule: item.decidedByRuleName ?? t('inbox.activity.automation'),
+              })
+            : t('inbox.activity.routedBy', {
+                actor: actorName(event.actorUserId),
+              });
+      } else {
+        text = t(inboxEventKindLabelKeys[event.kind]!, {
+          actor: actorName(event.actorUserId),
+        });
+      }
+      if (event.reason !== null) {
+        text = `${text} (${t(inboxEventReasonLabelKeys[event.reason]!)})`;
+      }
+      return { id: event.id, text, time: formatDateTime(event.createdAt) };
+    });
+    const corrections: Entry[] = detail.corrections.map((correction) => ({
+      id: correction.id,
+      text: `${t('inbox.correctionLine', {
+        field: t(inboxCorrectionFieldLabelKeys[correction.field]),
+        final: correction.finalValue ?? t('inbox.correctionNone'),
+        source: t(inboxCorrectionSourceLabelKeys[correction.source]),
+        suggested: correction.suggestedValue ?? t('inbox.correctionNone'),
+      })}${correction.reason === null ? '' : ` ${correction.reason}`}`,
+      time: formatDateTime(correction.createdAt),
+    }));
+    return [...events, ...corrections].reverse();
+  }
+
+  function receivedLine(): string {
+    if (item === undefined) {
+      return '';
+    }
+    const date = formatDateTime(item.receivedAt);
+    let source: string;
+    if (item.channelKind === 'email') {
+      source = t('inbox.item.sourceEmailFrom', {
+        sender: item.sender ?? t('inbox.activity.channel'),
+      });
+    } else if (item.channelKind === 'upload') {
+      const received = detail?.events.find(
+        (event) => event.kind === 'received',
+      );
+      source = t('inbox.item.sourceUploadBy', {
+        name: actorName(received?.actorUserId ?? null),
+      });
+    } else {
+      source = t('inbox.item.sourceApi', {
+        origin: item.origin ?? t('inbox.activity.channel'),
+      });
+    }
+    return t('inbox.item.receivedLine', { date, source });
+  }
+
+  function title(): string {
+    if (item === undefined) {
+      return '';
+    }
+    const name = files[0]?.originalFilename;
+    return name ?? item.sender ?? t('inbox.item.untitled');
+  }
+
+  function originalPane(): ReactElement {
+    if (selectedFile === undefined) {
+      return <p>{t('inbox.item.noOriginal')}</p>;
+    }
+    if (isBlobScanPending(selectedFile)) {
+      return (
+        <StatusIndicator label={t('inbox.scanPending')} severity="neutral" />
+      );
+    }
+    if (isBlobQuarantined(selectedFile)) {
+      return (
+        <InlineNotification
+          hideCloseButton
+          kind="warning"
+          lowContrast
+          subtitle={t('inbox.quarantinedHelp')}
+          title={t('inbox.quarantined')}
+        />
+      );
+    }
+    return (
+      <OriginalPreview
+        file={{
+          blobId: selectedFile.blobId,
+          byteSize: selectedFile.byteSize,
+          mediaType: selectedFile.mediaType,
+          name: selectedFile.originalFilename,
+        }}
+        frameTitle={t('inbox.previewFrame')}
+        noPreviewLabel={t('inbox.noPreview')}
+        organizationId={organizationId}
+      />
+    );
+  }
+
+  function fileRow(file: InboxItemFile): ReactElement {
+    // A neutral label when the sender named no file; the content hash never reaches the UI.
+    const name = file.originalFilename ?? t('inbox.item.unnamedFile');
+    // Carbon forbids an interactive element inside a clickable list item, so the download link and the quarantine tag ride in the action slot.
+    const action = isBlobScanPending(file) ? (
+      <StatusIndicator label={t('inbox.scanPending')} severity="neutral" />
+    ) : isBlobQuarantined(file) ? (
+      <StatusIndicator label={t('inbox.quarantined')} severity="error" />
+    ) : (
+      // A short link keeps the action slot narrow; the full name is its accessible name.
+      <Link
+        aria-label={t('inbox.downloadNamed', { name })}
+        href={inboxBlobDownloadPath(organizationId, file.blobId)}
+      >
+        {t('inbox.download')}
+      </Link>
+    );
+    return (
+      <ContainedListItem
+        action={action}
+        key={file.blobId}
+        {...(isBlobQuarantined(file)
+          ? {}
+          : {
+              onClick: () => {
+                setSelectedBlobId(file.blobId);
+              },
+            })}
+      >
+        <span className={styles.fileName!} title={name}>
+          {name}
+        </span>
+      </ContainedListItem>
+    );
+  }
+
+  const current = panel();
 
   return (
     <PageContainer>
-      <Stack gap={3}>
-        <h1>{t('inbox.detail')}</h1>
-        {item === undefined ? null : (
-          <div className={styles.summary!}>
-            <StatusIndicator
-              label={t(inboxStatusLabelKeys[item.status])}
-              severity={inboxStatusSeverity[item.status]}
-            />
-            <span>{item.receivedAt}</span>
-            {item.sender === null ? null : (
-              <StatusIndicator
-                label={t(
-                  item.senderAuthenticated
-                    ? 'inbox.senderAuthenticated'
-                    : 'inbox.senderUnverified',
-                )}
-                severity={item.senderAuthenticated ? 'success' : 'neutral'}
-              />
-            )}
-            {item.duplicateOfItemId === null ? null : (
-              <Link href={itemHref(item.duplicateOfItemId)}>
-                {t('inbox.duplicateOf')}
-              </Link>
-            )}
-            {item.documentId === null ? null : (
-              <Link href={documentHref(item.documentId)}>
-                {t('inbox.openDocument')}
-              </Link>
-            )}
-          </div>
-        )}
-      </Stack>
       {state === 'error' ? (
         <InlineNotification
           kind="error"
@@ -544,318 +1123,78 @@ export default function InboxItemPage() {
           title={t('inbox.writeFailed')}
         />
       ) : null}
-      {item === undefined || detail === undefined ? null : (
+      {item === undefined || detail === undefined || fields === undefined ? (
+        state === 'error' ? null : (
+          <p>{t('inbox.loading')}</p>
+        )
+      ) : (
         <Grid className={styles.columns!}>
-          <Column lg={10} md={8} sm={4}>
-            <Stack gap={6}>
-              <Tile>
-                <Stack gap={5}>
-                  <h2 className={styles.sectionHeading!}>
-                    {t('inbox.preview')}
-                  </h2>
-                  {previewFile === undefined ? (
-                    <p>{t('inbox.noPreview')}</p>
-                  ) : isBlobScanPending(previewFile) ? (
+          <Column lg={9} md={4} sm={4}>
+            <Stack className={styles.centrePane!} gap={5}>
+              <div>
+                <h1 className={styles.title!}>{title()}</h1>
+                <p className={styles.received!}>{receivedLine()}</p>
+                <div className={styles.summary!}>
+                  <StatusIndicator
+                    label={t(inboxListStatusLabelKeys[item.status])}
+                    severity={inboxStatusSeverity[item.status]}
+                  />
+                  {item.sender === null ? null : (
                     <StatusIndicator
-                      label={t('inbox.scanPending')}
-                      severity="neutral"
-                    />
-                  ) : isBlobQuarantined(previewFile) ? (
-                    <InlineNotification
-                      hideCloseButton
-                      kind="warning"
-                      lowContrast
-                      subtitle={t('inbox.quarantinedHelp')}
-                      title={t('inbox.quarantined')}
-                    />
-                  ) : (
-                    <iframe
-                      className={styles.preview!}
-                      // A sandboxed frame disables plugins, and Chromium's PDF viewer is one, so only images are sandboxed.
-                      {...(previewFile.mediaType === 'application/pdf'
-                        ? {}
-                        : { sandbox: '' })}
-                      src={inboxBlobInlinePath(
-                        organizationId,
-                        previewFile.blobId,
+                      label={t(
+                        item.senderAuthenticated
+                          ? 'inbox.senderAuthenticated'
+                          : 'inbox.senderUnverified',
                       )}
-                      title={t('inbox.previewFrame')}
+                      severity={
+                        item.senderAuthenticated ? 'success' : 'neutral'
+                      }
                     />
                   )}
-                  <StructuredListWrapper
-                    aria-label={t('inbox.files')}
-                    isCondensed
-                  >
-                    <StructuredListHead>
-                      <StructuredListRow head>
-                        <StructuredListCell head>
-                          {t('inbox.columnFileName')}
-                        </StructuredListCell>
-                        <StructuredListCell head>
-                          {t('inbox.download')}
-                        </StructuredListCell>
-                      </StructuredListRow>
-                    </StructuredListHead>
-                    <StructuredListBody>
-                      {detail.files.map((file) => {
-                        const name = file.originalFilename ?? file.sha256;
-                        return (
-                          <StructuredListRow key={file.blobId}>
-                            <StructuredListCell>
-                              {name} ({file.mediaType}, {String(file.byteSize)}{' '}
-                              B)
-                            </StructuredListCell>
-                            <StructuredListCell>
-                              {isBlobScanPending(file) ? (
-                                <StatusIndicator
-                                  label={t('inbox.scanPending')}
-                                  severity="neutral"
-                                />
-                              ) : isBlobQuarantined(file) ? (
-                                <StatusIndicator
-                                  label={t('inbox.quarantined')}
-                                  severity="error"
-                                />
-                              ) : (
-                                <Link
-                                  href={inboxBlobDownloadPath(
-                                    organizationId,
-                                    file.blobId,
-                                  )}
-                                >
-                                  {t('inbox.downloadNamed', { name })}
-                                </Link>
-                              )}
-                            </StructuredListCell>
-                          </StructuredListRow>
-                        );
-                      })}
-                    </StructuredListBody>
-                  </StructuredListWrapper>
-                </Stack>
-              </Tile>
-
-              <Tile>
-                <Stack gap={5}>
-                  <h2 className={styles.sectionHeading!}>
-                    {t('inbox.explanation')}
-                  </h2>
-                  <p>
-                    {t('inbox.routingTarget')}:{' '}
-                    {t(
-                      detail.routingTarget.destination === null
-                        ? inboxRoutingDestinationNoneLabelKey
-                        : inboxRoutingDestinationLabelKeys[
-                            detail.routingTarget.destination
-                          ],
-                    )}
-                    {detail.routingTarget.documentKind === null
-                      ? ''
-                      : `, ${t(documentKindLabelKeys[detail.routingTarget.documentKind])}`}{' '}
-                    (
-                    {t(
-                      detail.routingTarget.source === 'organization'
-                        ? 'inbox.routingTargetOrganization'
-                        : 'inbox.routingTargetPlatform',
-                    )}
-                    )
+                  {item.duplicateOfItemId === null ? null : (
+                    <Link href={itemHref(item.duplicateOfItemId)}>
+                      {t('inbox.duplicateOf')}
+                    </Link>
+                  )}
+                </div>
+                {item.hintText === null ? null : (
+                  <p className={styles.note!}>
+                    {t('inbox.item.noteLine', { text: item.hintText })}
                   </p>
-                  {extraction === null ? (
-                    <p>{t('inbox.explanationEmpty')}</p>
-                  ) : (
-                    <Stack gap={4}>
-                      <p>
-                        {t('inbox.decidedBy')}:{' '}
-                        {item.decidedByKind === null
-                          ? t('inbox.notAvailable')
-                          : t(inboxDecidedByLabelKeys[item.decidedByKind]!)}
-                        {'. '}
-                        {t('inbox.confidence')}:{' '}
-                        {String(Math.round(extraction.confidence * 100))} %
-                        {'. '}
-                        {t('inbox.detectedType')}:{' '}
-                        {extraction.detectedType ?? t('inbox.notAvailable')}
-                      </p>
-                      {extraction.reasons.length > 0 ? (
-                        <ul aria-label={t('inbox.reasons')}>
-                          {extraction.reasons.map((reason, index) => (
-                            <li key={`${reason.step}-${String(index)}`}>
-                              {t('inbox.reasonSentence', {
-                                evidence: reason.evidence,
-                                step: reason.step,
-                              })}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
-                      {extraction.issues.map((issue, index) => (
+                )}
+              </div>
+
+              <Tabs>
+                <TabList aria-label={t('inbox.item.tabs')}>
+                  <Tab>{t('inbox.item.overviewTab')}</Tab>
+                  <Tab>
+                    {t('inbox.item.activityTab', {
+                      count: detail.events.length + detail.corrections.length,
+                    })}
+                  </Tab>
+                </TabList>
+                <TabPanels>
+                  <TabPanel>
+                    <Stack gap={6}>
+                      <Stack gap={3}>
                         <InlineNotification
                           hideCloseButton
-                          key={`${issue.code}-${String(index)}`}
-                          kind="warning"
+                          kind={current.tone}
                           lowContrast
-                          subtitle={issue.message}
-                          title={issue.code}
-                        />
-                      ))}
-                    </Stack>
-                  )}
-                  {detail.corrections.length === 0 ? null : (
-                    <Stack gap={3}>
-                      <h3>{t('inbox.corrections')}</h3>
-                      <ul aria-label={t('inbox.corrections')}>
-                        {detail.corrections.map((correction, index) => (
-                          <li key={`${correction.field}-${String(index)}`}>
-                            {t('inbox.correctionLine', {
-                              field: t(
-                                inboxCorrectionFieldLabelKeys[correction.field],
-                              ),
-                              final:
-                                correction.finalValue ??
-                                t('inbox.correctionNone'),
-                              source: t(
-                                inboxCorrectionSourceLabelKeys[
-                                  correction.source
-                                ],
-                              ),
-                              suggested:
-                                correction.suggestedValue ??
-                                t('inbox.correctionNone'),
-                            })}
-                            {correction.reason === null
-                              ? ''
-                              : ` ${correction.reason}`}
-                          </li>
-                        ))}
-                      </ul>
-                    </Stack>
-                  )}
-                </Stack>
-              </Tile>
-
-              <Tile>
-                <ContainedList
-                  kind="on-page"
-                  label={t('inbox.events')}
-                  size="sm"
-                >
-                  {detail.events.map((event) => (
-                    <ContainedListItem key={event.id}>
-                      <span className={styles.eventTime!}>
-                        {event.createdAt}
-                      </span>{' '}
-                      {event.kind}
-                      {event.reason === null ? '' : ` (${event.reason})`}
-                    </ContainedListItem>
-                  ))}
-                </ContainedList>
-              </Tile>
-            </Stack>
-          </Column>
-          <Column lg={6} md={8} sm={4}>
-            <Stack gap={6}>
-              {canManage ? (
-                <Tile>
-                  <Form
-                    aria-label={t('inbox.hintsTitle')}
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void saveHints();
-                    }}
-                  >
-                    <Stack gap={5}>
-                      <h2 className={styles.sectionHeading!}>
-                        {t('inbox.hintsTitle')}
-                      </h2>
-                      <TextArea
-                        id="inbox-hint-text"
-                        labelText={t('inbox.hintText')}
-                        onChange={(event) => {
-                          setHintText(event.target.value);
-                        }}
-                        value={hintText}
-                      />
-                      <Select
-                        id="inbox-hint-entity"
-                        labelText={t('inbox.entity')}
-                        onChange={(event) => {
-                          setHintLegalEntityId(event.target.value);
-                        }}
-                        value={hintLegalEntityId}
-                      >
-                        <SelectItem text={t('inbox.entityNone')} value="" />
-                        {legalEntities.map((entity) => (
-                          <SelectItem
-                            key={entity.id}
-                            text={entity.name}
-                            value={entity.id}
-                          />
-                        ))}
-                      </Select>
-                      <TextInput
-                        id="inbox-hint-kind"
-                        labelText={t('inbox.hintKind')}
-                        onChange={(event) => {
-                          setHintKind(event.target.value);
-                        }}
-                        value={hintKind}
-                      />
-                      <TextInput
-                        id="inbox-hint-partner"
-                        labelText={t('inbox.hintPartnerId')}
-                        onChange={(event) => {
-                          setHintPartnerId(event.target.value);
-                        }}
-                        value={hintPartnerId}
-                      />
-                      <TextInput
-                        id="inbox-hint-link"
-                        labelText={t('inbox.hintLinkDocumentId')}
-                        onChange={(event) => {
-                          setHintLinkDocumentId(event.target.value);
-                        }}
-                        value={hintLinkDocumentId}
-                      />
-                      <div className={styles.actions!}>
-                        <Button disabled={busy} kind="secondary" type="submit">
-                          {t('inbox.saveHints')}
-                        </Button>
-                        <Button
-                          disabled={busy || !open}
-                          onClick={() => {
-                            void write('process');
-                          }}
-                          type="button"
+                          title={current.title}
                         >
-                          {t('inbox.process')}
-                        </Button>
-                      </div>
-                    </Stack>
-                  </Form>
-                </Tile>
-              ) : null}
-
-              {canManage && open && fields !== undefined ? (
-                <Tile>
-                  <Form
-                    aria-label={t('inbox.draftTitle')}
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void routeToDocument();
-                    }}
-                  >
-                    <Stack gap={5}>
-                      <h2 className={styles.sectionHeading!}>
-                        {t('inbox.draftTitle')}
-                      </h2>
-                      {draftInvalid ? (
-                        <InlineNotification
-                          kind="error"
-                          lowContrast
-                          role="alert"
-                          title={t('inbox.draftInvalid')}
-                        />
-                      ) : null}
+                          <ul aria-label={current.title}>
+                            {current.lines.map((line, index) => (
+                              <li key={`${String(index)}-${line}`}>{line}</li>
+                            ))}
+                          </ul>
+                        </InlineNotification>
+                        {current.link === undefined ? null : (
+                          <Link href={current.link.href}>
+                            {current.link.text}
+                          </Link>
+                        )}
+                      </Stack>
                       {conflict?.code === 'reference_conflict' &&
                       pendingRoute !== undefined ? (
                         <Stack gap={3}>
@@ -887,294 +1226,431 @@ export default function InboxItemPage() {
                           </div>
                         </Stack>
                       ) : null}
-                      <Select
-                        id="inbox-draft-entity"
-                        labelText={t('inbox.draftEntity')}
-                        onChange={(event) => {
-                          updateDraft({ legalEntityId: event.target.value });
-                        }}
-                        value={fields.legalEntityId}
-                      >
-                        {legalEntities.map((entity) => (
-                          <SelectItem
-                            key={entity.id}
-                            text={entity.name}
-                            value={entity.id}
-                          />
-                        ))}
-                      </Select>
-                      <Select
-                        id="inbox-draft-kind"
-                        labelText={t('inbox.draftKind')}
-                        onChange={(event) => {
-                          updateDraft({ kind: asKind(event.target.value) });
-                        }}
-                        value={fields.kind}
-                      >
-                        {documentKindSchema.options.map((kind) => (
-                          <SelectItem
-                            key={kind}
-                            text={t(documentKindLabelKeys[kind])}
-                            value={kind}
-                          />
-                        ))}
-                      </Select>
-                      <TextInput
-                        id="inbox-draft-title"
-                        labelText={t('inbox.draftTitleField')}
-                        onChange={(event) => {
-                          updateDraft({ title: event.target.value });
-                        }}
-                        value={fields.title}
-                      />
-                      <TextInput
-                        id="inbox-draft-date"
-                        labelText={t('inbox.draftDate')}
-                        onChange={(event) => {
-                          updateDraft({ documentDate: event.target.value });
-                        }}
-                        placeholder="yyyy-mm-dd"
-                        value={fields.documentDate}
-                      />
-                      <TextInput
-                        id="inbox-draft-currency"
-                        labelText={t('inbox.draftCurrency')}
-                        onChange={(event) => {
-                          updateDraft({ currencyCode: event.target.value });
-                        }}
-                        value={fields.currencyCode}
-                      />
-                      <TextInput
-                        id="inbox-draft-reference"
-                        labelText={t('inbox.draftReference')}
-                        onChange={(event) => {
-                          updateDraft({ reference: event.target.value });
-                        }}
-                        value={fields.reference}
-                      />
-                      <TextInput
-                        id="inbox-draft-partner"
-                        labelText={t('inbox.draftPartner')}
-                        onChange={(event) => {
-                          updateDraft({ partnerId: event.target.value });
-                        }}
-                        value={fields.partnerId}
-                      />
-                      {changedFields.map((key) => {
-                        const field = correctionFields[key];
-                        const label = t(inboxCorrectionFieldLabelKeys[field]);
-                        return (
-                          <TextInput
-                            helperText={t('inbox.correctionReasonHelp')}
-                            id={`inbox-draft-reason-${field}`}
-                            key={field}
-                            labelText={t('inbox.correctionReason', {
-                              field: label,
-                            })}
-                            maxLength={500}
+                      {invoice && open ? (
+                        <div className={styles.actions!}>
+                          <Button
+                            kind="secondary"
+                            onClick={() => {
+                              setOpenModal('attach');
+                            }}
+                            type="button"
+                          >
+                            {t('inbox.attachTitle')}
+                          </Button>
+                        </div>
+                      ) : null}
+                      {draftInvalid ? (
+                        <InlineNotification
+                          kind="error"
+                          lowContrast
+                          role="alert"
+                          title={t('inbox.draftInvalid')}
+                        />
+                      ) : null}
+
+                      <section aria-labelledby="inbox-where-heading">
+                        <Stack gap={4}>
+                          <div className={styles.sectionHead!}>
+                            <h2
+                              className={styles.sectionHeading!}
+                              id="inbox-where-heading"
+                            >
+                              {t('inbox.item.whereTitle')}
+                            </h2>
+                            {sectionTag(whereStatus)}
+                          </div>
+                          <Select
+                            disabled={!canManage || !open}
+                            id="inbox-where-entity"
+                            labelText={t('inbox.draftEntity')}
                             onChange={(event) => {
-                              setReasons({
-                                ...reasons,
-                                [field]: event.target.value,
+                              updateDraft({
+                                legalEntityId: event.target.value,
                               });
                             }}
-                            value={reasons[field] ?? ''}
+                            // Keep Carbon from titling the control with its value as a native tooltip.
+                            title={t('inbox.draftEntity')}
+                            value={fields.legalEntityId}
+                          >
+                            <SelectItem text={t('inbox.entityNone')} value="" />
+                            {legalEntities.map((entity) => (
+                              <SelectItem
+                                key={entity.id}
+                                text={entity.name}
+                                value={entity.id}
+                              />
+                            ))}
+                          </Select>
+                          {reasonInput('legalEntityId')}
+                          <Select
+                            disabled={!canManage || !open}
+                            id="inbox-where-kind"
+                            labelText={t('inbox.draftKind')}
+                            onChange={(event) => {
+                              updateDraft({ kind: asKind(event.target.value) });
+                            }}
+                            // Keep Carbon from titling the control with its value as a native tooltip.
+                            title={t('inbox.draftKind')}
+                            value={fields.kind}
+                          >
+                            {documentKindSchema.options.map((kind) => (
+                              <SelectItem
+                                key={kind}
+                                text={t(documentKindLabelKeys[kind])}
+                                value={kind}
+                              />
+                            ))}
+                          </Select>
+                          {reasonInput('kind')}
+                        </Stack>
+                      </section>
+
+                      <section aria-labelledby="inbox-document-heading">
+                        <Stack gap={4}>
+                          <div className={styles.sectionHead!}>
+                            <h2
+                              className={styles.sectionHeading!}
+                              id="inbox-document-heading"
+                            >
+                              {t('inbox.item.documentTitle')}
+                            </h2>
+                            {sectionTag(documentStatus)}
+                          </div>
+                          <TextInput
+                            disabled={!canManage || !open}
+                            id="inbox-document-title"
+                            labelText={t('inbox.draftTitleField')}
+                            onChange={(event) => {
+                              updateDraft({ title: event.target.value });
+                            }}
+                            value={fields.title}
                           />
-                        );
-                      })}
-                      <div className={styles.actions!}>
-                        <Button disabled={busy} type="submit">
-                          {t('inbox.routeToDocument')}
-                        </Button>
-                      </div>
+                          {reasonInput('title')}
+                          <TextInput
+                            disabled={!canManage || !open}
+                            id="inbox-document-date"
+                            labelText={t('inbox.draftDate')}
+                            onChange={(event) => {
+                              updateDraft({ documentDate: event.target.value });
+                            }}
+                            placeholder="yyyy-mm-dd"
+                            value={fields.documentDate}
+                          />
+                          {reasonInput('documentDate')}
+                          <TextInput
+                            disabled={!canManage || !open}
+                            id="inbox-document-reference"
+                            labelText={t('inbox.draftReference')}
+                            onChange={(event) => {
+                              updateDraft({ reference: event.target.value });
+                            }}
+                            value={fields.reference}
+                          />
+                          {reasonInput('reference')}
+                          <TextInput
+                            disabled={!canManage || !open}
+                            id="inbox-document-currency"
+                            labelText={t('inbox.draftCurrency')}
+                            onChange={(event) => {
+                              updateDraft({ currencyCode: event.target.value });
+                            }}
+                            value={fields.currencyCode}
+                          />
+                          {reasonInput('currencyCode')}
+                          <PartnerPicker
+                            disabled={!canManage || !open}
+                            idPrefix="inbox-document"
+                            onSelect={(partnerId) => {
+                              updateDraft({ partnerId });
+                            }}
+                            organizationId={organizationId}
+                            selectedPartnerId={fields.partnerId}
+                          />
+                          {reasonInput('partnerId')}
+                        </Stack>
+                      </section>
                     </Stack>
-                  </Form>
-                </Tile>
-              ) : null}
+                  </TabPanel>
+                  <TabPanel>
+                    <ContainedList
+                      kind="on-page"
+                      label={t('inbox.item.activityLabel')}
+                      size="sm"
+                    >
+                      {activityEntries().map((entry) => (
+                        <ContainedListItem key={entry.id}>
+                          {entry.text}{' '}
+                          <span className={styles.eventTime!}>
+                            {entry.time}
+                          </span>
+                        </ContainedListItem>
+                      ))}
+                    </ContainedList>
+                  </TabPanel>
+                </TabPanels>
+              </Tabs>
+            </Stack>
 
-              {canManage && open ? (
-                <Tile>
-                  <Form
-                    aria-label={t('inbox.attachTitle')}
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void attachToDocument(attachTargetId);
-                    }}
-                  >
-                    <Stack gap={5}>
-                      <h2 className={styles.sectionHeading!}>
-                        {t('inbox.attachTitle')}
-                      </h2>
-                      <p>{t('inbox.attachHelp')}</p>
-                      <ComboBox
-                        id="inbox-attach-target"
-                        items={attachCandidates}
-                        itemToString={(candidate) =>
-                          candidate === null ? '' : candidate.title
-                        }
-                        onChange={(change) => {
-                          setAttachTargetId(change.selectedItem?.id ?? '');
-                        }}
-                        onInputChange={(value) => {
-                          setAttachQuery(value);
-                        }}
-                        selectedItem={
-                          attachCandidates.find(
-                            (candidate) => candidate.id === attachTargetId,
-                          ) ?? null
-                        }
-                        titleText={t('inbox.attachTarget')}
-                      />
-                      <div className={styles.actions!}>
-                        <Button
-                          disabled={busy || attachTargetId.length === 0}
-                          kind="secondary"
-                          type="submit"
-                        >
-                          {t('inbox.attach')}
-                        </Button>
-                      </div>
-                    </Stack>
-                  </Form>
-                </Tile>
-              ) : null}
+            {canManage ? (
+              <div className={styles.bottomBar!}>
+                <Button
+                  disabled={neighbours.previous === undefined}
+                  kind="ghost"
+                  onClick={() => {
+                    if (neighbours.previous !== undefined) {
+                      router.push(itemHref(neighbours.previous) as Route);
+                    }
+                  }}
+                  type="button"
+                >
+                  {t('inbox.item.previous')}
+                </Button>
+                <Button
+                  disabled={neighbours.next === undefined}
+                  kind="ghost"
+                  onClick={() => {
+                    if (neighbours.next !== undefined) {
+                      router.push(itemHref(neighbours.next) as Route);
+                    }
+                  }}
+                  type="button"
+                >
+                  {t('inbox.item.next')}
+                </Button>
+                <OverflowMenu
+                  aria-label={t('inbox.item.moreActions')}
+                  iconDescription={t('inbox.item.moreActions')}
+                >
+                  {open ? (
+                    <OverflowMenuItem
+                      itemText={t('inbox.discard')}
+                      onClick={() => {
+                        setOpenModal('discard');
+                      }}
+                    />
+                  ) : null}
+                  {open ? (
+                    <OverflowMenuItem
+                      itemText={t('inbox.snooze')}
+                      onClick={() => {
+                        setOpenModal('snooze');
+                      }}
+                    />
+                  ) : null}
+                  {open ? (
+                    <OverflowMenuItem
+                      itemText={t('inbox.assign')}
+                      onClick={() => {
+                        setOpenModal('assign');
+                      }}
+                    />
+                  ) : null}
+                  {open ? (
+                    <OverflowMenuItem
+                      itemText={t('inbox.item.attachAction')}
+                      onClick={() => {
+                        setOpenModal('attach');
+                      }}
+                    />
+                  ) : null}
+                  <OverflowMenuItem
+                    href={createRuleHref()}
+                    itemText={t('inbox.createRule')}
+                  />
+                  {item.status === 'failed' ? (
+                    <OverflowMenuItem
+                      itemText={t('inbox.item.resplit')}
+                      onClick={() => {
+                        void write('process');
+                      }}
+                    />
+                  ) : null}
+                  {open && item.status !== 'failed' ? (
+                    <OverflowMenuItem
+                      itemText={t('inbox.item.recheck')}
+                      onClick={() => {
+                        void write('process');
+                      }}
+                    />
+                  ) : null}
+                  {item.status === 'routed' ? (
+                    <OverflowMenuItem
+                      itemText={t('inbox.item.reopen')}
+                      onClick={() => {
+                        void write('route/undo');
+                      }}
+                    />
+                  ) : null}
+                  {item.status === 'discarded' ? (
+                    <OverflowMenuItem
+                      itemText={t('inbox.restore')}
+                      onClick={() => {
+                        void write('restore');
+                      }}
+                    />
+                  ) : null}
+                  {item.snoozedUntil === null ? null : (
+                    <OverflowMenuItem
+                      itemText={t('inbox.snoozeClear')}
+                      onClick={() => {
+                        void write('snooze', { snoozedUntil: null });
+                      }}
+                    />
+                  )}
+                </OverflowMenu>
+                {primaryButton()}
+              </div>
+            ) : null}
+          </Column>
 
-              {canManage ? (
-                <Tile>
-                  <Stack gap={5}>
-                    <h2 className={styles.sectionHeading!}>
-                      {t('inbox.actions')}
-                    </h2>
-                    <div className={styles.actions!}>
-                      {item.status === 'routed' ? (
-                        <Button
-                          disabled={busy}
-                          kind="danger--tertiary"
-                          onClick={() => {
-                            void write('route/undo');
-                          }}
-                          type="button"
-                        >
-                          {t('inbox.undoRoute')}
-                        </Button>
-                      ) : null}
-                      {item.status === 'discarded' ? (
-                        <Button
-                          disabled={busy}
-                          kind="secondary"
-                          onClick={() => {
-                            void write('restore');
-                          }}
-                          type="button"
-                        >
-                          {t('inbox.restore')}
-                        </Button>
-                      ) : null}
-                      {open ? null : (
-                        <Button
-                          href={createRuleHref()}
-                          kind="tertiary"
-                          title={t('inbox.createRuleHelp')}
-                        >
-                          {t('inbox.createRule')}
-                        </Button>
-                      )}
-                    </div>
-                    {open ? (
-                      <div className={styles.actions!}>
-                        <Select
-                          id="inbox-discard-reason"
-                          labelText={t('inbox.discardReason')}
-                          onChange={(event) => {
-                            setDiscardReason(
-                              asDiscardReason(event.target.value),
-                            );
-                          }}
-                          value={discardReason}
-                        >
-                          {inboxDiscardReasonSchema.options.map((reason) => (
-                            <SelectItem
-                              key={reason}
-                              text={t(inboxDiscardReasonLabelKeys[reason])}
-                              value={reason}
-                            />
-                          ))}
-                        </Select>
-                        <Button
-                          disabled={busy}
-                          kind="danger--tertiary"
-                          onClick={() => {
-                            void write('discard', { reason: discardReason });
-                          }}
-                          type="button"
-                        >
-                          {t('inbox.discard')}
-                        </Button>
-                      </div>
-                    ) : null}
-                    <div className={styles.actions!}>
-                      <TextInput
-                        id="inbox-assignee"
-                        labelText={t('inbox.assignee')}
-                        onChange={(event) => {
-                          setAssigneeId(event.target.value);
-                        }}
-                        placeholder={t('inbox.assigneePlaceholder')}
-                        value={assigneeId}
-                      />
-                      <Button
-                        disabled={busy}
-                        kind="tertiary"
-                        onClick={() => {
-                          void write('assign', {
-                            assigneeId: nullable(assigneeId),
-                          });
-                        }}
-                        type="button"
-                      >
-                        {t('inbox.assign')}
-                      </Button>
-                    </div>
-                    <div className={styles.actions!}>
-                      <TextInput
-                        id="inbox-snooze"
-                        labelText={t('inbox.snoozedUntil')}
-                        onChange={(event) => {
-                          setSnoozedUntil(event.target.value);
-                        }}
-                        type="datetime-local"
-                        value={snoozedUntil}
-                      />
-                      <Button
-                        disabled={busy || snoozedUntil.length === 0}
-                        kind="tertiary"
-                        onClick={() => {
-                          void write('snooze', {
-                            snoozedUntil: new Date(snoozedUntil).toISOString(),
-                          });
-                        }}
-                        type="button"
-                      >
-                        {t('inbox.snooze')}
-                      </Button>
-                      <Button
-                        disabled={busy || item.snoozedUntil === null}
-                        kind="ghost"
-                        onClick={() => {
-                          void write('snooze', { snoozedUntil: null });
-                        }}
-                        type="button"
-                      >
-                        {t('inbox.snoozeClear')}
-                      </Button>
-                    </div>
-                  </Stack>
-                </Tile>
-              ) : null}
+          <Column lg={7} md={4} sm={4}>
+            <Stack gap={5}>
+              <h2 className={styles.sectionHeading!}>
+                {t('inbox.item.original')}
+              </h2>
+              {originalPane()}
+              <ContainedList kind="on-page" label={t('inbox.files')} size="sm">
+                {files.map((file) => fileRow(file))}
+              </ContainedList>
             </Stack>
           </Column>
         </Grid>
       )}
+
+      {openModal === 'discard' ? (
+        <Modal
+          modalHeading={t('inbox.item.discardTitle')}
+          onRequestClose={() => {
+            setOpenModal(undefined);
+          }}
+          onRequestSubmit={() => {
+            void write('discard', { reason: discardReason });
+          }}
+          open
+          primaryButtonText={t('inbox.discard')}
+          secondaryButtonText={t('inbox.cancel')}
+        >
+          <Select
+            id="inbox-discard-reason"
+            labelText={t('inbox.discardReason')}
+            onChange={(event) => {
+              setDiscardReason(asDiscardReason(event.target.value));
+            }}
+            value={discardReason}
+          >
+            {inboxDiscardReasonSchema.options.map((reason) => (
+              <SelectItem
+                key={reason}
+                text={t(inboxDiscardReasonLabelKeys[reason])}
+                value={reason}
+              />
+            ))}
+          </Select>
+        </Modal>
+      ) : null}
+
+      {openModal === 'snooze' ? (
+        <Modal
+          modalHeading={t('inbox.item.snoozeTitle')}
+          onRequestClose={() => {
+            setOpenModal(undefined);
+          }}
+          onRequestSubmit={() => {
+            if (snoozedUntil.length > 0) {
+              void write('snooze', {
+                snoozedUntil: new Date(snoozedUntil).toISOString(),
+              });
+            }
+          }}
+          open
+          primaryButtonDisabled={snoozedUntil.length === 0}
+          primaryButtonText={t('inbox.snooze')}
+          secondaryButtonText={t('inbox.cancel')}
+        >
+          <TextInput
+            id="inbox-snooze-until"
+            labelText={t('inbox.snoozedUntil')}
+            onChange={(event) => {
+              setSnoozedUntil(event.target.value);
+            }}
+            type="datetime-local"
+            value={snoozedUntil}
+          />
+        </Modal>
+      ) : null}
+
+      {openModal === 'assign' ? (
+        <Modal
+          modalHeading={t('inbox.item.assignTitle')}
+          onRequestClose={() => {
+            setOpenModal(undefined);
+          }}
+          onRequestSubmit={() => {
+            void write('assign', { assigneeId: nullable(assigneeId) });
+          }}
+          open
+          primaryButtonText={t('inbox.assign')}
+          secondaryButtonText={t('inbox.cancel')}
+        >
+          <Select
+            id="inbox-assignee"
+            labelText={t('inbox.assignee')}
+            onChange={(event) => {
+              setAssigneeId(event.target.value);
+            }}
+            value={assigneeId}
+          >
+            <SelectItem text={t('inbox.assigneeNone')} value="" />
+            {(members ?? []).map((member) => (
+              <SelectItem
+                key={member.id}
+                text={member.name}
+                value={member.id}
+              />
+            ))}
+          </Select>
+        </Modal>
+      ) : null}
+
+      {openModal === 'attach' ? (
+        <Modal
+          modalHeading={t('inbox.attachTitle')}
+          onRequestClose={() => {
+            setOpenModal(undefined);
+          }}
+          onRequestSubmit={() => {
+            if (attachTargetId.length > 0) {
+              void attachToDocument(attachTargetId);
+            }
+          }}
+          open
+          primaryButtonDisabled={attachTargetId.length === 0}
+          primaryButtonText={t('inbox.attach')}
+          secondaryButtonText={t('inbox.cancel')}
+        >
+          <Stack gap={5}>
+            <p>{t('inbox.attachHelp')}</p>
+            <ComboBox
+              id="inbox-attach-target"
+              items={attachCandidates}
+              itemToString={(candidate) => candidate?.title ?? ''}
+              onChange={(change) => {
+                setAttachTargetId(change.selectedItem?.id ?? '');
+              }}
+              onInputChange={(value) => {
+                setAttachQuery(value);
+              }}
+              selectedItem={
+                attachCandidates.find(
+                  (candidate) => candidate.id === attachTargetId,
+                ) ?? null
+              }
+              titleText={t('inbox.attachTarget')}
+            />
+          </Stack>
+        </Modal>
+      ) : null}
+
       {conflict?.code === 'duplicate_probable' && pendingRoute !== undefined ? (
         <Modal
           modalHeading={t('inbox.duplicateProbable')}
