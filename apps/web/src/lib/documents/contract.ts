@@ -63,6 +63,7 @@ export const documentKindSchema = z.enum([
   'issued_invoice',
   'received_invoice',
   'credit_note',
+  'advance_request',
   'receipt',
   'bank_statement',
   'contract',
@@ -103,6 +104,7 @@ export const vatModeSchema = z.enum([
 ]);
 export const documentLinkKindSchema = z.enum([
   'settles',
+  'advance_of',
   'fulfills',
   'corrects',
   'supersedes',

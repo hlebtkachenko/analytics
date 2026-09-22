@@ -217,12 +217,12 @@ describe('documents register isolation', () => {
     const compatibility = await checkMigrationCompatibility(apiPool);
 
     expect(result.applied).toEqual([]);
-    expect(result.currentVersion).toBe('20260915.0001');
-    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260915.0001');
+    expect(result.currentVersion).toBe('20260916.0001');
+    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260916.0001');
     expect(compatibility).toEqual({
       compatible: true,
-      expectedVersion: '20260915.0001',
-      version: '20260915.0001',
+      expectedVersion: '20260916.0001',
+      version: '20260916.0001',
     });
   });
 
@@ -1094,9 +1094,9 @@ describe('documents register isolation', () => {
         root.release();
       }
 
-      // Everything except the migration under test, so the register is populated the way an existing database is.
+      // Everything before the migration under test, so the register is populated the way an existing database is.
       for (const entry of await readdir(source)) {
-        if (entry.endsWith('.sql') && !entry.startsWith('20260915.0001')) {
+        if (entry.endsWith('.sql') && entry < '20260915.0001') {
           await copyFile(new URL(entry, source), join(directory, entry));
         }
       }

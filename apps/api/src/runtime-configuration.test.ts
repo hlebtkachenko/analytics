@@ -5,6 +5,10 @@ import { loadRuntimeConfiguration } from './runtime-configuration.js';
 describe('loadRuntimeConfiguration', () => {
   it('uses the application API defaults', () => {
     expect(loadRuntimeConfiguration({})).toEqual({
+      blob: {
+        quotaBytesPerOrganization: 1_073_741_824,
+        storageDirectory: '/var/lib/bap/blobs',
+      },
       host: '0.0.0.0',
       issuer: 'http://localhost:3000',
       jwksUrl: 'http://web:3000/api/auth/jwks',
@@ -21,6 +25,29 @@ describe('loadRuntimeConfiguration', () => {
     expect(() => loadRuntimeConfiguration({ PORT: 'invalid' })).toThrow(
       'Invalid runtime configuration',
     );
+  });
+
+  it('validates the blob storage directory and quota', () => {
+    expect(
+      loadRuntimeConfiguration({
+        BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION: '2048',
+        BAP_BLOB_STORAGE_DIR: '/blobs',
+      }).blob,
+    ).toEqual({ quotaBytesPerOrganization: 2048, storageDirectory: '/blobs' });
+    expect(() =>
+      loadRuntimeConfiguration({ BAP_BLOB_STORAGE_DIR: ' ' }),
+    ).toThrow('Invalid runtime configuration');
+    expect(() =>
+      loadRuntimeConfiguration({ BAP_BLOB_STORAGE_DIR: 'relative' }),
+    ).toThrow('Invalid runtime configuration');
+    expect(() =>
+      loadRuntimeConfiguration({ BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION: '0' }),
+    ).toThrow('Invalid runtime configuration');
+    expect(() =>
+      loadRuntimeConfiguration({
+        BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION: '1.5',
+      }),
+    ).toThrow('Invalid runtime configuration');
   });
 
   it('rejects an empty host', () => {

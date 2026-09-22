@@ -1,6 +1,7 @@
 # ADR 0011: Two-Level Tenancy
 
 - Status: accepted
+- Amended by ADR 0015: inbox items are organization-level until routed.
 - Date: 2026-09-10
 
 ## Context

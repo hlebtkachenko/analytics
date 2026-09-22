@@ -654,6 +654,7 @@ describe('czech default derivation rules', () => {
   it('books no event for a kind the rule set does not cover', () => {
     for (const kind of [
       'credit_note',
+      'advance_request',
       'receipt',
       'bank_statement',
       'contract',

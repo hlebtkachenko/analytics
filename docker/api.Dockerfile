@@ -31,6 +31,10 @@ WORKDIR /app
 RUN groupadd --system --gid 1001 bap && useradd --system --uid 1001 --gid bap bap
 # A fresh named volume inherits this directory's ownership, so the staging mount stays writable.
 RUN install --directory --owner=bap --group=bap --mode=0750 /var/lib/bap/uploads
+# GID 999 is the backup image's postgres group: backup reads blobs and restore writes them as 999:999.
+# The setgid bit keeps that group on every organization prefix the API creates.
+RUN groupadd --system --gid 999 blobs && usermod --append --groups blobs bap \
+  && install --directory --owner=bap --group=blobs --mode=2770 /var/lib/bap/blobs
 COPY --from=build --chown=bap:bap /runtime ./
 COPY --chown=bap:bap THIRD_PARTY_NOTICES.md ./
 COPY --chown=bap:bap licenses ./licenses

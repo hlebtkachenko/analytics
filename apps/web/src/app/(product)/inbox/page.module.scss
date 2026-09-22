@@ -1,0 +1,8 @@
+@use '@bap/design-system/tokens/spacing.scss' as spacing;
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-05;
+  max-inline-size: 20rem;
+}

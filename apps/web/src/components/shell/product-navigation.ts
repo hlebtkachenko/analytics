@@ -1,6 +1,7 @@
 import {
   DataSet,
   Document,
+  Email,
   Enterprise,
   Security,
   UserAvatar,
@@ -35,6 +36,7 @@ export const railDestinations: readonly RailDestination[] = [
     route: 'organizations',
   },
   { href: '/datasets', icon: DataSet, label: 'Datasets', route: 'datasets' },
+  { href: '/inbox', icon: Email, label: 'Inbox', route: 'inbox' },
   {
     href: '/documents',
     icon: Document,
