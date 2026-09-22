@@ -35,7 +35,10 @@ import {
   RULE_PROVIDER,
   createInboxRuleRequestSchema,
 } from './contract.js';
-import type { RouteInboxItemJob } from './contract.js';
+import type {
+  PutInboxRoutingTargetRequest,
+  RouteInboxItemJob,
+} from './contract.js';
 import { InboxService } from './inbox.service.js';
 import { sendRouteInboxItem } from './inbox-queue.js';
 import {
@@ -816,6 +819,53 @@ describe('inbox rules', () => {
     expect((await listRules(apiPool, owner)).map((r) => r.id)).toEqual([
       second?.id,
     ]);
+  });
+
+  it('refuses a routing target default entity outside the saver scope', async () => {
+    const body: PutInboxRoutingTargetRequest = {
+      auto: 'always',
+      autoThreshold: null,
+      defaultAssigneeId: null,
+      defaultLegalEntityId: entityB,
+      destination: 'documents',
+      documentKind: 'other',
+      partnerPolicy: 'match_only',
+      requiredFields: [],
+    };
+
+    await asTenant(owner, (transaction) =>
+      transaction.query(
+        `insert into app.member_entity_scope (organization_id, user_id, mode, updated_by)
+         values ($1, $2, 'restricted', $3)`,
+        [owner.organizationId, admin.userId, owner.userId],
+      ),
+    );
+
+    try {
+      await expect(
+        putRoutingTarget(apiPool, { ...admin, body, detectedType: 'pdf' }),
+      ).resolves.toBeNull();
+
+      await asTenant(owner, (transaction) =>
+        transaction.query(
+          `update app.member_entity_scope set mode = 'all'
+           where organization_id = $1 and user_id = $2`,
+          [owner.organizationId, admin.userId],
+        ),
+      );
+
+      await expect(
+        putRoutingTarget(apiPool, { ...admin, body, detectedType: 'pdf' }),
+      ).resolves.toMatchObject({ defaultLegalEntityId: entityB });
+    } finally {
+      await deleteRoutingTarget(apiPool, { ...owner, detectedType: 'pdf' });
+      await asTenant(owner, (transaction) =>
+        transaction.query(
+          'delete from app.member_entity_scope where user_id = $1',
+          [admin.userId],
+        ),
+      );
+    }
   });
 
   it('answers null for an entity outside the caller scope and refuses a member', async () => {
