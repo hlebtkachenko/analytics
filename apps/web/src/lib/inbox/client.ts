@@ -1,5 +1,15 @@
 import { organizationPath } from '../datasets/client';
-import { inboxUploadResponseSchema } from './contract.ts';
+import {
+  inboxRoutingTargetSchema,
+  inboxSettingsSchema,
+  inboxUploadResponseSchema,
+} from './contract.ts';
+import type {
+  InboxRoutingTarget,
+  InboxSettings,
+  PutInboxRoutingTargetRequest,
+  UpdateInboxSettingsRequest,
+} from './contract.ts';
 
 // The inbox BFF shapes the browser may ask for, all fixed paths under one organization.
 export function inboxPath(organizationId: string): string {
@@ -64,6 +74,79 @@ export function inboxChannelCredentialPath(
   credentialId: string,
 ): string {
   return `${inboxChannelCredentialsPath(organizationId, channelId)}/${encodeURIComponent(credentialId)}`;
+}
+
+export function inboxRoutingTargetsPath(organizationId: string): string {
+  return `${inboxPath(organizationId)}/routing-targets`;
+}
+
+export function inboxRoutingTargetPath(
+  organizationId: string,
+  detectedType: string,
+): string {
+  return `${inboxRoutingTargetsPath(organizationId)}/${encodeURIComponent(detectedType)}`;
+}
+
+export function inboxSettingsPath(organizationId: string): string {
+  return `${inboxPath(organizationId)}/settings`;
+}
+
+// A PUT carries the whole target, so the shared mutation helper's verbs do not fit; this is the one PUT the inbox makes.
+export async function saveInboxRoutingTarget(
+  organizationId: string,
+  detectedType: string,
+  body: PutInboxRoutingTargetRequest,
+): Promise<InboxRoutingTarget> {
+  const response = await fetch(
+    inboxRoutingTargetPath(organizationId, detectedType),
+    {
+      body: JSON.stringify(body),
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json' },
+      method: 'PUT',
+    },
+  );
+  if (!response.ok) {
+    throw new Error('Request failed.');
+  }
+  return inboxRoutingTargetSchema.parse(await response.json());
+}
+
+export type SettingsOutcome =
+  | Readonly<{ kind: 'saved'; settings: InboxSettings }>
+  | Readonly<{ kind: 'above_cap' }>
+  | Readonly<{ kind: 'failed' }>;
+
+// The API answers 422 for a quota above the platform cap, which the page names rather than folding into a failure.
+export async function updateInboxSettings(
+  organizationId: string,
+  body: UpdateInboxSettingsRequest,
+): Promise<SettingsOutcome> {
+  let response: Response;
+  try {
+    response = await fetch(inboxSettingsPath(organizationId), {
+      body: JSON.stringify(body),
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json' },
+      method: 'PATCH',
+    });
+  } catch {
+    return { kind: 'failed' };
+  }
+  if (response.status === 422) {
+    return { kind: 'above_cap' };
+  }
+  if (!response.ok) {
+    return { kind: 'failed' };
+  }
+  try {
+    return {
+      kind: 'saved',
+      settings: inboxSettingsSchema.parse(await response.json()),
+    };
+  } catch {
+    return { kind: 'failed' };
+  }
 }
 
 // The public push route lives at a fixed path on the same origin the owner is signed into.

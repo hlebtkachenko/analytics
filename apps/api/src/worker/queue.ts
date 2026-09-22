@@ -46,7 +46,27 @@ export async function createQueueClient(env: Environment): Promise<PgBoss> {
   return createQueueClientFromConfiguration(configuration);
 }
 
+export type QueueOptions = { policy?: 'exclusive' };
+
 // A partitioned queue makes pgboss.create_queue run CREATE TABLE, which bap_api cannot do.
-export async function createQueue(client: PgBoss, name: string): Promise<void> {
-  await client.createQueue(name, { partition: false });
+// pg-boss honours singletonKey only under a keyed policy, and createQueue is ON CONFLICT DO NOTHING.
+// updateQueue refuses a policy change, so a queue found with another policy is deleted and created again.
+// Deleting drops pending jobs; the maintenance requeue re-enqueues every email parent still received after 10 minutes.
+export async function createQueue(
+  client: PgBoss,
+  name: string,
+  options: QueueOptions = {},
+  warn: (message: string) => void = () => undefined,
+): Promise<void> {
+  const policy = options.policy ?? 'standard';
+  const existing = await client.getQueue(name);
+
+  if (existing !== null && existing.policy !== policy) {
+    warn(
+      `Recreating queue ${name}: policy ${existing.policy} cannot become ${policy} in place`,
+    );
+    await client.deleteQueue(name);
+  }
+
+  await client.createQueue(name, { ...options, partition: false });
 }

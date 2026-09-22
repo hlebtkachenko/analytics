@@ -1,4 +1,4 @@
-import { Injectable, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import type { PgBoss } from 'pg-boss';
 
@@ -9,9 +9,22 @@ import {
 import { SPLIT_EMAIL_ITEM_QUEUE } from './contract.js';
 import type { SplitEmailItemJob } from './contract.js';
 
-// pg-boss options of the split job: three retries a minute apart, one queued job per item however often it is replayed.
+// pg-boss options of the split job: three retries a minute apart. The item id is the singleton key, which holds
+// only because the queue is exclusive: at most one job per key across created, retry and active.
 export const SPLIT_EMAIL_ITEM_RETRY_LIMIT = 3;
 export const SPLIT_EMAIL_ITEM_RETRY_DELAY_SECONDS = 60;
+
+// The one way a split job is sent, shared by the intake and the maintenance requeue.
+export async function sendSplitEmailItem(
+  client: PgBoss,
+  job: SplitEmailItemJob,
+): Promise<void> {
+  await client.send(SPLIT_EMAIL_ITEM_QUEUE, job, {
+    retryDelay: SPLIT_EMAIL_ITEM_RETRY_DELAY_SECONDS,
+    retryLimit: SPLIT_EMAIL_ITEM_RETRY_LIMIT,
+    singletonKey: job.itemId,
+  });
+}
 
 export abstract class InboxQueue {
   abstract enqueueSplitEmailItem(job: SplitEmailItemJob): Promise<void>;
@@ -20,14 +33,10 @@ export abstract class InboxQueue {
 @Injectable()
 export class PgBossInboxQueue extends InboxQueue implements OnModuleDestroy {
   private clientPromise: Promise<PgBoss> | undefined;
+  private readonly logger = new Logger(PgBossInboxQueue.name);
 
   async enqueueSplitEmailItem(job: SplitEmailItemJob): Promise<void> {
-    const client = await this.getClient();
-    await client.send(SPLIT_EMAIL_ITEM_QUEUE, job, {
-      retryDelay: SPLIT_EMAIL_ITEM_RETRY_DELAY_SECONDS,
-      retryLimit: SPLIT_EMAIL_ITEM_RETRY_LIMIT,
-      singletonKey: job.itemId,
-    });
+    await sendSplitEmailItem(await this.getClient(), job);
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -67,7 +76,12 @@ export class PgBossInboxQueue extends InboxQueue implements OnModuleDestroy {
 
     try {
       await client.start();
-      await createQueue(client, SPLIT_EMAIL_ITEM_QUEUE);
+      await createQueue(
+        client,
+        SPLIT_EMAIL_ITEM_QUEUE,
+        { policy: 'exclusive' },
+        (message) => this.logger.warn(message),
+      );
     } catch (error) {
       // A retry builds a new client, so this one must not keep its connection pool open.
       await client.stop({ graceful: false }).catch(() => undefined);

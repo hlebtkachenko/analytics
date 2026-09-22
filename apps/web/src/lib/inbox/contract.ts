@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import {
   createDocumentRequestSchema,
+  documentKindSchema,
   identifierSchema,
 } from '../documents/contract.ts';
 
@@ -105,9 +106,12 @@ export const inboxUnprocessableReasonSchema = z.enum([
   'too_large',
   'policy_rejected',
 ]);
+// The reaper writes this on an item it failed for being stuck in processing; no person chooses it.
+export const inboxMaintenanceReasonSchema = z.enum(['stalled']);
 export const inboxEventReasonSchema = z.enum([
   ...inboxDiscardReasonSchema.options,
   ...inboxUnprocessableReasonSchema.options,
+  ...inboxMaintenanceReasonSchema.options,
 ]);
 export const inboxIssueCodeSchema = z.enum([
   'duplicate_exact',
@@ -246,12 +250,107 @@ export const inboxUploadResponseSchema = z
   })
   .strict();
 
+export const inboxRoutingDestinationSchema = z.enum([
+  'documents',
+  'datasets',
+  'discard',
+]);
+export const inboxRoutingPartnerPolicySchema = z.enum(['match_only']);
+export const inboxRoutingAutoPolicySchema = z.enum([
+  'never',
+  'above_threshold',
+  'always',
+]);
+export const inboxRoutingTargetSourceSchema = z.enum([
+  'platform',
+  'organization',
+]);
+export const MAX_ROUTING_REQUIRED_FIELDS = 32;
+
+// A draft field name a person must fill before routing: any identifier the destination contract names.
+const routingRequiredFieldSchema = z
+  .string()
+  .regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/);
+
+// The editable part of a target; a PUT carries all of it, so one edit never resets another field.
+const routingTargetFieldsSchema = z.object({
+  auto: inboxRoutingAutoPolicySchema,
+  autoThreshold: confidenceSchema.nullable(),
+  defaultAssigneeId: subjectIdentifierSchema.nullable(),
+  defaultLegalEntityId: identifierSchema.nullable(),
+  // Null only on a platform default that names no destination yet; a saved row always names one.
+  destination: inboxRoutingDestinationSchema.nullable(),
+  documentKind: documentKindSchema.nullable(),
+  partnerPolicy: inboxRoutingPartnerPolicySchema,
+  requiredFields: z
+    .array(routingRequiredFieldSchema)
+    .max(MAX_ROUTING_REQUIRED_FIELDS),
+});
+
+// The two row checks: a kind exactly when the destination is documents, a threshold when the policy needs one.
+function routingTargetInvariants(
+  target: z.infer<typeof routingTargetFieldsSchema>,
+  context: z.RefinementCtx,
+): void {
+  if ((target.documentKind !== null) !== (target.destination === 'documents')) {
+    context.addIssue({
+      code: 'custom',
+      message:
+        'A document kind is set exactly when the destination is documents.',
+      path: ['documentKind'],
+    });
+  }
+  if (target.auto === 'above_threshold' && target.autoThreshold === null) {
+    context.addIssue({
+      code: 'custom',
+      message: 'A threshold is required for above_threshold.',
+      path: ['autoThreshold'],
+    });
+  }
+}
+
+// The full target, never a partial patch: the form is prefilled from the effective target.
+export const putInboxRoutingTargetRequestSchema = routingTargetFieldsSchema
+  .extend({ destination: inboxRoutingDestinationSchema })
+  .strict()
+  .superRefine(routingTargetInvariants);
+
+// The effective target for one detected type: the organization row when present, else the platform default.
+export const inboxRoutingTargetSchema = routingTargetFieldsSchema
+  .extend({
+    detectedType: tokenSchema,
+    source: inboxRoutingTargetSourceSchema,
+  })
+  .strict()
+  .superRefine(routingTargetInvariants);
+
+export const inboxRoutingTargetListResponseSchema = z
+  .object({ targets: z.array(inboxRoutingTargetSchema) })
+  .strict();
+
+const blobQuotaBytesSchema = z.number().int().positive();
+
+// The platform value is both the default and the cap, so an owner can only tighten it.
+export const inboxSettingsSchema = z
+  .object({
+    blobQuotaBytes: blobQuotaBytesSchema.nullable(),
+    platformQuotaBytes: blobQuotaBytesSchema,
+    usedBytes: z.number().int().min(0),
+  })
+  .strict();
+
+export const updateInboxSettingsRequestSchema = z
+  .object({ blobQuotaBytes: blobQuotaBytesSchema.nullable() })
+  .strict();
+
 export const inboxItemDetailSchema = z
   .object({
     events: z.array(inboxEventSchema),
     extraction: inboxExtractionSchema.nullable(),
     files: z.array(inboxItemFileSchema),
     item: inboxItemSchema,
+    // The effective target of the item's detected type, so the setting is visible on the item the day it lands.
+    routingTarget: inboxRoutingTargetSchema,
   })
   .strict();
 
@@ -433,15 +532,32 @@ export type InboxItemListResponse = z.infer<typeof inboxItemListResponseSchema>;
 export type InboxItemStatus = z.infer<typeof inboxItemStatusSchema>;
 export type InboxIntakeResponse = z.infer<typeof inboxIntakeResponseSchema>;
 export type InboxIssueCode = z.infer<typeof inboxIssueCodeSchema>;
+export type InboxRoutingAutoPolicy = z.infer<
+  typeof inboxRoutingAutoPolicySchema
+>;
+export type InboxRoutingDestination = z.infer<
+  typeof inboxRoutingDestinationSchema
+>;
+export type InboxRoutingTarget = z.infer<typeof inboxRoutingTargetSchema>;
+export type InboxRoutingTargetListResponse = z.infer<
+  typeof inboxRoutingTargetListResponseSchema
+>;
+export type InboxSettings = z.infer<typeof inboxSettingsSchema>;
 export type IssueInboxChannelCredentialResponse = z.infer<
   typeof issueInboxChannelCredentialResponseSchema
 >;
 export type InboxUploadResponse = z.infer<typeof inboxUploadResponseSchema>;
 export type ProviderIssue = z.infer<typeof providerIssueSchema>;
 export type ProviderReason = z.infer<typeof providerReasonSchema>;
+export type PutInboxRoutingTargetRequest = z.infer<
+  typeof putInboxRoutingTargetRequestSchema
+>;
 export type UpdateInboxChannelRequest = z.infer<
   typeof updateInboxChannelRequestSchema
 >;
 export type UpdateInboxHintsRequest = z.input<
   typeof updateInboxHintsRequestSchema
+>;
+export type UpdateInboxSettingsRequest = z.infer<
+  typeof updateInboxSettingsRequestSchema
 >;

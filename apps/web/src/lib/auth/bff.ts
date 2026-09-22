@@ -27,13 +27,19 @@ import {
   inboxItemDetailSchema,
   inboxItemListQuerySchema,
   inboxItemListResponseSchema,
+  inboxRoutingTargetListResponseSchema,
+  inboxRoutingTargetSchema,
+  inboxSettingsSchema,
   inboxUploadResponseSchema,
   isInlineMediaType,
   issueInboxChannelCredentialResponseSchema,
+  putInboxRoutingTargetRequestSchema,
   routeInboxItemToDocumentRequestSchema,
   snoozeInboxItemRequestSchema,
+  tokenSchema,
   updateInboxChannelRequestSchema,
   updateInboxHintsRequestSchema,
+  updateInboxSettingsRequestSchema,
 } from '../inbox/contract.ts';
 import { webLogger } from '../logger.ts';
 
@@ -2341,6 +2347,182 @@ export async function deleteInboxChannelCredential(
       path: `inbox/channels/${encodeURIComponent(selectedChannel.value)}/credentials/${encodeURIComponent(selectedCredential.value)}`,
       schema: null,
       successStatus: 204,
+    },
+    fetchImplementation,
+  );
+}
+
+// A detected type is a token; anything else answers like a type that has no target.
+function parsedDetectedType(
+  value: string,
+): Readonly<{ failure: Response }> | Readonly<{ value: string }> {
+  const parsed = tokenSchema.safeParse(value);
+
+  return parsed.success
+    ? { value: parsed.data }
+    : {
+        failure: jsonResponse({ error: 'inbox_routing_target_not_found' }, 404),
+      };
+}
+
+export async function getInboxRoutingTargets(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'inbox_routing_targets_unavailable',
+      method: 'GET',
+      operation: 'getInboxRoutingTargets',
+      path: 'inbox/routing-targets',
+      schema: inboxRoutingTargetListResponseSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+// The body is the whole target, so a one-field edit never resets the rest of the row.
+export async function putInboxRoutingTarget(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  detectedType: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const selected = parsedDetectedType(detectedType);
+
+  if ('failure' in selected) {
+    return selected.failure;
+  }
+
+  const parsed = await readJsonBody(
+    request,
+    putInboxRoutingTargetRequestSchema,
+  );
+
+  if ('failure' in parsed) {
+    return parsed.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      body: parsed.data,
+      errorCode: 'inbox_routing_target_rejected',
+      method: 'PUT',
+      operation: 'putInboxRoutingTarget',
+      path: `inbox/routing-targets/${encodeURIComponent(selected.value)}`,
+      schema: inboxRoutingTargetSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function deleteInboxRoutingTarget(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  detectedType: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const selected = parsedDetectedType(detectedType);
+
+  if ('failure' in selected) {
+    return selected.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'inbox_routing_target_rejected',
+      method: 'DELETE',
+      operation: 'deleteInboxRoutingTarget',
+      path: `inbox/routing-targets/${encodeURIComponent(selected.value)}`,
+      schema: null,
+      successStatus: 204,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function getInboxSettings(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'inbox_settings_unavailable',
+      method: 'GET',
+      operation: 'getInboxSettings',
+      path: 'inbox/settings',
+      schema: inboxSettingsSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+// A quota above the platform cap comes back as the API's 422 under the rejection code.
+export async function patchInboxSettings(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const parsed = await readJsonBody(request, updateInboxSettingsRequestSchema);
+
+  if ('failure' in parsed) {
+    return parsed.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      body: parsed.data,
+      errorCode: 'inbox_settings_rejected',
+      method: 'PATCH',
+      operation: 'patchInboxSettings',
+      path: 'inbox/settings',
+      schema: inboxSettingsSchema,
+      successStatus: 200,
     },
     fetchImplementation,
   );

@@ -105,6 +105,19 @@ const extraction = {
   reasons: [{ evidence: 'a PDF header', step: 'sniff', weight: 0.9 }],
 };
 
+const routingTarget = {
+  auto: 'never',
+  autoThreshold: null,
+  defaultAssigneeId: null,
+  defaultLegalEntityId: null,
+  destination: 'documents',
+  detectedType: 'pdf',
+  documentKind: 'receipt',
+  partnerPolicy: 'match_only',
+  requiredFields: [],
+  source: 'platform',
+};
+
 function capabilities(manageDocuments: boolean) {
   return {
     createEntities: false,
@@ -121,7 +134,9 @@ function capabilities(manageDocuments: boolean) {
 }
 
 // One router per test, so every request is answered by the shape its route promises.
-function respondWith(detail: Record<string, unknown>, manageDocuments = true) {
+function respondWith(given: Record<string, unknown>, manageDocuments = true) {
+  // Every detail carries the effective target unless a test says otherwise.
+  const detail: Record<string, unknown> = { routingTarget, ...given };
   return vi.fn(async (input: string, init?: RequestInit) => {
     if (input === '/api/auth/organization/list') {
       return Response.json([
@@ -361,6 +376,52 @@ describe('InboxItemPage', () => {
         ).length,
       ).toBeGreaterThan(1);
     });
+  });
+
+  it('shows the effective routing target and defaults the draft kind from it', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respondWith({
+        events: [],
+        extraction: { ...extraction, draft: {} },
+        files: [file('application/pdf')],
+        item: inboxItem,
+      }),
+    );
+
+    renderItemPage();
+
+    expect(
+      await screen.findByText(
+        'Routing target: Documents, Receipt (platform default)',
+      ),
+    ).toBeVisible();
+    expect(screen.getByLabelText('Kind')).toHaveValue('receipt');
+  });
+
+  it('lets the kind hint win over the routing target and shows an organization target', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respondWith({
+        events: [],
+        extraction: { ...extraction, draft: {} },
+        files: [file('application/pdf')],
+        item: { ...inboxItem, hintKind: 'contract' },
+        routingTarget: {
+          ...routingTarget,
+          destination: 'discard',
+          documentKind: null,
+          source: 'organization',
+        },
+      }),
+    );
+
+    renderItemPage();
+
+    expect(
+      await screen.findByText('Routing target: Discard (organization setting)'),
+    ).toBeVisible();
+    expect(screen.getByLabelText('Kind')).toHaveValue('contract');
   });
 
   it('offers undo and the document link once the item is routed', async () => {

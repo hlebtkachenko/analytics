@@ -11,6 +11,7 @@ import {
   NotFoundException,
   PayloadTooLargeException,
   ServiceUnavailableException,
+  UnprocessableEntityException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
 import type { BlobScanStatus } from '@bap/db';
@@ -35,6 +36,7 @@ import type {
   SplitEmailItemJob,
 } from './contract.js';
 import { applyHints, InboxService } from './inbox.service.js';
+import { routingTargetFor } from './routing-targets.js';
 import {
   QuotaExceededError,
   type InboxRepository,
@@ -42,6 +44,7 @@ import {
   type ReceiveIntakeInput,
   type RecordExtractionInput,
   type RouteToDocumentInput,
+  type UpdateInboxSettingsInput,
 } from './inbox-repository.js';
 import * as fixtures from './providers/__fixtures__/index.js';
 
@@ -100,6 +103,7 @@ const detail: InboxItemDetail = {
   extraction: null,
   files: [],
   item,
+  routingTarget: routingTargetFor('pdf'),
 };
 
 describe('InboxService', () => {
@@ -121,6 +125,7 @@ describe('InboxService', () => {
   const extractions: RecordExtractionInput[] = [];
   const routed: RouteToDocumentInput[] = [];
   const enqueued: SplitEmailItemJob[] = [];
+  const settingsUpdates: UpdateInboxSettingsInput[] = [];
   let enqueueFails = false;
   const queue = {
     enqueueSplitEmailItem: vi.fn(async (job: SplitEmailItemJob) => {
@@ -135,6 +140,7 @@ describe('InboxService', () => {
   const repository = {
     assignItem: vi.fn(),
     createChannel: vi.fn(),
+    deleteRoutingTarget: vi.fn(),
     discardItem: vi.fn(),
     issueCredential: vi.fn(
       async (input: { channelId: string; intakeDomain: string }) => {
@@ -181,6 +187,8 @@ describe('InboxService', () => {
     ),
     listChannels: vi.fn(),
     listItems: vi.fn(),
+    listRoutingTargets: vi.fn(),
+    putRoutingTarget: vi.fn(),
     readBlob: vi.fn(async (input: { blobId: string }) =>
       storedFile === null || input.blobId !== storedFile.blobId
         ? null
@@ -188,6 +196,11 @@ describe('InboxService', () => {
     ),
     readChannel: vi.fn(),
     readChannelPrincipal: vi.fn(),
+    readInboxSettings: vi.fn(async (input: { platformQuotaBytes: number }) => ({
+      blobQuotaBytes: null,
+      platformQuotaBytes: input.platformQuotaBytes,
+      usedBytes,
+    })),
     readItem: vi.fn(),
     readProviderInput: vi.fn(async (input: { itemId: string }) =>
       input.itemId !== ITEM_ID || storedFile === null
@@ -235,6 +248,14 @@ describe('InboxService', () => {
     undoRoute: vi.fn(),
     updateChannel: vi.fn(),
     updateHints: vi.fn(),
+    updateInboxSettings: vi.fn(async (input: UpdateInboxSettingsInput) => {
+      settingsUpdates.push(input);
+      return {
+        blobQuotaBytes: input.blobQuotaBytes,
+        platformQuotaBytes: input.platformQuotaBytes,
+        usedBytes,
+      };
+    }),
   } satisfies InboxRepository;
 
   async function stage(bytes: Buffer, name = 'upload-1'): Promise<string> {
@@ -735,5 +756,52 @@ describe('InboxService', () => {
     await expect(
       service.issueCredential({ ...tenant, channelId: 'no-domain' }),
     ).rejects.toBeInstanceOf(InternalServerErrorException);
+  });
+
+  it('reads the settings against the platform cap and refuses a quota above it with 422', async () => {
+    const organization = {
+      organizationId: 'organization_1',
+      role: 'owner' as const,
+      userId: 'user_1',
+    };
+
+    await expect(service.readSettings(organization)).resolves.toEqual({
+      blobQuotaBytes: null,
+      platformQuotaBytes: QUOTA,
+      usedBytes,
+    });
+
+    await expect(
+      service.updateSettings({
+        ...organization,
+        body: { blobQuotaBytes: QUOTA + 1 },
+      }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(settingsUpdates).toEqual([]);
+
+    // The cap itself, anything below it and a reset to null all reach the repository with the platform value.
+    await expect(
+      service.updateSettings({
+        ...organization,
+        body: { blobQuotaBytes: QUOTA },
+      }),
+    ).resolves.toMatchObject({ blobQuotaBytes: QUOTA });
+    await expect(
+      service.updateSettings({
+        ...organization,
+        body: { blobQuotaBytes: null },
+      }),
+    ).resolves.toMatchObject({ blobQuotaBytes: null });
+    expect(settingsUpdates).toEqual([
+      expect.objectContaining({
+        blobQuotaBytes: QUOTA,
+        platformQuotaBytes: QUOTA,
+        userId: 'user_1',
+      }),
+      expect.objectContaining({
+        blobQuotaBytes: null,
+        platformQuotaBytes: QUOTA,
+      }),
+    ]);
   });
 });

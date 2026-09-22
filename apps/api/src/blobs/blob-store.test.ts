@@ -1,4 +1,12 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -90,6 +98,45 @@ describe('FilesystemBlobStore', () => {
       expect(() => store.open(key)).toThrow();
     },
   );
+});
+
+describe('orphan sweep support', () => {
+  it('lists organizations, the stale content-addressed files of one, and unlinks by key', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'bap-blobs-'));
+    await createBlobDirectories(directory);
+    const store = new FilesystemBlobStore(directory);
+    const organization = join(directory, 'org', 'organization_1');
+    await mkdir(organization);
+    await mkdir(join(directory, 'org', 'not a tenant'));
+    await mkdir(join(directory, 'org', 'organization_2'));
+    const old = 'c'.repeat(64);
+    const young = 'd'.repeat(64);
+    await writeFile(join(organization, old), 'old');
+    await writeFile(join(organization, young), 'young');
+    await writeFile(join(organization, 'notes.txt'), 'not a blob');
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    await utimes(join(organization, old), twoHoursAgo, twoHoursAgo);
+    await utimes(join(organization, 'notes.txt'), twoHoursAgo, twoHoursAgo);
+    const olderThan = new Date(Date.now() - 60 * 60 * 1000);
+
+    expect(await store.listOrganizations()).toEqual([
+      'organization_1',
+      'organization_2',
+    ]);
+    expect(await store.listStale('organization_1', olderThan, 1000)).toEqual([
+      { key: `org/organization_1/${old}`, sha256: old },
+    ]);
+    expect(await store.listStale('organization_1', olderThan, 0)).toEqual([]);
+    expect(await store.listStale('organization_2', olderThan, 1000)).toEqual(
+      [],
+    );
+
+    await store.unlink(`org/organization_1/${old}`);
+    await expect(stat(join(organization, old))).rejects.toThrow();
+    expect((await stat(join(organization, young))).isFile()).toBe(true);
+    await expect(store.unlink('tmp/anything')).rejects.toThrow();
+    await rm(directory, { force: true, recursive: true });
+  });
 });
 
 describe('deleteTemporary', () => {

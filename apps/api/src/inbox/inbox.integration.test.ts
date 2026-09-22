@@ -7,6 +7,7 @@ import {
   ConflictException,
   ForbiddenException,
   PayloadTooLargeException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import {
   bootstrapDatabaseRoles,
@@ -33,7 +34,8 @@ import {
   deleteDocument,
   readDocument,
 } from '../documents/document-repository.js';
-import { inboxItemListQuerySchema } from './contract.js';
+import { DETECTED_TYPES, inboxItemListQuerySchema } from './contract.js';
+import type { PutInboxRoutingTargetRequest } from './contract.js';
 import { InboxService } from './inbox.service.js';
 import {
   SNIFF_PROVIDER,
@@ -44,13 +46,17 @@ import {
 import {
   assignItem,
   createChannel,
+  deleteRoutingTarget,
   discardItem,
   issueCredential,
   listChannels,
   listItems,
+  listRoutingTargets,
+  putRoutingTarget,
   readBlob,
   readChannel,
   readChannelPrincipal,
+  readInboxSettings,
   readItem,
   readProviderInput,
   receiveIntake,
@@ -62,9 +68,11 @@ import {
   undoRoute,
   updateChannel,
   updateHints,
+  updateInboxSettings,
   type InboxRepository,
 } from './inbox-repository.js';
 import * as fixtures from './providers/__fixtures__/index.js';
+import { routingTargetFor } from './routing-targets.js';
 
 const postgresImage =
   'pgvector/pgvector:pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a';
@@ -217,13 +225,17 @@ beforeAll(async () => {
   const repository: InboxRepository = {
     assignItem: (input) => assignItem(apiPool, input),
     createChannel: (input) => createChannel(apiPool, input),
+    deleteRoutingTarget: (input) => deleteRoutingTarget(apiPool, input),
     discardItem: (input) => discardItem(apiPool, input),
     issueCredential: (input) => issueCredential(apiPool, input),
     listChannels: (input) => listChannels(apiPool, input),
     listItems: (input) => listItems(apiPool, input),
+    listRoutingTargets: (input) => listRoutingTargets(apiPool, input),
+    putRoutingTarget: (input) => putRoutingTarget(apiPool, input),
     readBlob: (input) => readBlob(apiPool, input),
     readChannel: (input) => readChannel(apiPool, input),
     readChannelPrincipal: (input) => readChannelPrincipal(apiPool, input),
+    readInboxSettings: (input) => readInboxSettings(apiPool, input),
     readItem: (input) => readItem(apiPool, input),
     readProviderInput: (input) => readProviderInput(apiPool, input),
     receiveIntake: (input) => receiveIntake(apiPool, input),
@@ -235,6 +247,7 @@ beforeAll(async () => {
     undoRoute: (input) => undoRoute(apiPool, input),
     updateChannel: (input) => updateChannel(apiPool, input),
     updateHints: (input) => updateHints(apiPool, input),
+    updateInboxSettings: (input) => updateInboxSettings(apiPool, input),
   };
   service = new InboxService(repository, store, QUOTA, 'intake.invalid', {
     enqueueSplitEmailItem: async () => undefined,
@@ -685,7 +698,11 @@ describe('inbox intake', () => {
       itemId: firstItemId,
       reason: 'not_ours',
     });
-    expect(discarded?.item.status).toBe('discarded');
+    expect(discarded?.item).toMatchObject({
+      decidedByKind: 'user',
+      decidedByUserId: creator.userId,
+      status: 'discarded',
+    });
     expect(discarded?.events.at(-1)).toMatchObject({
       kind: 'discarded',
       reason: 'not_ours',
@@ -720,7 +737,11 @@ describe('inbox intake', () => {
       ...allEntities,
       itemId: firstItemId,
     });
-    expect(restored?.item.status).toBe('needs_review');
+    expect(restored?.item).toMatchObject({
+      decidedByKind: null,
+      decidedByUserId: null,
+      status: 'needs_review',
+    });
     expect(restored?.events.at(-1)?.kind).toBe('restored');
 
     await expect(
@@ -755,5 +776,177 @@ describe('inbox intake', () => {
         inline: false,
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe('routing targets', () => {
+  const target: PutInboxRoutingTargetRequest = {
+    auto: 'above_threshold',
+    autoThreshold: 0.85,
+    defaultAssigneeId: 'user-2',
+    defaultLegalEntityId: null,
+    destination: 'documents',
+    documentKind: 'contract',
+    partnerPolicy: 'match_only',
+    requiredFields: ['documentDate', 'title'],
+  };
+
+  it('merges one organization row over the platform constant and shows it on the item', async () => {
+    const before = await listRoutingTargets(apiPool, creator);
+    expect(before.map((entry) => entry.detectedType)).toEqual([
+      ...DETECTED_TYPES,
+    ]);
+    expect(before.every((entry) => entry.source === 'platform')).toBe(true);
+
+    const saved = await putRoutingTarget(apiPool, {
+      ...creator,
+      body: { ...target, defaultLegalEntityId: ownedEntityId },
+      detectedType: 'pdf',
+    });
+    expect(saved).toEqual({
+      ...target,
+      defaultLegalEntityId: ownedEntityId,
+      detectedType: 'pdf',
+      source: 'organization',
+    });
+
+    const after = await listRoutingTargets(apiPool, creator);
+    expect(after.find((entry) => entry.detectedType === 'pdf')).toEqual(saved);
+    expect(
+      after.filter((entry) => entry.source === 'organization'),
+    ).toHaveLength(1);
+    expect(after.find((entry) => entry.detectedType === 'text')).toEqual(
+      routingTargetFor('text'),
+    );
+
+    // The first item was routed as an agreement, a kind outside the list that resolves to unknown; an unknown row shows on it.
+    const unknownTarget = await putRoutingTarget(apiPool, {
+      ...creator,
+      body: { ...target, destination: 'discard', documentKind: null },
+      detectedType: 'unknown',
+    });
+    const detail = await readItem(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: firstItemId,
+    });
+    expect(detail?.item.detectedType).toBe('agreement');
+    expect(detail?.routingTarget).toEqual(unknownTarget);
+    expect(detail?.routingTarget).toMatchObject({
+      destination: 'discard',
+      detectedType: 'unknown',
+      source: 'organization',
+    });
+    await expect(
+      deleteRoutingTarget(apiPool, { ...creator, detectedType: 'unknown' }),
+    ).resolves.toBe(true);
+    expect(
+      (await listRoutingTargets(apiPool, stranger)).every(
+        (entry) => entry.source === 'platform',
+      ),
+    ).toBe(true);
+
+    // A second PUT replaces the whole row and refreshes who saved it.
+    const replaced = await putRoutingTarget(apiPool, {
+      ...creator,
+      body: {
+        ...target,
+        auto: 'never',
+        autoThreshold: null,
+        requiredFields: [],
+      },
+      detectedType: 'pdf',
+    });
+    expect(replaced).toMatchObject({ auto: 'never', requiredFields: [] });
+    const row = await asTenant(creator, (transaction) =>
+      transaction.query<{ count: number; updated_by: string }>(
+        'select count(*)::int as count, min(updated_by) as updated_by from app.inbox_routing_target',
+      ),
+    );
+    expect(row.rows[0]).toEqual({ count: 1, updated_by: creator.userId });
+  });
+
+  it('refuses a foreign legal entity and a member, and deletes back to the platform default', async () => {
+    const foreignEntityId = await createLegalEntity(stranger, 'Theirs');
+    await expect(
+      putRoutingTarget(apiPool, {
+        ...creator,
+        body: { ...target, defaultLegalEntityId: foreignEntityId },
+        detectedType: 'text',
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      putRoutingTarget(apiPool, {
+        ...reader,
+        body: target,
+        detectedType: 'text',
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      deleteRoutingTarget(apiPool, { ...reader, detectedType: 'pdf' }),
+    ).resolves.toBe(false);
+
+    await expect(
+      deleteRoutingTarget(apiPool, { ...creator, detectedType: 'pdf' }),
+    ).resolves.toBe(true);
+    await expect(
+      deleteRoutingTarget(apiPool, { ...creator, detectedType: 'pdf' }),
+    ).resolves.toBe(false);
+    expect(
+      (await listRoutingTargets(apiPool, creator)).find(
+        (entry) => entry.detectedType === 'pdf',
+      ),
+    ).toEqual(routingTargetFor('pdf'));
+  });
+});
+
+describe('inbox settings', () => {
+  it('reads the platform value until an owner tightens it', async () => {
+    const settings = await service.readSettings(creator);
+    expect(settings).toMatchObject({
+      blobQuotaBytes: null,
+      platformQuotaBytes: QUOTA,
+    });
+    expect(settings.usedBytes).toBeGreaterThan(0);
+    expect(settings.usedBytes).toBeLessThan(QUOTA);
+
+    // A member never writes the row; the definer-free policy refuses it and the caller sees null.
+    await expect(
+      service.updateSettings({ ...reader, body: { blobQuotaBytes: 1 } }),
+    ).resolves.toBeNull();
+    await expect(
+      service.updateSettings({
+        ...creator,
+        body: { blobQuotaBytes: QUOTA + 1 },
+      }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('refuses an upload past the tightened quota while the platform cap alone admits it', async () => {
+    const used = (await service.readSettings(creator)).usedBytes;
+    const bytes = fixtures.padded(fixtures.PDF_MAGIC, 2_000);
+    expect(used + bytes.length).toBeLessThan(QUOTA);
+
+    const tightened = await service.updateSettings({
+      ...creator,
+      body: { blobQuotaBytes: used + bytes.length - 1 },
+    });
+    expect(tightened?.blobQuotaBytes).toBe(used + bytes.length - 1);
+    await expect(
+      upload(creator, bytes, 'tightened.pdf'),
+    ).rejects.toBeInstanceOf(PayloadTooLargeException);
+    expect(await readdir(store.temporaryDirectory())).toEqual([]);
+
+    // Reset to the platform value and the same bytes are admitted.
+    const reset = await service.updateSettings({
+      ...creator,
+      body: { blobQuotaBytes: null },
+    });
+    expect(reset?.blobQuotaBytes).toBeNull();
+    const admitted = await upload(creator, bytes, 'admitted.pdf');
+    expect(admitted.item.status).toBe('needs_review');
+    expect((await service.readSettings(creator)).usedBytes).toBe(
+      used + bytes.length,
+    );
   });
 });

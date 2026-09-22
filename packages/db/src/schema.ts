@@ -309,9 +309,14 @@ export const inboxUnprocessableReasons = [
 export type InboxUnprocessableReason =
   (typeof inboxUnprocessableReasons)[number];
 
+// The reaper's reason: a processing item whose handler died before its last attempt finished.
+export const inboxMaintenanceReasons = ['stalled'] as const;
+export type InboxMaintenanceReason = (typeof inboxMaintenanceReasons)[number];
+
 export const inboxEventReasons = [
   ...inboxDiscardReasons,
   ...inboxUnprocessableReasons,
+  ...inboxMaintenanceReasons,
 ] as const;
 export type InboxEventReason = (typeof inboxEventReasons)[number];
 
@@ -660,6 +665,127 @@ export const documentFiles = appSchema.table(
   ],
 );
 
+export const inboxRoutingDestinations = [
+  'documents',
+  'datasets',
+  'discard',
+] as const;
+export type InboxRoutingDestination = (typeof inboxRoutingDestinations)[number];
+
+export const inboxRoutingPartnerPolicies = ['match_only'] as const;
+export type InboxRoutingPartnerPolicy =
+  (typeof inboxRoutingPartnerPolicies)[number];
+
+export const inboxRoutingAutoPolicies = [
+  'never',
+  'above_threshold',
+  'always',
+] as const;
+export type InboxRoutingAutoPolicy = (typeof inboxRoutingAutoPolicies)[number];
+
+// An organization override of the platform routing default for one detected type; absent means the platform default.
+export const inboxRoutingTargets = appSchema.table(
+  'inbox_routing_target',
+  {
+    ...organizationSlot,
+    auto: text('auto', { enum: inboxRoutingAutoPolicies })
+      .notNull()
+      .default('never'),
+    autoThreshold: numeric('auto_threshold', { precision: 3, scale: 2 }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdBy: text('created_by')
+      .notNull()
+      .default(sql`current_setting('bap.user_id', true)`),
+    defaultAssigneeId: text('default_assignee_id'),
+    defaultLegalEntityId: uuid('default_legal_entity_id'),
+    destination: text('destination', {
+      enum: inboxRoutingDestinations,
+    }).notNull(),
+    detectedType: text('detected_type').notNull(),
+    documentKind: text('document_kind'),
+    id: uuid('id').primaryKey().defaultRandom(),
+    partnerPolicy: text('partner_policy', {
+      enum: inboxRoutingPartnerPolicies,
+    })
+      .notNull()
+      .default('match_only'),
+    requiredFields: text('required_fields').array().notNull().default([]),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedBy: text('updated_by')
+      .notNull()
+      .default(sql`current_setting('bap.user_id', true)`),
+  },
+  (table) => [
+    check(
+      'inbox_routing_target_detected_type_check',
+      sql`${table.detectedType} ~ '^[a-z][a-z0-9_]{0,63}$'`,
+    ),
+    check(
+      'inbox_routing_target_destination_check',
+      sql`${table.destination} in (${sqlList(inboxRoutingDestinations)})`,
+    ),
+    check(
+      'inbox_routing_target_document_kind_check',
+      sql`(${table.destination} = 'documents') = (${table.documentKind} is not null)`,
+    ),
+    check(
+      'inbox_routing_target_partner_policy_check',
+      sql`${table.partnerPolicy} in (${sqlList(inboxRoutingPartnerPolicies)})`,
+    ),
+    check(
+      'inbox_routing_target_auto_check',
+      sql`${table.auto} in (${sqlList(inboxRoutingAutoPolicies)})`,
+    ),
+    check(
+      'inbox_routing_target_auto_threshold_check',
+      sql`${table.autoThreshold} is null or (${table.autoThreshold} >= 0 and ${table.autoThreshold} <= 1)`,
+    ),
+    check(
+      'inbox_routing_target_auto_threshold_required_check',
+      sql`${table.auto} <> 'above_threshold' or ${table.autoThreshold} is not null`,
+    ),
+    check(
+      'inbox_routing_target_required_fields_check',
+      sql`array_position(${table.requiredFields}, null) is null and cardinality(${table.requiredFields}) <= 32`,
+    ),
+    unique('inbox_routing_target_organization_detected_type_key').on(
+      table.organizationId,
+      table.detectedType,
+    ),
+    index('inbox_routing_target_default_legal_entity_idx')
+      .on(table.defaultLegalEntityId)
+      .where(sql`${table.defaultLegalEntityId} is not null`),
+  ],
+);
+
+// One optional row per organization; null means the platform value, which is also the cap.
+export const organizationInboxSettings = appSchema.table(
+  'organization_inbox_setting',
+  {
+    blobQuotaBytes: bigint('blob_quota_bytes', { mode: 'number' }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdBy: text('created_by')
+      .notNull()
+      .default(sql`current_setting('bap.user_id', true)`),
+    organizationId: text('organization_id').primaryKey(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      'organization_inbox_setting_blob_quota_bytes_check',
+      sql`${table.blobQuotaBytes} is null or ${table.blobQuotaBytes} > 0`,
+    ),
+  ],
+);
+
 export type Blob = typeof blobs.$inferSelect;
 export type NewBlob = typeof blobs.$inferInsert;
 export type InboxChannel = typeof inboxChannels.$inferSelect;
@@ -674,6 +800,12 @@ export type InboxEvent = typeof inboxEvents.$inferSelect;
 export type NewInboxEvent = typeof inboxEvents.$inferInsert;
 export type DocumentFile = typeof documentFiles.$inferSelect;
 export type NewDocumentFile = typeof documentFiles.$inferInsert;
+export type InboxRoutingTarget = typeof inboxRoutingTargets.$inferSelect;
+export type NewInboxRoutingTarget = typeof inboxRoutingTargets.$inferInsert;
+export type OrganizationInboxSetting =
+  typeof organizationInboxSettings.$inferSelect;
+export type NewOrganizationInboxSetting =
+  typeof organizationInboxSettings.$inferInsert;
 
 export const schema = {
   accounts,
@@ -684,9 +816,11 @@ export const schema = {
   inboxItemExtractions,
   inboxItemFiles,
   inboxItems,
+  inboxRoutingTargets,
   invitations,
   jwks,
   members,
+  organizationInboxSettings,
   organizations,
   rateLimits,
   sessions,
