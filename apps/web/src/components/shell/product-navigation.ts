@@ -1,4 +1,4 @@
-import { DataSet, Document, UserAvatar } from '@bap/design-system/icons';
+import { DataSet, Document, Email, UserAvatar } from '@bap/design-system/icons';
 import type { ComponentType } from 'react';
 
 // Carbon icon components accept a Carbon artboard size and nothing the rail sets.
@@ -19,6 +19,7 @@ export type WorkspaceSectionItem = Readonly<{
 // The rail's whole-app destinations, all real routes, rendered straight from this array.
 export const railDestinations: readonly RailDestination[] = [
   { href: '/datasets', icon: DataSet, label: 'Datasets', route: 'datasets' },
+  { href: '/inbox', icon: Email, label: 'Inbox', route: 'inbox' },
   {
     href: '/documents',
     icon: Document,

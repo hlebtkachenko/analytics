@@ -43,6 +43,7 @@ deliberately deferred.
 - [Platform batteries plan](planning/platform-batteries.md)
 - [Tenant data foundation plan](planning/tenant-data-foundation.md)
 - [MCP server plan](planning/mcp-server.md)
+- [Inbox plan](planning/inbox.md)
 - [Tooling decisions](tooling/tool-decisions.md)
 - [Carbon patterns](design-system/patterns.md)
 - [Carbon accessibility](design-system/accessibility.md)
@@ -63,6 +64,9 @@ deliberately deferred.
 - [ADR 0011: two-level tenancy](adr/0011-two-level-tenancy.md)
 - [ADR 0012: documents register and derived economic events](adr/0012-documents-register-and-derived-events.md)
 - [ADR 0013: invoice advances, rounding and line periods](adr/0013-invoice-advances-rounding-and-line-periods.md)
+- [ADR 0014: durable blob storage](adr/0014-durable-blob-storage.md)
+- [ADR 0015: inbox intake model](adr/0015-inbox-intake-model.md)
+- [ADR 0016: channel principal](adr/0016-channel-principal.md)
 
 Documentation must stay synchronized with commands, runtime behavior, and
 architecture decisions in the same change.

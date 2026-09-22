@@ -528,7 +528,7 @@ describe('PostgreSQL 18 isolation', () => {
         conname: 'organization_slug_reserved_check',
         convalidated: true,
         definition:
-          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text, 'organizations'::text, 'documents'::text, 'members'::text, 'entities'::text, 'settings'::text, 'assistant'::text, 'audit'::text, 'workspaces'::text, 'notifications'::text])))",
+          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text, 'organizations'::text, 'documents'::text, 'members'::text, 'entities'::text, 'settings'::text, 'assistant'::text, 'audit'::text, 'workspaces'::text, 'notifications'::text, 'inbox'::text])))",
         table_name: 'organization',
       },
     ]);
@@ -1318,6 +1318,17 @@ describe('PostgreSQL 18 isolation', () => {
     });
   });
 
+  it('indexes the sign-up and intake edge rate-limit namespaces by last request', async () => {
+    const indexes = await rootPool.query<{ indexname: string }>(
+      "select indexname from pg_indexes where schemaname = 'auth' and tablename = 'rate_limit'",
+    );
+    const indexNames = indexes.rows.map((row) => row.indexname);
+    expect(indexNames).toContain(
+      'rate_limit_public_signup_edge_last_request_idx',
+    );
+    expect(indexNames).toContain('rate_limit_intake_edge_last_request_idx');
+  });
+
   it('executes inherited auth-table DML as bap_auth on a newly created disposable table', async () => {
     await asOwner((client) =>
       client.query(
@@ -1656,6 +1667,16 @@ describe('PostgreSQL 18 isolation', () => {
       {
         column_name: 'created_by',
         privilege_type: 'SELECT',
+        table_name: 'blob',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'blob',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
         table_name: 'dataset',
       },
       {
@@ -1676,12 +1697,82 @@ describe('PostgreSQL 18 isolation', () => {
       {
         column_name: 'created_by',
         privilege_type: 'SELECT',
+        table_name: 'document_file',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'document_file',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
         table_name: 'document_link',
       },
       {
         column_name: 'created_by',
         privilege_type: 'UPDATE',
         table_name: 'document_link',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_channel',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_channel',
+      },
+      {
+        column_name: 'actor_user_id',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_event',
+      },
+      {
+        column_name: 'actor_user_id',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_event',
+      },
+      {
+        column_name: 'assignee_id',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_item',
+      },
+      {
+        column_name: 'assignee_id',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_item',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_item',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_item',
+      },
+      {
+        column_name: 'decided_by_user_id',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_item',
+      },
+      {
+        column_name: 'decided_by_user_id',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_item',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_item_extraction',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_item_extraction',
       },
       {
         column_name: 'created_by',

@@ -44,6 +44,7 @@ const reviewedImports = {
   'components/shell/product-navigation.ts': [
     'DataSet',
     'Document',
+    'Email',
     'UserAvatar',
   ],
   'components/shell/product-shell.tsx': [

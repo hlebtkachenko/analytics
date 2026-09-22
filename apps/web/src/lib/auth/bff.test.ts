@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   deleteDocumentLink,
+  deleteInboxChannelCredential,
   deleteLegalEntity,
   getDocument,
   getDocumentAnalytics,
@@ -9,14 +10,26 @@ import {
   getDatasetExport,
   getDatasetRows,
   getDatasets,
+  getInboxBlobDownload,
+  getInboxBlobInline,
+  getInboxChannel,
+  getInboxChannels,
+  getInboxItem,
+  getInboxItems,
   getLegalEntities,
   getMemberEntityScope,
   getMemberEntityScopes,
   getOrganizationAccess,
+  patchInboxChannel,
   patchLegalEntity,
   patchPartner,
   postDatasetUpload,
   postDocument,
+  postInboxChannel,
+  postInboxChannelCredential,
+  postInboxItemDiscard,
+  postInboxItemRouteDocument,
+  postInboxUpload,
   postLegalEntity,
   putMemberEntityScope,
 } from './bff.js';
@@ -1573,5 +1586,704 @@ describe('parsedIdentifier', () => {
     expect(partner.status).toBe(404);
     expect(await partner.json()).toEqual({ error: 'partner_not_found' });
     expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+});
+
+const INBOX_ITEM_ID = '00000000-0000-4000-8000-000000000050';
+const BLOB_ID = '00000000-0000-4000-8000-000000000060';
+
+const inboxItem = {
+  assigneeId: null,
+  channelId: null,
+  channelKind: 'upload',
+  confidence: 0.9,
+  createdAt: '2026-09-16T08:00:00.000Z',
+  datasetId: null,
+  decidedByKind: null,
+  decidedByUserId: null,
+  detectedType: 'pdf',
+  documentId: null,
+  duplicateOfItemId: null,
+  hintKind: null,
+  hintLegalEntityId: null,
+  hintLinkDocumentId: null,
+  hintPartnerId: null,
+  hintText: null,
+  id: INBOX_ITEM_ID,
+  legalEntityId: null,
+  origin: null,
+  partnerId: null,
+  payloadKind: 'file',
+  receivedAt: '2026-09-16T08:00:00.000Z',
+  routedAt: null,
+  snoozedUntil: null,
+  status: 'needs_review',
+  updatedAt: '2026-09-16T08:00:00.000Z',
+};
+
+const inboxFile = {
+  blobId: BLOB_ID,
+  byteSize: 3,
+  mediaType: 'application/pdf',
+  originalFilename: 'placeholder.pdf',
+  position: 1,
+  scanStatus: 'clean',
+  sha256: 'a'.repeat(64),
+};
+
+const inboxDetail = {
+  events: [],
+  extraction: null,
+  files: [inboxFile],
+  item: inboxItem,
+};
+
+const inboxRequest = (path: string, init?: RequestInit) =>
+  new Request(
+    `https://bap.invalid/api/bff/application/organizations/org_1/inbox/${path}`,
+    {
+      ...init,
+      headers: {
+        ...(init?.body === undefined
+          ? {}
+          : { 'content-type': 'application/json' }),
+        'x-bap-request-id': '123e4567-e89b-42d3-a456-426614174000',
+      },
+    },
+  );
+
+describe('postInboxUpload', () => {
+  it('streams the multipart body to the fixed inbox upload target', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/uploads',
+      );
+      expect(init?.method).toBe('POST');
+      expect((init as { duplex?: string }).duplex).toBe('half');
+      expect(init?.body).toBeInstanceOf(ReadableStream);
+      return Response.json(
+        { duplicateOfItemId: null, files: [inboxFile], item: inboxItem },
+        { status: 201 },
+      );
+    });
+
+    const response = await postInboxUpload(
+      auth,
+      new Request(
+        'https://bap.invalid/api/bff/application/organizations/org_1/inbox/uploads',
+        {
+          body: 'part',
+          headers: { 'content-type': 'multipart/form-data; boundary=b' },
+          method: 'POST',
+        },
+      ),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(201);
+    expect((await response.json()).item.id).toBe(INBOX_ITEM_ID);
+  });
+
+  it('passes a 413 refusal through and refuses a non-multipart body itself', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(
+      async () => new Response(null, { status: 413 }),
+    );
+
+    const refused = await postInboxUpload(
+      auth,
+      new Request(
+        'https://bap.invalid/api/bff/application/organizations/org_1/inbox/uploads',
+        {
+          body: 'part',
+          headers: { 'content-type': 'multipart/form-data; boundary=b' },
+          method: 'POST',
+        },
+      ),
+      'org_1',
+      fetchImplementation,
+    );
+    const invalid = await postInboxUpload(
+      auth,
+      inboxRequest('uploads', { body: '{}', method: 'POST' }),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(refused.status).toBe(413);
+    expect(invalid.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('getInboxItems', () => {
+  it('rebuilds the list query from parsed values with the contract defaults', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/items?status=received%2Cfailed&page=1&pageSize=25',
+      );
+      return Response.json({
+        items: [{ ...inboxItem, fileCount: 1, primaryFilename: 'a.pdf' }],
+        page: 1,
+        pageSize: 25,
+        total: 1,
+      });
+    });
+
+    const response = await getInboxItems(
+      auth,
+      inboxRequest('items?status=received,failed'),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).items).toHaveLength(1);
+  });
+
+  it('refuses an unknown status and an oversized page without an outbound call', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>();
+
+    const unknown = await getInboxItems(
+      auth,
+      inboxRequest('items?status=archived'),
+      'org_1',
+      fetchImplementation,
+    );
+    const oversized = await getInboxItems(
+      auth,
+      inboxRequest('items?pageSize=101'),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(unknown.status).toBe(400);
+    expect(oversized.status).toBe(400);
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+});
+
+describe('inbox item reads and writes', () => {
+  it('reads one item and answers 404 for a malformed identifier', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe(
+        `http://api:3001/v1/organizations/org_1/inbox/items/${INBOX_ITEM_ID}`,
+      );
+      return Response.json(inboxDetail);
+    });
+
+    const response = await getInboxItem(
+      auth,
+      inboxRequest(`items/${INBOX_ITEM_ID}`),
+      'org_1',
+      INBOX_ITEM_ID,
+      fetchImplementation,
+    );
+    const malformed = await getInboxItem(
+      auth,
+      inboxRequest('items/not-an-id'),
+      'org_1',
+      'not-an-id',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(200);
+    expect(malformed.status).toBe(404);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes the validated draft with the item blobs and refuses a bad body', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        `http://api:3001/v1/organizations/org_1/inbox/items/${INBOX_ITEM_ID}/route/document`,
+      );
+      expect(init?.method).toBe('POST');
+      expect(JSON.parse(String(init?.body))).toEqual({
+        document: {
+          currencyCode: 'CZK',
+          documentDate: '2026-09-01',
+          kind: 'contract',
+          legalEntityId: LEGAL_ENTITY_ID,
+          title: 'Placeholder contract',
+        },
+        fileBlobIds: [BLOB_ID],
+      });
+      return Response.json({
+        ...inboxDetail,
+        item: { ...inboxItem, documentId: DATASET_ID, status: 'routed' },
+      });
+    });
+
+    const routed = await postInboxItemRouteDocument(
+      auth,
+      inboxRequest(`items/${INBOX_ITEM_ID}/route/document`, {
+        body: JSON.stringify({
+          document: {
+            documentDate: '2026-09-01',
+            kind: 'contract',
+            legalEntityId: LEGAL_ENTITY_ID,
+            title: 'Placeholder contract',
+          },
+          fileBlobIds: [BLOB_ID],
+        }),
+        method: 'POST',
+      }),
+      'org_1',
+      INBOX_ITEM_ID,
+      fetchImplementation,
+    );
+    const refused = await postInboxItemRouteDocument(
+      auth,
+      inboxRequest(`items/${INBOX_ITEM_ID}/route/document`, {
+        body: JSON.stringify({ document: {}, fileBlobIds: [] }),
+        method: 'POST',
+      }),
+      'org_1',
+      INBOX_ITEM_ID,
+      fetchImplementation,
+    );
+
+    expect(routed.status).toBe(200);
+    expect((await routed.json()).item.status).toBe('routed');
+    expect(refused.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+
+  it('discards with a reason from the closed list only', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        `http://api:3001/v1/organizations/org_1/inbox/items/${INBOX_ITEM_ID}/discard`,
+      );
+      expect(JSON.parse(String(init?.body))).toEqual({ reason: 'spam' });
+      return Response.json({
+        ...inboxDetail,
+        item: { ...inboxItem, status: 'discarded' },
+      });
+    });
+
+    const discarded = await postInboxItemDiscard(
+      auth,
+      inboxRequest(`items/${INBOX_ITEM_ID}/discard`, {
+        body: JSON.stringify({ reason: 'spam' }),
+        method: 'POST',
+      }),
+      'org_1',
+      INBOX_ITEM_ID,
+      fetchImplementation,
+    );
+    const refused = await postInboxItemDiscard(
+      auth,
+      inboxRequest(`items/${INBOX_ITEM_ID}/discard`, {
+        body: JSON.stringify({ reason: 'boring' }),
+        method: 'POST',
+      }),
+      'org_1',
+      INBOX_ITEM_ID,
+      fetchImplementation,
+    );
+
+    expect(discarded.status).toBe(200);
+    expect(refused.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('inbox blob routes', () => {
+  it('streams a download under a disposition minted from the sanitised filename', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe(
+        `http://api:3001/v1/organizations/org_1/inbox/blobs/${BLOB_ID}/download`,
+      );
+      return new Response('%PDF', {
+        headers: {
+          // The quote, the separator and the non-ASCII rune must never reach the browser.
+          'content-disposition':
+            'attachment; filename="invéoice; ../steered.pdf"',
+          'content-type': 'application/pdf',
+          'x-upstream': 'leak',
+        },
+      });
+    });
+
+    const response = await getInboxBlobDownload(
+      auth,
+      inboxRequest(`blobs/${BLOB_ID}/download`),
+      'org_1',
+      BLOB_ID,
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-disposition')).toBe(
+      'attachment; filename="invoice ..steered.pdf"',
+    );
+    expect(response.headers.get('content-type')).toBe('application/pdf');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(response.headers.get('content-security-policy')).toBeNull();
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(response.headers.get('x-upstream')).toBeNull();
+    expect(response.body).toBeInstanceOf(ReadableStream);
+    expect(await response.text()).toBe('%PDF');
+  });
+
+  it('renders inline under a sandbox policy and falls back to the blob id as a name', async () => {
+    const response = await getInboxBlobInline(
+      auth,
+      inboxRequest(`blobs/${BLOB_ID}/inline`),
+      'org_1',
+      BLOB_ID,
+      async (input) => {
+        expect(String(input)).toBe(
+          `http://api:3001/v1/organizations/org_1/inbox/blobs/${BLOB_ID}/inline`,
+        );
+        return new Response('png', {
+          headers: { 'content-type': 'image/png' },
+        });
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-disposition')).toBe(
+      `inline; filename="blob-${BLOB_ID}"`,
+    );
+    expect(response.headers.get('content-security-policy')).toBe('sandbox');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(await response.text()).toBe('png');
+  });
+
+  it('renders a PDF inline without the sandbox policy, since a sandboxed viewer renders blank', async () => {
+    const response = await getInboxBlobInline(
+      auth,
+      inboxRequest(`blobs/${BLOB_ID}/inline`),
+      'org_1',
+      BLOB_ID,
+      async () =>
+        new Response('%PDF', {
+          headers: { 'content-type': 'application/pdf' },
+        }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/pdf');
+    expect(response.headers.get('content-disposition')).toBe(
+      `inline; filename="blob-${BLOB_ID}"`,
+    );
+    expect(response.headers.get('content-security-policy')).toBeNull();
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
+  it('refuses an inline type outside the closed list, a bad id, and passes a 415 through', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>();
+    const svg = await getInboxBlobInline(
+      auth,
+      inboxRequest(`blobs/${BLOB_ID}/inline`),
+      'org_1',
+      BLOB_ID,
+      async () =>
+        new Response('<svg/>', {
+          headers: { 'content-type': 'image/svg+xml' },
+        }),
+    );
+    const malformed = await getInboxBlobInline(
+      auth,
+      inboxRequest('blobs/not-an-id/inline'),
+      'org_1',
+      'not-an-id',
+      fetchImplementation,
+    );
+    const unsupported = await getInboxBlobInline(
+      auth,
+      inboxRequest(`blobs/${BLOB_ID}/inline`),
+      'org_1',
+      BLOB_ID,
+      async () => new Response(null, { status: 415 }),
+    );
+
+    expect(svg.status).toBe(502);
+    expect(malformed.status).toBe(404);
+    expect(fetchImplementation).not.toHaveBeenCalled();
+    expect(unsupported.status).toBe(415);
+    expect(await unsupported.json()).toEqual({ error: 'blob_rejected' });
+  });
+
+  it('passes the quarantine 409 through as blob_quarantined on both blob routes', async () => {
+    const quarantined = async () =>
+      new Response('{"code":"blob_quarantined"}', {
+        headers: { 'x-upstream': 'leak' },
+        status: 409,
+      });
+    const download = await getInboxBlobDownload(
+      auth,
+      inboxRequest(`blobs/${BLOB_ID}/download`),
+      'org_1',
+      BLOB_ID,
+      quarantined,
+    );
+    const inline = await getInboxBlobInline(
+      auth,
+      inboxRequest(`blobs/${BLOB_ID}/inline`),
+      'org_1',
+      BLOB_ID,
+      quarantined,
+    );
+
+    for (const response of [download, inline]) {
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: 'blob_quarantined' });
+      expect(response.headers.get('x-upstream')).toBeNull();
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+    }
+  });
+});
+
+const CHANNEL_ID = '00000000-0000-4000-8000-000000000060';
+const CREDENTIAL_ID = '00000000-0000-4000-8000-000000000061';
+
+const inboxChannel = {
+  createdAt: '2026-09-17T08:00:00.000Z',
+  credentials: [
+    {
+      createdAt: '2026-09-17T08:00:00.000Z',
+      credentialId: CREDENTIAL_ID,
+      displayPrefix: 'AAAAAAAA',
+      lastUsedAt: null,
+    },
+  ],
+  emailAddress: null,
+  enabled: true,
+  hintKind: 'invoice',
+  id: CHANNEL_ID,
+  itemCount: 0,
+  kind: 'api',
+  legalEntityId: null,
+  name: 'Placeholder push',
+  updatedAt: '2026-09-17T08:00:00.000Z',
+};
+
+describe('inbox channels', () => {
+  it('lists the channels and reads one, answering 404 for a malformed identifier', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/inbox/channels')) {
+        return Response.json({ channels: [inboxChannel] });
+      }
+      expect(url).toBe(
+        `http://api:3001/v1/organizations/org_1/inbox/channels/${CHANNEL_ID}`,
+      );
+      return Response.json(inboxChannel);
+    });
+
+    const list = await getInboxChannels(
+      auth,
+      inboxRequest('channels'),
+      'org_1',
+      fetchImplementation,
+    );
+    const one = await getInboxChannel(
+      auth,
+      inboxRequest(`channels/${CHANNEL_ID}`),
+      'org_1',
+      CHANNEL_ID,
+      fetchImplementation,
+    );
+    const malformed = await getInboxChannel(
+      auth,
+      inboxRequest('channels/not-an-id'),
+      'org_1',
+      'not-an-id',
+      fetchImplementation,
+    );
+
+    expect(list.status).toBe(200);
+    expect((await list.json()).channels[0].id).toBe(CHANNEL_ID);
+    expect(one.status).toBe(200);
+    expect(malformed.status).toBe(404);
+    expect(await malformed.json()).toEqual({
+      error: 'inbox_channel_not_found',
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it('creates an api or email channel from a validated body and refuses another kind', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/channels',
+      );
+      expect(init?.method).toBe('POST');
+      const body = JSON.parse(String(init?.body));
+      expect(['api', 'email']).toContain(body.kind);
+      return Response.json(
+        {
+          ...inboxChannel,
+          ...body,
+          emailAddress:
+            body.kind === 'email'
+              ? `in-${'b'.repeat(32)}@in.bap.localhost`
+              : null,
+        },
+        { status: 201 },
+      );
+    });
+
+    const created = await postInboxChannel(
+      auth,
+      inboxRequest('channels', {
+        body: JSON.stringify({ kind: 'api', name: 'Placeholder push' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      }),
+      'org_1',
+      fetchImplementation,
+    );
+    const mailbox = await postInboxChannel(
+      auth,
+      inboxRequest('channels', {
+        body: JSON.stringify({ kind: 'email', name: 'Placeholder mail' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      }),
+      'org_1',
+      fetchImplementation,
+    );
+    const refused = await postInboxChannel(
+      auth,
+      inboxRequest('channels', {
+        body: JSON.stringify({ kind: 'upload', name: 'Placeholder drop' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      }),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(created.status).toBe(201);
+    expect(mailbox.status).toBe(201);
+    expect((await mailbox.json()).emailAddress).toMatch(/^in-[0-9a-f]{32}@/);
+    expect(refused.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it('patches a channel, maps a 403 to the rejection code and refuses a delete without disable', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        `http://api:3001/v1/organizations/org_1/inbox/channels/${CHANNEL_ID}`,
+      );
+      expect(init?.method).toBe('PATCH');
+      const body = JSON.parse(String(init?.body));
+      if (body.enabled === false && body.deleted === true) {
+        return Response.json({ ...inboxChannel, enabled: false });
+      }
+      return new Response(null, { status: 403 });
+    });
+
+    const deleted = await patchInboxChannel(
+      auth,
+      inboxRequest(`channels/${CHANNEL_ID}`, {
+        body: JSON.stringify({ deleted: true, enabled: false }),
+        headers: { 'content-type': 'application/json' },
+        method: 'PATCH',
+      }),
+      'org_1',
+      CHANNEL_ID,
+      fetchImplementation,
+    );
+    const forbidden = await patchInboxChannel(
+      auth,
+      inboxRequest(`channels/${CHANNEL_ID}`, {
+        body: JSON.stringify({ enabled: false }),
+        headers: { 'content-type': 'application/json' },
+        method: 'PATCH',
+      }),
+      'org_1',
+      CHANNEL_ID,
+      fetchImplementation,
+    );
+    const invalid = await patchInboxChannel(
+      auth,
+      inboxRequest(`channels/${CHANNEL_ID}`, {
+        body: JSON.stringify({ deleted: true }),
+        headers: { 'content-type': 'application/json' },
+        method: 'PATCH',
+      }),
+      'org_1',
+      CHANNEL_ID,
+      fetchImplementation,
+    );
+
+    expect(deleted.status).toBe(200);
+    expect((await deleted.json()).enabled).toBe(false);
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toEqual({ error: 'inbox_channel_rejected' });
+    expect(invalid.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it('issues a credential once, passes a 409 through and revokes with no content', async () => {
+    const issued = {
+      credentialId: CREDENTIAL_ID,
+      displayPrefix: 'AAAAAAAA',
+      secret: `bap_intake_${'A'.repeat(43)}`,
+    };
+    let issues = 0;
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (init?.method === 'DELETE') {
+        expect(url).toBe(
+          `http://api:3001/v1/organizations/org_1/inbox/channels/${CHANNEL_ID}/credentials/${CREDENTIAL_ID}`,
+        );
+        return new Response(null, { status: 204 });
+      }
+      expect(url).toBe(
+        `http://api:3001/v1/organizations/org_1/inbox/channels/${CHANNEL_ID}/credentials`,
+      );
+      issues += 1;
+      return issues === 1
+        ? Response.json(issued, { status: 201 })
+        : new Response(null, { status: 409 });
+    });
+
+    const first = await postInboxChannelCredential(
+      auth,
+      inboxRequest(`channels/${CHANNEL_ID}/credentials`, { method: 'POST' }),
+      'org_1',
+      CHANNEL_ID,
+      fetchImplementation,
+    );
+    const third = await postInboxChannelCredential(
+      auth,
+      inboxRequest(`channels/${CHANNEL_ID}/credentials`, { method: 'POST' }),
+      'org_1',
+      CHANNEL_ID,
+      fetchImplementation,
+    );
+    const revoked = await deleteInboxChannelCredential(
+      auth,
+      inboxRequest(`channels/${CHANNEL_ID}/credentials/${CREDENTIAL_ID}`, {
+        method: 'DELETE',
+      }),
+      'org_1',
+      CHANNEL_ID,
+      CREDENTIAL_ID,
+      fetchImplementation,
+    );
+    const malformed = await deleteInboxChannelCredential(
+      auth,
+      inboxRequest(`channels/${CHANNEL_ID}/credentials/nope`, {
+        method: 'DELETE',
+      }),
+      'org_1',
+      CHANNEL_ID,
+      'nope',
+      fetchImplementation,
+    );
+
+    expect(first.status).toBe(201);
+    expect(await first.json()).toEqual(issued);
+    expect(third.status).toBe(409);
+    expect(await third.json()).toEqual({ error: 'inbox_credential_rejected' });
+    expect(revoked.status).toBe(204);
+    expect(revoked.headers.get('cache-control')).toBe('private, no-store');
+    expect(malformed.status).toBe(404);
+    expect(fetchImplementation).toHaveBeenCalledTimes(3);
   });
 });

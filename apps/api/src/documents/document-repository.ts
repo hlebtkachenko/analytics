@@ -24,6 +24,7 @@ import { entityFilter, isUniqueViolation, likePattern } from './sql.js';
 import type {
   CreateDocumentRequest,
   DirectiveAccount,
+  DocumentSource,
   DocumentAnalyticsResponse,
   DocumentDetail,
   DocumentKind,
@@ -47,6 +48,8 @@ export interface ReadDocumentInput extends EntityScopeSelector {
 
 export interface CreateDocumentInput extends EntityScopeSelector {
   body: CreateDocumentRequest;
+  // Internal to the inbox route: the item the document was routed from, never part of the public create body.
+  inbox?: { itemId: string; source: DocumentSource };
 }
 
 export interface UpdateDocumentInput extends ReadDocumentInput {
@@ -661,122 +664,133 @@ export async function createDocument(
   pool: DatabasePool,
   input: CreateDocumentInput,
 ): Promise<DocumentDetail | null> {
+  return runInTenantContext(pool, input, (transaction) =>
+    createDocumentInTransaction(transaction, input),
+  );
+}
+
+// The inbox routes a document inside its own tenant transaction, so the create body of work is callable on one.
+export async function createDocumentInTransaction(
+  transaction: PoolClient,
+  input: CreateDocumentInput,
+): Promise<DocumentDetail | null> {
   const { body } = input;
 
-  return runInTenantContext(pool, input, async (transaction) => {
-    const entity = await transaction.query(
-      `select 1
+  const entity = await transaction.query(
+    `select 1
          from app.legal_entity
         where id = $1 and ($2::uuid[] is null or id = any($2::uuid[]))`,
-      [body.legalEntityId, entityFilter(input.legalEntityIds)],
+    [body.legalEntityId, entityFilter(input.legalEntityIds)],
+  );
+
+  if (entity.rowCount === 0) {
+    return null;
+  }
+
+  if (body.partnerId !== undefined) {
+    const partner = await transaction.query(
+      'select 1 from app.partner where id = $1',
+      [body.partnerId],
     );
 
-    if (entity.rowCount === 0) {
+    if (partner.rowCount === 0) {
       return null;
     }
+  }
 
-    if (body.partnerId !== undefined) {
-      const partner = await transaction.query(
-        'select 1 from app.partner where id = $1',
-        [body.partnerId],
-      );
+  let baseTotal = DECIMAL_ZERO;
+  let vatTotal = DECIMAL_ZERO;
+  let advanceTotal = DECIMAL_ZERO;
 
-      if (partner.rowCount === 0) {
-        return null;
-      }
+  for (const line of body.invoice?.lines ?? []) {
+    const base = parseDecimal(line.baseAmount);
+    const vat = parseDecimal(line.vatAmount);
+
+    // The three totals are the supply value of the invoice, so a deduction line feeds the advance total instead.
+    if (line.lineKind === 'advance_deduction') {
+      advanceTotal = addDecimal(advanceTotal, addDecimal(base, vat));
+      continue;
     }
 
-    let baseTotal = DECIMAL_ZERO;
-    let vatTotal = DECIMAL_ZERO;
-    let advanceTotal = DECIMAL_ZERO;
+    baseTotal = addDecimal(baseTotal, base);
+    vatTotal = addDecimal(vatTotal, vat);
+  }
 
-    for (const line of body.invoice?.lines ?? []) {
-      const base = parseDecimal(line.baseAmount);
-      const vat = parseDecimal(line.vatAmount);
-
-      // The three totals are the supply value of the invoice, so a deduction line feeds the advance total instead.
-      if (line.lineKind === 'advance_deduction') {
-        advanceTotal = addDecimal(advanceTotal, addDecimal(base, vat));
-        continue;
-      }
-
-      baseTotal = addDecimal(baseTotal, base);
-      vatTotal = addDecimal(vatTotal, vat);
-    }
-
-    const grossTotal = addDecimal(baseTotal, vatTotal);
-    const roundingAmount = parseDecimal(body.invoice?.roundingAmount ?? '0');
-    // What the paper says to pay before the advance is deducted; the database generates the amount due from it.
-    const invoiceTotal = addDecimal(grossTotal, roundingAmount);
-    const created = await transaction.query<{ id: string }>(
-      `insert into app.document
+  const grossTotal = addDecimal(baseTotal, vatTotal);
+  const roundingAmount = parseDecimal(body.invoice?.roundingAmount ?? '0');
+  // What the paper says to pay before the advance is deducted; the database generates the amount due from it.
+  const invoiceTotal = addDecimal(grossTotal, roundingAmount);
+  const created = await transaction.query<{ id: string }>(
+    `insert into app.document
          (organization_id, legal_entity_id, kind, reference, title, partner_id, document_date,
-          valid_from, valid_to, currency_code, total_amount, notes, created_by)
-       values ($1, $2, $3, $4, $5, $6, $7::date, $8::date, $9::date, $10, $11, $12, $13)
+          valid_from, valid_to, currency_code, total_amount, notes, created_by, source, inbox_item_id)
+       values ($1, $2, $3, $4, $5, $6, $7::date, $8::date, $9::date, $10, $11, $12, $13, $14, $15)
        returning id`,
-      [
-        input.organizationId,
-        body.legalEntityId,
-        body.kind,
-        body.reference ?? null,
-        body.title,
-        body.partnerId ?? null,
-        body.documentDate,
-        body.validFrom ?? null,
-        body.validTo ?? null,
-        body.currencyCode,
-        // Invoice totals are computed from the lines, so a client value is only used when there is no invoice.
-        body.invoice === undefined
-          ? (body.totalAmount ?? null)
-          : formatDecimal(invoiceTotal),
-        body.notes ?? null,
-        input.userId,
-      ],
-    );
-    const documentId = created.rows[0]?.id;
-
-    if (documentId === undefined) {
-      throw new Error('The document insert returned no row.');
-    }
-
-    await writeAttributes(
-      transaction,
+    [
       input.organizationId,
-      documentId,
-      body.attributes ?? {},
-    );
+      body.legalEntityId,
+      body.kind,
+      body.reference ?? null,
+      body.title,
+      body.partnerId ?? null,
+      body.documentDate,
+      body.validFrom ?? null,
+      body.validTo ?? null,
+      body.currencyCode,
+      // Invoice totals are computed from the lines, so a client value is only used when there is no invoice.
+      body.invoice === undefined
+        ? (body.totalAmount ?? null)
+        : formatDecimal(invoiceTotal),
+      body.notes ?? null,
+      input.userId,
+      input.inbox?.source ?? 'manual',
+      input.inbox?.itemId ?? null,
+    ],
+  );
+  const documentId = created.rows[0]?.id;
 
-    const lines = body.invoice?.lines ?? [];
-    const derivationLines: DerivationLine[] = [];
+  if (documentId === undefined) {
+    throw new Error('The document insert returned no row.');
+  }
 
-    if (body.invoice !== undefined) {
-      // amount_due is generated and stored by the database, so it is never in this column list.
-      await transaction.query(
-        `insert into app.invoice
+  await writeAttributes(
+    transaction,
+    input.organizationId,
+    documentId,
+    body.attributes ?? {},
+  );
+
+  const lines = body.invoice?.lines ?? [];
+  const derivationLines: DerivationLine[] = [];
+
+  if (body.invoice !== undefined) {
+    // amount_due is generated and stored by the database, so it is never in this column list.
+    await transaction.query(
+      `insert into app.invoice
            (document_id, organization_id, tax_point_date, due_date, received_date, variable_symbol, fx_rate,
             base_total, vat_total, gross_total, rounding_amount, advance_total)
          values ($1, $2, $3::date, $4::date, $5::date, $6, $7, $8, $9, $10, $11, $12)`,
-        [
-          documentId,
-          input.organizationId,
-          body.invoice.taxPointDate ?? null,
-          body.invoice.dueDate ?? null,
-          body.invoice.receivedDate ?? null,
-          body.invoice.variableSymbol ?? null,
-          body.invoice.fxRate ?? null,
-          formatDecimal(baseTotal),
-          formatDecimal(vatTotal),
-          formatDecimal(grossTotal),
-          formatDecimal(roundingAmount),
-          formatDecimal(advanceTotal),
-        ],
-      );
+      [
+        documentId,
+        input.organizationId,
+        body.invoice.taxPointDate ?? null,
+        body.invoice.dueDate ?? null,
+        body.invoice.receivedDate ?? null,
+        body.invoice.variableSymbol ?? null,
+        body.invoice.fxRate ?? null,
+        formatDecimal(baseTotal),
+        formatDecimal(vatTotal),
+        formatDecimal(grossTotal),
+        formatDecimal(roundingAmount),
+        formatDecimal(advanceTotal),
+      ],
+    );
 
-      const inserted = await transaction.query<{
-        id: string;
-        line_no: number;
-      }>(
-        `insert into app.invoice_line
+    const inserted = await transaction.query<{
+      id: string;
+      line_no: number;
+    }>(
+      `insert into app.invoice_line
            (organization_id, document_id, line_no, description, category, quantity, unit, unit_price,
             base_amount, vat_mode, vat_rate, vat_amount, source_account_code,
             line_kind, tax_point_date, period_start, period_end, activity_code)
@@ -790,91 +804,90 @@ export async function createDocument(
                      base_amount, vat_mode, vat_rate, vat_amount, source_account_code,
                      line_kind, tax_point_date, period_start, period_end, activity_code)
          returning id, line_no`,
-        [
-          input.organizationId,
-          documentId,
-          lines.map((_line, index) => index + 1),
-          lines.map((line) => line.description),
-          lines.map((line) => line.category ?? null),
-          lines.map((line) => line.quantity ?? null),
-          lines.map((line) => line.unit ?? null),
-          lines.map((line) => line.unitPrice ?? null),
-          lines.map((line) => line.baseAmount),
-          lines.map((line) => line.vatMode),
-          lines.map((line) => line.vatRate),
-          lines.map((line) => line.vatAmount),
-          lines.map((line) => line.sourceAccountCode ?? null),
-          lines.map((line) => line.lineKind),
-          lines.map((line) => line.taxPointDate ?? null),
-          lines.map((line) => line.periodStart ?? null),
-          lines.map((line) => line.periodEnd ?? null),
-          lines.map((line) => line.activityCode ?? null),
-        ],
-      );
-
-      // The generated identifiers come back with their line numbers, so derivation needs no second read.
-      for (const row of [...inserted.rows].sort(
-        (left, right) => left.line_no - right.line_no,
-      )) {
-        const line = lines[row.line_no - 1];
-
-        if (line === undefined) {
-          throw new Error('The invoice line insert returned an unknown line.');
-        }
-
-        derivationLines.push({
-          activityCode: line.activityCode ?? null,
-          baseAmount: line.baseAmount,
-          category: line.category ?? null,
-          description: line.description,
-          id: row.id,
-          lineKind: line.lineKind,
-          taxPointDate: line.taxPointDate ?? null,
-          vatAmount: line.vatAmount,
-          vatMode: line.vatMode,
-          vatRate: line.vatRate,
-        });
-      }
-    }
-
-    await rederive(
-      transaction,
-      input.organizationId,
-      {
-        documentDate: body.documentDate,
-        id: documentId,
-        kind: body.kind,
-        legalEntityId: body.legalEntityId,
-        partnerId: body.partnerId ?? null,
-        roundingAmount: body.invoice?.roundingAmount ?? '0',
-        taxPointDate: body.invoice?.taxPointDate ?? null,
-      },
-      derivationLines,
-    );
-    // Identifiers and the kind only: the audit log never carries the title, the notes or an amount.
-    await transaction.query(
-      "select app.record_audit('document.created', 'document', $1, $2::jsonb)",
       [
+        input.organizationId,
         documentId,
-        JSON.stringify({
-          kind: body.kind,
-          legalEntityId: body.legalEntityId,
-        }),
+        lines.map((_line, index) => index + 1),
+        lines.map((line) => line.description),
+        lines.map((line) => line.category ?? null),
+        lines.map((line) => line.quantity ?? null),
+        lines.map((line) => line.unit ?? null),
+        lines.map((line) => line.unitPrice ?? null),
+        lines.map((line) => line.baseAmount),
+        lines.map((line) => line.vatMode),
+        lines.map((line) => line.vatRate),
+        lines.map((line) => line.vatAmount),
+        lines.map((line) => line.sourceAccountCode ?? null),
+        lines.map((line) => line.lineKind),
+        lines.map((line) => line.taxPointDate ?? null),
+        lines.map((line) => line.periodStart ?? null),
+        lines.map((line) => line.periodEnd ?? null),
+        lines.map((line) => line.activityCode ?? null),
       ],
     );
 
-    const summary = await loadSummary(
-      transaction,
-      documentId,
-      input.legalEntityIds,
-    );
+    // The generated identifiers come back with their line numbers, so derivation needs no second read.
+    for (const row of [...inserted.rows].sort(
+      (left, right) => left.line_no - right.line_no,
+    )) {
+      const line = lines[row.line_no - 1];
 
-    if (summary === null) {
-      throw new Error('The created document is not readable in its own scope.');
+      if (line === undefined) {
+        throw new Error('The invoice line insert returned an unknown line.');
+      }
+
+      derivationLines.push({
+        activityCode: line.activityCode ?? null,
+        baseAmount: line.baseAmount,
+        category: line.category ?? null,
+        description: line.description,
+        id: row.id,
+        lineKind: line.lineKind,
+        taxPointDate: line.taxPointDate ?? null,
+        vatAmount: line.vatAmount,
+        vatMode: line.vatMode,
+        vatRate: line.vatRate,
+      });
     }
+  }
 
-    return loadDetail(transaction, summary, input.legalEntityIds);
-  });
+  await rederive(
+    transaction,
+    input.organizationId,
+    {
+      documentDate: body.documentDate,
+      id: documentId,
+      kind: body.kind,
+      legalEntityId: body.legalEntityId,
+      partnerId: body.partnerId ?? null,
+      roundingAmount: body.invoice?.roundingAmount ?? '0',
+      taxPointDate: body.invoice?.taxPointDate ?? null,
+    },
+    derivationLines,
+  );
+  // Identifiers and the kind only: the audit log never carries the title, the notes or an amount.
+  await transaction.query(
+    "select app.record_audit('document.created', 'document', $1, $2::jsonb)",
+    [
+      documentId,
+      JSON.stringify({
+        kind: body.kind,
+        legalEntityId: body.legalEntityId,
+      }),
+    ],
+  );
+
+  const summary = await loadSummary(
+    transaction,
+    documentId,
+    input.legalEntityIds,
+  );
+
+  if (summary === null) {
+    throw new Error('The created document is not readable in its own scope.');
+  }
+
+  return loadDetail(transaction, summary, input.legalEntityIds);
 }
 
 export async function readDocument(
@@ -1024,24 +1037,65 @@ export async function deleteDocument(
   pool: DatabasePool,
   input: ReadDocumentInput,
 ): Promise<boolean> {
-  return runInTenantContext(pool, input, async (transaction) => {
-    const removed = await transaction.query(
-      `delete from app.document
-        where id = $1
-          and ($2::uuid[] is null or legal_entity_id = any($2::uuid[]))`,
-      [input.documentId, entityFilter(input.legalEntityIds)],
-    );
+  return runInTenantContext(pool, input, (transaction) =>
+    deleteDocumentInTransaction(transaction, input),
+  );
+}
 
-    if (removed.rowCount === 0) {
-      return false;
-    }
+// The routed inbox item holds an ON DELETE RESTRICT pointer, so it is un-routed first and the delete is the undo path.
+export async function deleteDocumentInTransaction(
+  transaction: PoolClient,
+  input: ReadDocumentInput,
+): Promise<boolean> {
+  const visible = await transaction.query(
+    `select 1
+       from app.document
+      where id = $1
+        and ($2::uuid[] is null or legal_entity_id = any($2::uuid[]))`,
+    [input.documentId, entityFilter(input.legalEntityIds)],
+  );
 
+  if (visible.rowCount === 0) {
+    return false;
+  }
+
+  // The entity stays: a person bound it, and deleting the document does not unbind it.
+  const unrouted = await transaction.query<{ id: string }>(
+    `update app.inbox_item
+        set document_id = null,
+            status = 'needs_review',
+            decided_by_kind = null,
+            decided_by_user_id = null,
+            routed_at = null,
+            updated_at = now()
+      where document_id = $1
+      returning id`,
+    [input.documentId],
+  );
+
+  for (const item of unrouted.rows) {
     await transaction.query(
-      "select app.record_audit('document.deleted', 'document', $1, '{}'::jsonb)",
-      [input.documentId],
+      `insert into app.inbox_event (organization_id, item_id, kind, actor_user_id, created_at)
+       values ($1, $2, 'unrouted', $3, clock_timestamp())`,
+      [input.organizationId, item.id, input.userId],
     );
-    return true;
-  });
+  }
+
+  const removed = await transaction.query(
+    'delete from app.document where id = $1',
+    [input.documentId],
+  );
+
+  // The member role holds no write capability, so a policy-blocked delete matches no row.
+  if (removed.rowCount === 0) {
+    return false;
+  }
+
+  await transaction.query(
+    "select app.record_audit('document.deleted', 'document', $1, '{}'::jsonb)",
+    [input.documentId],
+  );
+  return true;
 }
 
 export async function createDocumentLink(

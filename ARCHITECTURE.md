@@ -6,9 +6,10 @@ BAP is organized as 3 independently deployable TypeScript applications plus a
 background-worker entrypoint behind Caddy with PostgreSQL 18 persistence. The
 platform implements identity, organization access, database isolation,
 observability, migration, backup, generic dataset ingestion and retrieval,
-streaming export, bounded AI workflows, and a first business-domain schema: the
-documents register and its derived economic events. Broader analytics semantics
-remain out of scope.
+streaming export, bounded AI workflows, the Inbox intake boundary with durable
+per-organization blob storage, and a first business-domain schema: the documents
+register and its derived economic events. Broader analytics semantics remain out
+of scope.
 
 ## System context
 
@@ -39,36 +40,62 @@ C4Container
   Container_Boundary(bap, "Business Analytics Platform") {
     Container(caddy, "Ingress", "Caddy", "Terminates TLS and is the only public peer")
     Container(web, "Web application", "Next.js, Better Auth, Carbon", "Owns browser sessions, identity and organization pages, fixed BFF routes, and streaming chat")
-    Container(api, "Application API", "NestJS, JOSE", "Authorizes application access, stages uploads, serves dataset lists, rows, and exports, and registers documents, partners, and derived economic events")
+    Container(api, "Application API", "NestJS, JOSE", "Authorizes application access, stages uploads, serves dataset lists, rows, and exports, registers documents, partners, and derived economic events, and intakes, routes, and serves inbox items and their durable blobs")
     Container(reporting, "Reporting API", "NestJS, JOSE", "Authorizes reporting access")
-    Container(worker, "Background worker", "Node.js, pg-boss, @bap/ai", "Ingests datasets, summarizes metadata, and writes embeddings")
+    Container(worker, "Background worker", "Node.js, pg-boss, @bap/ai", "Ingests datasets, summarizes metadata, writes embeddings, and splits scanned inbound email into inbox items")
     ContainerDb(database, "Database", "PostgreSQL 18 with pgvector and pg-boss", "Stores identity, organization, dataset, vector, queue, audit, and migration state behind role and RLS boundaries")
     ContainerDb(staging, "Upload staging", "Private named volume", "Carries bounded raw uploads from the API to the worker until processing ends")
+    ContainerDb(blobs, "Blob storage", "Private named volume", "Durable, content-addressed per-organization blobs behind the Inbox and app.document_file")
+    Container(clamd, "ClamAV daemon", "clamd", "Scans inbound email blobs for the worker over the internal scan network")
+    Container(freshclam, "ClamAV signature updater", "freshclam", "Fetches ClamAV signature updates over internet-egress")
   }
 
   Rel(user, caddy, "Uses", "HTTPS")
   Rel(caddy, web, "Forwards public routes", "HTTP on app network")
-  Rel(web, api, "Calls fixed access, upload, list, row, and export routes", "Short-lived JWT over HTTP")
+  Rel(web, api, "Calls fixed access, upload, list, row, export, document, and inbox/blob routes", "Short-lived JWT over HTTP")
   Rel(web, reporting, "Calls the fixed reporting access route", "Short-lived JWT over HTTP")
   Rel(web, database, "Uses bap_auth role", "PostgreSQL protocol")
-  Rel(api, database, "Resolves membership, stores upload metadata, and enqueues jobs as bap_api", "PostgreSQL protocol")
+  Rel(api, database, "Resolves membership, stores upload and inbox metadata, and enqueues jobs as bap_api", "PostgreSQL protocol")
   Rel(reporting, database, "Executes membership resolver as bap_reporting", "PostgreSQL protocol")
   Rel(api, staging, "Writes server-named staged uploads", "Private volume")
   Rel(worker, staging, "Streams and removes staged uploads", "Private volume")
+  Rel(api, blobs, "Writes and serves content-addressed org blobs", "Private volume")
+  Rel(worker, blobs, "Mounts durable blobs for a future orphan-sweep job", "Private volume")
   Rel(worker, database, "Dequeues jobs and uses short tenant transactions as bap_api", "PostgreSQL protocol")
   Rel(api, web, "Refreshes public signing keys", "JWKS")
   Rel(reporting, web, "Refreshes public signing keys", "JWKS")
+  Rel(worker, clamd, "Streams a blob over INSTREAM", "TCP on the internal scan network")
+  Rel(freshclam, clamd, "Shares the signature volume", "Private volume")
 ```
 
 The browser receives only opaque Better Auth cookies. Resource JWTs exist only
-inside the 23 fixed BFF-to-service route shapes: application access, legal
+inside the 37 fixed BFF-to-service route shapes: application access, legal
 entity list/create/update/delete, member entity-scope read/update, the bulk
 entity-scope read, upload, dataset list, dataset rows, dataset export, document
 list/create/read/update/delete, document link create/delete, partner
-list/create/update, the shared directive-account chart, and reporting access.
-They contain `iss`, `aud`, `sub`, `iat`, and `exp`. The web route validates and
-allow-lists each upstream response or stream. No catch-all service proxy or
-browser Bearer-token flow exists.
+list/create/update, the shared directive-account chart, inbox upload, inbox item
+list/read/hints/process/route-to-document/route-undo/discard/restore/assign/snooze,
+blob download/inline, and reporting access. They contain `iss`, `aud`, `sub`,
+`iat`, and `exp`. The web route validates and allow-lists each upstream response
+or stream. No catch-all service proxy or browser Bearer-token flow exists.
+
+One further resource JWT exists outside that browser-facing matrix: the web's
+public `POST /api/intake/v1/items` route
+([ADR 0016](docs/adr/0016-channel-principal.md)) resolves a hashed channel
+credential and mints its JWT server-side, with no browser session, in front of
+`InboxChannelController` in `apps/api`.
+
+A second public, session-less route joins it: `POST /api/inbound/mailgun/mime`
+in the web service receives inbound email, verifies the Mailgun signature,
+resolves the recipient token to a channel, and forwards the raw MIME to
+`POST /v1/organizations/:organizationId/inbox/channels/:channelId/email` in
+front of the same controller, which stores the `.eml` and enqueues the
+`split_email_item` pg-boss job with an ids-only payload
+(`{ organizationId, channelId, itemId }`). The worker runs that job as the
+channel principal, scans the blob through `clamd` using
+`apps/api/src/scanning/clamd-client.ts`, and splits attachments into child inbox
+items; see [ADR 0016](docs/adr/0016-channel-principal.md) (Webhook and Worker)
+and [the inbox email channel spec](.ai/specs/2026-09-17-inbox-email-channel.md).
 
 The web-local chat route requires a verified session, resolves application
 access through the same fixed BFF boundary, and can optionally resolve one
@@ -146,6 +173,26 @@ legal entities, and `app.directive_account` carries no tenant column at all,
 because the shared chart of accounts is identical for every organization. See
 [documents](docs/documents.md) for the full model.
 
+Migration `20260916.0002` adds the Inbox and the durable blob register on the
+same tenancy shape: `app.blob`, `app.inbox_item`, `app.inbox_item_file`,
+`app.inbox_item_extraction`, `app.inbox_event`, and `app.document_file` each
+carry `organization_id` for row level security, and `app.inbox_item` carries a
+nullable `legal_entity_id` until the item is routed or pre-bound by its channel.
+`app.document` gains `inbox_item_id`. See
+[ADR 0015](docs/adr/0015-inbox-intake-model.md) and
+[the inbox plan](docs/planning/inbox.md) for the full model.
+
+Migrations `20260917.0001` and `20260917.0002` add the channel principal of
+[ADR 0016](docs/adr/0016-channel-principal.md): `app.inbox_channel` and the
+`auth`-schema credential table `auth.inbox_channel_credential`, resolved by
+`resolveChannelAccess` in `apps/api/src/channel-access.ts` and served by
+`InboxChannelController`, give a non-human caller a role,
+`bap.role = 'channel'`, that is denied by construction everywhere except the
+inbox tables. Migration `20260917.0003` adds the email channel of ADR 0016's
+Webhook and Worker sections: `app.record_blob_scan`, the platform-unique
+`inbox_channel.email_address`, the recreated `auth.issue_channel_credential`
+with its `email_address` kind, and `app.inbox_item.sender`.
+
 ## Workspace dependency rules
 
 ```mermaid
@@ -213,23 +260,40 @@ C4Deployment
     Container(worker, "Background worker", "Application API image, worker entrypoint", "Non-root Node.js process")
     ContainerDb(database, "Database", "PostgreSQL 18.6", "Persistent named volume")
     ContainerDb(staging, "Upload staging", "Private named volume", "Mounted into API and worker only")
+    ContainerDb(blobs, "Blob storage", "Private named volume", "Mounted into API rw, worker rw, backup ro, restore rw")
     Container(bootstrap, "Bootstrap and migrator", "Image-local one-shot commands", "Creates roles, then applies reviewed SQL")
     Container(backup, "Backup operations", "Pinned PostgreSQL client and restic", "Encrypted backup, check, prune, and isolated restore")
+    Container(clamd, "ClamAV daemon", "Digest-pinned clamav/clamav image", "read_only, cap_drop: ALL, on the internal scan network with worker only")
+    Container(freshclam, "ClamAV signature updater", "Digest-pinned clamav/clamav image", "On internet-egress only, writes the shared signature volume")
   }
 ```
 
 The production model has non-internal `edge`, internal `app`, internal `data`,
-and non-internal `internet-egress` and `operations-egress` networks. Caddy is
-the only published service. Only the web application and the background worker
-join `internet-egress`, where they reach mail and AI providers; the application
-API and the reporting API deliberately keep no outbound path. Only one-shot
-restic clients join `operations-egress`; backup and restore also join `data`.
-Each runtime mounts only its own credential files. Caddy certificate state and
-PostgreSQL data use named volumes. A third named volume stages uploaded files
-between the application API and the worker; it is mounted into that pair and
-into no other service, which `scripts/verify-compose.mjs` asserts. Backup
-scheduling, backend-specific credentials, and off-host durability require owner
-configuration.
+internal `scan`, and non-internal `internet-egress` and `operations-egress`
+networks. Caddy is the only published service. Only the web application and the
+background worker join `internet-egress`, where they reach mail and AI
+providers, and, for `freshclam` only, the ClamAV signature mirror; the
+application API and the reporting API deliberately keep no outbound path. The
+`scan` network carries only `clamd` and `worker`, so the ClamAV daemon that
+parses hostile email attachments has no route to the internet or to the
+database. Only one-shot restic clients join `operations-egress`; backup and
+restore also join `data`. Each runtime mounts only its own credential files.
+Caddy certificate state and PostgreSQL data use named volumes. A third named
+volume stages uploaded files between the application API and the worker; it is
+mounted into that pair and into no other service, which
+`scripts/verify-compose.mjs` asserts. Backup scheduling, backend-specific
+credentials, and off-host durability require owner configuration.
+
+A fourth named volume, `blob_storage`, holds durable, content-addressed
+per-organization blobs behind the Inbox (`apps/api/src/inbox`) and the
+`BlobStore` interface (`apps/api/src/blobs`). Uploaded bytes are no longer
+transient: unlike the staging volume, they are never deleted after intake. Its
+member set is the application API (rw), the worker (rw), the `backup` service
+(ro), and `restore` (rw), which `scripts/verify-compose.mjs` also asserts.
+`BAP_BLOB_STORAGE_DIR` sets its mount path and
+`BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION` bounds it per organization; see
+[ADR 0014](docs/adr/0014-durable-blob-storage.md) and
+[ADR 0015](docs/adr/0015-inbox-intake-model.md).
 
 The profiled owner-bootstrap service is the only dual-tier exception: it mounts
 the auth credential used by Better Auth and a separate migrator credential used
@@ -275,20 +339,22 @@ TypeScript slug contract through migration `20260831.0004`, and migration
 
 Authenticated `app/(product)` routes share a server layout that renders the
 client `ProductShell`, a Carbon UI Shell header branded "Afframe Analytics" over
-a pinned-persistable left icon rail for Workspaces, Datasets, Documents, and
-Account, and a workspace section shown when an organization is active. The
-account area holds Carbon profile, security, and preferences pages plus the
-access diagnostic at `/account/access`; `/access` redirects there. Header
-actions open single-purpose panels for search, help, account, and workspace
-switching. The search panel builds a client index from the rail destinations,
-the signed-in account's workspaces, and the active workspace's legal entities.
-The help panel links the public docs, the running version, and an optional
-feedback address. The account panel holds identity, the account links, the
-light/dark/system theme control, and sign out. The shell is not rendered around
-identity, invitation, or design-system reference routes. The layout owns the
-single `main-content` landmark and renders small Carbon breadcrumbs from the
-route segments, including subordinate organization pages and the inline dataset
-detail. The complete discoverability and state contract is recorded in
+a pinned-persistable left icon rail for Workspaces, Datasets, Inbox, Documents,
+and Account, and a workspace section shown when an organization is active. The
+`/inbox` page drops multi-file uploads, reviews their detected type, hints, and
+routing draft, and routes them into Documents. The account area holds Carbon
+profile, security, and preferences pages plus the access diagnostic at
+`/account/access`; `/access` redirects there. Header actions open single-purpose
+panels for search, help, account, and workspace switching. The search panel
+builds a client index from the rail destinations, the signed-in account's
+workspaces, and the active workspace's legal entities. The help panel links the
+public docs, the running version, and an optional feedback address. The account
+panel holds identity, the account links, the light/dark/system theme control,
+and sign out. The shell is not rendered around identity, invitation, or
+design-system reference routes. The layout owns the single `main-content`
+landmark and renders small Carbon breadcrumbs from the route segments, including
+subordinate organization pages and the inline dataset detail. The complete
+discoverability and state contract is recorded in
 [the application route map](docs/application-routes.md).
 
 The separately selected development and operational-proof Mailpit overlay adds 1
@@ -326,12 +392,23 @@ generic document link, and reporting-API reads of documents or economic events
 remain deferred; see [documents](docs/documents.md) for the full out-of-scope
 list.
 
+The Inbox intake boundary and its durable per-organization blob storage,
+described in [ADR 0014](docs/adr/0014-durable-blob-storage.md) and
+[ADR 0015](docs/adr/0015-inbox-intake-model.md), are also no longer deferred.
+Uploaded bytes behind an inbox item or a document are durable, never deleted
+after intake. Inbox channels beyond manual upload, the `inbox_channel` and
+`inbox_rule` tables, a non-human channel principal, a per-organization quota
+setting, routing target settings, the orphan blob sweep, and any AI or parser
+provider remain deferred; see [the inbox plan](docs/planning/inbox.md) for the
+full list.
+
 Metric definitions, aggregation and transformation semantics beyond derivation,
 derived datasets, cross-dataset joins, dataset editing and versioning, custom
 roles, workspace deletion, cross-workspace queries, SSO, distributed caches or
-limits, OpenTelemetry, PDF export, billing, object storage, HA, registry
-publishing, and deployment automation require real owner or product
-requirements. Per-dataset sharing is superseded by legal-entity scope rather
-than deferred. See
+limits, OpenTelemetry, PDF export, billing, HA, registry publishing, and
+deployment automation require real owner or product requirements. A multi-host
+object store such as S3 or MinIO remains deferred behind the same `BlobStore`
+interface until a second host exists (ADR 0014). Per-dataset sharing is
+superseded by legal-entity scope rather than deferred. See
 [the approved SaaS foundation plan](docs/planning/saas-foundation.md) and
 [the platform batteries plan](docs/planning/platform-batteries.md).

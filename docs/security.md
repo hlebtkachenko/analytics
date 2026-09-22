@@ -422,6 +422,99 @@ Per-dataset grants no longer exist. `app.data_grants` is dropped, `member` is
 read-only, and dataset and upload visibility depends only on organization
 membership and, above that boundary, entity scope.
 
+## Channel principal
+
+[ADR 0016](adr/0016-channel-principal.md) adds a second, non-human principal
+kind beside the membership roles: a channel runs with subject `channel_<uuid>`,
+where the uuid is `app.inbox_channel.id`, and `bap.role = 'channel'` in the
+tenant transaction. There is no `auth."user"` row and no new database role;
+`app.role_is_channel()` is the only predicate that names the role value, and
+`app.role_can_write()` is untouched, so a channel is denied on every table by
+construction unless a policy opts it in by name.
+
+A channel context can write only through 6 policies: the 5 inbox INSERT policies
+(`blob_insert`, `inbox_item_insert`, `inbox_item_file_insert`,
+`inbox_item_extraction_insert`, `inbox_event_insert`), each
+`... AND (app.role_can_write() OR app.role_is_channel())` with the
+`created_by = current_setting('bap.user_id', true)` check outside the
+parentheses, and the narrow `inbox_item_channel_update`, which lets a channel
+move its own unrouted item through `received`, `processing`, `needs_review` and
+`failed` but never route it, un-route it, or overwrite a person's decision
+(`status <> 'routed'`, `decided_by_kind IS DISTINCT FROM 'user'`, and no
+destination column). `blob_update` does not opt in.
+
+A channel context cannot read anything outside the inbox tables and `app.blob`:
+every non-inbox tenant SELECT policy gains `AND NOT app.role_is_channel()`, and
+`audit_log_isolation` is split so `audit_log_select` excludes the channel while
+`app.record_audit` inserts keep working through the separate write policy.
+
+The credential model lives entirely in `auth`, never in a tenant table.
+`auth.inbox_channel_credential` stores `secret_sha256` and an 8-character
+`display_prefix`, never the plain secret; tables in `auth` inherit DML for
+`bap_auth`, so that default grant is revoked right after the `CREATE`, and
+`bap_api` holds nothing direct either. A credential's plain value is
+`bap_intake_` followed by 32 random bytes in base64url, returned exactly once by
+the issue response; a channel may hold at most 2 active credentials at a time,
+so a rotation can overlap. 4 `SECURITY DEFINER` functions owned by `bap_owner`
+are the whole surface: `auth.issue_channel_credential(channel_id, kind)` and
+`auth.revoke_channel_credential(credential_id)` take the organization and the
+acting subject from the transaction settings, assert `bap.role = 'owner'`, and
+are granted to `bap_api`; `auth.resolve_channel_credential(secret_sha256)`
+returns the binding for one unrevoked credential and is granted to `bap_auth`,
+the role the web service already holds;
+`auth.list_channel_credentials(channel_id)` lists a channel's active credentials
+by prefix only and is granted to `bap_api`.
+
+The public intake path is `POST /api/intake/v1/items` in the web service,
+organization-less by design. A malformed bearer is refused with no database call
+at all. Otherwise, it checks the edge IP bucket (the sign-up bucket's shape, in
+its own `bap-edge:intake:` namespace: 3 requests per 60 seconds) before the
+credential lookup and consumes it on a miss only, so an unknown token cannot be
+guessed at line rate; it then hashes the bearer and resolves it on the
+`bap_auth` pool, and mints the channel's resource JWT server-side from the
+resolved channel id. A credential whose kind is not `api_token` is a miss on
+this route, whatever its channel. `/api/auth/token` stays in
+`disabledAuthPaths`: a browser session is still never exchanged for a bearer
+token, and a channel credential is the only way to mint one from outside a
+verified session.
+
+Ranked by what a stolen credential could do: first, binding the wrong
+organization is closed by resolving the channel from the credential row and
+re-checking it by RLS inside the API, never from the JWT or the request path;
+second, a compromised credential can only write intake, because
+`app.role_can_write()` is never granted to a channel and only 6 policies name
+`app.role_is_channel()`; third, a compromised credential cannot read tenant data
+at all, because every other SELECT policy and `audit_log_select` exclude it.
+
+Amended 2026-09-17 ([ADR 0016](adr/0016-channel-principal.md), Phase 1a-email):
+inbound email adds a second, public boundary, `POST /api/inbound/mailgun/mime`
+in the web service. The poster is trusted only after its signature verifies:
+HMAC-SHA256 of `timestamp` concatenated with `token`, keyed with
+`BAP_MAILGUN_WEBHOOK_SIGNING_KEY_FILE`, compared with `timingSafeEqual`, and a
+300 second window on `timestamp`. A signature failure, including a body that is
+not a form, answers 401 and consumes the edge bucket `bap-edge:inbound:`; a
+signed miss never consumes it, so a valid poster is never rate-limited by an
+attacker's guesses. Binding is the recipient token alone: the local part
+`in-<32 hex>` is required, hashed with sha256 of its lowercased form, and
+resolved through `auth.resolve_channel_credential`; the domain is never checked.
+An unknown recipient or a credential of the wrong kind answers 406 so Mailgun
+stops retrying, and every permanent refusal of a signed request on this route
+answers 406 for the same reason. An in-flight semaphore answers 503 past
+`BAP_INBOUND_MAX_IN_FLIGHT` so a burst degrades instead of queuing unbounded
+work. `From`, `To`, subject and body bind nothing; the sender stored for display
+is the parsed `From` header address, unverified, never used for routing.
+
+Once bound, the worker parses hostile MIME in-process under the channel context:
+mailparser caps enforced in code (20 attachments, 25 MB per attachment, a
+nesting depth of 10, 1 MB of text) bound what mailparser itself cannot, and
+every new blob is scanned by `clamd` before it is treated as content, recorded
+through the security-definer `app.record_blob_scan`. An infected or unscannable
+blob is quarantined: `readBlob` refuses it on both the download and inline
+routes with 409 `blob_quarantined`. Nothing from the mail is logged, audited, or
+sent anywhere: sender, recipient, token, subject, headers, body, and attachment
+names stay out of logs and `inbox_event`, which carry ids, reasons, and counts
+only.
+
 ## Member status
 
 A membership carries an `active` or `inactive` status on `auth.member`. Inactive

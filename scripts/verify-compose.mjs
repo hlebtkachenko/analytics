@@ -34,6 +34,9 @@ const postgresImageDigest =
   'sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a';
 const mailpitImageDigest =
   'sha256:98b916bd3c8d61f7633a52d3ea2f58d00620cb01ca57ab59edde68c347a95365';
+// clamav/clamav:1.5.4 (stable); Docker Hub publishes it for amd64 only.
+const clamavImageDigest =
+  'sha256:9cb27d7660bdf66e9878c832cb433dd8aa152cfbe16f3c2c0084c80b04ae22b4';
 
 function invariant(condition, message) {
   if (!condition) {
@@ -123,7 +126,7 @@ const internetEgressMembers = Object.entries(configuration.services)
   .map(([name]) => name)
   .sort();
 invariant(
-  internetEgressMembers.join() === 'web,worker',
+  internetEgressMembers.join() === 'freshclam,web,worker',
   `Unexpected internet egress members: ${internetEgressMembers.join(',')}.`,
 );
 invariant(
@@ -157,8 +160,113 @@ for (const service of internetEgressMembers) {
 }
 
 invariant(
-  networkNames('worker').join() === 'data,internet-egress',
-  'The worker must use only data and internet egress.',
+  networkNames('worker').join() === 'data,internet-egress,scan',
+  'The worker must use only data, internet egress, and scan.',
+);
+
+// clamd sees every inbound email, so its only neighbour is the worker and its only writer is freshclam.
+invariant(
+  configuration.networks.scan?.internal === true,
+  'The scan network must be internal.',
+);
+const scanMembers = Object.entries(configuration.services)
+  .filter(([, service]) => Object.hasOwn(service.networks ?? {}, 'scan'))
+  .map(([name]) => name)
+  .sort();
+invariant(
+  scanMembers.join() === 'clamd,worker',
+  `Unexpected scan members: ${scanMembers.join(',')}.`,
+);
+invariant(
+  networkNames('clamd').join() === 'scan',
+  'clamd must use only the scan network.',
+);
+invariant(
+  networkNames('freshclam').join() === 'internet-egress',
+  'freshclam must use only internet egress.',
+);
+for (const service of ['clamd', 'freshclam']) {
+  const model = configuration.services[service];
+  invariant(
+    model.image.includes(clamavImageDigest),
+    `${service} must use the accepted ClamAV image digest.`,
+  );
+  invariant(
+    model.read_only === true &&
+      model.user === '100:101' &&
+      model.cap_drop.join() === 'ALL' &&
+      (model.cap_add?.length ?? 0) === 0 &&
+      model.security_opt.join() === 'no-new-privileges:true' &&
+      model.tmpfs.some((mount) => mount.startsWith('/run/clamav:')) &&
+      model.tmpfs.some((mount) => mount.startsWith('/tmp:')),
+    `${service} must retain the ClamAV privilege boundary.`,
+  );
+  invariant(
+    (model.ports?.length ?? 0) === 0,
+    `${service} must not publish ports.`,
+  );
+  const configurationMount = (model.volumes ?? []).find(
+    (mount) => mount.target === `/etc/clamav/${service}.conf`,
+  );
+  invariant(
+    configurationMount?.type === 'bind' &&
+      configurationMount.read_only === true &&
+      configurationMount.source.endsWith(
+        `/infrastructure/clamav/${service}.conf`,
+      ),
+    `${service} must run only the mounted read-only configuration.`,
+  );
+}
+const signatureTarget = '/var/lib/clamav';
+const signatureMounts = Object.entries(configuration.services).flatMap(
+  ([name, service]) =>
+    (service.volumes ?? [])
+      .filter((mount) => mount.source === 'clamav_signatures')
+      .map((mount) => ({ mount, name })),
+);
+const signatureMembers = signatureMounts.map(({ name }) => name).sort();
+invariant(
+  signatureMembers.join() === 'clamd,freshclam',
+  `Unexpected signature volume members: ${signatureMembers.join(',')}.`,
+);
+for (const { mount, name } of signatureMounts) {
+  invariant(
+    mount.type === 'volume' &&
+      mount.target === signatureTarget &&
+      (mount.read_only === true) === (name === 'clamd'),
+    `${name} must mount the signature volume ${name === 'clamd' ? 'read-only' : 'read-write'} at ${signatureTarget}.`,
+  );
+}
+invariant(
+  Object.hasOwn(configuration.volumes, 'clamav_signatures'),
+  'The signature volume must be declared.',
+);
+invariant(
+  configuration.services.clamd.depends_on?.freshclam?.condition ===
+    'service_healthy',
+  'clamd must wait for a populated signature volume.',
+);
+invariant(
+  configuration.services.worker.environment.BAP_CLAMAV_HOST === 'clamd' &&
+    configuration.services.worker.environment.BAP_CLAMAV_PORT === '3310',
+  'The worker must scan through the clamd service.',
+);
+for (const service of ['web', 'api']) {
+  invariant(
+    /^[a-z0-9.-]+$/.test(
+      configuration.services[service].environment.BAP_INTAKE_DOMAIN ?? '',
+    ),
+    `${service} must carry the intake domain.`,
+  );
+}
+invariant(
+  configuration.services.web.environment
+    .BAP_MAILGUN_WEBHOOK_SIGNING_KEY_FILE ===
+    '/run/credentials/mailgun-webhook-signing-key' &&
+    /^[1-9]\d*$/.test(
+      configuration.services.web.environment.BAP_INBOUND_MAX_IN_FLIGHT ?? '',
+    ),
+  'Web must read the mounted Mailgun signing key and cap in-flight inbound posts.',
 );
 
 // Staged uploads are other tenants' raw files, so the volume's member set is a contract.
@@ -194,11 +302,68 @@ for (const service of ['api', 'worker']) {
   );
 }
 
+// Blobs are every organization's originals, so the member set and each mode is a contract.
+const blobStorageTarget = '/var/lib/bap/blobs';
+const blobStorageModes = {
+  api: 'rw',
+  backup: 'ro',
+  restore: 'rw',
+  worker: 'rw',
+};
+const blobStorageMounts = Object.entries(configuration.services).flatMap(
+  ([name, service]) =>
+    (service.volumes ?? [])
+      .filter((mount) => mount.source === 'blob_storage')
+      .map((mount) => ({ mount, name })),
+);
+const blobStorageMembers = blobStorageMounts.map(({ name }) => name).sort();
+invariant(
+  blobStorageMembers.join() ===
+    (mode === 'operations' ? 'api,backup,restore,worker' : 'api,worker'),
+  `Unexpected blob storage members: ${blobStorageMembers.join(',')}.`,
+);
+for (const { mount, name } of blobStorageMounts) {
+  const expectedMode = blobStorageModes[name];
+  invariant(
+    mount.type === 'volume' &&
+      mount.target === blobStorageTarget &&
+      (mount.read_only === true) === (expectedMode === 'ro'),
+    `${name} must mount the blob storage volume ${expectedMode === 'ro' ? 'read-only' : 'read-write'} at ${blobStorageTarget}.`,
+  );
+}
+invariant(
+  Object.hasOwn(configuration.volumes, 'blob_storage'),
+  'The blob storage volume must be declared.',
+);
+invariant(
+  backupEntrypoint.includes(`blob_storage_directory=${blobStorageTarget}`) &&
+    backupEntrypoint.includes(
+      'restic backup --tag blobs --exclude "$blob_storage_directory/tmp" "$blob_storage_directory"',
+    ) &&
+    backupEntrypoint.includes('--target "$blob_storage_directory"'),
+  'The backup entrypoint must snapshot and restore the mounted blob volume.',
+);
+for (const service of ['api', 'worker']) {
+  invariant(
+    configuration.services[service].environment.BAP_BLOB_STORAGE_DIR ===
+      blobStorageTarget,
+    `${service} must store blobs on the mounted volume.`,
+  );
+  invariant(
+    /^[1-9]\d*$/.test(
+      configuration.services[service].environment
+        .BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION ?? '',
+    ),
+    `${service} must carry a positive integer blob quota.`,
+  );
+}
+
 expectSecrets('database', ['postgres_admin_password']);
 expectSecrets('web', [
   'ai_provider_config',
   'bap_auth_password',
   'better_auth_secret',
+  'mailgun_webhook_signing_key',
   'resend_api_key',
 ]);
 invariant(
@@ -282,6 +447,13 @@ if (mode === 'production') {
     'The data network must be internal.',
   );
 
+  for (const service of ['clamd', 'freshclam']) {
+    invariant(
+      configuration.services[service].restart === 'unless-stopped',
+      `${service} must restart with the production stack.`,
+    );
+  }
+
   for (const service of applicationServices) {
     const model = configuration.services[service];
     invariant(
@@ -295,11 +467,13 @@ if (mode === 'production') {
       model.tmpfs.includes('/tmp'),
       `${service} must write only to ephemeral storage.`,
     );
-    // Staging is the one durable exception, and only the pair that parses uploads holds it.
+    // Staging and blobs are the durable exceptions, and only the pair that handles files holds them.
     const durable = (model.volumes ?? []).map((mount) => mount.source).sort();
     invariant(
       durable.join() ===
-        (service === 'api' || service === 'worker' ? 'upload_staging' : ''),
+        (service === 'api' || service === 'worker'
+          ? 'blob_storage,upload_staging'
+          : ''),
       `${service} must keep the production durable mount set.`,
     );
   }

@@ -1,6 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
 
-export type TenantRole = 'owner' | 'admin' | 'member';
+// 'channel' is not a membership role: a channel principal (ADR 0016) runs as 'channel_<uuid>' with no auth."user" row.
+export type TenantRole = 'owner' | 'admin' | 'member' | 'channel';
 
 export interface TenantContext {
   organizationId: string;

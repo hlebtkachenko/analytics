@@ -2,7 +2,15 @@ import type { DatabasePool } from '@bap/db/pool';
 import type { PoolClient } from 'pg';
 import { describe, expect, it } from 'vitest';
 
-import { runTenantJob, tenantJobPayloadSchema } from './job-context.js';
+import {
+  channelJobPayloadSchema,
+  jobPayloadSchema,
+  runTenantJob,
+  tenantJobPayloadSchema,
+} from './job-context.js';
+
+const CHANNEL_ID = '4a2b7c1e-9f5d-4c3a-8b21-6e0f7d5a4c39';
+const ITEM_ID = '9f702163-4eac-4b8f-9076-b34ec2af9184';
 
 interface RecordedQuery {
   text: string;
@@ -16,7 +24,10 @@ interface FakePool {
   releases: number;
 }
 
-function createFakePool(membershipRows: Record<string, unknown>[]): FakePool {
+function createFakePool(
+  membershipRows: Record<string, unknown>[],
+  channelRows: Record<string, unknown>[] = [],
+): FakePool {
   const state: FakePool = {
     connects: 0,
     pool: undefined as unknown as DatabasePool,
@@ -26,7 +37,7 @@ function createFakePool(membershipRows: Record<string, unknown>[]): FakePool {
   const client = {
     query: async (text: string, values: unknown[] = []) => {
       state.queries.push({ text, values });
-      return { rows: [] };
+      return { rows: text.includes('app.inbox_channel') ? channelRows : [] };
     },
     release: () => {
       state.releases += 1;
@@ -77,6 +88,39 @@ describe('tenantJobPayloadSchema', () => {
     expect(() =>
       tenantJobPayloadSchema.parse({ organizationId: 'org-1' }),
     ).toThrow();
+  });
+});
+
+describe('channelJobPayloadSchema', () => {
+  it('accepts a channel payload with an optional item id, both as uuids', () => {
+    expect(
+      channelJobPayloadSchema.parse({
+        channelId: CHANNEL_ID,
+        organizationId: 'org-1',
+      }),
+    ).toEqual({ channelId: CHANNEL_ID, organizationId: 'org-1' });
+    expect(
+      jobPayloadSchema.parse({
+        channelId: CHANNEL_ID,
+        itemId: ITEM_ID,
+        organizationId: 'org-1',
+      }),
+    ).toEqual({
+      channelId: CHANNEL_ID,
+      itemId: ITEM_ID,
+      organizationId: 'org-1',
+    });
+  });
+
+  it('refuses a non-uuid id, a user id beside the channel and unknown keys', () => {
+    for (const payload of [
+      { channelId: 'channel_1', organizationId: 'org-1' },
+      { channelId: CHANNEL_ID, itemId: 'item-1', organizationId: 'org-1' },
+      { channelId: CHANNEL_ID, organizationId: 'org-1', userId: 'user-1' },
+      { channelId: CHANNEL_ID, organizationId: 'org-1', sender: 'a@b.c' },
+    ]) {
+      expect(() => jobPayloadSchema.parse(payload)).toThrow();
+    }
   });
 });
 
@@ -157,5 +201,46 @@ describe('runTenantJob', () => {
     ).rejects.toThrow('work failed');
     expect(fake.releases).toBe(1);
     expect(fake.queries.at(-1)?.text).toBe('rollback');
+  });
+
+  it('opens a channel job as the channel principal after finding its enabled row', async () => {
+    const fake = createFakePool([], [{ '?column?': 1 }]);
+
+    const result = await runTenantJob({
+      data: { channelId: CHANNEL_ID, itemId: ITEM_ID, organizationId: 'org-1' },
+      pool: fake.pool,
+      work: async (_transaction, payload) =>
+        'channelId' in payload ? payload.itemId : 'wrong branch',
+    });
+
+    expect(result).toBe(ITEM_ID);
+    expect(fake.connects).toBe(1);
+    expect(fake.releases).toBe(1);
+    expect(fake.queries.map(({ text }) => text)).toEqual([
+      'begin',
+      "select set_config('bap.user_id', $1, true), set_config('bap.organization_id', $2, true), set_config('bap.role', $3, true)",
+      'select 1 from app.inbox_channel where id = $1 and enabled and deleted_at is null',
+      'commit',
+    ]);
+    // No membership is resolved: the channel is the principal, never a person.
+    expect(fake.queries[1]?.values).toEqual([
+      `channel_${CHANNEL_ID}`,
+      'org-1',
+      'channel',
+    ]);
+  });
+
+  it('rolls back a channel job whose channel is disabled, deleted or missing', async () => {
+    const fake = createFakePool([], []);
+
+    await expect(
+      runTenantJob({
+        data: { channelId: CHANNEL_ID, organizationId: 'org-1' },
+        pool: fake.pool,
+        work: async () => 'unreachable',
+      }),
+    ).rejects.toThrow('Job channel is disabled or missing.');
+    expect(fake.queries.at(-1)?.text).toBe('rollback');
+    expect(fake.releases).toBe(1);
   });
 });

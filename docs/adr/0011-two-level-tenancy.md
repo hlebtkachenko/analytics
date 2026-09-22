@@ -1,6 +1,9 @@
 # ADR 0011: Two-Level Tenancy
 
 - Status: accepted
+- Amended by ADR 0015: inbox items are organization-level until routed.
+- Amended by [ADR 0016](0016-channel-principal.md): `bap.role` gains the
+  non-membership value `channel`, resolved by a sibling of the shared resolver.
 - Date: 2026-09-10
 
 ## Context

@@ -35,5 +35,6 @@
   { "slug": "assistant", "valid": false },
   { "slug": "audit", "valid": false },
   { "slug": "workspaces", "valid": false },
-  { "slug": "notifications", "valid": false }
+  { "slug": "notifications", "valid": false },
+  { "slug": "inbox", "valid": false }
 ]
