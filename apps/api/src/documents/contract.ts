@@ -1,3 +1,4 @@
+import { inboxChannelKinds, inboxItemStatuses } from '@bap/db';
 import { legalEntityIdentifierSchema } from '@bap/security';
 import { z } from 'zod';
 
@@ -364,14 +365,41 @@ export const documentLinkSchema = z
 
 export type DocumentLink = z.infer<typeof documentLinkSchema>;
 
+// The original bytes behind the document: one row per attached blob, in document order.
+export const documentFileSchema = z
+  .object({
+    blobId: z.string().uuid(),
+    byteSize: z.number().int().positive(),
+    filename: z.string().min(1).max(255).nullable(),
+    mediaType: z.string().min(1).max(255),
+    position: z.number().int().min(1),
+  })
+  .strict();
+
+export type DocumentFile = z.infer<typeof documentFileSchema>;
+
+// Every inbox item pointing at the document: the one that created it and every one attached later.
+export const documentInboxItemSchema = z
+  .object({
+    channelKind: z.enum(inboxChannelKinds),
+    id: z.string().uuid(),
+    receivedAt: z.iso.datetime(),
+    status: z.enum(inboxItemStatuses),
+  })
+  .strict();
+
 export const documentDetailSchema = z
   .object({
     attributes: z.record(attributeKeySchema, attributeValueSchema),
     document: documentSummarySchema,
     event: economicEventSchema.nullable(),
+    files: z.array(documentFileSchema),
+    inboxItems: z.array(documentInboxItemSchema),
     invoice: invoiceSchema.nullable(),
     issues: z.array(dataIssueSchema),
     links: z.array(documentLinkSchema),
+    supersededByDocumentId: documentIdentifierSchema.nullable(),
+    supersedesDocumentId: documentIdentifierSchema.nullable(),
   })
   .strict();
 
@@ -410,8 +438,12 @@ export function repeatedOrCsv<Values extends readonly [string, ...string[]]>(
     .pipe(z.array(z.enum(values)).min(1).max(values.length));
 }
 
+export const DOCUMENT_CURRENT_FILTERS = ['true', 'false', 'all'] as const;
+
 export const documentListQuerySchema = z
   .object({
+    // Superseded versions are hidden unless asked for.
+    current: z.enum(DOCUMENT_CURRENT_FILTERS).default('true'),
     dateFrom: z.iso.date().optional(),
     dateTo: z.iso.date().optional(),
     kind: repeatedOrCsv(DOCUMENT_KINDS).optional(),
@@ -1138,6 +1170,35 @@ export const documentDetailOpenApiSchema = {
     attributes: { additionalProperties: { type: 'string' }, type: 'object' },
     document: documentSummaryOpenApiSchema,
     event: { ...economicEventOpenApiSchema, nullable: true },
+    files: {
+      items: {
+        additionalProperties: false,
+        properties: {
+          blobId: uuidProperty,
+          byteSize: { minimum: 1, type: 'integer' },
+          filename: { maxLength: 255, nullable: true, type: 'string' },
+          mediaType: { maxLength: 255, type: 'string' },
+          position: { minimum: 1, type: 'integer' },
+        },
+        required: ['blobId', 'byteSize', 'filename', 'mediaType', 'position'],
+        type: 'object',
+      },
+      type: 'array',
+    },
+    inboxItems: {
+      items: {
+        additionalProperties: false,
+        properties: {
+          channelKind: { enum: [...inboxChannelKinds], type: 'string' },
+          id: uuidProperty,
+          receivedAt: dateTimeProperty,
+          status: { enum: [...inboxItemStatuses], type: 'string' },
+        },
+        required: ['channelKind', 'id', 'receivedAt', 'status'],
+        type: 'object',
+      },
+      type: 'array',
+    },
     invoice: { ...invoiceOpenApiSchema, nullable: true },
     issues: {
       items: {
@@ -1163,8 +1224,21 @@ export const documentDetailOpenApiSchema = {
       type: 'array',
     },
     links: { items: documentLinkOpenApiSchema, type: 'array' },
+    supersededByDocumentId: { ...uuidProperty, nullable: true },
+    supersedesDocumentId: { ...uuidProperty, nullable: true },
   },
-  required: ['attributes', 'document', 'event', 'invoice', 'issues', 'links'],
+  required: [
+    'attributes',
+    'document',
+    'event',
+    'files',
+    'inboxItems',
+    'invoice',
+    'issues',
+    'links',
+    'supersededByDocumentId',
+    'supersedesDocumentId',
+  ],
   type: 'object',
 };
 

@@ -45,14 +45,24 @@ function collectKeys(): ReadonlyMap<string, string> {
 }
 
 function keyExists(key: string): boolean {
+  const segments = key.split('.');
+  const leaf = segments.pop()!;
   let node: unknown = resources['en-US'].translation;
-  for (const segment of key.split('.')) {
+  for (const segment of segments) {
     if (typeof node !== 'object' || node === null) {
       return false;
     }
     node = (node as Record<string, unknown>)[segment];
   }
-  return typeof node === 'string';
+  if (typeof node !== 'object' || node === null) {
+    return false;
+  }
+  // A count key carries only its i18next plural forms, never the bare name.
+  const parent = node as Record<string, unknown>;
+  return (
+    typeof parent[leaf] === 'string' ||
+    typeof parent[`${leaf}_other`] === 'string'
+  );
 }
 
 describe('translation key completeness', () => {

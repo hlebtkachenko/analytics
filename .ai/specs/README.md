@@ -2,6 +2,8 @@
 
 ## Delivered and historical records
 
+- [Inbox actions (Phase 1b-actions)](2026-09-17-inbox-actions.md)
+- [Inbox runtime (Phase 1b-runtime)](2026-09-17-inbox-runtime.md)
 - [Inbox email channel (Phase 1a-email)](2026-09-17-inbox-email-channel.md)
 - [Inbox channels (Phase 1a)](2026-09-17-inbox-channels.md)
 - [Native Carbon members tables](2026-09-17-members-native-tables.md)

@@ -129,7 +129,9 @@ subject, so the embedded document quotes the description the summary wrote. When
 no summary model is named, ingestion chains the backfill directly. Nothing else
 enqueues either job, and neither runs on a schedule. Both chained payloads carry
 identifiers only, and both jobs re-resolve membership at dequeue like every
-other worker job.
+other worker job. Amended 2026-09-17 (1b-runtime): the platform's first
+scheduled job is `inbox_maintenance`, an organization-less tick with no tenant
+transaction; see the Background worker boundary section below.
 
 An operator who treats dataset and column names as sensitive should enable the
 embedding and summarization jobs deliberately rather than by default. Naming no
@@ -182,6 +184,42 @@ checksummed migration runner, `bap_api` holds no `CREATE` privilege anywhere,
 and queue statistics persistence is off because it would otherwise issue
 partition DDL at runtime. Recurring work uses pg-boss cron; there is no second
 scheduler.
+
+Amended 2026-09-17 (1b-runtime): `inbox_maintenance` is the platform's first
+scheduled job, registered with `queue.schedule` on `*/15 * * * *` UTC,
+`singletonKey = 'inbox_maintenance'`, `expireInSeconds` 600 and `retryLimit` 0.
+Its payload is an empty strict object; it never opens a tenant transaction and
+never goes through `runTenantJob`, because the tick has no organization and no
+user. Each tick runs three tasks, each capped at 500 rows and its own statement,
+and a failing task logs and lets the next one run: the orphan blob sweep unlinks
+an untracked file on the volume older than a 60 minute grace period; the stalled
+item reaper fails an `inbox_item` stuck in `processing` past 60 minutes; the
+stuck email requeue re-enqueues `split_email_item` for an email item still
+`received` past 10 minutes. `split_email_item` and `inbox_maintenance` both use
+pg-boss `policy: 'exclusive'`, because `singletonKey` is inert on a standard
+queue: exclusive admits at most one job per key across `created`, `retry` and
+`active`, so the tick cannot pile up a job per still-received item every 15
+minutes and two worker replicas cannot split the same item concurrently. A
+policy is fixed at creation, so the worker recreates a `split_email_item` or
+`inbox_maintenance` queue found with another policy at startup, dropping its
+pending jobs, which the requeue task recovers. Metrics carry the queue label
+only; log lines carry counts and ids, never a storage key, filename or
+organization name.
+
+Amended 2026-09-17 (1b-rules): `route_inbox_item` and `rerun_inbox_rule` are two
+more jobs, payload ids only. `route_inbox_item` carries
+`{ organizationId, itemId, ruleId }` (`ruleId` null for a target default),
+`retryLimit: 3`, `retryDelay: 60`, `singletonKey = itemId`; only an
+infrastructure error throws and retries, and every other outcome commits once.
+It locks the item row `FOR UPDATE` before deciding, so a human route serializes
+against it, and it writes at most one `auto_route` extraction row per human
+touch, refusing a second attempt before a new human touch. An invoice-kind item
+is never enqueued at all; the refusal is written directly on the intake
+transaction's `rule` extraction row instead. `rerun_inbox_rule` carries
+`{ organizationId, userId, ruleId }` and runs through `runTenantJob` as its
+creator, so a creator who is gone fails the job before any write; it walks
+untouched `needs_review` items up to a per-job cap of 100, then self-requeues
+with a cursor for the rest.
 
 Better Auth uses opaque cookies for browser identity, `Secure` whenever the
 configured public origin is HTTPS, which is every production deployment, and
@@ -514,6 +552,71 @@ routes with 409 `blob_quarantined`. Nothing from the mail is logged, audited, or
 sent anywhere: sender, recipient, token, subject, headers, body, and attachment
 names stay out of logs and `inbox_event`, which carry ids, reasons, and counts
 only.
+
+Amended 2026-09-17 (1b-runtime): three more `SECURITY DEFINER` functions owned
+by `bap_owner`, with EXECUTE to `bap_api`, back the `inbox_maintenance` tick:
+`app.list_blob_keys(organization_id, sha256s)` returns the subset of hashes that
+already have a `blob` row and never deletes one;
+`app.reap_stalled_inbox_items(stale, max_rows)` fails a stuck `processing` item
+and writes its `stalled` event; `app.list_stuck_email_items(stale, max_rows)`
+returns ids for a `received` email item past its requeue window. Each raises
+`insufficient_privilege` when `current_setting('bap.organization_id', true)` is
+set, the inverse of the `record_blob_scan` guard: every API request and every
+channel job runs inside a tenant transaction, so only the organization-less
+worker tick can reach them.
+
+Amended 2026-09-17 (1b-rules): a rule carries no principal of its own, only its
+author's. A rule runs a synchronous action inside the intake path only when
+`app.list_inbox_rules()` returns it, which happens only while its author is a
+verified owner or admin member, and runs the automatic route in the
+`route_inbox_item` job as that same author after `resolveMembership` re-resolves
+role and entity scope at dequeue. An author who is no longer a verified owner or
+admin, whose scope excludes the item's entity, or who was erased leaves the item
+in review with a `rule_author_unavailable` event, and the rules page shows the
+rule paused with an adopt action. A rule never grants its author anything beyond
+what that author can already do at the moment it runs, checked independently on
+both paths.
+
+The route job opens its read-only transaction as `system_automation`, the
+subject ADR 0016 names in place of the earlier `system_sweep` placeholder:
+`{ role: 'member', userId: 'system_automation' }`, admitted to write nothing
+except through `app.record_inbox_automation_skip`. Its `legalEntityIds` is null
+and the job never calls `readEntityScope` or `app.record_audit` for it, since a
+fake subject's missing-row scope default would be unrestricted and the audit
+insert policy has no role check to stop it. The migration adds
+`CHECK (id NOT LIKE 'system\_%')` on `auth."user"` beside
+`user_id_not_channel_check`, and `app.erase_user` refuses the name, so the
+subject can never collide with a real account.
+
+Two more `SECURITY DEFINER` functions owned by `bap_owner` join the runtime's
+three, EXECUTE to `bap_api`: `app.list_inbox_rules()` reads `auth.member` and
+`auth."user"` to return only the enabled, undeleted rules of the caller's
+organization whose author is currently a verified owner or admin, raising when
+`bap.organization_id` is empty;
+`app.record_inbox_automation_skip(item_id, reason)` inserts one `failed`
+`inbox_event` for a `needs_review` item of the caller's organization, raising
+when the setting is empty and on any reason other than
+`rule_author_unavailable`.
+
+Amended 2026-09-17 (1b-actions): `POST .../items/bulk` runs each of up to 100
+distinct item ids through the existing single-item repository function in its
+own transaction, in body order inside one request, so a refusal on one id (409
+not open, 404 not visible) never rolls back another; the response carries one
+`{ itemId, status, code? }` per id and the audit entry is one row per changed
+item, the same as the single-item actions. Like every route in this spec, bulk
+resolves `manageDocuments` through the controller's `manage` helper
+(`inbox.controller.ts:574-584`), which a `channel_` subject never passes, so the
+channel principal cannot call bulk, attach, or the versioning and fingerprint
+routes either. Attach runs as one transaction: it locks the target document row,
+inserts the item's `document_file` rows, and routes the item, so a concurrent
+attach or delete of the same document serializes against it; undo discriminates
+by `document.inbox_item_id`, deleting only the attaching item's `document_file`
+rows and leaving the document when another item created it, or deleting the
+document itself in the same transaction as the unroute when this item created
+it. `POST .../items/:itemId/process` on a `failed` email parent re-enqueues
+`split_email_item` instead of re-sniffing; its children stay idempotent by
+`external_id`, so a re-run resumes at the first child that does not exist yet
+rather than duplicating an already-split attachment.
 
 ## Member status
 

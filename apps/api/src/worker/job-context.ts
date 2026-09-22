@@ -1,4 +1,5 @@
 import { withTenantContext } from '@bap/db';
+import type { TenantContext } from '@bap/db';
 import { resolveMembership } from '@bap/db/access';
 import type { DatabasePool } from '@bap/db/pool';
 import { organizationIdentifierSchema } from '@bap/security';
@@ -35,9 +36,39 @@ export const channelJobPayloadSchema = z
 
 export type ChannelJobPayload = z.infer<typeof channelJobPayloadSchema>;
 
+// The rerun walks as its creator: a tenant payload plus the rule and the cursor the previous batch stopped at.
+export const rerunInboxRuleJobPayloadSchema = tenantJobPayloadSchema
+  .extend({
+    cursor: z
+      .object({ itemId: z.string().uuid(), receivedAt: z.iso.datetime() })
+      .strict()
+      .optional(),
+    ruleId: z.string().uuid(),
+  })
+  .strict();
+
+export type RerunInboxRuleJobPayload = z.infer<
+  typeof rerunInboxRuleJobPayloadSchema
+>;
+
+// The route job names no subject: the author is resolved at dequeue from the rule or the target, never carried.
+export const routeInboxItemJobPayloadSchema = z
+  .object({
+    itemId: z.string().uuid(),
+    organizationId: organizationIdentifierSchema,
+    ruleId: z.string().uuid().nullable(),
+  })
+  .strict();
+
+export type RouteInboxItemJobPayload = z.infer<
+  typeof routeInboxItemJobPayloadSchema
+>;
+
 export const jobPayloadSchema = z.union([
   tenantJobPayloadSchema,
   channelJobPayloadSchema,
+  rerunInboxRuleJobPayloadSchema,
+  routeInboxItemJobPayloadSchema,
 ]);
 
 export type JobPayload = z.infer<typeof jobPayloadSchema>;
@@ -45,7 +76,11 @@ export type JobPayload = z.infer<typeof jobPayloadSchema>;
 export interface RunTenantJobOptions<T> {
   data: unknown;
   pool: DatabasePool;
-  work: (transaction: PoolClient, payload: JobPayload) => Promise<T>;
+  work: (
+    transaction: PoolClient,
+    payload: JobPayload,
+    tenant: TenantContext,
+  ) => Promise<T>;
 }
 
 // The dequeue gate: parse, re-resolve membership, only then open a tenant transaction. Model, API and network calls belong outside withTenantContext, never inside the transaction.
@@ -56,6 +91,11 @@ export async function runTenantJob<T>(
 
   if ('channelId' in payload) {
     return runChannelJob(options, payload);
+  }
+
+  // The route job resolves its own author and opens its own transactions; it never runs as a payload subject.
+  if (!('userId' in payload)) {
+    throw new Error('Job payload names no subject.');
   }
 
   const membership = await resolveMembership(options.pool, {
@@ -77,14 +117,13 @@ export async function runTenantJob<T>(
 
   try {
     // The role is re-resolved here, never carried in the payload, so a demoted subject loses its writes.
-    return await withTenantContext(
-      client,
-      {
-        organizationId: payload.organizationId,
-        role: membership.role,
-        userId: payload.userId,
-      },
-      (transaction) => options.work(transaction, payload),
+    const tenant: TenantContext = {
+      organizationId: payload.organizationId,
+      role: membership.role,
+      userId: payload.userId,
+    };
+    return await withTenantContext(client, tenant, (transaction) =>
+      options.work(transaction, payload, tenant),
     );
   } finally {
     client.release();
@@ -97,24 +136,21 @@ async function runChannelJob<T>(
   payload: ChannelJobPayload,
 ): Promise<T> {
   const client = await options.pool.connect();
+  const tenant = channelTenant(payload.organizationId, payload.channelId);
 
   try {
-    return await withTenantContext(
-      client,
-      channelTenant(payload.organizationId, payload.channelId),
-      async (transaction) => {
-        const channel = await transaction.query(
-          'select 1 from app.inbox_channel where id = $1 and enabled and deleted_at is null',
-          [payload.channelId],
-        );
+    return await withTenantContext(client, tenant, async (transaction) => {
+      const channel = await transaction.query(
+        'select 1 from app.inbox_channel where id = $1 and enabled and deleted_at is null',
+        [payload.channelId],
+      );
 
-        if (channel.rows.length === 0) {
-          throw new Error('Job channel is disabled or missing.');
-        }
+      if (channel.rows.length === 0) {
+        throw new Error('Job channel is disabled or missing.');
+      }
 
-        return options.work(transaction, payload);
-      },
-    );
+      return options.work(transaction, payload, tenant);
+    });
   } finally {
     client.release();
   }

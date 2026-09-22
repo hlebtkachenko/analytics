@@ -6,6 +6,7 @@ import {
   type ExceptionFilter,
 } from '@nestjs/common';
 
+import type { ApplicationLogger } from './logger.js';
 import type { AuthenticatedRequest, HttpResponse } from './request-context.js';
 
 const problemDetails: Record<
@@ -49,27 +50,38 @@ const problemDetails: Record<
   },
 };
 
-// A route may name a machine-readable reason (a lowercase token) beside the generic problem of its status.
+// A route may name a machine-readable reason (a lowercase token) beside the generic problem of its status,
+// either as the exception message or as a `code` field of an object body whose other fields ride along.
 const PROBLEM_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 
-function problemCode(exception: unknown): string | undefined {
+function problemExtension(exception: unknown): Record<string, unknown> {
   if (!(exception instanceof HttpException)) {
-    return undefined;
+    return {};
   }
 
   const body = exception.getResponse();
+
+  if (typeof body === 'object' && body !== null && 'code' in body) {
+    const { code } = body as { code?: unknown };
+    return typeof code === 'string' && PROBLEM_CODE_PATTERN.test(code)
+      ? { ...body }
+      : {};
+  }
+
   const message =
     typeof body === 'object' && body !== null
       ? (body as { message?: unknown }).message
       : body;
 
   return typeof message === 'string' && PROBLEM_CODE_PATTERN.test(message)
-    ? message
-    : undefined;
+    ? { code: message }
+    : {};
 }
 
 @Catch()
 export class ProblemExceptionFilter implements ExceptionFilter {
+  constructor(private readonly logger?: ApplicationLogger) {}
+
   catch(exception: unknown, host: ArgumentsHost): void {
     const response = host.switchToHttp().getResponse<HttpResponse>();
     const request = host.switchToHttp().getRequest<AuthenticatedRequest>();
@@ -77,6 +89,17 @@ export class ProblemExceptionFilter implements ExceptionFilter {
       exception instanceof HttpException
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
+
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      this.logger?.error({
+        errorMessage:
+          exception instanceof Error ? exception.message : String(exception),
+        errorName: exception instanceof Error ? exception.name : 'UnknownError',
+        requestId: request.requestId,
+        route: request.route?.path,
+      });
+    }
+
     const problem = problemDetails[status] ?? {
       detail: 'The service could not complete the request',
       slug:
@@ -89,11 +112,9 @@ export class ProblemExceptionFilter implements ExceptionFilter {
           : 'Service error',
     };
 
-    const code = problemCode(exception);
-
     response.setHeader('Content-Type', 'application/problem+json');
     response.status(status).json({
-      ...(code === undefined ? {} : { code }),
+      ...problemExtension(exception),
       detail: problem.detail,
       instance: request.url.split('?', 1)[0] || '/',
       status,

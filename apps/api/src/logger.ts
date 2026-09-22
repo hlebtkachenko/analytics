@@ -44,7 +44,12 @@ export class ApplicationLogger implements LoggerService {
     this.logger.debug({ context }, String(message));
   }
 
-  error(_message: unknown, _trace?: string, context?: string): void {
+  error(message: unknown, _trace?: string, context?: string): void {
+    if (typeof message === 'object' && message !== null) {
+      this.logger.error({ context, data: message }, 'Application error');
+      return;
+    }
+
     this.logger.error({ context }, 'Application error');
   }
 

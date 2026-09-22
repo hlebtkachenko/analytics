@@ -15,6 +15,7 @@ import {
 import type { PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { endPools } from '../test-support/end-pools.js';
 import {
   createDocumentRequestSchema,
   documentListQuerySchema,
@@ -329,7 +330,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await Promise.all([apiPool.end(), migratorPool.end()]);
+  await endPools(apiPool, migratorPool);
   await container.stop();
 });
 

@@ -4,6 +4,8 @@ import {
   Button,
   ComboBox,
   InlineNotification,
+  Link,
+  ListItem,
   Select,
   SelectItem,
   Stack,
@@ -20,6 +22,8 @@ import {
   TableHeader,
   TableRow,
   Tag,
+  Tile,
+  UnorderedList,
 } from '@bap/design-system/react';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -37,6 +41,7 @@ import {
   formatAmount,
   sendJson,
   sendWithoutContent,
+  withOrganization,
 } from '../../../../lib/documents/client';
 import {
   documentDetailSchema,
@@ -60,6 +65,8 @@ import {
   invoiceLineKindLabelKeys,
   vatModeLabelKeys,
 } from '../../../../lib/documents/labels.ts';
+import { inboxBlobDownloadPath } from '../../../../lib/inbox/client';
+import { inboxStatusLabelKeys } from '../../../../lib/inbox/labels.ts';
 import { useOrganizationAccess } from '../../../../lib/organizations/use-organization-access';
 import { useOrganizationSelection } from '../../../../lib/organizations/use-organization-selection';
 import styles from './page.module.scss';
@@ -582,6 +589,84 @@ export default function DocumentDetailPage() {
           )}
         </Stack>
       </section>
+      <Tile>
+        <section aria-labelledby="document-originals-heading">
+          <Stack gap={5}>
+            <h2
+              className={styles.sectionHeading!}
+              id="document-originals-heading"
+            >
+              {t('documents.originalsTitle')}
+            </h2>
+            {detail.supersedesDocumentId === null &&
+            detail.supersededByDocumentId === null ? null : (
+              <>
+                <InlineNotification
+                  hideCloseButton
+                  kind="info"
+                  lowContrast
+                  subtitle={t('documents.versionBanner')}
+                />
+                <Stack gap={3}>
+                  {detail.supersedesDocumentId === null ? null : (
+                    <Link
+                      href={documentPath(
+                        organizationId,
+                        detail.supersedesDocumentId,
+                      )}
+                    >
+                      {t('documents.supersedesLink')}
+                    </Link>
+                  )}
+                  {detail.supersededByDocumentId === null ? null : (
+                    <Link
+                      href={documentPath(
+                        organizationId,
+                        detail.supersededByDocumentId,
+                      )}
+                    >
+                      {t('documents.supersededByLink')}
+                    </Link>
+                  )}
+                </Stack>
+              </>
+            )}
+            {detail.files.length === 0 ? (
+              <p>{t('documents.originalsNone')}</p>
+            ) : (
+              <UnorderedList aria-label={t('documents.originalsTitle')}>
+                {detail.files.map((file) => (
+                  <ListItem key={file.blobId}>
+                    <Link
+                      href={inboxBlobDownloadPath(organizationId, file.blobId)}
+                    >
+                      {file.filename ??
+                        t('documents.originalFile', {
+                          position: String(file.position),
+                        })}
+                    </Link>
+                  </ListItem>
+                ))}
+              </UnorderedList>
+            )}
+            {detail.inboxItems.map((item) => (
+              <div className={styles.actions!} key={item.id}>
+                <span>
+                  {t(inboxStatusLabelKeys[item.status])} · {item.receivedAt}
+                </span>
+                <Link
+                  href={withOrganization(
+                    `/inbox/${encodeURIComponent(item.id)}`,
+                    organization.slug,
+                  )}
+                >
+                  {item.id}
+                </Link>
+              </div>
+            ))}
+          </Stack>
+        </section>
+      </Tile>
       <section aria-labelledby="document-links-heading">
         <Stack gap={5}>
           <h2 id="document-links-heading">{t('documents.linksTitle')}</h2>

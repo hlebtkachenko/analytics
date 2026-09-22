@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   deleteDocumentLink,
   deleteInboxChannelCredential,
+  deleteInboxRoutingTarget,
+  deleteInboxRule,
   deleteLegalEntity,
   getDocument,
   getDocumentAnalytics,
@@ -16,21 +18,32 @@ import {
   getInboxChannels,
   getInboxItem,
   getInboxItems,
+  getInboxRoutingTargets,
+  getInboxRules,
+  getInboxSettings,
   getLegalEntities,
   getMemberEntityScope,
   getMemberEntityScopes,
   getOrganizationAccess,
   patchInboxChannel,
+  patchInboxRule,
+  patchInboxSettings,
   patchLegalEntity,
   patchPartner,
   postDatasetUpload,
   postDocument,
   postInboxChannel,
   postInboxChannelCredential,
+  postInboxItemAttach,
   postInboxItemDiscard,
   postInboxItemRouteDocument,
+  postInboxItemsBulk,
+  postInboxRule,
+  postInboxRuleAdopt,
   postInboxUpload,
   postLegalEntity,
+  putInboxRoutingTarget,
+  putInboxRuleOrder,
   putMemberEntityScope,
 } from './bff.js';
 import type { BffAuth } from './bff.js';
@@ -1221,16 +1234,20 @@ const documentDetail = {
   attributes: {},
   document: documentSummary,
   event: null,
+  files: [],
+  inboxItems: [],
   invoice: null,
   issues: [],
   links: [],
+  supersededByDocumentId: null,
+  supersedesDocumentId: null,
 };
 
 describe('getDocuments', () => {
   it('rebuilds the query from validated values only', async () => {
     const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe(
-        `http://api:3001/v1/organizations/org_1/documents?legalEntityId=${LEGAL_ENTITY_ID}&kind=received_invoice&status=registered&page=2&pageSize=50&sort=title&order=asc`,
+        `http://api:3001/v1/organizations/org_1/documents?current=true&legalEntityId=${LEGAL_ENTITY_ID}&kind=received_invoice&status=registered&page=2&pageSize=50&sort=title&order=asc`,
       );
       expect(init?.headers).toEqual({
         authorization: 'Bearer resource-token',
@@ -1258,7 +1275,7 @@ describe('getDocuments', () => {
   it('applies the contract defaults when the browser asks for nothing', async () => {
     const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
       expect(String(input)).toBe(
-        'http://api:3001/v1/organizations/org_1/documents?page=1&pageSize=25&sort=documentDate&order=desc',
+        'http://api:3001/v1/organizations/org_1/documents?current=true&page=1&pageSize=25&sort=documentDate&order=desc',
       );
       return Response.json(documentList);
     });
@@ -1266,6 +1283,25 @@ describe('getDocuments', () => {
     const response = await getDocuments(
       auth,
       datasetRequest('documents'),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+  });
+
+  it('forwards an explicit current filter to the API', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/documents?current=all&page=1&pageSize=25&sort=documentDate&order=desc',
+      );
+      return Response.json(documentList);
+    });
+
+    const response = await getDocuments(
+      auth,
+      datasetRequest('documents?current=all'),
       'org_1',
       fetchImplementation,
     );
@@ -1600,6 +1636,7 @@ const inboxItem = {
   createdAt: '2026-09-16T08:00:00.000Z',
   datasetId: null,
   decidedByKind: null,
+  decidedByRuleId: null,
   decidedByUserId: null,
   detectedType: 'pdf',
   documentId: null,
@@ -1609,6 +1646,7 @@ const inboxItem = {
   hintLinkDocumentId: null,
   hintPartnerId: null,
   hintText: null,
+  humanTouched: false,
   id: INBOX_ITEM_ID,
   legalEntityId: null,
   origin: null,
@@ -1632,10 +1670,23 @@ const inboxFile = {
 };
 
 const inboxDetail = {
+  corrections: [],
   events: [],
   extraction: null,
   files: [inboxFile],
-  item: inboxItem,
+  item: { ...inboxItem, sender: null },
+  routingTarget: {
+    auto: 'never',
+    autoThreshold: null,
+    defaultAssigneeId: null,
+    defaultLegalEntityId: null,
+    destination: 'documents',
+    detectedType: 'pdf',
+    documentKind: 'other',
+    partnerPolicy: 'match_only',
+    requiredFields: [],
+    source: 'platform',
+  },
 };
 
 const inboxRequest = (path: string, init?: RequestInit) =>
@@ -1723,7 +1774,14 @@ describe('getInboxItems', () => {
         'http://api:3001/v1/organizations/org_1/inbox/items?status=received%2Cfailed&page=1&pageSize=25',
       );
       return Response.json({
-        items: [{ ...inboxItem, fileCount: 1, primaryFilename: 'a.pdf' }],
+        items: [
+          {
+            ...inboxItem,
+            fileCount: 1,
+            humanTouched: false,
+            primaryFilename: 'a.pdf',
+          },
+        ],
         page: 1,
         pageSize: 25,
         total: 1,
@@ -1739,6 +1797,34 @@ describe('getInboxItems', () => {
 
     expect(response.status).toBe(200);
     expect((await response.json()).items).toHaveLength(1);
+  });
+
+  it('passes the issue, assignee and confidence filters through and refuses an unknown band', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/items?issue=duplicate_probable&assigneeId=none&confidence=low&page=1&pageSize=25',
+      );
+      return Response.json({ items: [], page: 1, pageSize: 25, total: 0 });
+    });
+
+    const filtered = await getInboxItems(
+      auth,
+      inboxRequest(
+        'items?issue=duplicate_probable&assigneeId=none&confidence=low',
+      ),
+      'org_1',
+      fetchImplementation,
+    );
+    const unknownBand = await getInboxItems(
+      auth,
+      inboxRequest('items?confidence=certain'),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(filtered.status).toBe(200);
+    expect(unknownBand.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
   });
 
   it('refuses an unknown status and an oversized page without an outbound call', async () => {
@@ -1799,6 +1885,7 @@ describe('inbox item reads and writes', () => {
       );
       expect(init?.method).toBe('POST');
       expect(JSON.parse(String(init?.body))).toEqual({
+        correctionReasons: { kind: 'It is a contract.' },
         document: {
           currencyCode: 'CZK',
           documentDate: '2026-09-01',
@@ -1810,7 +1897,12 @@ describe('inbox item reads and writes', () => {
       });
       return Response.json({
         ...inboxDetail,
-        item: { ...inboxItem, documentId: DATASET_ID, status: 'routed' },
+        item: {
+          ...inboxItem,
+          documentId: DATASET_ID,
+          sender: null,
+          status: 'routed',
+        },
       });
     });
 
@@ -1818,6 +1910,7 @@ describe('inbox item reads and writes', () => {
       auth,
       inboxRequest(`items/${INBOX_ITEM_ID}/route/document`, {
         body: JSON.stringify({
+          correctionReasons: { kind: 'It is a contract.' },
           document: {
             documentDate: '2026-09-01',
             kind: 'contract',
@@ -1849,6 +1942,166 @@ describe('inbox item reads and writes', () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(1);
   });
 
+  it('forwards the two 409 route bodies by code and hides any other conflict body', async () => {
+    let posts = 0;
+    const fetchImplementation = vi.fn<typeof fetch>(async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      posts += 1;
+      if (posts === 1) {
+        expect(body.supersedesDocumentId).toBeUndefined();
+        return Response.json(
+          { code: 'reference_conflict', documentId: DATASET_ID },
+          { status: 409 },
+        );
+      }
+      if (posts === 2) {
+        expect(body.supersedesDocumentId).toBe(DATASET_ID);
+        expect(body.acknowledgeDuplicateOf).toBe(DATASET_ID);
+        return Response.json(
+          {
+            candidates: [
+              {
+                documentDate: '2026-09-01',
+                id: DATASET_ID,
+                reference: 'REF-9',
+                totalAmount: '10.0000',
+              },
+            ],
+            code: 'duplicate_probable',
+          },
+          { status: 409 },
+        );
+      }
+      return Response.json({ code: 'something_else' }, { status: 409 });
+    });
+    const route = (extra: Record<string, unknown>) =>
+      postInboxItemRouteDocument(
+        auth,
+        inboxRequest(`items/${INBOX_ITEM_ID}/route/document`, {
+          body: JSON.stringify({
+            document: {
+              documentDate: '2026-09-01',
+              kind: 'contract',
+              legalEntityId: LEGAL_ENTITY_ID,
+              title: 'Placeholder contract',
+            },
+            fileBlobIds: [BLOB_ID],
+            ...extra,
+          }),
+          method: 'POST',
+        }),
+        'org_1',
+        INBOX_ITEM_ID,
+        fetchImplementation,
+      );
+
+    const reference = await route({});
+    const duplicate = await route({
+      acknowledgeDuplicateOf: DATASET_ID,
+      supersedesDocumentId: DATASET_ID,
+    });
+    const other = await route({});
+
+    expect(reference.status).toBe(409);
+    expect(await reference.json()).toEqual({
+      code: 'reference_conflict',
+      documentId: DATASET_ID,
+      error: 'inbox_item_rejected',
+    });
+    expect(duplicate.status).toBe(409);
+    expect((await duplicate.json()).candidates).toHaveLength(1);
+    expect(other.status).toBe(409);
+    expect(await other.json()).toEqual({ error: 'inbox_item_rejected' });
+  });
+
+  it('attaches to a document and refuses a body without one', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        `http://api:3001/v1/organizations/org_1/inbox/items/${INBOX_ITEM_ID}/attach`,
+      );
+      expect(JSON.parse(String(init?.body))).toEqual({
+        documentId: DATASET_ID,
+      });
+      return Response.json({
+        ...inboxDetail,
+        item: {
+          ...inboxItem,
+          documentId: DATASET_ID,
+          sender: null,
+          status: 'routed',
+        },
+      });
+    });
+    const attach = (body: unknown) =>
+      postInboxItemAttach(
+        auth,
+        inboxRequest(`items/${INBOX_ITEM_ID}/attach`, {
+          body: JSON.stringify(body),
+          method: 'POST',
+        }),
+        'org_1',
+        INBOX_ITEM_ID,
+        fetchImplementation,
+      );
+
+    const attached = await attach({ documentId: DATASET_ID });
+    const refused = await attach({});
+
+    expect(attached.status).toBe(200);
+    expect((await attached.json()).item.status).toBe('routed');
+    expect(refused.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs a bulk action, answers per id, and refuses a field that does not belong to the action', async () => {
+    const results = [
+      { itemId: INBOX_ITEM_ID, status: 'ok' },
+      { code: 'not_open', itemId: BLOB_ID, status: 'refused' },
+    ];
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/items/bulk',
+      );
+      expect(JSON.parse(String(init?.body))).toEqual({
+        action: 'assign',
+        assigneeId: 'user_2',
+        itemIds: [INBOX_ITEM_ID, BLOB_ID],
+      });
+      return Response.json({ results });
+    });
+    const bulk = (body: unknown) =>
+      postInboxItemsBulk(
+        auth,
+        inboxRequest('items/bulk', {
+          body: JSON.stringify(body),
+          method: 'POST',
+        }),
+        'org_1',
+        fetchImplementation,
+      );
+
+    const assigned = await bulk({
+      action: 'assign',
+      assigneeId: 'user_2',
+      itemIds: [INBOX_ITEM_ID, BLOB_ID],
+    });
+    const strayField = await bulk({
+      action: 'approve',
+      assigneeId: 'user_2',
+      itemIds: [INBOX_ITEM_ID],
+    });
+    const missingField = await bulk({
+      action: 'snooze',
+      itemIds: [INBOX_ITEM_ID],
+    });
+
+    expect(assigned.status).toBe(200);
+    expect(await assigned.json()).toEqual({ results });
+    expect(strayField.status).toBe(400);
+    expect(missingField.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+
   it('discards with a reason from the closed list only', async () => {
     const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe(
@@ -1857,7 +2110,7 @@ describe('inbox item reads and writes', () => {
       expect(JSON.parse(String(init?.body))).toEqual({ reason: 'spam' });
       return Response.json({
         ...inboxDetail,
-        item: { ...inboxItem, status: 'discarded' },
+        item: { ...inboxItem, sender: null, status: 'discarded' },
       });
     });
 
@@ -2285,5 +2538,458 @@ describe('inbox channels', () => {
     expect(revoked.headers.get('cache-control')).toBe('private, no-store');
     expect(malformed.status).toBe(404);
     expect(fetchImplementation).toHaveBeenCalledTimes(3);
+  });
+});
+
+const routingTarget = {
+  auto: 'never',
+  autoThreshold: null,
+  defaultAssigneeId: null,
+  defaultLegalEntityId: null,
+  destination: 'documents',
+  detectedType: 'pdf',
+  documentKind: 'other',
+  partnerPolicy: 'match_only',
+  requiredFields: [],
+  source: 'platform',
+};
+const routingTargetBody = {
+  auto: 'above_threshold',
+  autoThreshold: 0.9,
+  defaultAssigneeId: null,
+  defaultLegalEntityId: LEGAL_ENTITY_ID,
+  destination: 'documents',
+  documentKind: 'contract',
+  partnerPolicy: 'match_only',
+  requiredFields: ['title'],
+};
+
+describe('inbox routing targets', () => {
+  it('lists the effective targets from the fixed path', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/routing-targets',
+      );
+      expect(init?.method).toBe('GET');
+      return Response.json({ targets: [routingTarget] });
+    });
+
+    const response = await getInboxRoutingTargets(
+      auth,
+      inboxRequest('routing-targets'),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).targets).toEqual([routingTarget]);
+  });
+
+  it('puts a full target, refuses a partial or inconsistent body, and maps a 403', async () => {
+    let puts = 0;
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/routing-targets/pdf',
+      );
+      expect(init?.method).toBe('PUT');
+      expect(JSON.parse(String(init?.body))).toEqual(routingTargetBody);
+      puts += 1;
+      return puts === 1
+        ? Response.json({
+            ...routingTarget,
+            ...routingTargetBody,
+            source: 'organization',
+          })
+        : new Response(null, { status: 403 });
+    });
+    const put = (body: unknown, detectedType = 'pdf') =>
+      putInboxRoutingTarget(
+        auth,
+        inboxRequest(`routing-targets/${detectedType}`, {
+          body: JSON.stringify(body),
+          method: 'PUT',
+        }),
+        'org_1',
+        detectedType,
+        fetchImplementation,
+      );
+
+    const saved = await put(routingTargetBody);
+    const forbidden = await put(routingTargetBody);
+    const partial = await put({ auto: 'never' });
+    const noThreshold = await put({
+      ...routingTargetBody,
+      autoThreshold: null,
+    });
+    const kindOnDiscard = await put({
+      ...routingTargetBody,
+      destination: 'discard',
+    });
+    const malformed = await put(routingTargetBody, 'Not-A-Type');
+
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({
+      documentKind: 'contract',
+      source: 'organization',
+    });
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toEqual({
+      error: 'inbox_routing_target_rejected',
+    });
+    expect(partial.status).toBe(400);
+    expect(noThreshold.status).toBe(400);
+    expect(kindOnDiscard.status).toBe(400);
+    expect(malformed.status).toBe(404);
+    expect(await malformed.json()).toEqual({
+      error: 'inbox_routing_target_not_found',
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it('deletes a target with no content and answers 404 for a malformed type', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/routing-targets/pdf',
+      );
+      expect(init?.method).toBe('DELETE');
+      return new Response(null, { status: 204 });
+    });
+
+    const removed = await deleteInboxRoutingTarget(
+      auth,
+      inboxRequest('routing-targets/pdf', { method: 'DELETE' }),
+      'org_1',
+      'pdf',
+      fetchImplementation,
+    );
+    const malformed = await deleteInboxRoutingTarget(
+      auth,
+      inboxRequest('routing-targets/..', { method: 'DELETE' }),
+      'org_1',
+      '..',
+      fetchImplementation,
+    );
+
+    expect(removed.status).toBe(204);
+    expect(removed.headers.get('cache-control')).toBe('private, no-store');
+    expect(malformed.status).toBe(404);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('inbox settings', () => {
+  const settings = {
+    blobQuotaBytes: null,
+    platformQuotaBytes: 10_000_000_000,
+    usedBytes: 12_345,
+  };
+
+  it('reads the quota triple', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/settings',
+      );
+      return Response.json(settings);
+    });
+
+    const response = await getInboxSettings(
+      auth,
+      inboxRequest('settings'),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(settings);
+  });
+
+  it('patches the quota, passes a 422 above the cap through, and refuses a bad body', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/settings',
+      );
+      expect(init?.method).toBe('PATCH');
+      const body = JSON.parse(String(init?.body));
+      return body.blobQuotaBytes > settings.platformQuotaBytes
+        ? Response.json(
+            { status: 422, title: 'Quota above the platform cap' },
+            { status: 422 },
+          )
+        : Response.json({ ...settings, blobQuotaBytes: body.blobQuotaBytes });
+    });
+    const patch = (body: unknown) =>
+      patchInboxSettings(
+        auth,
+        inboxRequest('settings', {
+          body: JSON.stringify(body),
+          method: 'PATCH',
+        }),
+        'org_1',
+        fetchImplementation,
+      );
+
+    const saved = await patch({ blobQuotaBytes: 5_000 });
+    const cleared = await patch({ blobQuotaBytes: null });
+    const aboveCap = await patch({ blobQuotaBytes: 20_000_000_000 });
+    const negative = await patch({ blobQuotaBytes: -1 });
+    const unknownField = await patch({ blobQuotaBytes: 1, usedBytes: 0 });
+
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).blobQuotaBytes).toBe(5_000);
+    expect(cleared.status).toBe(200);
+    expect((await cleared.json()).blobQuotaBytes).toBeNull();
+    expect(aboveCap.status).toBe(422);
+    expect(await aboveCap.json()).toEqual({ error: 'inbox_settings_rejected' });
+    expect(negative.status).toBe(400);
+    expect(unknownField.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('inbox rules', () => {
+  const RULE_ID = '00000000-0000-4000-8000-000000000080';
+  const OTHER_RULE_ID = '00000000-0000-4000-8000-000000000081';
+  const rule = {
+    autoRoute: false,
+    channelId: null,
+    createdAt: '2026-09-17T08:00:00.000Z',
+    createdBy: 'user_1',
+    detectedType: null,
+    discardReason: null,
+    enabled: true,
+    id: RULE_ID,
+    keyword: null,
+    name: 'Supplier mail',
+    paused: false,
+    priority: 1,
+    senderPattern: '@dodavatel.cz',
+    setAssigneeId: null,
+    setDocumentKind: 'contract',
+    setLegalEntityId: LEGAL_ENTITY_ID,
+    setPartnerId: null,
+    updatedAt: '2026-09-17T08:00:00.000Z',
+  };
+  const ruleBody = {
+    applyToExisting: true,
+    autoRoute: false,
+    channelId: null,
+    detectedType: null,
+    discardReason: null,
+    enabled: true,
+    keyword: null,
+    name: 'Supplier mail',
+    senderPattern: '@dodavatel.cz',
+    setAssigneeId: null,
+    setDocumentKind: 'contract',
+    setLegalEntityId: LEGAL_ENTITY_ID,
+    setPartnerId: null,
+  };
+  const problem = (code: string) =>
+    Response.json(
+      { code, detail: 'Refused', status: 422, title: 'Unprocessable' },
+      { status: 422 },
+    );
+
+  it('lists the rules in the order the API answers', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/rules',
+      );
+      expect(init?.method).toBe('GET');
+      return Response.json({ rules: [rule] });
+    });
+
+    const response = await getInboxRules(
+      auth,
+      inboxRequest('rules'),
+      'org_1',
+      fetchImplementation,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).rules).toEqual([rule]);
+  });
+
+  it('creates a rule, passes the two 422 codes through, and refuses a bad body', async () => {
+    let posts = 0;
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/rules',
+      );
+      expect(init?.method).toBe('POST');
+      expect(JSON.parse(String(init?.body))).toEqual(ruleBody);
+      posts += 1;
+      return posts === 1
+        ? Response.json(rule, { status: 201 })
+        : posts === 2
+          ? problem('rule_limit')
+          : posts === 3
+            ? problem('not_available')
+            : problem('something_else');
+    });
+    const post = (body: unknown) =>
+      postInboxRule(
+        auth,
+        inboxRequest('rules', { body: JSON.stringify(body), method: 'POST' }),
+        'org_1',
+        fetchImplementation,
+      );
+
+    const created = await post(ruleBody);
+    const limit = await post(ruleBody);
+    const invoice = await post(ruleBody);
+    const unknownCode = await post(ruleBody);
+    const noCondition = await post({ ...ruleBody, senderPattern: null });
+    const noAction = await post({
+      ...ruleBody,
+      setDocumentKind: null,
+      setLegalEntityId: null,
+    });
+    const discardPlus = await post({ ...ruleBody, discardReason: 'spam' });
+
+    expect(created.status).toBe(201);
+    expect(await created.json()).toEqual(rule);
+    expect(limit.status).toBe(422);
+    expect(await limit.json()).toEqual({
+      code: 'rule_limit',
+      error: 'inbox_rule_rejected',
+    });
+    expect(invoice.status).toBe(422);
+    expect(await invoice.json()).toEqual({
+      code: 'not_available',
+      error: 'inbox_rule_rejected',
+    });
+    expect(await unknownCode.json()).toEqual({ error: 'inbox_rule_rejected' });
+    expect(noCondition.status).toBe(400);
+    expect(noAction.status).toBe(400);
+    expect(discardPlus.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledTimes(4);
+  });
+
+  it('patches a subset, maps a 404, and answers 404 for a malformed id', async () => {
+    let patches = 0;
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        `http://api:3001/v1/organizations/org_1/inbox/rules/${RULE_ID}`,
+      );
+      expect(init?.method).toBe('PATCH');
+      expect(JSON.parse(String(init?.body))).toEqual({ enabled: false });
+      patches += 1;
+      return patches === 1
+        ? Response.json({ ...rule, enabled: false })
+        : new Response(null, { status: 404 });
+    });
+    const patch = (body: unknown, ruleId = RULE_ID) =>
+      patchInboxRule(
+        auth,
+        inboxRequest(`rules/${ruleId}`, {
+          body: JSON.stringify(body),
+          method: 'PATCH',
+        }),
+        'org_1',
+        ruleId,
+        fetchImplementation,
+      );
+
+    const disabled = await patch({ enabled: false });
+    const missing = await patch({ enabled: false });
+    const empty = await patch({});
+    const rerun = await patch({ applyToExisting: true });
+    const malformed = await patch({ enabled: false }, 'not-an-id');
+
+    expect(disabled.status).toBe(200);
+    expect((await disabled.json()).enabled).toBe(false);
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: 'inbox_rule_rejected' });
+    expect(empty.status).toBe(400);
+    expect(rerun.status).toBe(400);
+    expect(malformed.status).toBe(404);
+    expect(await malformed.json()).toEqual({ error: 'inbox_rule_not_found' });
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it('deletes with no content and adopts from the fixed path', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      if (init?.method === 'DELETE') {
+        expect(String(input)).toBe(
+          `http://api:3001/v1/organizations/org_1/inbox/rules/${RULE_ID}`,
+        );
+        return new Response(null, { status: 204 });
+      }
+      expect(String(input)).toBe(
+        `http://api:3001/v1/organizations/org_1/inbox/rules/${RULE_ID}/adopt`,
+      );
+      expect(init?.method).toBe('POST');
+      expect(init?.body).toBeUndefined();
+      return Response.json({ ...rule, createdBy: 'user_1', paused: false });
+    });
+
+    const deleted = await deleteInboxRule(
+      auth,
+      inboxRequest(`rules/${RULE_ID}`, { method: 'DELETE' }),
+      'org_1',
+      RULE_ID,
+      fetchImplementation,
+    );
+    const adopted = await postInboxRuleAdopt(
+      auth,
+      inboxRequest(`rules/${RULE_ID}/adopt`, { method: 'POST' }),
+      'org_1',
+      RULE_ID,
+      fetchImplementation,
+    );
+    const malformed = await postInboxRuleAdopt(
+      auth,
+      inboxRequest('rules/not-an-id/adopt', { method: 'POST' }),
+      'org_1',
+      'not-an-id',
+      fetchImplementation,
+    );
+
+    expect(deleted.status).toBe(204);
+    expect(adopted.status).toBe(200);
+    expect((await adopted.json()).paused).toBe(false);
+    expect(malformed.status).toBe(404);
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it('puts the whole order and refuses a repeated or empty list', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'http://api:3001/v1/organizations/org_1/inbox/rules/order',
+      );
+      expect(init?.method).toBe('PUT');
+      expect(JSON.parse(String(init?.body))).toEqual({
+        ruleIds: [OTHER_RULE_ID, RULE_ID],
+      });
+      return Response.json({
+        rules: [
+          { ...rule, id: OTHER_RULE_ID, priority: 1 },
+          { ...rule, priority: 2 },
+        ],
+      });
+    });
+    const put = (body: unknown) =>
+      putInboxRuleOrder(
+        auth,
+        inboxRequest('rules/order', {
+          body: JSON.stringify(body),
+          method: 'PUT',
+        }),
+        'org_1',
+        fetchImplementation,
+      );
+
+    const ordered = await put({ ruleIds: [OTHER_RULE_ID, RULE_ID] });
+    const repeated = await put({ ruleIds: [RULE_ID, RULE_ID] });
+    const empty = await put({ ruleIds: [] });
+
+    expect(ordered.status).toBe(200);
+    expect(
+      (await ordered.json()).rules.map((entry: { id: string }) => entry.id),
+    ).toEqual([OTHER_RULE_ID, RULE_ID]);
+    expect(repeated.status).toBe(400);
+    expect(empty.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
   });
 });

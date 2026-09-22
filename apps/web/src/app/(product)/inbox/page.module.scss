@@ -8,9 +8,8 @@
   justify-content: space-between;
 }
 
-.filters {
+.headingActions {
   display: flex;
   flex-wrap: wrap;
-  gap: spacing.$spacing-05;
-  max-inline-size: 20rem;
+  gap: spacing.$spacing-03;
 }

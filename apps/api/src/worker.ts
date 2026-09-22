@@ -11,7 +11,17 @@ import {
   SUMMARIZE_DATASET_QUEUE,
 } from './agents/contract.js';
 import { FilesystemBlobStore } from './blobs/blob-store.js';
-import { SPLIT_EMAIL_ITEM_QUEUE } from './inbox/contract.js';
+import {
+  INBOX_MAINTENANCE_QUEUE,
+  RERUN_INBOX_RULE_QUEUE,
+  ROUTE_INBOX_ITEM_QUEUE,
+  SPLIT_EMAIL_ITEM_QUEUE,
+} from './inbox/contract.js';
+import {
+  sendRerunInboxRule,
+  sendRouteInboxItem,
+  sendSplitEmailItem,
+} from './inbox/inbox-queue.js';
 import { INGEST_DATASET_QUEUE } from './ingestion/contract.js';
 import {
   createStagingDirectory,
@@ -21,8 +31,14 @@ import { ApplicationLogger } from './logger.js';
 import { loadRuntimeConfiguration } from './runtime-configuration.js';
 import { ClamdClient } from './scanning/clamd-client.js';
 import { backfillDatasetEmbeddings } from './worker/backfill-embeddings.js';
+import {
+  runInboxMaintenance,
+  scheduleInboxMaintenance,
+} from './worker/inbox-maintenance.js';
 import { ingestDataset } from './worker/ingest-dataset.js';
 import { curateJobFailure } from './worker/job-failure.js';
+import { rerunInboxRule } from './worker/rerun-inbox-rule.js';
+import { routeInboxItem } from './worker/route-inbox-item.js';
 import { splitEmailItem } from './worker/split-email-item.js';
 import { summarizeDataset } from './worker/summarize-dataset.js';
 import { startObservabilityServer } from './worker/observability.js';
@@ -85,7 +101,33 @@ async function bootstrap(): Promise<void> {
   await createQueue(queue, INGEST_DATASET_QUEUE);
   await createQueue(queue, BACKFILL_EMBEDDINGS_QUEUE);
   await createQueue(queue, SUMMARIZE_DATASET_QUEUE);
-  await createQueue(queue, SPLIT_EMAIL_ITEM_QUEUE);
+  // Keyed queues: the item id and the tick name are singleton keys, which pg-boss honours only under exclusive.
+  const warnQueue = (message: string): void =>
+    logger.warn(message, SERVICE_NAME);
+  await createQueue(
+    queue,
+    SPLIT_EMAIL_ITEM_QUEUE,
+    { policy: 'exclusive' },
+    warnQueue,
+  );
+  await createQueue(
+    queue,
+    INBOX_MAINTENANCE_QUEUE,
+    { policy: 'exclusive' },
+    warnQueue,
+  );
+  await createQueue(
+    queue,
+    ROUTE_INBOX_ITEM_QUEUE,
+    { policy: 'exclusive' },
+    warnQueue,
+  );
+  await createQueue(
+    queue,
+    RERUN_INBOX_RULE_QUEUE,
+    { policy: 'exclusive' },
+    warnQueue,
+  );
   // The real error is logged here; only the curated one reaches pgboss.job.output.
   const runJob = async (work: () => Promise<void>): Promise<void> => {
     try {
@@ -168,6 +210,7 @@ async function bootstrap(): Promise<void> {
           splitEmailItem({
             blobs,
             data: job.data,
+            enqueueRouteInboxItem: (route) => sendRouteInboxItem(queue, route),
             metrics,
             pool,
             quotaBytes: runtime.blob.quotaBytesPerOrganization,
@@ -175,6 +218,59 @@ async function bootstrap(): Promise<void> {
             scanner,
           }),
         );
+      }
+    },
+  );
+
+  // The platform's first cron: one organization-less tick every quarter hour, never through runTenantJob.
+  await scheduleInboxMaintenance(queue);
+  await queue.work<unknown, void, { localConcurrency: 1 }>(
+    INBOX_MAINTENANCE_QUEUE,
+    { localConcurrency: 1 },
+    async (jobs) => {
+      for (const job of jobs) {
+        await runJob(async () => {
+          await runInboxMaintenance({
+            blobs,
+            data: job.data,
+            enqueueSplitEmailItem: (split) => sendSplitEmailItem(queue, split),
+            logger,
+            metrics,
+            pool,
+          });
+        });
+      }
+    },
+  );
+
+  // Each route locks its own item row, so a few may run side by side; a rerun walks many rows, so one at a time.
+  await queue.work<unknown, void, { localConcurrency: 4 }>(
+    ROUTE_INBOX_ITEM_QUEUE,
+    { localConcurrency: 4 },
+    async (jobs) => {
+      for (const job of jobs) {
+        await runJob(async () => {
+          await routeInboxItem({ data: job.data, logger, metrics, pool });
+        });
+      }
+    },
+  );
+  await queue.work<unknown, void, { localConcurrency: 1 }>(
+    RERUN_INBOX_RULE_QUEUE,
+    { localConcurrency: 1 },
+    async (jobs) => {
+      for (const job of jobs) {
+        await runJob(async () => {
+          await rerunInboxRule({
+            blobs,
+            data: job.data,
+            enqueueRerunInboxRule: (rerun) => sendRerunInboxRule(queue, rerun),
+            enqueueRouteInboxItem: (route) => sendRouteInboxItem(queue, route),
+            logger,
+            metrics,
+            pool,
+          });
+        });
       }
     },
   );

@@ -37,6 +37,12 @@ describe('DataGrid', () => {
     expect(bodyRowText()).toHaveLength(3);
   });
 
+  it('wraps the table in a container that never widens its parent', () => {
+    const { container } = render(<DataGrid columns={columns} rows={rows} />);
+    const section = container.querySelector('.cds--data-table-container');
+    expect(section?.className).toContain('container');
+  });
+
   it('sorts ascending when a sortable header is clicked', () => {
     render(<DataGrid columns={columns} rows={rows} sortable />);
     expect(bodyRowText()[0]).toContain('beta');
@@ -102,6 +108,22 @@ describe('DataGrid', () => {
     const checkbox = within(firstBodyRow).getByRole('checkbox');
     fireEvent.click(checkbox);
     expect(onSelectionChange).toHaveBeenCalledWith(['1']);
+  });
+
+  it('hides the batch action bar from focus until a row is selected', () => {
+    render(
+      <DataGrid
+        batchActions={[{ id: 'archive', label: 'Archive', onClick: vi.fn() }]}
+        columns={columns}
+        rows={rows}
+        selection="multi"
+      />,
+    );
+    const action = screen.getByText('Archive').closest('button') as HTMLElement;
+    expect(action).toHaveAttribute('tabindex', '-1');
+    const firstBodyRow = screen.getAllByRole('row')[1] as HTMLElement;
+    fireEvent.click(within(firstBodyRow).getByRole('checkbox'));
+    expect(action).toHaveAttribute('tabindex', '0');
   });
 
   it('freezes a pinned column with a sticky left offset', () => {

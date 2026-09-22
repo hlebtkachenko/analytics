@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import {
   ConflictException,
   ForbiddenException,
+  NotFoundException,
   PayloadTooLargeException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import {
   bootstrapDatabaseRoles,
@@ -29,11 +31,24 @@ import {
   createBlobDirectories,
   FilesystemBlobStore,
 } from '../blobs/blob-store.js';
+import { BadRequestException } from '@nestjs/common';
+import {
+  createDocumentRequestSchema,
+  documentListQuerySchema,
+} from '../documents/contract.js';
+import type { CreateDocumentRequest } from '../documents/contract.js';
 import {
   deleteDocument,
+  listDocuments,
   readDocument,
 } from '../documents/document-repository.js';
-import { inboxItemListQuerySchema } from './contract.js';
+import { createPartner } from '../documents/partner-repository.js';
+import { endPools } from '../test-support/end-pools.js';
+import { DETECTED_TYPES, inboxItemListQuerySchema } from './contract.js';
+import type {
+  PutInboxRoutingTargetRequest,
+  RouteInboxItemJob,
+} from './contract.js';
 import { InboxService } from './inbox.service.js';
 import {
   SNIFF_PROVIDER,
@@ -42,19 +57,34 @@ import {
   toProviderOutput,
 } from './providers/sniff.js';
 import {
+  adoptRule,
+  approveItem,
+  attachItem,
   assignItem,
   createChannel,
+  createRule,
+  deleteRule,
+  listRules,
+  orderRules,
+  readRule,
+  updateRule,
+  deleteRoutingTarget,
   discardItem,
+  findDuplicateCandidates,
   issueCredential,
   listChannels,
   listItems,
+  listRoutingTargets,
+  putRoutingTarget,
   readBlob,
   readChannel,
   readChannelPrincipal,
+  readInboxSettings,
   readItem,
   readProviderInput,
   receiveIntake,
   recordExtraction,
+  reopenEmailItem,
   restoreItem,
   revokeCredential,
   routeToDocument,
@@ -62,9 +92,11 @@ import {
   undoRoute,
   updateChannel,
   updateHints,
+  updateInboxSettings,
   type InboxRepository,
 } from './inbox-repository.js';
 import * as fixtures from './providers/__fixtures__/index.js';
+import { routingTargetFor } from './routing-targets.js';
 
 const postgresImage =
   'pgvector/pgvector:pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a';
@@ -100,6 +132,7 @@ let otherEntityId = '';
 let firstItemId = '';
 let firstBlobId = '';
 let documentId = '';
+const routeJobs: RouteInboxItemJob[] = [];
 
 function configurationFor(role: DatabaseRole): DatabaseConfiguration {
   return {
@@ -215,19 +248,33 @@ beforeAll(async () => {
   store = new FilesystemBlobStore(directory);
   // The service is exercised against the container pool through the same functions the Nest repository wraps.
   const repository: InboxRepository = {
+    adoptRule: (input) => adoptRule(apiPool, input),
+    approveItem: (input) => approveItem(apiPool, input),
+    attachItem: (input) => attachItem(apiPool, input),
     assignItem: (input) => assignItem(apiPool, input),
+    createRule: (input) => createRule(apiPool, input),
+    deleteRule: (input) => deleteRule(apiPool, input),
+    listRules: (input) => listRules(apiPool, input),
+    orderRules: (input) => orderRules(apiPool, input),
+    readRule: (input) => readRule(apiPool, input),
+    updateRule: (input) => updateRule(apiPool, input),
     createChannel: (input) => createChannel(apiPool, input),
+    deleteRoutingTarget: (input) => deleteRoutingTarget(apiPool, input),
     discardItem: (input) => discardItem(apiPool, input),
     issueCredential: (input) => issueCredential(apiPool, input),
     listChannels: (input) => listChannels(apiPool, input),
     listItems: (input) => listItems(apiPool, input),
+    listRoutingTargets: (input) => listRoutingTargets(apiPool, input),
+    putRoutingTarget: (input) => putRoutingTarget(apiPool, input),
     readBlob: (input) => readBlob(apiPool, input),
     readChannel: (input) => readChannel(apiPool, input),
     readChannelPrincipal: (input) => readChannelPrincipal(apiPool, input),
+    readInboxSettings: (input) => readInboxSettings(apiPool, input),
     readItem: (input) => readItem(apiPool, input),
     readProviderInput: (input) => readProviderInput(apiPool, input),
     receiveIntake: (input) => receiveIntake(apiPool, input),
     recordExtraction: (input) => recordExtraction(apiPool, input),
+    reopenEmailItem: (input) => reopenEmailItem(apiPool, input),
     restoreItem: (input) => restoreItem(apiPool, input),
     revokeCredential: (input) => revokeCredential(apiPool, input),
     routeToDocument: (input) => routeToDocument(apiPool, input),
@@ -235,14 +282,19 @@ beforeAll(async () => {
     undoRoute: (input) => undoRoute(apiPool, input),
     updateChannel: (input) => updateChannel(apiPool, input),
     updateHints: (input) => updateHints(apiPool, input),
+    updateInboxSettings: (input) => updateInboxSettings(apiPool, input),
   };
   service = new InboxService(repository, store, QUOTA, 'intake.invalid', {
+    enqueueRerunInboxRule: async () => undefined,
+    enqueueRouteInboxItem: async (job) => {
+      routeJobs.push(job);
+    },
     enqueueSplitEmailItem: async () => undefined,
   });
 });
 
 afterAll(async () => {
-  await Promise.all([apiPool.end(), migratorPool.end()]);
+  await endPools(apiPool, migratorPool);
   await container.stop();
   await rm(directory, { force: true, recursive: true });
 });
@@ -685,7 +737,11 @@ describe('inbox intake', () => {
       itemId: firstItemId,
       reason: 'not_ours',
     });
-    expect(discarded?.item.status).toBe('discarded');
+    expect(discarded?.item).toMatchObject({
+      decidedByKind: 'user',
+      decidedByUserId: creator.userId,
+      status: 'discarded',
+    });
     expect(discarded?.events.at(-1)).toMatchObject({
       kind: 'discarded',
       reason: 'not_ours',
@@ -720,7 +776,11 @@ describe('inbox intake', () => {
       ...allEntities,
       itemId: firstItemId,
     });
-    expect(restored?.item.status).toBe('needs_review');
+    expect(restored?.item).toMatchObject({
+      decidedByKind: null,
+      decidedByUserId: null,
+      status: 'needs_review',
+    });
     expect(restored?.events.at(-1)?.kind).toBe('restored');
 
     await expect(
@@ -755,5 +815,837 @@ describe('inbox intake', () => {
         inline: false,
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe('routing targets', () => {
+  const target: PutInboxRoutingTargetRequest = {
+    auto: 'above_threshold',
+    autoThreshold: 0.85,
+    defaultAssigneeId: 'user-2',
+    defaultLegalEntityId: null,
+    destination: 'documents',
+    documentKind: 'contract',
+    partnerPolicy: 'match_only',
+    requiredFields: ['documentDate', 'title'],
+  };
+
+  it('merges one organization row over the platform constant and shows it on the item', async () => {
+    const before = await listRoutingTargets(apiPool, creator);
+    expect(before.map((entry) => entry.detectedType)).toEqual([
+      ...DETECTED_TYPES,
+    ]);
+    expect(before.every((entry) => entry.source === 'platform')).toBe(true);
+
+    const saved = await putRoutingTarget(apiPool, {
+      ...creator,
+      body: { ...target, defaultLegalEntityId: ownedEntityId },
+      detectedType: 'pdf',
+    });
+    expect(saved).toEqual({
+      ...target,
+      defaultLegalEntityId: ownedEntityId,
+      detectedType: 'pdf',
+      source: 'organization',
+    });
+
+    const after = await listRoutingTargets(apiPool, creator);
+    expect(after.find((entry) => entry.detectedType === 'pdf')).toEqual(saved);
+    expect(
+      after.filter((entry) => entry.source === 'organization'),
+    ).toHaveLength(1);
+    expect(after.find((entry) => entry.detectedType === 'text')).toEqual(
+      routingTargetFor('text'),
+    );
+
+    // The first item was routed as an agreement, a kind outside the list that resolves to unknown; an unknown row shows on it.
+    const unknownTarget = await putRoutingTarget(apiPool, {
+      ...creator,
+      body: { ...target, destination: 'discard', documentKind: null },
+      detectedType: 'unknown',
+    });
+    const detail = await readItem(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: firstItemId,
+    });
+    expect(detail?.item.detectedType).toBe('agreement');
+    expect(detail?.routingTarget).toEqual(unknownTarget);
+    expect(detail?.routingTarget).toMatchObject({
+      destination: 'discard',
+      detectedType: 'unknown',
+      source: 'organization',
+    });
+    await expect(
+      deleteRoutingTarget(apiPool, { ...creator, detectedType: 'unknown' }),
+    ).resolves.toBe(true);
+    expect(
+      (await listRoutingTargets(apiPool, stranger)).every(
+        (entry) => entry.source === 'platform',
+      ),
+    ).toBe(true);
+
+    // A second PUT replaces the whole row and refreshes who saved it.
+    const replaced = await putRoutingTarget(apiPool, {
+      ...creator,
+      body: {
+        ...target,
+        auto: 'never',
+        autoThreshold: null,
+        requiredFields: [],
+      },
+      detectedType: 'pdf',
+    });
+    expect(replaced).toMatchObject({ auto: 'never', requiredFields: [] });
+    const row = await asTenant(creator, (transaction) =>
+      transaction.query<{ count: number; updated_by: string }>(
+        'select count(*)::int as count, min(updated_by) as updated_by from app.inbox_routing_target',
+      ),
+    );
+    expect(row.rows[0]).toEqual({ count: 1, updated_by: creator.userId });
+  });
+
+  it('refuses a foreign legal entity and a member, and deletes back to the platform default', async () => {
+    const foreignEntityId = await createLegalEntity(stranger, 'Theirs');
+    await expect(
+      putRoutingTarget(apiPool, {
+        ...creator,
+        body: { ...target, defaultLegalEntityId: foreignEntityId },
+        detectedType: 'text',
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      putRoutingTarget(apiPool, {
+        ...reader,
+        body: target,
+        detectedType: 'text',
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      deleteRoutingTarget(apiPool, { ...reader, detectedType: 'pdf' }),
+    ).resolves.toBe(false);
+
+    await expect(
+      deleteRoutingTarget(apiPool, { ...creator, detectedType: 'pdf' }),
+    ).resolves.toBe(true);
+    await expect(
+      deleteRoutingTarget(apiPool, { ...creator, detectedType: 'pdf' }),
+    ).resolves.toBe(false);
+    expect(
+      (await listRoutingTargets(apiPool, creator)).find(
+        (entry) => entry.detectedType === 'pdf',
+      ),
+    ).toEqual(routingTargetFor('pdf'));
+  });
+});
+
+describe('inbox settings', () => {
+  it('reads the platform value until an owner tightens it', async () => {
+    const settings = await service.readSettings(creator);
+    expect(settings).toMatchObject({
+      blobQuotaBytes: null,
+      platformQuotaBytes: QUOTA,
+    });
+    expect(settings.usedBytes).toBeGreaterThan(0);
+    expect(settings.usedBytes).toBeLessThan(QUOTA);
+
+    // A member never writes the row; the definer-free policy refuses it and the caller sees null.
+    await expect(
+      service.updateSettings({ ...reader, body: { blobQuotaBytes: 1 } }),
+    ).resolves.toBeNull();
+    await expect(
+      service.updateSettings({
+        ...creator,
+        body: { blobQuotaBytes: QUOTA + 1 },
+      }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('refuses an upload past the tightened quota while the platform cap alone admits it', async () => {
+    const used = (await service.readSettings(creator)).usedBytes;
+    const bytes = fixtures.padded(fixtures.PDF_MAGIC, 2_000);
+    expect(used + bytes.length).toBeLessThan(QUOTA);
+
+    const tightened = await service.updateSettings({
+      ...creator,
+      body: { blobQuotaBytes: used + bytes.length - 1 },
+    });
+    expect(tightened?.blobQuotaBytes).toBe(used + bytes.length - 1);
+    await expect(
+      upload(creator, bytes, 'tightened.pdf'),
+    ).rejects.toBeInstanceOf(PayloadTooLargeException);
+    expect(await readdir(store.temporaryDirectory())).toEqual([]);
+
+    // Reset to the platform value and the same bytes are admitted.
+    const reset = await service.updateSettings({
+      ...creator,
+      body: { blobQuotaBytes: null },
+    });
+    expect(reset?.blobQuotaBytes).toBeNull();
+    const admitted = await upload(creator, bytes, 'admitted.pdf');
+    expect(admitted.item.status).toBe('needs_review');
+    expect((await service.readSettings(creator)).usedBytes).toBe(
+      used + bytes.length,
+    );
+  });
+});
+
+describe('inbox actions', () => {
+  let partnerId = '';
+  let alphaItemId = '';
+  let alphaBlobId = '';
+  let betaItemId = '';
+  let firstVersionId = '';
+  let secondVersionId = '';
+
+  // Parsed at the boundary the way the controller does, so the line defaults are filled in.
+  const invoiceBody = (
+    reference: string,
+    overrides: Record<string, unknown> = {},
+  ): CreateDocumentRequest =>
+    createDocumentRequestSchema.parse({
+      currencyCode: 'CZK',
+      documentDate: '2026-09-10',
+      invoice: {
+        lines: [
+          {
+            baseAmount: '1000.0000',
+            category: 'services',
+            description: 'placeholder service line',
+            vatAmount: '210.0000',
+            vatMode: 'standard',
+            vatRate: '21.00',
+          },
+        ],
+      },
+      kind: 'received_invoice',
+      legalEntityId: ownedEntityId,
+      partnerId,
+      reference,
+      title: 'Placeholder supplier invoice',
+      ...overrides,
+    });
+
+  async function route(
+    itemId: string,
+    document: CreateDocumentRequest,
+    extra: {
+      acknowledgeDuplicateOf?: string;
+      supersedesDocumentId?: string;
+    } = {},
+  ) {
+    const files = await readItem(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId,
+    });
+    return service.routeToDocument({
+      ...creator,
+      ...allEntities,
+      body: {
+        ...extra,
+        document,
+        fileBlobIds: (files?.files ?? []).map((file) => file.blobId),
+      },
+      itemId,
+    });
+  }
+
+  async function conflictOf(pending: Promise<unknown>): Promise<unknown> {
+    try {
+      await pending;
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConflictException);
+      return (error as ConflictException).getResponse();
+    }
+    throw new Error('expected a conflict');
+  }
+
+  beforeAll(async () => {
+    const partner = await createPartner(apiPool, {
+      ...creator,
+      ...allEntities,
+      countryCode: 'CZ',
+      legalEntityId: null,
+      name: 'Placeholder Supplier',
+      registrationNumber: 'CD-654321',
+      vatNumber: 'CZ87654321',
+    });
+    partnerId = partner?.id ?? '';
+    const alpha = await upload(
+      creator,
+      Buffer.from('alpha invoice bytes'),
+      'alpha.txt',
+    );
+    alphaItemId = alpha.item.id;
+    alphaBlobId = alpha.files[0]?.blobId ?? '';
+    betaItemId = (
+      await upload(creator, Buffer.from('beta invoice bytes'), 'beta.txt')
+    ).item.id;
+  });
+
+  it('refuses a taken reference with the current document, records the issue, then versions on request', async () => {
+    const first = await route(alphaItemId, invoiceBody('SUP-2026-1'));
+    firstVersionId = first?.item.documentId ?? '';
+    expect(firstVersionId).not.toBe('');
+
+    const conflict = await conflictOf(
+      route(betaItemId, invoiceBody('SUP-2026-1')),
+    );
+    expect(conflict).toEqual({
+      code: 'reference_conflict',
+      documentId: firstVersionId,
+    });
+
+    // The refusal row is committed on its own: the item stays in review and its newest extraction names the issue.
+    const refused = await readItem(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: betaItemId,
+    });
+    expect(refused?.item.status).toBe('needs_review');
+    expect(refused?.extraction?.issues).toEqual([
+      expect.objectContaining({
+        code: 'reference_conflict',
+        message: expect.stringContaining(firstVersionId),
+      }),
+    ]);
+
+    await expect(
+      route(betaItemId, invoiceBody('SUP-2026-1'), {
+        supersedesDocumentId: betaItemId,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    const second = await route(betaItemId, invoiceBody('SUP-2026-1'), {
+      supersedesDocumentId: firstVersionId,
+    });
+    secondVersionId = second?.item.documentId ?? '';
+    expect(second?.item.status).toBe('routed');
+
+    const newer = await readDocument(apiPool, {
+      ...creator,
+      ...allEntities,
+      documentId: secondVersionId,
+    });
+    expect(newer?.document).toMatchObject({
+      hasEvent: true,
+      isCurrent: true,
+      version: 2,
+    });
+    expect(newer?.supersedesDocumentId).toBe(firstVersionId);
+    expect(newer?.supersededByDocumentId).toBeNull();
+    expect(newer?.inboxItems.map((entry) => entry.id)).toEqual([betaItemId]);
+
+    const older = await readDocument(apiPool, {
+      ...creator,
+      ...allEntities,
+      documentId: firstVersionId,
+    });
+    expect(older?.document).toMatchObject({
+      hasEvent: false,
+      isCurrent: false,
+      version: 1,
+    });
+    expect(older?.event).toBeNull();
+    expect(older?.supersededByDocumentId).toBe(secondVersionId);
+    expect(older?.files.map((file) => file.blobId)).toEqual([alphaBlobId]);
+
+    // The list hides the superseded row by default and shows it on request.
+    const current = await listDocuments(apiPool, {
+      ...creator,
+      ...allEntities,
+      query: documentListQuerySchema.parse({ partnerId }),
+    });
+    expect(current.documents.map((entry) => entry.id)).toEqual([
+      secondVersionId,
+    ]);
+    const all = await listDocuments(apiPool, {
+      ...creator,
+      ...allEntities,
+      query: documentListQuerySchema.parse({ current: 'all', partnerId }),
+    });
+    expect(all.documents.map((entry) => entry.id).sort()).toEqual(
+      [firstVersionId, secondVersionId].sort(),
+    );
+
+    const audit = await asTenant(creator, (transaction) =>
+      transaction.query<{ metadata: { supersedesDocumentId: string | null } }>(
+        `select metadata from app.audit_log
+          where action = 'inbox_item.routed' and resource_id = $1
+          order by created_at desc limit 1`,
+        [betaItemId],
+      ),
+    );
+    expect(audit.rows[0]?.metadata.supersedesDocumentId).toBe(firstVersionId);
+  });
+
+  it('refuses undo and delete on a superseded row, and undo of the version restores it', async () => {
+    await expect(
+      undoRoute(apiPool, { ...creator, ...allEntities, itemId: alphaItemId }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(
+      deleteDocument(apiPool, {
+        ...creator,
+        ...allEntities,
+        documentId: firstVersionId,
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    const undone = await undoRoute(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: betaItemId,
+    });
+    expect(undone?.item.status).toBe('needs_review');
+    expect(
+      await readDocument(apiPool, {
+        ...creator,
+        ...allEntities,
+        documentId: secondVersionId,
+      }),
+    ).toBeNull();
+
+    const restored = await readDocument(apiPool, {
+      ...creator,
+      ...allEntities,
+      documentId: firstVersionId,
+    });
+    expect(restored?.document).toMatchObject({
+      hasEvent: true,
+      isCurrent: true,
+      version: 1,
+    });
+    expect(restored?.supersededByDocumentId).toBeNull();
+    expect(restored?.event?.lines.length).toBeGreaterThan(0);
+  });
+
+  it('rolls back a version route when the new document cannot be created', async () => {
+    const gamma = await upload(
+      creator,
+      Buffer.from('gamma invoice bytes'),
+      'gamma.txt',
+    );
+    // A distinct total so the duplicate-by-amount check never matches another test's fixture.
+    const original = await route(
+      gamma.item.id,
+      invoiceBody('SUP-2026-99', {
+        invoice: {
+          lines: [
+            {
+              baseAmount: '7000.0000',
+              category: 'services',
+              description: 'placeholder service line',
+              vatAmount: '1470.0000',
+              vatMode: 'standard',
+              vatRate: '21.00',
+            },
+          ],
+        },
+      }),
+    );
+    const originalDocumentId = original?.item.documentId ?? '';
+    expect(originalDocumentId).not.toBe('');
+
+    // A partner that exists but belongs to another organization, invisible to this tenant context.
+    const foreignPartner = await createPartner(apiPool, {
+      ...stranger,
+      ...allEntities,
+      countryCode: 'CZ',
+      legalEntityId: null,
+      name: 'Foreign Supplier',
+      registrationNumber: 'CD-000000',
+      vatNumber: 'CZ00000000',
+    });
+
+    const delta = await upload(
+      creator,
+      Buffer.from('delta invoice bytes'),
+      'delta.txt',
+    );
+
+    await expect(
+      route(
+        delta.item.id,
+        invoiceBody('SUP-2026-99', { partnerId: foreignPartner?.id ?? '' }),
+        { supersedesDocumentId: originalDocumentId },
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    // The old document was flipped to superseded before the failed create; the rollback must undo that too.
+    const stillCurrent = await readDocument(apiPool, {
+      ...creator,
+      ...allEntities,
+      documentId: originalDocumentId,
+    });
+    expect(stillCurrent?.document).toMatchObject({
+      hasEvent: true,
+      isCurrent: true,
+      version: 1,
+    });
+    expect(stillCurrent?.supersededByDocumentId).toBeNull();
+    expect(stillCurrent?.event?.lines.length).toBeGreaterThan(0);
+  });
+
+  it('flags a probable duplicate by partner and lets an acknowledged route proceed', async () => {
+    // Same partner and total within three days, another reference and kind: a hit by the second rule.
+    const nearby = invoiceBody('SUP-2026-2', {
+      documentDate: '2026-09-12',
+      kind: 'issued_invoice',
+    });
+    const duplicate = await conflictOf(route(betaItemId, nearby));
+    expect(duplicate).toEqual({
+      candidates: [
+        {
+          documentDate: '2026-09-10',
+          id: firstVersionId,
+          reference: 'SUP-2026-1',
+          totalAmount: '1210.0000',
+        },
+      ],
+      code: 'duplicate_probable',
+    });
+    const refused = await readItem(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: betaItemId,
+    });
+    expect(refused?.extraction?.issues).toEqual([
+      expect.objectContaining({ code: 'duplicate_probable' }),
+    ]);
+    // The list filter reads the newest extraction, which is the refusal row just committed.
+    const flagged = await listItems(apiPool, {
+      ...creator,
+      ...allEntities,
+      query: inboxItemListQuerySchema.parse({ issue: 'duplicate_probable' }),
+    });
+    expect(flagged.items.map((entry) => entry.id)).toEqual([betaItemId]);
+
+    // Outside the window, and without a partner, nothing matches.
+    await asTenant(creator, async (transaction) => {
+      const base = {
+        excludeDocumentId: null,
+        legalEntityIds: null,
+        organizationId: creator.organizationId,
+        partnerId,
+        reference: null,
+        totalAmount: '1210.0000',
+      };
+      expect(
+        await findDuplicateCandidates(transaction, {
+          ...base,
+          documentDate: '2026-09-14',
+        }),
+      ).toEqual([]);
+      expect(
+        await findDuplicateCandidates(transaction, {
+          ...base,
+          documentDate: '2026-09-13',
+        }),
+      ).toHaveLength(1);
+      // The caller's entities bound the search; the superseded row is excluded by id.
+      expect(
+        await findDuplicateCandidates(transaction, {
+          ...base,
+          documentDate: '2026-09-13',
+          legalEntityIds: [otherEntityId],
+        }),
+      ).toEqual([]);
+      expect(
+        await findDuplicateCandidates(transaction, {
+          ...base,
+          documentDate: '2026-09-13',
+          excludeDocumentId: firstVersionId,
+        }),
+      ).toEqual([]);
+    });
+    const noPartner = await route(
+      betaItemId,
+      createDocumentRequestSchema.parse({
+        currencyCode: 'CZK',
+        documentDate: '2026-09-12',
+        kind: 'other',
+        legalEntityId: ownedEntityId,
+        reference: 'SUP-2026-2',
+        title: 'Placeholder without partner',
+        totalAmount: '1210.0000',
+      }),
+    );
+    expect(noPartner?.item.status).toBe('routed');
+    await undoRoute(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: betaItemId,
+    });
+
+    await expect(
+      route(betaItemId, nearby, { acknowledgeDuplicateOf: betaItemId }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    const acknowledged = await route(betaItemId, nearby, {
+      acknowledgeDuplicateOf: firstVersionId,
+    });
+    expect(acknowledged?.item.status).toBe('routed');
+    await undoRoute(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: betaItemId,
+    });
+  });
+
+  it('attaches an item to an existing document and undo removes only its rows', async () => {
+    await expect(
+      service.attachItem({
+        ...creator,
+        ...allEntities,
+        documentId: alphaItemId,
+        itemId: betaItemId,
+      }),
+    ).resolves.toBeNull();
+
+    const attached = await service.attachItem({
+      ...creator,
+      ...allEntities,
+      documentId: firstVersionId,
+      itemId: betaItemId,
+    });
+    expect(attached?.item).toMatchObject({
+      decidedByKind: 'user',
+      decidedByUserId: creator.userId,
+      documentId: firstVersionId,
+      legalEntityId: ownedEntityId,
+      status: 'routed',
+    });
+    expect(attached?.events.at(-1)?.kind).toBe('attached');
+
+    const document = await readDocument(apiPool, {
+      ...creator,
+      ...allEntities,
+      documentId: firstVersionId,
+    });
+    expect(document?.files.map((file) => file.position)).toEqual([1, 2]);
+    expect(document?.inboxItems.map((entry) => entry.id).sort()).toEqual(
+      [alphaItemId, betaItemId].sort(),
+    );
+
+    // The same blob twice on one document is refused; the second item's rows go on undo, the document stays.
+    await expect(
+      service.attachItem({
+        ...creator,
+        ...allEntities,
+        documentId: firstVersionId,
+        itemId: betaItemId,
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    const undone = await undoRoute(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: betaItemId,
+    });
+    expect(undone?.item).toMatchObject({
+      documentId: null,
+      status: 'needs_review',
+    });
+    expect(undone?.events.at(-1)?.kind).toBe('unrouted');
+    const after = await readDocument(apiPool, {
+      ...creator,
+      ...allEntities,
+      documentId: firstVersionId,
+    });
+    expect(after?.files.map((file) => file.blobId)).toEqual([alphaBlobId]);
+    expect(after?.inboxItems.map((entry) => entry.id)).toEqual([alphaItemId]);
+  });
+
+  it('runs a bulk action per id and approves from the composed draft', async () => {
+    const gamma = (
+      await upload(creator, Buffer.from('gamma bytes'), 'gamma.txt')
+    ).item.id;
+    const assigned = await service.bulk({
+      ...creator,
+      ...allEntities,
+      body: {
+        action: 'assign',
+        assigneeId: reader.userId,
+        itemIds: [betaItemId, alphaItemId, gamma],
+      },
+    });
+    expect(assigned.results).toEqual([
+      { itemId: betaItemId, status: 'ok' },
+      { code: 'not_open', itemId: alphaItemId, status: 'refused' },
+      { itemId: gamma, status: 'ok' },
+    ]);
+
+    // Text has no default document kind, so approve cannot fill the draft until a hint names one.
+    const approved = await service.bulk({
+      ...creator,
+      ...allEntities,
+      body: { action: 'approve', itemIds: [gamma] },
+    });
+    expect(approved.results).toEqual([
+      { code: 'missing_required_field', itemId: gamma, status: 'refused' },
+    ]);
+    await updateHints(apiPool, {
+      ...creator,
+      ...allEntities,
+      body: { hintKind: 'other', hintLegalEntityId: ownedEntityId },
+      itemId: gamma,
+    });
+    const routed = await service.bulk({
+      ...creator,
+      ...allEntities,
+      body: { action: 'approve', itemIds: [gamma] },
+    });
+    expect(routed.results).toEqual([{ itemId: gamma, status: 'ok' }]);
+    const detail = await readItem(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: gamma,
+    });
+    expect(detail?.item).toMatchObject({
+      decidedByKind: 'user',
+      status: 'routed',
+    });
+    expect(detail?.extraction?.provider).toBe('manual');
+  });
+
+  it('deletes a current version directly: the predecessor is restored, its stale issue clears, and an attached item un-routes', async () => {
+    const epsilon = await upload(
+      creator,
+      Buffer.from('epsilon invoice bytes'),
+      'epsilon.txt',
+    );
+    // A distinct total so the duplicate-by-amount check never matches another test's fixture.
+    const distinctInvoice = {
+      invoice: {
+        lines: [
+          {
+            baseAmount: '5000.0000',
+            category: 'services',
+            description: 'placeholder service line',
+            vatAmount: '1050.0000',
+            vatMode: 'standard',
+            vatRate: '21.00',
+          },
+        ],
+      },
+    };
+    const first = await route(
+      epsilon.item.id,
+      invoiceBody('SUP-2026-77', distinctInvoice),
+    );
+    const predecessorId = first?.item.documentId ?? '';
+    expect(predecessorId).not.toBe('');
+
+    // An unresolved issue on the predecessor, the way a rule run might leave one.
+    await asTenant(creator, (transaction) =>
+      transaction.query(
+        `insert into app.data_issue (organization_id, document_id, code, severity)
+         values ($1, $2, 'total_mismatch', 'warning')`,
+        [creator.organizationId, predecessorId],
+      ),
+    );
+
+    const zeta = await upload(
+      creator,
+      Buffer.from('zeta invoice bytes'),
+      'zeta.txt',
+    );
+    const second = await route(
+      zeta.item.id,
+      invoiceBody('SUP-2026-77', distinctInvoice),
+      { supersedesDocumentId: predecessorId },
+    );
+    const supersedingId = second?.item.documentId ?? '';
+    expect(supersedingId).not.toBe('');
+
+    const clearedIssues = await asTenant(creator, (transaction) =>
+      transaction.query(
+        `select 1 from app.data_issue where document_id = $1 and resolved_at is null`,
+        [predecessorId],
+      ),
+    );
+    expect(clearedIssues.rowCount).toBe(0);
+
+    const eta = await upload(
+      creator,
+      Buffer.from('eta invoice bytes'),
+      'eta.txt',
+    );
+    await service.attachItem({
+      ...creator,
+      ...allEntities,
+      documentId: supersedingId,
+      itemId: eta.item.id,
+    });
+
+    const deleted = await deleteDocument(apiPool, {
+      ...creator,
+      ...allEntities,
+      documentId: supersedingId,
+    });
+    expect(deleted).toBe(true);
+
+    const restored = await readDocument(apiPool, {
+      ...creator,
+      ...allEntities,
+      documentId: predecessorId,
+    });
+    expect(restored?.document).toMatchObject({
+      hasEvent: true,
+      isCurrent: true,
+      version: 1,
+    });
+    expect(restored?.supersededByDocumentId).toBeNull();
+    expect(restored?.event?.lines.length).toBeGreaterThan(0);
+
+    const creatorItem = await readItem(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: zeta.item.id,
+    });
+    expect(creatorItem?.item).toMatchObject({
+      documentId: null,
+      status: 'needs_review',
+    });
+
+    const attachedItem = await readItem(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: eta.item.id,
+    });
+    expect(attachedItem?.item).toMatchObject({
+      documentId: null,
+      status: 'needs_review',
+    });
+  });
+
+  it('filters the list by issue, assignee and confidence band and reports the human touch', async () => {
+    const query = (overrides: Record<string, unknown>) =>
+      listItems(apiPool, {
+        ...creator,
+        ...allEntities,
+        query: inboxItemListQuerySchema.parse(overrides),
+      });
+
+    // The newest extraction of every item is clean by now.
+    const byIssue = await query({ issue: 'duplicate_probable' });
+    expect(byIssue.items).toEqual([]);
+    const byAssignee = await query({ assigneeId: reader.userId });
+    expect(byAssignee.items.map((entry) => entry.id)).toContain(betaItemId);
+    expect(byAssignee.items.every((entry) => entry.humanTouched)).toBe(true);
+    const unassigned = await query({ assigneeId: 'none' });
+    expect(unassigned.items.map((entry) => entry.id)).not.toContain(betaItemId);
+    const high = await query({ confidence: 'high' });
+    expect(high.items.map((entry) => entry.id)).toContain(betaItemId);
+    const unknown = await query({ confidence: 'unknown' });
+    expect(unknown.items.every((entry) => entry.confidence === null)).toBe(
+      true,
+    );
+
+    // The event actor decides: a route or attach by a person is a decision, not a touch.
+    const untouched = await query({ status: 'routed' });
+    expect(
+      untouched.items.find((entry) => entry.id === alphaItemId)?.humanTouched,
+    ).toBe(false);
   });
 });

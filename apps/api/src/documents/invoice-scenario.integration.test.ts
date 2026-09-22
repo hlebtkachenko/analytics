@@ -33,6 +33,7 @@ import {
   SUBJECT_RATE_LIMITER,
   SubjectRateLimitGuard,
 } from '../subject-rate-limit.guard.js';
+import { endPools } from '../test-support/end-pools.js';
 import { readDocumentAnalytics } from './analytics-repository.js';
 import { DocumentController } from './document.controller.js';
 import {
@@ -324,7 +325,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await application.close();
-  await Promise.all([apiPool.end(), migratorPool.end()]);
+  await endPools(apiPool, migratorPool);
   await container.stop();
 });
 

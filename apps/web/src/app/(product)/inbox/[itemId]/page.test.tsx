@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -45,6 +46,7 @@ const inboxItem = {
   createdAt: '2026-09-16T08:00:00.000Z',
   datasetId: null,
   decidedByKind: 'provider',
+  decidedByRuleId: null,
   decidedByUserId: null,
   detectedType: 'pdf',
   documentId: null,
@@ -54,6 +56,7 @@ const inboxItem = {
   hintLinkDocumentId: null,
   hintPartnerId: null,
   hintText: null,
+  humanTouched: false,
   id: ITEM_ID,
   legalEntityId: null,
   origin: null,
@@ -61,6 +64,7 @@ const inboxItem = {
   payloadKind: 'file',
   receivedAt: '2026-09-16T08:00:00.000Z',
   routedAt: null,
+  sender: null,
   snoozedUntil: null,
   status: 'needs_review',
   updatedAt: '2026-09-16T08:00:00.000Z',
@@ -105,6 +109,19 @@ const extraction = {
   reasons: [{ evidence: 'a PDF header', step: 'sniff', weight: 0.9 }],
 };
 
+const routingTarget = {
+  auto: 'never',
+  autoThreshold: null,
+  defaultAssigneeId: null,
+  defaultLegalEntityId: null,
+  destination: 'documents',
+  detectedType: 'pdf',
+  documentKind: 'receipt',
+  partnerPolicy: 'match_only',
+  requiredFields: [],
+  source: 'platform',
+};
+
 function capabilities(manageDocuments: boolean) {
   return {
     createEntities: false,
@@ -120,8 +137,22 @@ function capabilities(manageDocuments: boolean) {
   };
 }
 
+// The route answers with the queued 409 bodies first, then routes; the attach answers the routed detail.
+type RouteAnswers = Readonly<{ conflicts?: unknown[] }>;
+
 // One router per test, so every request is answered by the shape its route promises.
-function respondWith(detail: Record<string, unknown>, manageDocuments = true) {
+function respondWith(
+  given: Record<string, unknown>,
+  manageDocuments = true,
+  answers: RouteAnswers = {},
+) {
+  const conflicts = [...(answers.conflicts ?? [])];
+  // Every detail carries the effective target and no corrections unless a test says otherwise.
+  const detail: Record<string, unknown> = {
+    corrections: [],
+    routingTarget,
+    ...given,
+  };
   return vi.fn(async (input: string, init?: RequestInit) => {
     if (input === '/api/auth/organization/list') {
       return Response.json([
@@ -141,7 +172,20 @@ function respondWith(detail: Record<string, unknown>, manageDocuments = true) {
     if (input.endsWith('/legal-entities')) {
       return Response.json(legalEntities);
     }
+    if (input.includes('/documents?')) {
+      return Response.json({
+        documents: [documentSummary],
+        page: 1,
+        pageSize: 25,
+        total: 1,
+        totalsByCurrency: [],
+      });
+    }
     if (input.endsWith(`/inbox/items/${ITEM_ID}/route/document`)) {
+      const conflict = conflicts.shift();
+      if (conflict !== undefined) {
+        return Response.json(conflict, { status: 409 });
+      }
       return Response.json({
         ...detail,
         item: {
@@ -162,6 +206,36 @@ function respondWith(detail: Record<string, unknown>, manageDocuments = true) {
     }
     return new Response(null, { status: 404 });
   });
+}
+
+const documentSummary = {
+  createdAt: '2026-09-01T00:00:00.000Z',
+  currencyCode: 'CZK',
+  documentDate: '2026-09-01',
+  hasEvent: false,
+  id: DOCUMENT_ID,
+  isBalanced: null,
+  isCurrent: true,
+  kind: 'contract',
+  legalEntityId: LEGAL_ENTITY_ID,
+  openIssueCount: 0,
+  partnerId: null,
+  partnerName: null,
+  reference: 'REF-9',
+  source: 'manual',
+  status: 'registered',
+  title: 'Placeholder contract',
+  totalAmount: null,
+  updatedAt: '2026-09-01T00:00:00.000Z',
+  validFrom: null,
+  validTo: null,
+  version: 1,
+};
+
+function routeBodies(fetchMock: ReturnType<typeof respondWith>) {
+  return fetchMock.mock.calls
+    .filter((call) => String(call[0]).endsWith('/route/document'))
+    .map((call) => JSON.parse(String((call[1] as RequestInit).body)));
 }
 
 function renderItemPage() {
@@ -360,6 +434,417 @@ describe('InboxItemPage', () => {
             call[1]?.method === undefined,
         ).length,
       ).toBeGreaterThan(1);
+    });
+  });
+
+  it('shows the effective routing target and defaults the draft kind from it', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respondWith({
+        events: [],
+        extraction: { ...extraction, draft: {} },
+        files: [file('application/pdf')],
+        item: inboxItem,
+      }),
+    );
+
+    renderItemPage();
+
+    expect(
+      await screen.findByText(
+        'Routing target: Documents, Receipt (platform default)',
+      ),
+    ).toBeVisible();
+    expect(screen.getByLabelText('Kind')).toHaveValue('receipt');
+  });
+
+  it('lets the kind hint win over the routing target and shows an organization target', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respondWith({
+        events: [],
+        extraction: { ...extraction, draft: {} },
+        files: [file('application/pdf')],
+        item: { ...inboxItem, hintKind: 'contract' },
+        routingTarget: {
+          ...routingTarget,
+          destination: 'discard',
+          documentKind: null,
+          source: 'organization',
+        },
+      }),
+    );
+
+    renderItemPage();
+
+    expect(
+      await screen.findByText('Routing target: Discard (organization setting)'),
+    ).toBeVisible();
+    expect(screen.getByLabelText('Kind')).toHaveValue('contract');
+  });
+
+  it('asks why a changed field differs and sends the reasons with the route', async () => {
+    const fetchMock = respondWith({
+      events: [],
+      extraction,
+      files: [file('application/pdf')],
+      item: inboxItem,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderItemPage();
+
+    expect(await screen.findByLabelText('Kind')).toHaveValue('contract');
+    expect(screen.queryByLabelText(/^Why did/)).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Kind'), {
+      target: { value: 'agreement' },
+    });
+    fireEvent.change(screen.getByLabelText('Title'), {
+      target: { value: 'Placeholder agreement' },
+    });
+    expect(screen.getByLabelText('Why did Title change?')).toBeVisible();
+    fireEvent.change(screen.getByLabelText('Why did Kind change?'), {
+      target: { value: 'It is signed by both sides.' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Route to document' }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some((call) =>
+          String(call[0]).endsWith('/route/document'),
+        ),
+      ).toBe(true);
+    });
+    const routeCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).endsWith('/route/document'),
+    )!;
+    const body = JSON.parse(String((routeCall[1] as RequestInit).body));
+    // Only a filled reason is sent; the unexplained title change is still a correction upstream.
+    expect(body.correctionReasons).toEqual({
+      kind: 'It is signed by both sides.',
+    });
+    expect(body.document.kind).toBe('agreement');
+  });
+
+  it('lists the corrections under the explanation and offers a rule from a routed item', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respondWith({
+        corrections: [
+          {
+            createdAt: '2026-09-16T09:00:00.000Z',
+            createdBy: 'user_2',
+            field: 'kind',
+            finalValue: 'agreement',
+            id: '00000000-0000-4000-8000-000000000091',
+            reason: 'It is signed by both sides.',
+            source: 'provider',
+            suggestedValue: 'contract',
+          },
+          {
+            createdAt: '2026-09-16T09:00:00.000Z',
+            createdBy: 'user_2',
+            field: 'partner_id',
+            finalValue: null,
+            id: '00000000-0000-4000-8000-000000000092',
+            reason: null,
+            source: 'hint',
+            suggestedValue: '00000000-0000-4000-8000-000000000090',
+          },
+        ],
+        events: [],
+        extraction,
+        files: [file('application/pdf')],
+        item: {
+          ...inboxItem,
+          assigneeId: 'user_2',
+          decidedByKind: 'user',
+          documentId: DOCUMENT_ID,
+          legalEntityId: LEGAL_ENTITY_ID,
+          status: 'routed',
+        },
+      }),
+    );
+
+    renderItemPage();
+
+    const list = await screen.findByRole('list', { name: 'Corrections' });
+    expect(list).toHaveTextContent(
+      'Kind: contract (Provider) changed to agreement It is signed by both sides.',
+    );
+    expect(list).toHaveTextContent(
+      'Partner id: 00000000-0000-4000-8000-000000000090 (Hint) changed to none',
+    );
+    const link = screen.getByRole('link', { name: 'Create a rule' });
+    const href = new URL(link.getAttribute('href')!, 'https://bap.invalid');
+    expect(href.pathname).toBe('/inbox/rules');
+    expect(Object.fromEntries(href.searchParams)).toEqual({
+      assigneeId: 'user_2',
+      detectedType: 'pdf',
+      kind: 'contract',
+      legalEntityId: LEGAL_ENTITY_ID,
+      organization: 'organization-1',
+    });
+  });
+
+  it('offers a discard rule with the reason of the discard event', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respondWith({
+        events: [
+          {
+            actorUserId: 'user_1',
+            createdAt: '2026-09-16T09:00:00.000Z',
+            id: '00000000-0000-4000-8000-000000000071',
+            kind: 'discarded',
+            reason: 'spam',
+          },
+        ],
+        extraction: null,
+        files: [file('application/pdf')],
+        item: {
+          ...inboxItem,
+          channelId: '00000000-0000-4000-8000-000000000060',
+          decidedByKind: 'user',
+          status: 'discarded',
+        },
+      }),
+    );
+
+    renderItemPage();
+
+    const link = await screen.findByRole('link', { name: 'Create a rule' });
+    const href = new URL(link.getAttribute('href')!, 'https://bap.invalid');
+    expect(Object.fromEntries(href.searchParams)).toEqual({
+      channelId: '00000000-0000-4000-8000-000000000060',
+      detectedType: 'pdf',
+      discardReason: 'spam',
+      organization: 'organization-1',
+    });
+    expect(screen.queryByRole('list', { name: 'Corrections' })).toBeNull();
+  });
+
+  it('carries the lowercased sender domain on the create-a-rule link', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respondWith({
+        events: [],
+        extraction: null,
+        files: [file('application/pdf')],
+        item: {
+          ...inboxItem,
+          documentId: DOCUMENT_ID,
+          sender: 'Someone <person@Example.org>',
+          status: 'routed',
+        },
+      }),
+    );
+
+    renderItemPage();
+
+    const link = await screen.findByRole('link', { name: 'Create a rule' });
+    const href = new URL(link.getAttribute('href')!, 'https://bap.invalid');
+    expect(href.searchParams.get('sender')).toBe('@example.org');
+  });
+
+  it('offers to register a new version on a reference conflict and resends with the id', async () => {
+    const fetchMock = respondWith(
+      {
+        events: [],
+        extraction,
+        files: [file('application/pdf')],
+        item: inboxItem,
+      },
+      true,
+      {
+        conflicts: [{ code: 'reference_conflict', documentId: DOCUMENT_ID }],
+      },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderItemPage();
+    await screen.findByLabelText('Title');
+    fireEvent.click(screen.getByRole('button', { name: 'Route to document' }));
+
+    expect(
+      await screen.findByText(
+        'A current document already carries this reference.',
+      ),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Register as new version' }),
+    );
+
+    await waitFor(() => {
+      expect(routeBodies(fetchMock)).toHaveLength(2);
+    });
+    const [first, second] = routeBodies(fetchMock);
+    expect(first.supersedesDocumentId).toBeUndefined();
+    expect(second.supersedesDocumentId).toBe(DOCUMENT_ID);
+    expect(second.document).toEqual(first.document);
+  });
+
+  it('shows the duplicate dialog with the candidates and routes anyway with the acknowledgement', async () => {
+    const fetchMock = respondWith(
+      {
+        events: [],
+        extraction,
+        files: [file('application/pdf')],
+        item: inboxItem,
+      },
+      true,
+      {
+        conflicts: [
+          {
+            candidates: [
+              {
+                documentDate: '2026-09-01',
+                id: DOCUMENT_ID,
+                reference: 'REF-9',
+                totalAmount: '10.0000',
+              },
+            ],
+            code: 'duplicate_probable',
+          },
+        ],
+      },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderItemPage();
+    await screen.findByLabelText('Title');
+    fireEvent.click(screen.getByRole('button', { name: 'Route to document' }));
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'This looks like a duplicate',
+    });
+    expect(within(dialog).getByRole('link', { name: 'REF-9' })).toHaveAttribute(
+      'href',
+      `/documents/${DOCUMENT_ID}?organization=organization-1`,
+    );
+    expect(
+      within(dialog).getByRole('button', { name: 'Attach to this document' }),
+    ).toBeVisible();
+    expect(
+      within(dialog).getByRole('button', { name: 'Discard as duplicate' }),
+    ).toBeVisible();
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Route anyway' }),
+    );
+
+    await waitFor(() => {
+      expect(routeBodies(fetchMock)).toHaveLength(2);
+    });
+    expect(routeBodies(fetchMock)[1].acknowledgeDuplicateOf).toBe(DOCUMENT_ID);
+  });
+
+  it('attaches to a candidate from the dialog and discards as duplicate from it', async () => {
+    const conflict = {
+      candidates: [
+        {
+          documentDate: '2026-09-01',
+          id: DOCUMENT_ID,
+          reference: 'REF-9',
+          totalAmount: null,
+        },
+      ],
+      code: 'duplicate_probable',
+    };
+    const fetchMock = respondWith(
+      {
+        events: [],
+        extraction,
+        files: [file('application/pdf')],
+        item: inboxItem,
+      },
+      true,
+      { conflicts: [conflict, conflict] },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderItemPage();
+    await screen.findByLabelText('Title');
+    fireEvent.click(screen.getByRole('button', { name: 'Route to document' }));
+    const dialog = await screen.findByRole('dialog', {
+      name: 'This looks like a duplicate',
+    });
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Attach to this document' }),
+    );
+
+    await waitFor(() => {
+      const attach = fetchMock.mock.calls.find((call) =>
+        String(call[0]).endsWith(`/inbox/items/${ITEM_ID}/attach`),
+      );
+      expect(attach).toBeDefined();
+      expect(JSON.parse(String((attach![1] as RequestInit).body))).toEqual({
+        documentId: DOCUMENT_ID,
+      });
+    });
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Route to document' }),
+    );
+    const again = await screen.findByRole('dialog', {
+      name: 'This looks like a duplicate',
+    });
+    fireEvent.click(
+      within(again).getByRole('button', { name: 'Discard as duplicate' }),
+    );
+
+    await waitFor(() => {
+      const discard = fetchMock.mock.calls.find((call) =>
+        String(call[0]).endsWith(`/inbox/items/${ITEM_ID}/discard`),
+      );
+      expect(discard).toBeDefined();
+      expect(JSON.parse(String((discard![1] as RequestInit).body))).toEqual({
+        reason: 'duplicate',
+      });
+    });
+  });
+
+  it('attaches an open item to a document picked from the search', async () => {
+    const fetchMock = respondWith({
+      events: [],
+      extraction: null,
+      files: [file('application/pdf')],
+      item: inboxItem,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderItemPage();
+    const form = await screen.findByRole('form', {
+      name: 'Attach to existing document',
+    });
+    const attach = within(form).getByRole('button', { name: 'Attach' });
+    expect(attach).toBeDisabled();
+    const picker = within(form).getByRole('combobox');
+    fireEvent.change(picker, { target: { value: 'Placeholder' } });
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some((call) =>
+          String(call[0]).includes('/documents?'),
+        ),
+      ).toBe(true);
+    });
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'Placeholder contract' }),
+    );
+
+    expect(attach).toBeEnabled();
+    fireEvent.click(attach);
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find((entry) =>
+        String(entry[0]).endsWith(`/inbox/items/${ITEM_ID}/attach`),
+      );
+      expect(call).toBeDefined();
+      expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({
+        documentId: DOCUMENT_ID,
+      });
     });
   });
 

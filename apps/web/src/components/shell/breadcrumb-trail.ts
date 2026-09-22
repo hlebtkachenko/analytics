@@ -24,7 +24,7 @@ const childLabels: Readonly<Record<string, Readonly<Record<string, string>>>> =
       security: 'Security',
     },
     documents: { analytics: 'Analytics', new: 'New document' },
-    inbox: { channels: 'Channels' },
+    inbox: { channels: 'Channels', rules: 'Rules', settings: 'Settings' },
     workspaces: { new: 'Create workspace' },
   };
 

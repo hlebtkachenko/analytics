@@ -1,0 +1,21 @@
+@use '@bap/design-system/tokens/spacing.scss' as spacing;
+
+.headingRow {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-05;
+  justify-content: space-between;
+}
+
+.name {
+  align-items: center;
+  display: inline-flex;
+  gap: spacing.$spacing-02;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-02;
+}

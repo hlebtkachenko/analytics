@@ -27,6 +27,7 @@ import {
   withTenantContext,
 } from './index.js';
 import type { TenantContext } from './index.js';
+import { endPools } from './integration-support.js';
 import { executeEraseUser } from './cli.js';
 
 const postgresImage =
@@ -296,14 +297,14 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await Promise.all([
-    apiPool.end(),
-    authPool.end(),
-    backupPool.end(),
-    migratorPool.end(),
-    reportingPool.end(),
-    rootPool.end(),
-  ]);
+  await endPools(
+    apiPool,
+    authPool,
+    backupPool,
+    migratorPool,
+    reportingPool,
+    rootPool,
+  );
   await container.stop();
 });
 
@@ -1725,6 +1726,16 @@ describe('PostgreSQL 18 isolation', () => {
         table_name: 'inbox_channel',
       },
       {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_correction',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_correction',
+      },
+      {
         column_name: 'actor_user_id',
         privilege_type: 'SELECT',
         table_name: 'inbox_event',
@@ -1777,6 +1788,96 @@ describe('PostgreSQL 18 isolation', () => {
       {
         column_name: 'created_by',
         privilege_type: 'SELECT',
+        table_name: 'inbox_routing_target',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_routing_target',
+      },
+      {
+        column_name: 'default_assignee_id',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_routing_target',
+      },
+      {
+        column_name: 'default_assignee_id',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_routing_target',
+      },
+      {
+        column_name: 'updated_by',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_routing_target',
+      },
+      {
+        column_name: 'updated_by',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_routing_target',
+      },
+      {
+        column_name: 'auto_route',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'deleted_at',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'deleted_at',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'enabled',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'priority',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'set_assignee_id',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'set_assignee_id',
+        privilege_type: 'UPDATE',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'set_document_kind',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'set_legal_entity_id',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'set_partner_id',
+        privilege_type: 'SELECT',
+        table_name: 'inbox_rule',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
         table_name: 'legal_entity',
       },
       {
@@ -1813,6 +1914,16 @@ describe('PostgreSQL 18 isolation', () => {
         column_name: 'user_id',
         privilege_type: 'SELECT',
         table_name: 'member_entity_scope',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'SELECT',
+        table_name: 'organization_inbox_setting',
+      },
+      {
+        column_name: 'created_by',
+        privilege_type: 'UPDATE',
+        table_name: 'organization_inbox_setting',
       },
       {
         column_name: 'created_by',

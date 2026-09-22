@@ -20,20 +20,36 @@ import {
 } from '../documents/contract.ts';
 import {
   assignInboxItemRequestSchema,
+  attachInboxItemRequestSchema,
+  bulkInboxItemsRequestSchema,
+  bulkInboxItemsResponseSchema,
   createInboxChannelRequestSchema,
+  createInboxRuleRequestSchema,
   discardInboxItemRequestSchema,
   inboxChannelListResponseSchema,
   inboxChannelSchema,
   inboxItemDetailSchema,
   inboxItemListQuerySchema,
   inboxItemListResponseSchema,
+  inboxRouteConflictSchema,
+  inboxRoutingTargetListResponseSchema,
+  inboxRoutingTargetSchema,
+  inboxRuleListResponseSchema,
+  inboxRuleRefusalCodeSchema,
+  inboxRuleSchema,
+  inboxSettingsSchema,
   inboxUploadResponseSchema,
   isInlineMediaType,
   issueInboxChannelCredentialResponseSchema,
+  putInboxRoutingTargetRequestSchema,
+  putInboxRuleOrderRequestSchema,
   routeInboxItemToDocumentRequestSchema,
   snoozeInboxItemRequestSchema,
+  tokenSchema,
   updateInboxChannelRequestSchema,
   updateInboxHintsRequestSchema,
+  updateInboxRuleRequestSchema,
+  updateInboxSettingsRequestSchema,
 } from '../inbox/contract.ts';
 import { webLogger } from '../logger.ts';
 
@@ -780,6 +796,10 @@ export {
 type ApplicationJsonCall = Readonly<{
   body?: unknown;
   errorCode: string;
+  // A problem code from this closed list is passed through beside the error code; nothing else of the body is.
+  passthroughCodes?: z.ZodEnum<Record<string, string>>;
+  // A 409 body of this closed shape is passed through whole, since the page acts on the ids it names.
+  passthroughConflict?: z.ZodType<Record<string, unknown>>;
   method: 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT';
   operation: string;
   path: string;
@@ -825,7 +845,22 @@ async function callApplicationJson(
       return upstreamFailure(call.operation, 'unreachable');
     }
 
-    return jsonResponse({ error: call.errorCode }, response.status);
+    if (call.passthroughConflict !== undefined && response.status === 409) {
+      const conflict = await problemBody(response, call.passthroughConflict);
+      if (conflict !== undefined) {
+        return jsonResponse({ error: call.errorCode, ...conflict }, 409);
+      }
+    }
+
+    const code =
+      call.passthroughCodes === undefined
+        ? undefined
+        : await problemCode(response, call.passthroughCodes);
+
+    return jsonResponse(
+      { error: call.errorCode, ...(code === undefined ? {} : { code }) },
+      response.status,
+    );
   }
 
   if (call.schema === null) {
@@ -853,6 +888,40 @@ async function callApplicationJson(
   return jsonResponse(payload.data, call.successStatus, {
     'x-request-id': prepared.requestId,
   });
+}
+
+// The API's problem body names a machine-readable code; only a listed one crosses to the browser.
+async function problemCode(
+  response: Response,
+  codes: z.ZodEnum<Record<string, string>>,
+): Promise<string | undefined> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return undefined;
+  }
+  const parsed = codes.safeParse(
+    typeof body === 'object' && body !== null
+      ? (body as { code?: unknown }).code
+      : undefined,
+  );
+  return parsed.success ? parsed.data : undefined;
+}
+
+// The whole problem body, validated against the closed shape; undefined when it is anything else.
+async function problemBody<T>(
+  response: Response,
+  schema: z.ZodType<T>,
+): Promise<T | undefined> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return undefined;
+  }
+  const parsed = schema.safeParse(body);
+  return parsed.success ? parsed.data : undefined;
 }
 
 type ParsedBody<T> = Readonly<{ data: T }> | Readonly<{ failure: Response }>;
@@ -1190,6 +1259,7 @@ function documentListQuery(
 ): string {
   const outbound = new URLSearchParams();
 
+  outbound.set('current', query.current);
   if (query.legalEntityId !== undefined) {
     outbound.set('legalEntityId', query.legalEntityId);
   }
@@ -1664,6 +1734,15 @@ function inboxItemListQuery(
   if (query.detectedType !== undefined) {
     outbound.set('detectedType', query.detectedType);
   }
+  if (query.issue !== undefined) {
+    outbound.set('issue', query.issue);
+  }
+  if (query.assigneeId !== undefined) {
+    outbound.set('assigneeId', query.assigneeId);
+  }
+  if (query.confidence !== undefined) {
+    outbound.set('confidence', query.confidence);
+  }
   outbound.set('page', String(query.page));
   outbound.set('pageSize', String(query.pageSize));
 
@@ -1804,6 +1883,7 @@ export async function getInboxItem(
 type InboxItemWrite = Readonly<{
   action:
     | 'assign'
+    | 'attach'
     | 'discard'
     | 'hints'
     | 'process'
@@ -1812,6 +1892,7 @@ type InboxItemWrite = Readonly<{
     | 'route/undo'
     | 'snooze';
   bodySchema: z.ZodType | null;
+  conflictSchema?: z.ZodType<Record<string, unknown>>;
   method: 'PATCH' | 'POST';
   operation: string;
 }>;
@@ -1855,6 +1936,9 @@ async function writeInboxItem(
       errorCode: 'inbox_item_rejected',
       method: write.method,
       operation: write.operation,
+      ...(write.conflictSchema === undefined
+        ? {}
+        : { passthroughConflict: write.conflictSchema }),
       path: `inbox/items/${encodeURIComponent(selected.value)}/${write.action}`,
       schema: inboxItemDetailSchema,
       successStatus: 200,
@@ -1922,8 +2006,65 @@ export async function postInboxItemRouteDocument(
     {
       action: 'route/document',
       bodySchema: routeInboxItemToDocumentRequestSchema,
+      conflictSchema: inboxRouteConflictSchema,
       method: 'POST',
       operation: 'postInboxItemRouteDocument',
+    },
+    fetchImplementation,
+  );
+}
+
+export async function postInboxItemAttach(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  itemId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  return await writeInboxItem(
+    auth,
+    request,
+    organizationId,
+    itemId,
+    {
+      action: 'attach',
+      bodySchema: attachInboxItemRequestSchema,
+      method: 'POST',
+      operation: 'postInboxItemAttach',
+    },
+    fetchImplementation,
+  );
+}
+
+// One request per page of ids; the answer names every id, so a refusal never hides another.
+export async function postInboxItemsBulk(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const parsed = await readJsonBody(request, bulkInboxItemsRequestSchema);
+
+  if ('failure' in parsed) {
+    return parsed.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      body: parsed.data,
+      errorCode: 'inbox_bulk_rejected',
+      method: 'POST',
+      operation: 'postInboxItemsBulk',
+      path: 'inbox/items/bulk',
+      schema: bulkInboxItemsResponseSchema,
+      successStatus: 200,
     },
     fetchImplementation,
   );
@@ -2402,6 +2543,385 @@ export async function deleteInboxChannelCredential(
       path: `inbox/channels/${encodeURIComponent(selectedChannel.value)}/credentials/${encodeURIComponent(selectedCredential.value)}`,
       schema: null,
       successStatus: 204,
+    },
+    fetchImplementation,
+  );
+}
+
+// A detected type is a token; anything else answers like a type that has no target.
+function parsedDetectedType(
+  value: string,
+): Readonly<{ failure: Response }> | Readonly<{ value: string }> {
+  const parsed = tokenSchema.safeParse(value);
+
+  return parsed.success
+    ? { value: parsed.data }
+    : {
+        failure: jsonResponse({ error: 'inbox_routing_target_not_found' }, 404),
+      };
+}
+
+export async function getInboxRoutingTargets(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'inbox_routing_targets_unavailable',
+      method: 'GET',
+      operation: 'getInboxRoutingTargets',
+      path: 'inbox/routing-targets',
+      schema: inboxRoutingTargetListResponseSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+// The body is the whole target, so a one-field edit never resets the rest of the row.
+export async function putInboxRoutingTarget(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  detectedType: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const selected = parsedDetectedType(detectedType);
+
+  if ('failure' in selected) {
+    return selected.failure;
+  }
+
+  const parsed = await readJsonBody(
+    request,
+    putInboxRoutingTargetRequestSchema,
+  );
+
+  if ('failure' in parsed) {
+    return parsed.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      body: parsed.data,
+      errorCode: 'inbox_routing_target_rejected',
+      method: 'PUT',
+      operation: 'putInboxRoutingTarget',
+      path: `inbox/routing-targets/${encodeURIComponent(selected.value)}`,
+      schema: inboxRoutingTargetSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function deleteInboxRoutingTarget(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  detectedType: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const selected = parsedDetectedType(detectedType);
+
+  if ('failure' in selected) {
+    return selected.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'inbox_routing_target_rejected',
+      method: 'DELETE',
+      operation: 'deleteInboxRoutingTarget',
+      path: `inbox/routing-targets/${encodeURIComponent(selected.value)}`,
+      schema: null,
+      successStatus: 204,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function getInboxSettings(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'inbox_settings_unavailable',
+      method: 'GET',
+      operation: 'getInboxSettings',
+      path: 'inbox/settings',
+      schema: inboxSettingsSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+// A quota above the platform cap comes back as the API's 422 under the rejection code.
+export async function patchInboxSettings(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const parsed = await readJsonBody(request, updateInboxSettingsRequestSchema);
+
+  if ('failure' in parsed) {
+    return parsed.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      body: parsed.data,
+      errorCode: 'inbox_settings_rejected',
+      method: 'PATCH',
+      operation: 'patchInboxSettings',
+      path: 'inbox/settings',
+      schema: inboxSettingsSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function getInboxRules(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'inbox_rules_unavailable',
+      method: 'GET',
+      operation: 'getInboxRules',
+      path: 'inbox/rules',
+      schema: inboxRuleListResponseSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+// A 422 carries rule_limit or not_available beside the rejection code, so the page can name the refusal.
+export async function postInboxRule(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const parsed = await readJsonBody(request, createInboxRuleRequestSchema);
+
+  if ('failure' in parsed) {
+    return parsed.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      body: parsed.data,
+      errorCode: 'inbox_rule_rejected',
+      method: 'POST',
+      operation: 'postInboxRule',
+      passthroughCodes: inboxRuleRefusalCodeSchema,
+      path: 'inbox/rules',
+      schema: inboxRuleSchema,
+      successStatus: 201,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function patchInboxRule(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  ruleId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const selected = parsedIdentifier(ruleId, 'inbox_rule_not_found');
+
+  if ('failure' in selected) {
+    return selected.failure;
+  }
+
+  const parsed = await readJsonBody(request, updateInboxRuleRequestSchema);
+
+  if ('failure' in parsed) {
+    return parsed.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      body: parsed.data,
+      errorCode: 'inbox_rule_rejected',
+      method: 'PATCH',
+      operation: 'patchInboxRule',
+      passthroughCodes: inboxRuleRefusalCodeSchema,
+      path: `inbox/rules/${encodeURIComponent(selected.value)}`,
+      schema: inboxRuleSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+// A delete is soft upstream; the browser only learns that the rule is gone from the list.
+export async function deleteInboxRule(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  ruleId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const selected = parsedIdentifier(ruleId, 'inbox_rule_not_found');
+
+  if ('failure' in selected) {
+    return selected.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'inbox_rule_rejected',
+      method: 'DELETE',
+      operation: 'deleteInboxRule',
+      path: `inbox/rules/${encodeURIComponent(selected.value)}`,
+      schema: null,
+      successStatus: 204,
+    },
+    fetchImplementation,
+  );
+}
+
+// The body is the whole ordered id list, so one reorder is one statement upstream.
+export async function putInboxRuleOrder(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const parsed = await readJsonBody(request, putInboxRuleOrderRequestSchema);
+
+  if ('failure' in parsed) {
+    return parsed.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      body: parsed.data,
+      errorCode: 'inbox_rule_rejected',
+      method: 'PUT',
+      operation: 'putInboxRuleOrder',
+      path: 'inbox/rules/order',
+      schema: inboxRuleListResponseSchema,
+      successStatus: 200,
+    },
+    fetchImplementation,
+  );
+}
+
+export async function postInboxRuleAdopt(
+  auth: BffAuth,
+  request: Request,
+  organizationId: string,
+  ruleId: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<Response> {
+  const selected = parsedIdentifier(ruleId, 'inbox_rule_not_found');
+
+  if ('failure' in selected) {
+    return selected.failure;
+  }
+
+  const prepared = await prepareApplicationCall(auth, request, organizationId);
+
+  if ('failure' in prepared) {
+    return prepared.failure;
+  }
+
+  return await callApplicationJson(
+    prepared,
+    {
+      errorCode: 'inbox_rule_rejected',
+      method: 'POST',
+      operation: 'postInboxRuleAdopt',
+      path: `inbox/rules/${encodeURIComponent(selected.value)}/adopt`,
+      schema: inboxRuleSchema,
+      successStatus: 200,
     },
     fetchImplementation,
   );

@@ -13,6 +13,9 @@ import type { PgBoss } from 'pg-boss';
 import type { PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { SPLIT_EMAIL_ITEM_QUEUE } from '../inbox/contract.js';
+import { sendSplitEmailItem } from '../inbox/inbox-queue.js';
+import { endPools } from '../test-support/end-pools.js';
 import { runTenantJob } from './job-context.js';
 import { createQueue, createQueueClientFromConfiguration } from './queue.js';
 
@@ -127,11 +130,12 @@ beforeAll(async () => {
   boss = createQueueClientFromConfiguration(configurationFor('bap_api'));
   await boss.start();
   await createQueue(boss, queueName);
+  await createQueue(boss, SPLIT_EMAIL_ITEM_QUEUE, { policy: 'exclusive' });
 });
 
 afterAll(async () => {
   await boss.stop({ graceful: false });
-  await Promise.all([apiPool.end(), migratorPool.end(), rootPool.end()]);
+  await endPools(apiPool, migratorPool, rootPool);
   await container.stop();
 });
 
@@ -212,6 +216,105 @@ describe('worker queue confinement', () => {
         work: async () => 'unreachable',
       }),
     ).rejects.toThrow('Job subject has no membership in the organization.');
+  });
+
+  it('drops a second split job with the same item key while the first is created, retrying or active', async () => {
+    const job = {
+      channelId: '4a2b7c1e-9f5d-4c3a-8b21-6e0f7d5a4c39',
+      itemId: '6c4d9e30-1b7f-4e5c-ad43-801b9f7c6e51',
+      organizationId: 'org-1',
+    };
+    const policy = await apiPool.query<{ policy: string }>(
+      'select policy from pgboss.queue where name = $1',
+      [SPLIT_EMAIL_ITEM_QUEUE],
+    );
+    expect(policy.rows[0]?.policy).toBe('exclusive');
+
+    // The intake sends once and the maintenance requeue sends again: one job, with the retry options intact.
+    await sendSplitEmailItem(boss, job);
+    await sendSplitEmailItem(boss, job);
+    const created = await apiPool.query<{
+      retry_delay: number;
+      retry_limit: number;
+      singleton_key: string;
+      state: string;
+    }>(
+      'select state, singleton_key, retry_limit, retry_delay from pgboss.job where name = $1',
+      [SPLIT_EMAIL_ITEM_QUEUE],
+    );
+    expect(created.rows).toEqual([
+      {
+        retry_delay: 60,
+        retry_limit: 3,
+        singleton_key: job.itemId,
+        state: 'created',
+      },
+    ]);
+
+    // Fetched into active, the key is still held.
+    const [active] = (await boss.fetch(SPLIT_EMAIL_ITEM_QUEUE)) ?? [];
+    expect(active?.data).toEqual(job);
+    await sendSplitEmailItem(boss, job);
+    const whileActive = await apiPool.query(
+      'select 1 from pgboss.job where name = $1',
+      [SPLIT_EMAIL_ITEM_QUEUE],
+    );
+    expect(whileActive.rowCount).toBe(1);
+
+    // Failed with retries left, the job goes to retry and the key is still held.
+    await boss.fail(SPLIT_EMAIL_ITEM_QUEUE, active?.id ?? '');
+    await sendSplitEmailItem(boss, job);
+    const whileRetrying = await apiPool.query<{ state: string }>(
+      'select state from pgboss.job where name = $1',
+      [SPLIT_EMAIL_ITEM_QUEUE],
+    );
+    expect(whileRetrying.rows).toEqual([{ state: 'retry' }]);
+  });
+
+  it('recreates a queue found with another policy so the singleton key holds', async () => {
+    const probe = 'worker_policy_probe';
+    const warnings: string[] = [];
+    // The queue as PR #67 left it: standard, with a pending job that the recreation drops.
+    await boss.createQueue(probe, { partition: false });
+    await boss.send(probe, { itemId: 'stale' }, { singletonKey: 'key-1' });
+
+    await createQueue(boss, probe, { policy: 'exclusive' }, (message) =>
+      warnings.push(message),
+    );
+
+    expect(warnings).toEqual([
+      'Recreating queue worker_policy_probe: policy standard cannot become exclusive in place',
+    ]);
+    const policy = await apiPool.query<{ policy: string }>(
+      'select policy from pgboss.queue where name = $1',
+      [probe],
+    );
+    expect(policy.rows).toEqual([{ policy: 'exclusive' }]);
+    const dropped = await apiPool.query(
+      'select 1 from pgboss.job where name = $1',
+      [probe],
+    );
+    expect(dropped.rowCount).toBe(0);
+
+    // A second send with the same key is now dropped instead of queued twice.
+    await boss.send(probe, { itemId: 'fresh' }, { singletonKey: 'key-1' });
+    await boss.send(probe, { itemId: 'fresh' }, { singletonKey: 'key-1' });
+    const queued = await apiPool.query<{ singleton_key: string }>(
+      'select singleton_key from pgboss.job where name = $1',
+      [probe],
+    );
+    expect(queued.rows).toEqual([{ singleton_key: 'key-1' }]);
+
+    // Running the setup again against the exclusive queue changes nothing.
+    await createQueue(boss, probe, { policy: 'exclusive' }, (message) =>
+      warnings.push(message),
+    );
+    expect(warnings).toHaveLength(1);
+    const kept = await apiPool.query(
+      'select 1 from pgboss.job where name = $1',
+      [probe],
+    );
+    expect(kept.rowCount).toBe(1);
   });
 
   it('refuses object creation in the pgboss schema so self-migration stays impossible', async () => {

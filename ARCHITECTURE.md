@@ -193,6 +193,49 @@ Webhook and Worker sections: `app.record_blob_scan`, the platform-unique
 `inbox_channel.email_address`, the recreated `auth.issue_channel_credential`
 with its `email_address` kind, and `app.inbox_item.sender`.
 
+Migration `20260917.0004` adds the Phase 1b-runtime layer.
+`app.inbox_routing_target` holds a per-organization override of a detected
+type's destination, kind, default entity, partner policy, auto policy and
+required fields; the effective target for a type is that row when one exists,
+else the `ROUTING_TARGET_DEFAULTS` code constant, a lazy override with no
+seeding migration. `app.organization_inbox_setting` holds a per-organization
+blob quota; the effective quota is the lesser of that setting and
+`BAP_BLOB_QUOTA_BYTES_PER_ORGANIZATION`, so an owner can only tighten the
+platform cap. The worker's `inbox_maintenance` job, scheduled with pg-boss cron
+on `*/15 * * * *` and opening no tenant transaction, runs three tasks each tick:
+it unlinks a blob-volume file left untracked by a failed commit once it clears a
+60 minute grace period, fails an `inbox_item` stuck in `processing` past 60
+minutes, and re-enqueues `split_email_item` for an email item still `received`
+past 10 minutes.
+
+Migration `20260917.0005` adds the Phase 1b-rules layer. `app.inbox_rule` holds
+closed condition and action columns, no jsonb, evaluated in priority order at
+intake: every rule whose conditions all match applies, first-writer-wins per
+field, a discard rule is terminal, and a hint or the item's standing channel
+hint still outranks every rule action for that field. The first matched rule
+that asks for `auto_route` decides the automatic route, run by the
+`route_inbox_item` job as the rule's author, or as the routing target's editor
+for a target-default auto-route; a document destination only, never a dataset or
+a partner, and never an invoice kind in 1b. `app.inbox_correction` stores the
+suggested and final value of every draft field a route changed, read-only, shown
+under the item's explanation panel; nothing learns from it.
+`created_by = current_setting('bap.user_id', true)` pins a rule's author,
+changed only by an explicit adopt.
+
+Migration `20260917.0006` adds the Phase 1b-actions layer, the `attached` event
+kind only; it carries no new table, column, or policy. Routing an item to
+Documents now checks a reference conflict and a partner fingerprint before it
+creates a document, and can write a new version instead: the transaction flips
+the superseded row's `is_current` off, inserts the new row with
+`version = old.version + 1` and `supersedes_document_id`, and re-derives in
+place of the old row's deleted event and unresolved data issues. Attach routes
+an item's files onto an existing document without creating one, inserting
+`document_file` rows and reusing the same route-and-event path; its undo
+discriminates by `document.inbox_item_id` so it removes only the attaching
+item's files or the whole document, whichever the item created. Bulk runs up to
+100 item ids through the existing single-item actions, one transaction per id,
+inside one request.
+
 ## Workspace dependency rules
 
 ```mermaid
@@ -396,11 +439,13 @@ The Inbox intake boundary and its durable per-organization blob storage,
 described in [ADR 0014](docs/adr/0014-durable-blob-storage.md) and
 [ADR 0015](docs/adr/0015-inbox-intake-model.md), are also no longer deferred.
 Uploaded bytes behind an inbox item or a document are durable, never deleted
-after intake. Inbox channels beyond manual upload, the `inbox_channel` and
-`inbox_rule` tables, a non-human channel principal, a per-organization quota
-setting, routing target settings, the orphan blob sweep, and any AI or parser
-provider remain deferred; see [the inbox plan](docs/planning/inbox.md) for the
-full list.
+after intake. The per-organization quota setting, routing target settings, and
+the orphan blob sweep land with Phase 1b-runtime; the `inbox_rule` table, rules,
+corrections, and auto-route land with Phase 1b-rules; the versioning route,
+fingerprint duplicates, attach-to-existing, and bulk actions land with Phase
+1b-actions. Split, ARES, AI, OCR, any connector, the credential vault,
+retention, and channel health remain deferred to the connections and setup
+track; see [the inbox plan](docs/planning/inbox.md) for the full list.
 
 Metric definitions, aggregation and transformation semantics beyond derivation,
 derived datasets, cross-dataset joins, dataset editing and versioning, custom

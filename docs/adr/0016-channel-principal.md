@@ -45,7 +45,9 @@ its own spec; every section below names the one that delivers it.
   `split_email_item` job, ClamAV, email channels in the settings page and the
   Caddy cap. Its spec is written when 1a lands.
 - Phase 1b: the `poll_channels` skeleton, `app.list_due_channels()` and
-  `sweep_orphan_blobs`.
+  `sweep_orphan_blobs`. Amended 2026-09-17 (1b-runtime): `sweep_orphan_blobs` is
+  superseded by the `inbox_maintenance` worker tick's orphan sweep task; its
+  spec is [inbox runtime](../../.ai/specs/2026-09-17-inbox-runtime.md).
 
 ## Decision
 
@@ -235,7 +237,21 @@ recipient address alone.
 - The orphan sweep (Phase 1b) inserts nothing. It walks `org/<organization_id>`
   directories in the blob volume and reads `app.blob` as the read-only subject
   `system_sweep`; no policy admits that subject to write, so a bug in the sweep
-  cannot create rows.
+  cannot create rows. Amended 2026-09-17 (1b-runtime): the orphan sweep ships as
+  a worker tick with no database subject at all; it walks
+  `org/<organization_id>` under the blob volume, asks
+  `app.list_blob_keys(organization_id, sha256s)`, a `SECURITY DEFINER` function
+  that raises inside any tenant transaction, which hashes have a `blob` row, and
+  unlinks only files older than 60 minutes with no row; it deletes no row.
+  Amended 2026-09-17 (1b-rules): `system_sweep` is replaced by
+  `system_automation`, the read-only subject the `route_inbox_item` job opens
+  its first transaction as (`{ role: 'member', userId: 'system_automation' }`)
+  to read the item and the rule author before re-resolving that author; no
+  policy admits it to write, its only write is
+  `app.record_inbox_automation_skip`, and `user_id_not_system_check`
+  (`id NOT LIKE 'system\_%'`) on `auth."user"` plus the matching
+  `app.erase_user` refusal keep the subject from ever colliding with a real
+  account.
 - `blob.scan_status` is written through a security definer
   `app.record_blob_scan(blob_id uuid, status text)` with EXECUTE to `bap_api`,
   which updates that column and nothing else; `blob_update` never opts in for

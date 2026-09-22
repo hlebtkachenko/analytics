@@ -9,6 +9,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Inject,
   Injectable,
   InternalServerErrorException,
@@ -16,6 +17,7 @@ import {
   NotFoundException,
   PayloadTooLargeException,
   ServiceUnavailableException,
+  UnprocessableEntityException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
 import type { InboxChannelKind, TenantContext } from '@bap/db';
@@ -26,32 +28,47 @@ import { MAX_UPLOAD_BYTES } from '../ingestion/contract.js';
 import type { ReceivedFile } from '../request-context.js';
 import { EMAIL_MEDIA_TYPE, INLINE_MEDIA_TYPES } from './contract.js';
 import type {
+  BulkInboxItemsRequest,
+  BulkInboxItemsResponse,
   InboxChannel,
   InboxHints,
   InboxIntakeResponse,
   InboxItemDetail,
   InboxItemListResponse,
+  InboxRoutingTarget,
+  InboxRule,
+  InboxSettings,
   InboxUploadResponse,
   IssueInboxChannelCredentialResponse,
   ProviderOutput,
   RouteInboxItemToDocumentRequest,
+  UpdateInboxSettingsRequest,
 } from './contract.js';
 import {
   InboxRepository,
   QuotaExceededError,
+  RouteRefusedError,
+  type AdoptRuleInput,
   type AssignItemInput,
+  type AttachItemInput,
   type BlobRecord,
   type ChannelSelector,
   type CreateChannelInput,
+  type CreateRuleInput,
   type DiscardItemInput,
   type EntityScopeSelector,
   type ListItemsInput,
+  type OrderRulesInput,
+  type PutRoutingTargetInput,
   type ReadItemInput,
   type ReceiveIntakeResult,
   type RevokeCredentialInput,
+  type RoutingTargetSelector,
+  type RuleSelector,
   type SnoozeItemInput,
   type UpdateChannelInput,
   type UpdateHintsInput,
+  type UpdateRuleInput,
 } from './inbox-repository.js';
 import {
   MANUAL_PROVIDER,
@@ -67,6 +84,7 @@ import {
   toProviderOutput,
   type SniffResult,
 } from './providers/sniff.js';
+import { isInvoiceAutoRoute } from './rules.js';
 
 export const BLOB_QUOTA_BYTES = Symbol('BLOB_QUOTA_BYTES');
 export const INTAKE_DOMAIN = Symbol('INTAKE_DOMAIN');
@@ -124,9 +142,17 @@ export interface RouteInput extends ReadItemInput {
   body: RouteInboxItemToDocumentRequest;
 }
 
+export interface BulkInput extends EntityScopeSelector {
+  body: BulkInboxItemsRequest;
+}
+
 export interface OpenBlobInput extends EntityScopeSelector {
   blobId: string;
   inline: boolean;
+}
+
+export interface UpdateSettingsInput extends TenantContext {
+  body: UpdateInboxSettingsRequest;
 }
 
 export interface OpenedBlob {
@@ -237,6 +263,41 @@ function toIntakeResponse(result: ReceiveIntakeResult): InboxIntakeResponse {
   };
 }
 
+// The per-id verdict of a bulk action: the single-item refusals by status, and a route's own refusal by code.
+function bulkRefusalCode(
+  error: unknown,
+): BulkInboxItemsResponse['results'][number]['code'] {
+  if (error instanceof RouteRefusedError) {
+    return error.refusal.code;
+  }
+
+  if (error instanceof HttpException) {
+    const body = error.getResponse();
+    const code =
+      typeof body === 'object' && body !== null
+        ? (body as { code?: unknown }).code
+        : undefined;
+
+    if (code === 'reference_conflict' || code === 'duplicate_probable') {
+      return code;
+    }
+
+    if (error.getStatus() === 404) {
+      return 'not_found';
+    }
+
+    if (error.getStatus() === 409) {
+      return 'not_open';
+    }
+
+    if (error.getStatus() === 400) {
+      return 'invalid';
+    }
+  }
+
+  throw error;
+}
+
 // A person's hint outranks the sniff for the type and the entity; the reasons keep both steps visible.
 export function applyHints(
   output: ProviderOutput,
@@ -316,7 +377,7 @@ export class InboxService {
         throw new BadRequestException();
       }
 
-      return await this.receive({
+      const result = await this.receive({
         ...input,
         channelId: null,
         channelKind: 'upload',
@@ -327,6 +388,13 @@ export class InboxService {
         size: file.data.size,
         temporaryPath: file.data.temporaryPath,
       });
+
+      // The strict response contract refuses the replay and route-job fields the receive result carries.
+      return {
+        duplicateOfItemId: result.duplicateOfItemId,
+        files: result.files,
+        item: result.item,
+      };
     } catch (error) {
       // Covers a refusal before receive took over; after it the file is already gone and this is a no-op.
       if (received?.path !== undefined) {
@@ -441,7 +509,7 @@ export class InboxService {
           : await sniffFile(temporaryPath, size);
       const storageKey = blobStorageKey(staged.organizationId, sha256);
 
-      return await this.inbox.receiveIntake({
+      const result = await this.inbox.receiveIntake({
         ...staged,
         byteSize: size,
         // A structured payload is JSON by construction; every file is what its bytes say.
@@ -465,6 +533,19 @@ export class InboxService {
               },
         storageKey,
       });
+
+      // Sent after the commit; nothing routes inside a request. A lost job leaves the item in review for a person.
+      if (result.routeJob !== null) {
+        try {
+          await this.queue.enqueueRouteInboxItem(result.routeJob);
+        } catch {
+          this.logger.error(
+            `Enqueue of route_inbox_item failed for item ${result.item.id}.`,
+          );
+        }
+      }
+
+      return result;
     } catch (error) {
       if (error instanceof QuotaExceededError) {
         throw new PayloadTooLargeException();
@@ -544,12 +625,73 @@ export class InboxService {
     return this.inbox.revokeCredential(input);
   }
 
+  listRoutingTargets(input: TenantContext): Promise<InboxRoutingTarget[]> {
+    return this.inbox.listRoutingTargets(input);
+  }
+
+  putRoutingTarget(
+    input: PutRoutingTargetInput,
+  ): Promise<InboxRoutingTarget | null> {
+    return this.inbox.putRoutingTarget(input);
+  }
+
+  deleteRoutingTarget(input: RoutingTargetSelector): Promise<boolean> {
+    return this.inbox.deleteRoutingTarget(input);
+  }
+
+  readSettings(input: TenantContext): Promise<InboxSettings> {
+    return this.inbox.readInboxSettings({
+      ...input,
+      platformQuotaBytes: this.quotaBytes,
+    });
+  }
+
+  // The platform value is the cap: an owner can only tighten it, so anything above is unprocessable.
+  async updateSettings(
+    input: UpdateSettingsInput,
+  ): Promise<InboxSettings | null> {
+    const { blobQuotaBytes } = input.body;
+
+    if (blobQuotaBytes !== null && blobQuotaBytes > this.quotaBytes) {
+      throw new UnprocessableEntityException();
+    }
+
+    return this.inbox.updateInboxSettings({
+      ...input,
+      blobQuotaBytes,
+      platformQuotaBytes: this.quotaBytes,
+    });
+  }
+
   // Re-runs the sniff on the first file and lets the stored hints outrank it.
   async process(input: ReadItemInput): Promise<InboxItemDetail | null> {
     const loaded = await this.inbox.readProviderInput(input);
 
     if (loaded === null) {
       return null;
+    }
+
+    // A failed email parent is split again, not sniffed: the children already made are idempotent.
+    if (
+      loaded.input.item.status === 'failed' &&
+      loaded.input.item.payloadKind === 'email'
+    ) {
+      const reopened = await this.inbox.reopenEmailItem(input);
+
+      if (reopened === null) {
+        return null;
+      }
+
+      try {
+        await this.queue.enqueueSplitEmailItem(reopened.job);
+      } catch {
+        // The item is received again; the maintenance requeue picks it up like any lost split.
+        this.logger.error(
+          `Enqueue of split_email_item failed for item ${reopened.job.itemId}.`,
+        );
+      }
+
+      return reopened.detail;
     }
 
     const first = loaded.files[0];
@@ -590,6 +732,10 @@ export class InboxService {
 
     return this.inbox.routeToDocument({
       ...input,
+      ...(input.body.acknowledgeDuplicateOf === undefined
+        ? {}
+        : { acknowledgeDuplicateOf: input.body.acknowledgeDuplicateOf }),
+      correctionReasons: input.body.correctionReasons ?? {},
       document,
       extraction: {
         output,
@@ -597,7 +743,126 @@ export class InboxService {
         providerVersion: MANUAL_PROVIDER_VERSION,
       },
       fileBlobIds: input.body.fileBlobIds,
+      ...(input.body.supersedesDocumentId === undefined
+        ? {}
+        : { supersedesDocumentId: input.body.supersedesDocumentId }),
     });
+  }
+
+  attachItem(input: AttachItemInput): Promise<InboxItemDetail | null> {
+    return this.inbox.attachItem(input);
+  }
+
+  // One transaction per id in body order; a refusal on one item never rolls back another.
+  async bulk(input: BulkInput): Promise<BulkInboxItemsResponse> {
+    const { body } = input;
+    const results: BulkInboxItemsResponse['results'] = [];
+
+    for (const itemId of body.itemIds) {
+      const selector = {
+        ...input,
+        itemId,
+        legalEntityIds: input.legalEntityIds,
+      };
+
+      try {
+        const detail = await (body.action === 'assign'
+          ? this.inbox.assignItem({
+              ...selector,
+              assigneeId: body.assigneeId ?? null,
+            })
+          : body.action === 'snooze'
+            ? this.inbox.snoozeItem({
+                ...selector,
+                snoozedUntil: body.snoozedUntil ?? null,
+              })
+            : body.action === 'discard'
+              ? this.inbox.discardItem({
+                  ...selector,
+                  reason: body.reason ?? 'irrelevant',
+                })
+              : this.inbox.approveItem(selector));
+
+        results.push(
+          detail === null
+            ? { code: 'not_found', itemId, status: 'refused' }
+            : { itemId, status: 'ok' },
+        );
+      } catch (error) {
+        results.push({
+          code: bulkRefusalCode(error),
+          itemId,
+          status: 'refused',
+        });
+      }
+    }
+
+    return { results };
+  }
+
+  listRules(input: TenantContext): Promise<InboxRule[]> {
+    return this.inbox.listRules(input);
+  }
+
+  readRule(input: RuleSelector): Promise<InboxRule | null> {
+    return this.inbox.readRule(input);
+  }
+
+  // The enabled cap and the invoice refusal are the controller's answers; the rerun is queued after the commit.
+  async createRule(input: CreateRuleInput): Promise<InboxRule | null> {
+    const created = await this.inbox.createRule(input);
+
+    // Enqueued after the commit, as the creator; the rule stands either way and a lost rerun is logged, not a 503.
+    if (created !== null && input.body.applyToExisting) {
+      try {
+        await this.queue.enqueueRerunInboxRule({
+          organizationId: input.organizationId,
+          ruleId: created.id,
+          userId: input.userId,
+        });
+      } catch {
+        this.logger.error(
+          `Enqueue of rerun_inbox_rule failed for rule ${created.id}.`,
+        );
+      }
+    }
+
+    return created;
+  }
+
+  // The invoice refusal needs the merged row: the stored rule plus the patch.
+  async updateRule(input: UpdateRuleInput): Promise<InboxRule | null> {
+    const current = await this.inbox.readRule(input);
+
+    if (current === null) {
+      return null;
+    }
+
+    if (
+      isInvoiceAutoRoute({
+        autoRoute: input.body.autoRoute ?? current.autoRoute,
+        setDocumentKind:
+          input.body.setDocumentKind === undefined
+            ? current.setDocumentKind
+            : input.body.setDocumentKind,
+      })
+    ) {
+      throw new UnprocessableEntityException('not_available');
+    }
+
+    return this.inbox.updateRule(input);
+  }
+
+  deleteRule(input: RuleSelector): Promise<boolean> {
+    return this.inbox.deleteRule(input);
+  }
+
+  orderRules(input: OrderRulesInput): Promise<InboxRule[]> {
+    return this.inbox.orderRules(input);
+  }
+
+  adoptRule(input: AdoptRuleInput): Promise<InboxRule | null> {
+    return this.inbox.adoptRule(input);
   }
 
   listItems(input: ListItemsInput): Promise<InboxItemListResponse> {

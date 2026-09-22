@@ -20,6 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { INGEST_DATASET_QUEUE } from '../ingestion/contract.js';
 import { resolveStagedFilePath } from '../ingestion/staging.js';
+import { endPools } from '../test-support/end-pools.js';
 import { ingestDataset } from './ingest-dataset.js';
 import { createQueue, createQueueClientFromConfiguration } from './queue.js';
 import { WorkerMetrics } from './worker-metrics.js';
@@ -154,7 +155,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await boss.stop({ graceful: false });
-  await Promise.all([apiPool.end(), migratorPool.end()]);
+  await endPools(apiPool, migratorPool);
   await container.stop();
   await rm(staging, { force: true, recursive: true });
 });

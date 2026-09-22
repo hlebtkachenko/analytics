@@ -124,6 +124,90 @@ describe('channelJobPayloadSchema', () => {
   });
 });
 
+describe('inbox rule job payloads', () => {
+  const RULE_ID = '5b3c8d2f-0a6e-4d4b-9c32-7f1a8e6b5d40';
+
+  it('accepts a rerun payload with the rule and an optional cursor beside the tenant members', () => {
+    expect(
+      jobPayloadSchema.parse({
+        organizationId: 'org-1',
+        ruleId: RULE_ID,
+        userId: 'user-1',
+      }),
+    ).toEqual({ organizationId: 'org-1', ruleId: RULE_ID, userId: 'user-1' });
+    expect(
+      jobPayloadSchema.parse({
+        cursor: { itemId: ITEM_ID, receivedAt: '2026-09-17T08:00:00.000Z' },
+        organizationId: 'org-1',
+        ruleId: RULE_ID,
+        userId: 'user-1',
+      }),
+    ).toMatchObject({ cursor: { itemId: ITEM_ID } });
+    expect(() =>
+      tenantJobPayloadSchema.parse({
+        organizationId: 'org-1',
+        ruleId: RULE_ID,
+        userId: 'user-1',
+      }),
+    ).toThrow();
+  });
+
+  it('accepts a route payload with a required item and a nullable rule, never a subject', () => {
+    expect(
+      jobPayloadSchema.parse({
+        itemId: ITEM_ID,
+        organizationId: 'org-1',
+        ruleId: null,
+      }),
+    ).toEqual({ itemId: ITEM_ID, organizationId: 'org-1', ruleId: null });
+    for (const payload of [
+      { organizationId: 'org-1', ruleId: RULE_ID },
+      { itemId: ITEM_ID, organizationId: 'org-1' },
+      {
+        itemId: ITEM_ID,
+        organizationId: 'org-1',
+        ruleId: RULE_ID,
+        userId: 'u',
+      },
+      {
+        cursor: { itemId: ITEM_ID },
+        organizationId: 'org-1',
+        ruleId: RULE_ID,
+        userId: 'u',
+      },
+    ]) {
+      expect(() => jobPayloadSchema.parse(payload)).toThrow();
+    }
+  });
+
+  it('runs a rerun payload as its creator and hands the resolved tenant to the work', async () => {
+    const fake = createFakePool(membership);
+    const seen = await runTenantJob({
+      data: { organizationId: 'org-1', ruleId: RULE_ID, userId: 'user-1' },
+      pool: fake.pool,
+      work: async (_transaction, payload, tenant) => ({ payload, tenant }),
+    });
+
+    expect(seen).toEqual({
+      payload: { organizationId: 'org-1', ruleId: RULE_ID, userId: 'user-1' },
+      tenant: { organizationId: 'org-1', role: 'owner', userId: 'user-1' },
+    });
+  });
+
+  it('refuses to run a route payload, which names no subject', async () => {
+    const fake = createFakePool(membership);
+
+    await expect(
+      runTenantJob({
+        data: { itemId: ITEM_ID, organizationId: 'org-1', ruleId: null },
+        pool: fake.pool,
+        work: async () => undefined,
+      }),
+    ).rejects.toThrow('Job payload names no subject.');
+    expect(fake.connects).toBe(0);
+  });
+});
+
 describe('runTenantJob', () => {
   it('fails a malformed payload before touching the database', async () => {
     const fake = createFakePool(membership);

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
@@ -18,8 +18,10 @@ import {
   MEDIA_TYPE_PATTERN,
   SPLIT_EMAIL_ITEM_QUEUE,
 } from '../inbox/contract.js';
+import type { RouteInboxItemJob } from '../inbox/contract.js';
 import {
   appendEvent,
+  applyInboxRules,
   insertExtraction,
   receiveIntakeInTransaction,
 } from '../inbox/inbox-repository.js';
@@ -61,6 +63,8 @@ type SplitEmailItemPayload = z.infer<typeof splitEmailItemPayloadSchema>;
 export interface SplitEmailItemOptions {
   blobs: BlobStore;
   data: unknown;
+  // Sent after a child's transaction has committed when its rule pass asked for an automatic route.
+  enqueueRouteInboxItem: (job: RouteInboxItemJob) => Promise<void>;
   metrics: WorkerMetrics;
   pool: DatabasePool;
   quotaBytes: number;
@@ -161,17 +165,20 @@ async function recordScan(
   await appendEvent(transaction, tenant, itemId, 'scanned');
 }
 
+// The parent's terminal updates are guarded on processing: a reaped (failed) parent is never resurrected.
 async function setStatus(
   transaction: PoolClient,
   itemId: string,
   status: string,
+  expected: 'processing' | null = null,
 ): Promise<void> {
   const updated = await transaction.query(
-    'update app.inbox_item set status = $2, updated_at = now() where id = $1',
-    [itemId, status],
+    `update app.inbox_item set status = $2, updated_at = now()
+      where id = $1 and ($3::text is null or status = $3::text)`,
+    [itemId, status, expected],
   );
 
-  // The channel update policy refused the row: a person decided it meanwhile, so the split stops here.
+  // The channel update policy refused the row, or the reaper failed it meanwhile: the split stops here.
   if (updated.rowCount !== 1) {
     throw new SplitEmailError('item_unavailable');
   }
@@ -315,9 +322,8 @@ export async function splitEmailItem(
           return null;
         }
 
-        if (loaded.status === 'received') {
-          await setStatus(transaction, payload.itemId, 'processing');
-        }
+        // Every attempt touches updated_at, so the reaper's clock runs from the first attempt, not the last.
+        await setStatus(transaction, payload.itemId, 'processing');
 
         return loaded;
       },
@@ -353,7 +359,12 @@ export async function splitEmailItem(
           );
 
           if (verdict.outcome === 'infected') {
-            await setStatus(transaction, payload.itemId, 'discarded');
+            await setStatus(
+              transaction,
+              payload.itemId,
+              'discarded',
+              'processing',
+            );
             await appendEvent(
               transaction,
               tenant,
@@ -435,7 +446,12 @@ export async function splitEmailItem(
           await appendEvent(transaction, tenant, payload.itemId, 'classified');
         }
 
-        await setStatus(transaction, payload.itemId, 'needs_review');
+        await setStatus(
+          transaction,
+          payload.itemId,
+          'needs_review',
+          'processing',
+        );
         await transaction.query(
           "select app.record_audit('inbox_item.split', 'inbox_item', $1, $2::jsonb)",
           [payload.itemId, JSON.stringify({ outcome: outcome.kind })],
@@ -600,7 +616,12 @@ async function createChildren(
             provider: SNIFF_PROVIDER,
             providerVersion: SNIFF_PROVIDER_VERSION,
           };
-    await runTenantJob({
+    // The keyword source of a text child, read outside the transaction; the part is already under MAX_TEXT_BYTES.
+    const text =
+      part.payloadKind === 'text'
+        ? await readFile(part.temporaryPath, 'utf8')
+        : null;
+    const routeJob = await runTenantJob<RouteInboxItemJob | null>({
       data: payload,
       pool: options.pool,
       work: async (transaction) => {
@@ -634,7 +655,7 @@ async function createChildren(
 
         // A replayed child was handled by an earlier attempt; a duplicate blob was scanned when it first arrived.
         if (result.replayed || result.duplicateOfItemId !== null) {
-          return;
+          return null;
         }
 
         const blobId = result.files[0]?.blobId;
@@ -660,7 +681,7 @@ async function createChildren(
             'discarded',
             'policy_rejected',
           );
-          return;
+          return null;
         }
 
         if (extraction === null) {
@@ -672,13 +693,25 @@ async function createChildren(
             'discarded',
             'decorative_image',
           );
-          return;
+          return null;
         }
 
         await insertExtraction(transaction, tenant, result.item.id, extraction);
         await setStatus(transaction, result.item.id, 'needs_review');
+
+        // The rule pass runs under the channel principal, still inside the child's transaction.
+        const rulePass = await applyInboxRules(transaction, {
+          ...tenant,
+          itemId: result.item.id,
+          text,
+        });
+        return rulePass.routeJob;
       },
     });
+
+    if (routeJob !== null) {
+      await options.enqueueRouteInboxItem(routeJob);
+    }
   }
 
   return context.outcome;
@@ -717,7 +750,7 @@ async function recordFailure(
         ]);
       }
 
-      await setStatus(transaction, payload.itemId, 'failed');
+      await setStatus(transaction, payload.itemId, 'failed', 'processing');
       await appendEvent(transaction, tenant, payload.itemId, 'failed');
       await transaction.query(
         "select app.record_audit('inbox_item.split_failed', 'inbox_item', $1, $2::jsonb)",

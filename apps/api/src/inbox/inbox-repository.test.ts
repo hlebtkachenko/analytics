@@ -1,8 +1,14 @@
+import { BadRequestException } from '@nestjs/common';
 import type { DatabasePool } from '@bap/db/pool';
 import type { PoolClient } from 'pg';
 import { describe, expect, it } from 'vitest';
 
-import { receiveIntake, type ReceiveIntakeInput } from './inbox-repository.js';
+import { createDocumentRequestSchema } from '../documents/contract.js';
+import {
+  checkRoutePreconditions,
+  receiveIntake,
+  type ReceiveIntakeInput,
+} from './inbox-repository.js';
 
 const ITEM_ID = '6c4d9e30-1b7f-4e5c-ad43-801b9f7c6e51';
 const BLOB_ID = '9f702163-4eac-4b8f-9076-b34ec2af9184';
@@ -37,14 +43,14 @@ const itemRow = {
   updated_at: new Date('2026-09-16T06:00:00.000Z'),
 };
 
-// A scripted connection: every statement is recorded, and the item read answers as the scope decides.
+// A scripted connection: every statement is recorded, and the scoped item read answers as the scope decides.
 function fakePool(itemVisible: boolean): {
   pool: DatabasePool;
   statements: string[];
 } {
   const statements: string[] = [];
   const client = {
-    query: async (text: string) => {
+    query: async (text: string, values: unknown[] = []) => {
       statements.push(text);
 
       if (text.includes('from app.blob where sha256')) {
@@ -59,8 +65,9 @@ function fakePool(itemVisible: boolean): {
       if (text.includes('insert into app.inbox_item\n')) {
         return { rowCount: 1, rows: [{ id: ITEM_ID }] };
       }
+      // The rule pass reads organization-wide (a null scope); only the scoped read-back follows the flag.
       if (text.includes('from app.inbox_item as i')) {
-        return itemVisible
+        return itemVisible || values[0] === null
           ? { rowCount: 1, rows: [itemRow] }
           : { rowCount: 0, rows: [] };
       }
@@ -140,11 +147,52 @@ describe('receiveIntake', () => {
     const { pool, statements } = fakePool(false);
     const persisted: string[] = [];
 
-    await expect(receiveIntake(pool, uploadInput(persisted))).rejects.toThrow(
-      'not readable in its own scope',
-    );
+    await expect(
+      receiveIntake(pool, { ...uploadInput(persisted), legalEntityIds: [] }),
+    ).rejects.toThrow('not readable in its own scope');
 
     expect(persisted).toEqual([]);
     expect(statements.at(-1)).toBe('rollback');
+  });
+});
+
+describe('checkRoutePreconditions', () => {
+  it('refuses an acknowledgement when the draft carries no partner', async () => {
+    const transaction = {
+      query: async () => {
+        throw new Error(
+          'no query runs when there is no reference and no partner',
+        );
+      },
+    } as unknown as PoolClient;
+    const document = createDocumentRequestSchema.parse({
+      currencyCode: 'CZK',
+      documentDate: '2026-09-12',
+      kind: 'other',
+      legalEntityId: ITEM_ID,
+      title: 'Placeholder without partner',
+      totalAmount: '1210.0000',
+    });
+
+    await expect(
+      checkRoutePreconditions(transaction, {
+        acknowledgeDuplicateOf: BLOB_ID,
+        document,
+        extraction: {
+          output: {
+            confidence: 1,
+            detectedType: 'pdf',
+            draft: {},
+            fieldConfidences: {},
+            issues: [],
+            reasons: [],
+          },
+          provider: 'sniff',
+          providerVersion: '2026-09-16.1',
+        },
+        legalEntityIds: null,
+        organizationId: 'organization_1',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

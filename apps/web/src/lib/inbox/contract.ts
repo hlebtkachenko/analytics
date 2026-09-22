@@ -2,6 +2,9 @@ import { z } from 'zod';
 
 import {
   createDocumentRequestSchema,
+  decimalStringSchema,
+  documentDateSchema,
+  documentKindSchema,
   identifierSchema,
 } from '../documents/contract.ts';
 
@@ -88,6 +91,7 @@ export const inboxEventKindSchema = z.enum([
   'assigned',
   'hint_added',
   'failed',
+  'attached',
 ]);
 export const inboxDiscardReasonSchema = z.enum([
   'irrelevant',
@@ -105,18 +109,32 @@ export const inboxUnprocessableReasonSchema = z.enum([
   'too_large',
   'policy_rejected',
 ]);
+// The reaper writes this on an item it failed for being stuck in processing; no person chooses it.
+export const inboxMaintenanceReasonSchema = z.enum(['stalled']);
+// The automation writes this when a rule's author is no longer a verified owner or admin.
+export const inboxAutomationReasonSchema = z.enum(['rule_author_unavailable']);
 export const inboxEventReasonSchema = z.enum([
   ...inboxDiscardReasonSchema.options,
   ...inboxUnprocessableReasonSchema.options,
+  ...inboxMaintenanceReasonSchema.options,
+  ...inboxAutomationReasonSchema.options,
 ]);
 export const inboxIssueCodeSchema = z.enum([
   'duplicate_exact',
+  'duplicate_probable',
   'entity_unresolved',
   'missing_required_field',
   'reference_conflict',
   ...inboxUnprocessableReasonSchema.options,
 ]);
-export const providerStepSchema = z.enum(['sniff', 'hint', 'manual']);
+// The four bands the list filter names; the API owns the thresholds.
+export const inboxConfidenceBandSchema = z.enum([
+  'low',
+  'medium',
+  'high',
+  'unknown',
+]);
+export const providerStepSchema = z.enum(['sniff', 'hint', 'rule', 'manual']);
 
 export const tokenSchema = z.string().regex(TOKEN_PATTERN);
 const confidenceSchema = z.number().min(0).max(1);
@@ -141,10 +159,13 @@ export const inboxItemSchema = inboxHintsSchema
     createdAt: z.iso.datetime(),
     datasetId: identifierSchema.nullable(),
     decidedByKind: inboxDecidedByKindSchema.nullable(),
+    decidedByRuleId: identifierSchema.nullable(),
     decidedByUserId: subjectIdentifierSchema.nullable(),
     detectedType: tokenSchema.nullable(),
     documentId: identifierSchema.nullable(),
     duplicateOfItemId: identifierSchema.nullable(),
+    // A person set a hint, assigned, restored, reopened or unrouted it: the automation leaves it alone.
+    humanTouched: z.boolean(),
     id: identifierSchema,
     legalEntityId: identifierSchema.nullable(),
     // The credential display prefix that pushed the item; never what was pushed.
@@ -246,12 +267,145 @@ export const inboxUploadResponseSchema = z
   })
   .strict();
 
+export const inboxRoutingDestinationSchema = z.enum([
+  'documents',
+  'datasets',
+  'discard',
+]);
+export const inboxRoutingPartnerPolicySchema = z.enum(['match_only']);
+export const inboxRoutingAutoPolicySchema = z.enum([
+  'never',
+  'above_threshold',
+  'always',
+]);
+export const inboxRoutingTargetSourceSchema = z.enum([
+  'platform',
+  'organization',
+]);
+export const MAX_ROUTING_REQUIRED_FIELDS = 32;
+
+// A draft field name a person must fill before routing: any identifier the destination contract names.
+const routingRequiredFieldSchema = z
+  .string()
+  .regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/);
+
+// The editable part of a target; a PUT carries all of it, so one edit never resets another field.
+const routingTargetFieldsSchema = z.object({
+  auto: inboxRoutingAutoPolicySchema,
+  autoThreshold: confidenceSchema.nullable(),
+  defaultAssigneeId: subjectIdentifierSchema.nullable(),
+  defaultLegalEntityId: identifierSchema.nullable(),
+  // Null only on a platform default that names no destination yet; a saved row always names one.
+  destination: inboxRoutingDestinationSchema.nullable(),
+  documentKind: documentKindSchema.nullable(),
+  partnerPolicy: inboxRoutingPartnerPolicySchema,
+  requiredFields: z
+    .array(routingRequiredFieldSchema)
+    .max(MAX_ROUTING_REQUIRED_FIELDS),
+});
+
+// The two row checks: a kind exactly when the destination is documents, a threshold when the policy needs one.
+function routingTargetInvariants(
+  target: z.infer<typeof routingTargetFieldsSchema>,
+  context: z.RefinementCtx,
+): void {
+  if ((target.documentKind !== null) !== (target.destination === 'documents')) {
+    context.addIssue({
+      code: 'custom',
+      message:
+        'A document kind is set exactly when the destination is documents.',
+      path: ['documentKind'],
+    });
+  }
+  if (target.auto === 'above_threshold' && target.autoThreshold === null) {
+    context.addIssue({
+      code: 'custom',
+      message: 'A threshold is required for above_threshold.',
+      path: ['autoThreshold'],
+    });
+  }
+}
+
+// The full target, never a partial patch: the form is prefilled from the effective target.
+export const putInboxRoutingTargetRequestSchema = routingTargetFieldsSchema
+  .extend({ destination: inboxRoutingDestinationSchema })
+  .strict()
+  .superRefine(routingTargetInvariants);
+
+// The effective target for one detected type: the organization row when present, else the platform default.
+export const inboxRoutingTargetSchema = routingTargetFieldsSchema
+  .extend({
+    detectedType: tokenSchema,
+    source: inboxRoutingTargetSourceSchema,
+  })
+  .strict()
+  .superRefine(routingTargetInvariants);
+
+export const inboxRoutingTargetListResponseSchema = z
+  .object({ targets: z.array(inboxRoutingTargetSchema) })
+  .strict();
+
+const blobQuotaBytesSchema = z.number().int().positive();
+
+// The platform value is both the default and the cap, so an owner can only tighten it.
+export const inboxSettingsSchema = z
+  .object({
+    blobQuotaBytes: blobQuotaBytesSchema.nullable(),
+    platformQuotaBytes: blobQuotaBytesSchema,
+    usedBytes: z.number().int().min(0),
+  })
+  .strict();
+
+export const updateInboxSettingsRequestSchema = z
+  .object({ blobQuotaBytes: blobQuotaBytesSchema.nullable() })
+  .strict();
+
+// The draft fields the create form edits; a correction records where the final value diverged from the suggestion.
+export const inboxCorrectionFieldSchema = z.enum([
+  'kind',
+  'legal_entity_id',
+  'partner_id',
+  'document_date',
+  'title',
+  'reference',
+  'currency_code',
+]);
+export const inboxCorrectionSourceSchema = z.enum([
+  'hint',
+  'rule',
+  'target_default',
+  'provider',
+]);
+export const MAX_CORRECTION_REASON_LENGTH = 500;
+const correctionReasonSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(MAX_CORRECTION_REASON_LENGTH);
+
+export const inboxCorrectionSchema = z
+  .object({
+    createdAt: z.iso.datetime(),
+    createdBy: subjectIdentifierSchema,
+    field: inboxCorrectionFieldSchema,
+    finalValue: z.string().nullable(),
+    id: identifierSchema,
+    reason: z.string().max(MAX_CORRECTION_REASON_LENGTH).nullable(),
+    source: inboxCorrectionSourceSchema,
+    suggestedValue: z.string().nullable(),
+  })
+  .strict();
+
 export const inboxItemDetailSchema = z
   .object({
+    corrections: z.array(inboxCorrectionSchema),
     events: z.array(inboxEventSchema),
     extraction: inboxExtractionSchema.nullable(),
     files: z.array(inboxItemFileSchema),
-    item: inboxItemSchema,
+    // The item plus its sender: shown only on the detail, never in the list.
+    item: inboxItemSchema.extend({ sender: z.string().nullable() }).strict(),
+    // The effective target of the item's detected type, so the setting is visible on the item the day it lands.
+    routingTarget: inboxRoutingTargetSchema,
   })
   .strict();
 
@@ -283,9 +437,17 @@ const csvStatusSchema = z
       .max(inboxItemStatusSchema.options.length),
   );
 
+// The literal that filters the list to unassigned items.
+export const INBOX_ASSIGNEE_NONE = 'none';
+
 export const inboxItemListQuerySchema = z
   .object({
+    assigneeId: z
+      .union([z.literal(INBOX_ASSIGNEE_NONE), subjectIdentifierSchema])
+      .optional(),
+    confidence: inboxConfidenceBandSchema.optional(),
     detectedType: tokenSchema.optional(),
+    issue: inboxIssueCodeSchema.optional(),
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce
       .number()
@@ -304,13 +466,98 @@ export const updateInboxHintsRequestSchema = inboxHintsSchema
   .strict()
   .refine((body) => Object.keys(body).length > 0);
 
+// One optional line per changed field; absence records the correction without a reason.
+export const correctionReasonsSchema = z
+  .partialRecord(inboxCorrectionFieldSchema, correctionReasonSchema)
+  .refine((reasons) => Object.keys(reasons).length > 0);
+
 export const routeInboxItemToDocumentRequestSchema = z
   .object({
+    // Names one candidate of a duplicate_probable answer, so the same route proceeds.
+    acknowledgeDuplicateOf: identifierSchema.optional(),
+    correctionReasons: correctionReasonsSchema.optional(),
     document: createDocumentRequestSchema,
     fileBlobIds: z.array(identifierSchema).min(1).max(MAX_INBOX_FILES),
+    // Names the current document of a reference_conflict answer, so the new row becomes its next version.
+    supersedesDocumentId: identifierSchema.optional(),
   })
   .strict()
   .refine((body) => new Set(body.fileBlobIds).size === body.fileBlobIds.length);
+
+export const inboxDuplicateCandidateSchema = z
+  .object({
+    documentDate: documentDateSchema,
+    id: identifierSchema,
+    reference: z.string().nullable(),
+    totalAmount: decimalStringSchema.nullable(),
+  })
+  .strict();
+
+// The two 409 bodies a route can answer; the page needs their ids, not only the code.
+export const inboxRouteConflictSchema = z.discriminatedUnion('code', [
+  z.object({
+    code: z.literal('reference_conflict'),
+    documentId: identifierSchema,
+  }),
+  z.object({
+    candidates: z.array(inboxDuplicateCandidateSchema).min(1),
+    code: z.literal('duplicate_probable'),
+  }),
+]);
+
+export const attachInboxItemRequestSchema = z
+  .object({ documentId: identifierSchema })
+  .strict();
+
+export const MAX_INBOX_BULK_ITEMS = 100;
+export const inboxBulkActionSchema = z.enum([
+  'assign',
+  'snooze',
+  'discard',
+  'approve',
+]);
+
+// The field of the action is required and the others refused, so one body never carries a stray value.
+export const bulkInboxItemsRequestSchema = z
+  .object({
+    action: inboxBulkActionSchema,
+    assigneeId: subjectIdentifierSchema.nullable().optional(),
+    itemIds: z.array(identifierSchema).min(1).max(MAX_INBOX_BULK_ITEMS),
+    reason: inboxDiscardReasonSchema.optional(),
+    snoozedUntil: z.iso.datetime().nullable().optional(),
+  })
+  .strict()
+  .refine((body) => new Set(body.itemIds).size === body.itemIds.length)
+  .refine(
+    (body) =>
+      (body.assigneeId !== undefined) === (body.action === 'assign') &&
+      (body.snoozedUntil !== undefined) === (body.action === 'snooze') &&
+      (body.reason !== undefined) === (body.action === 'discard'),
+  );
+
+// Why one id of a bulk request was refused; the single-item routes answer the same cases by status.
+export const inboxBulkRefusalCodeSchema = z.enum([
+  'not_found',
+  'not_open',
+  'invalid',
+  'reference_conflict',
+  'duplicate_probable',
+  'missing_required_field',
+]);
+
+export const bulkInboxItemsResponseSchema = z
+  .object({
+    results: z.array(
+      z
+        .object({
+          code: inboxBulkRefusalCodeSchema.optional(),
+          itemId: identifierSchema,
+          status: z.enum(['ok', 'refused']),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
 
 export const discardInboxItemRequestSchema = z
   .object({ reason: inboxDiscardReasonSchema })
@@ -323,6 +570,153 @@ export const assignInboxItemRequestSchema = z
 export const snoozeInboxItemRequestSchema = z
   .object({ snoozedUntil: z.iso.datetime().nullable() })
   .strict();
+
+// A rule: closed condition and action columns, never a free-form expression.
+export const MAX_ENABLED_INBOX_RULES = 200;
+export const inboxRuleNameSchema = z.string().trim().min(1).max(120);
+// Lowercase, `@domain` or a full address, the database check pattern.
+export const inboxRuleSenderPatternSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(320)
+  .regex(/^(@|[^@\s]+@)[^@\s]+$/);
+export const inboxRuleKeywordSchema = z.string().trim().min(1).max(120);
+
+const inboxRuleConditionsSchema = z.object({
+  channelId: identifierSchema.nullable(),
+  detectedType: tokenSchema.nullable(),
+  keyword: inboxRuleKeywordSchema.nullable(),
+  senderPattern: inboxRuleSenderPatternSchema.nullable(),
+});
+
+const inboxRuleActionsSchema = z.object({
+  autoRoute: z.boolean(),
+  discardReason: inboxDiscardReasonSchema.nullable(),
+  setAssigneeId: subjectIdentifierSchema.nullable(),
+  setDocumentKind: documentKindSchema.nullable(),
+  setLegalEntityId: identifierSchema.nullable(),
+  setPartnerId: identifierSchema.nullable(),
+});
+
+type InboxRuleConditions = z.infer<typeof inboxRuleConditionsSchema>;
+type InboxRuleActions = z.infer<typeof inboxRuleActionsSchema>;
+
+// The three row checks: one condition, one action, and a discard rule sets nothing else.
+function inboxRuleInvariants(
+  rule: InboxRuleConditions & InboxRuleActions,
+  context: z.RefinementCtx,
+): void {
+  const hasCondition =
+    rule.channelId !== null ||
+    rule.detectedType !== null ||
+    rule.keyword !== null ||
+    rule.senderPattern !== null;
+  if (!hasCondition) {
+    context.addIssue({
+      code: 'custom',
+      message: 'A rule needs at least one condition.',
+      path: ['senderPattern'],
+    });
+  }
+  const sets =
+    rule.setAssigneeId !== null ||
+    rule.setDocumentKind !== null ||
+    rule.setLegalEntityId !== null ||
+    rule.setPartnerId !== null ||
+    rule.autoRoute;
+  if (!sets && rule.discardReason === null) {
+    context.addIssue({
+      code: 'custom',
+      message: 'A rule needs at least one action.',
+      path: ['discardReason'],
+    });
+  }
+  if (sets && rule.discardReason !== null) {
+    context.addIssue({
+      code: 'custom',
+      message: 'A discard rule carries no other action.',
+      path: ['discardReason'],
+    });
+  }
+}
+
+export const inboxRuleSchema = inboxRuleConditionsSchema
+  .extend(inboxRuleActionsSchema.shape)
+  .extend({
+    createdAt: z.iso.datetime(),
+    createdBy: subjectIdentifierSchema,
+    enabled: z.boolean(),
+    id: identifierSchema,
+    name: inboxRuleNameSchema,
+    // The author is no longer a verified owner or admin, so the rule does not run until adopted.
+    paused: z.boolean(),
+    priority: z.number().int().min(1),
+    updatedAt: z.iso.datetime(),
+  })
+  .strict()
+  .superRefine(inboxRuleInvariants);
+
+export const inboxRuleListResponseSchema = z
+  .object({ rules: z.array(inboxRuleSchema) })
+  .strict();
+
+export const createInboxRuleRequestSchema = inboxRuleConditionsSchema
+  .extend(inboxRuleActionsSchema.shape)
+  .extend({
+    // Also apply the new rule to the untouched needs_review items, not only future arrivals.
+    applyToExisting: z.boolean().default(false),
+    enabled: z.boolean().default(true),
+    name: inboxRuleNameSchema,
+  })
+  .partial({
+    autoRoute: true,
+    channelId: true,
+    detectedType: true,
+    discardReason: true,
+    keyword: true,
+    senderPattern: true,
+    setAssigneeId: true,
+    setDocumentKind: true,
+    setLegalEntityId: true,
+    setPartnerId: true,
+  })
+  .strict()
+  .transform((body) => ({
+    ...body,
+    autoRoute: body.autoRoute ?? false,
+    channelId: body.channelId ?? null,
+    detectedType: body.detectedType ?? null,
+    discardReason: body.discardReason ?? null,
+    keyword: body.keyword ?? null,
+    senderPattern: body.senderPattern ?? null,
+    setAssigneeId: body.setAssigneeId ?? null,
+    setDocumentKind: body.setDocumentKind ?? null,
+    setLegalEntityId: body.setLegalEntityId ?? null,
+    setPartnerId: body.setPartnerId ?? null,
+  }))
+  .superRefine(inboxRuleInvariants);
+
+// Any subset of the editable columns; the API re-checks the row invariants against the stored rule.
+export const updateInboxRuleRequestSchema = inboxRuleConditionsSchema
+  .extend(inboxRuleActionsSchema.shape)
+  .extend({ enabled: z.boolean(), name: inboxRuleNameSchema })
+  .partial()
+  .strict()
+  .refine((body) => Object.keys(body).length > 0);
+
+export const putInboxRuleOrderRequestSchema = z
+  .object({
+    ruleIds: z.array(identifierSchema).min(1).max(1000),
+  })
+  .strict()
+  .refine((body) => new Set(body.ruleIds).size === body.ruleIds.length);
+
+// The two refusals a rule write names beside the generic rejection code.
+export const inboxRuleRefusalCodeSchema = z.enum([
+  'rule_limit',
+  'not_available',
+]);
 
 // An intake secret: the fixed prefix, then 32 random bytes in base64url. The 8 characters after the prefix are shown.
 export const INTAKE_SECRET_PREFIX = 'bap_intake_';
@@ -414,6 +808,21 @@ export const inboxIntakeResponseSchema = z
 export type CreateInboxChannelRequest = z.infer<
   typeof createInboxChannelRequestSchema
 >;
+export type CreateInboxRuleRequest = z.infer<
+  typeof createInboxRuleRequestSchema
+>;
+export type InboxCorrection = z.infer<typeof inboxCorrectionSchema>;
+export type InboxCorrectionField = z.infer<typeof inboxCorrectionFieldSchema>;
+export type InboxCorrectionSource = z.infer<typeof inboxCorrectionSourceSchema>;
+export type InboxRule = z.infer<typeof inboxRuleSchema>;
+export type InboxRuleListResponse = z.infer<typeof inboxRuleListResponseSchema>;
+export type InboxRuleRefusalCode = z.infer<typeof inboxRuleRefusalCodeSchema>;
+export type PutInboxRuleOrderRequest = z.infer<
+  typeof putInboxRuleOrderRequestSchema
+>;
+export type UpdateInboxRuleRequest = z.infer<
+  typeof updateInboxRuleRequestSchema
+>;
 export type InboxChannel = z.infer<typeof inboxChannelSchema>;
 export type InboxChannelCredential = z.infer<
   typeof inboxChannelCredentialSchema
@@ -433,15 +842,49 @@ export type InboxItemListResponse = z.infer<typeof inboxItemListResponseSchema>;
 export type InboxItemStatus = z.infer<typeof inboxItemStatusSchema>;
 export type InboxIntakeResponse = z.infer<typeof inboxIntakeResponseSchema>;
 export type InboxIssueCode = z.infer<typeof inboxIssueCodeSchema>;
+export type InboxRoutingAutoPolicy = z.infer<
+  typeof inboxRoutingAutoPolicySchema
+>;
+export type InboxRoutingDestination = z.infer<
+  typeof inboxRoutingDestinationSchema
+>;
+export type InboxRoutingTarget = z.infer<typeof inboxRoutingTargetSchema>;
+export type InboxRoutingTargetListResponse = z.infer<
+  typeof inboxRoutingTargetListResponseSchema
+>;
+export type InboxSettings = z.infer<typeof inboxSettingsSchema>;
 export type IssueInboxChannelCredentialResponse = z.infer<
   typeof issueInboxChannelCredentialResponseSchema
 >;
 export type InboxUploadResponse = z.infer<typeof inboxUploadResponseSchema>;
 export type ProviderIssue = z.infer<typeof providerIssueSchema>;
 export type ProviderReason = z.infer<typeof providerReasonSchema>;
+export type PutInboxRoutingTargetRequest = z.infer<
+  typeof putInboxRoutingTargetRequestSchema
+>;
 export type UpdateInboxChannelRequest = z.infer<
   typeof updateInboxChannelRequestSchema
 >;
 export type UpdateInboxHintsRequest = z.input<
   typeof updateInboxHintsRequestSchema
+>;
+export type UpdateInboxSettingsRequest = z.infer<
+  typeof updateInboxSettingsRequestSchema
+>;
+export type AttachInboxItemRequest = z.infer<
+  typeof attachInboxItemRequestSchema
+>;
+export type BulkInboxItemsRequest = z.infer<typeof bulkInboxItemsRequestSchema>;
+export type BulkInboxItemsResponse = z.infer<
+  typeof bulkInboxItemsResponseSchema
+>;
+export type InboxBulkAction = z.infer<typeof inboxBulkActionSchema>;
+export type InboxBulkRefusalCode = z.infer<typeof inboxBulkRefusalCodeSchema>;
+export type InboxConfidenceBand = z.infer<typeof inboxConfidenceBandSchema>;
+export type InboxDuplicateCandidate = z.infer<
+  typeof inboxDuplicateCandidateSchema
+>;
+export type InboxRouteConflict = z.infer<typeof inboxRouteConflictSchema>;
+export type RouteInboxItemToDocumentRequest = z.input<
+  typeof routeInboxItemToDocumentRequestSchema
 >;

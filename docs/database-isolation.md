@@ -379,7 +379,7 @@ from the transaction settings, the same checks as `issue_channel_credential` and
 tier's public intake route calls `auth.resolve_channel_credential` and reads or
 upserts `auth.rate_limit` in that namespace, both on the `bap_auth` pool.
 `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
-`20260917.0002`.
+`20260917.0002` after this migration.
 
 Migration `20260917.0003` delivers the email channel of ADR 0016.
 `app.inbox_item` gains a nullable `sender` column (`length between 1 and 320`,
@@ -412,13 +412,102 @@ local part and hashes exactly that, never the whole address.
 `20260917.0003` after this migration, and `20260922.0005` after the inbox slug
 reservation.
 
+Migration `20260917.0004` adds the runtime layer of 1b-runtime.
+`app.inbox_routing_target` (`organization_id`, `detected_type`, `destination`,
+`document_kind`, `default_legal_entity_id`, `partner_policy`, `auto`,
+`auto_threshold`, `default_assignee_id`, `required_fields`, `created_by`,
+`updated_by`, `unique (organization_id, detected_type)`) carries the per command
+policy shape of `inbox_channel`: SELECT is organization wide and excludes a
+channel (`AND NOT app.role_is_channel()`), INSERT checks `created_by`, and
+UPDATE and DELETE both need `app.role_can_write()`; the owner-only rule above
+that is an API permission, not a policy. A row absent for a type falls back to
+the code constant, so no seeding migration copies it.
+`app.organization_inbox_setting` (`organization_id` primary key,
+`blob_quota_bytes`, `created_by`) is one row per organization: SELECT is
+organization wide with no channel exclusion, because the intake gate and the
+split job both read it inside the channel's own transaction, while INSERT and
+UPDATE need `app.role_is_owner()` and there is no DELETE policy. Three more
+`SECURITY DEFINER` functions owned by `bap_owner` (`app.list_blob_keys`,
+`app.reap_stalled_inbox_items`, `app.list_stuck_email_items`), EXECUTE to
+`bap_api`, back the `inbox_maintenance` worker tick and raise
+`insufficient_privilege` whenever `bap.organization_id` is set; because
+`FORCE ROW LEVEL SECURITY` also applies to `bap_owner`, the migration adds
+`TO bap_owner USING (true)` maintenance policies in the shape of
+`inbox_channel_maintenance_select`: SELECT on `inbox_item` and `blob`, UPDATE on
+`inbox_item`, INSERT on `inbox_event`. The `stalled` event reason joins
+`inbox_event_reason_check`. The eraser gains column grants on
+`inbox_routing_target.default_assignee_id`, `inbox_routing_target.created_by`,
+`inbox_routing_target.updated_by` and `organization_inbox_setting.created_by`;
+both tables get full DML for `bap_api` and SELECT for `bap_reporting` and
+`bap_backup`. `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts`
+was `20260917.0004` after this migration.
+
+Migration `20260917.0005` adds the rules layer of 1b-rules. `app.inbox_rule`
+carries closed, nullable condition columns (`channel_id`, `sender_pattern`,
+`keyword`, `detected_type`) and closed, nullable action columns
+(`set_legal_entity_id`, `set_document_kind`, `set_partner_id`,
+`set_assignee_id`, `discard_reason`, `auto_route`), a nullable `priority` with
+`unique (organization_id, priority) deferrable initially deferred` so a reorder
+is one statement, `unique (id, organization_id)`, and check
+`(deleted_at IS NULL) = (priority IS NOT NULL)` so a soft-deleted rule frees its
+slot. FORCE RLS; SELECT excludes the channel, INSERT checks `created_by` and
+`app.role_can_write()`, UPDATE needs `app.role_can_write()`, and there is no
+DELETE policy or grant, so the only delete is `deleted_at`. A `BEFORE UPDATE`
+trigger refuses any change to `created_by` other than to
+`current_setting('bap.user_id', true)`, closing adopt-as-someone-else at the
+database. `inbox_rule_maintenance_select TO bap_owner USING (true)` admits
+`app.list_inbox_rules()`, a `SECURITY DEFINER` function owned by `bap_owner`
+that also reads `auth.member` and `auth."user"`. `app.inbox_correction`
+(`organization_id`, `inbox_item_id`, `field`, `suggested_value`, `final_value`,
+`source`, `reason`, `created_by`) is insert-only: SELECT excludes the channel,
+INSERT checks `created_by` and `app.role_can_write()`, and there is no UPDATE or
+DELETE policy, since a correction is a fact about one route.
+`inbox_item_decided_by_rule_fkey (decided_by_rule_id, organization_id) references inbox_rule(id, organization_id) on delete restrict`,
+so a rule that decided an item is never hard-deleted.
+`app.record_inbox_automation_skip(item_id, reason)` is the second
+`SECURITY DEFINER` function, EXECUTE to `bap_api`; its tenant boundary lives in
+the function body rather than a policy, because the runtime's own
+`TO bap_owner WITH CHECK (true)` INSERT policy on `inbox_event` already admits
+`bap_owner` and a same-named policy here would fail the migration. `auth."user"`
+gains `CHECK (id NOT LIKE 'system\_%')` beside `user_id_not_channel_check`,
+reserving the `system_automation` subject; `app.erase_user` refuses that name.
+The eraser gains column grants on `inbox_rule.created_by`,
+`inbox_rule.set_assignee_id` and `inbox_correction.created_by`; `bap_api` gets
+SELECT, INSERT, UPDATE on `inbox_rule` and SELECT, INSERT on `inbox_correction`,
+and `bap_reporting` and `bap_backup` get SELECT on both.
+`inbox_event_reason_check` gains `rule_author_unavailable`.
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
+`20260917.0005` after this migration.
+
+Migration `20260917.0006` adds the actions layer of 1b-actions.
+`inbox_event_kind_check` (`20260916.0002_inbox.sql:254-257`) gains `attached`,
+the event kind an item's route to an existing document writes instead of
+`routed`. No new table, no new column, and no policy change: the attach route
+writes only `app.document_file`, gated by `document_file_insert`
+(`20260916.0002_inbox.sql:477-482`, `app.role_can_write()`), and
+`app.inbox_item`, where `inbox_item_channel_update`
+(`20260917.0001_inbox_channels.sql:356-371`) already keeps a channel subject out
+of `document_id` and the decided-by columns; the versioning, fingerprint, and
+bulk routes below write only `app.document`, `app.economic_event`,
+`app.data_issue`, and `app.inbox_item` the same way, through policies this
+migration does not touch. `DATABASE_MIGRATION_COMPATIBILITY` in
+`packages/db/src/access.ts` was `20260917.0006` after this migration.
+
 Migration `20260922.0006` re-declares `app.erase_user` as the union of the two
 bodies the platform and inbox stacks each wrote: the channel-name guard and the
 blob, inbox item, extraction, event, document file and channel tombstones, plus
 the member `resource_id` tombstone on `app.audit_log`. It is needed because
 `20260920.0001` replaced the function with a body that predates the inbox
 tables, and an applied migration cannot be edited in place.
-`DATABASE_MIGRATION_COMPATIBILITY` is now `20260922.0006` in
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
+`20260922.0006` after this migration.
+
+Migration `20260922.0007` re-declares `app.erase_user` once more, because
+`20260922.0006` sorts after the automation migrations and replaced the routing
+target, setting, rule and correction erasure rules `20260917.0004` and
+`20260917.0005` had added. Its body is the automation body plus the member
+`resource_id` tombstone on `app.audit_log`, so no stack loses a rule.
+`DATABASE_MIGRATION_COMPATIBILITY` is now `20260922.0007` in
 `packages/db/src/access.ts`.
 
 ## Tenant policy contract

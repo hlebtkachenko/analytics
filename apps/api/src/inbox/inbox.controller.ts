@@ -52,7 +52,13 @@ import type { TenantAccess } from '../tenant-access.js';
 import {
   assignInboxItemBodyOpenApiSchema,
   assignInboxItemRequestSchema,
+  attachInboxItemBodyOpenApiSchema,
+  attachInboxItemRequestSchema,
   blobIdentifierSchema,
+  bulkInboxItemsBodyOpenApiSchema,
+  bulkInboxItemsRequestSchema,
+  bulkInboxItemsResponseOpenApiSchema,
+  bulkInboxItemsResponseSchema,
   contentDispositionFilename,
   discardInboxItemBodyOpenApiSchema,
   discardInboxItemRequestSchema,
@@ -65,6 +71,7 @@ import {
   inboxUploadResponseOpenApiSchema,
   inboxUploadResponseSchema,
   INLINE_MEDIA_TYPES,
+  routeInboxItemConflictOpenApiSchema,
   routeInboxItemToDocumentBodyOpenApiSchema,
   routeInboxItemToDocumentRequestSchema,
   snoozeInboxItemBodyOpenApiSchema,
@@ -74,6 +81,9 @@ import {
 } from './contract.js';
 import type {
   AssignInboxItemRequest,
+  AttachInboxItemRequest,
+  BulkInboxItemsRequest,
+  BulkInboxItemsResponse,
   DiscardInboxItemRequest,
   InboxItemDetail,
   InboxItemListQuery,
@@ -292,7 +302,9 @@ export class InboxController {
   @ApiForbiddenResponse(forbidden)
   @ApiNotFoundResponse({ description: 'The item or the entity is not visible' })
   @ApiConflictResponse({
-    description: 'The item is not open or the reference is already used',
+    description:
+      'The item is not open, a current document carries the reference (reference_conflict), or a probable duplicate exists (duplicate_probable)',
+    schema: routeInboxItemConflictOpenApiSchema,
   })
   async routeToDocument(
     @Param('organizationId', { schema: organizationIdentifierSchema })
@@ -325,6 +337,74 @@ export class InboxController {
 
       throw error;
     }
+  }
+
+  @Post(':organizationId/inbox/items/:itemId/attach')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ResourceJwtGuard, SubjectRateLimitGuard)
+  @ApiOperation({
+    summary: 'Attach the item files to an existing document and route to it',
+  })
+  @ApiBody({ schema: attachInboxItemBodyOpenApiSchema })
+  @ApiOkResponse({ schema: inboxItemDetailOpenApiSchema })
+  @ApiUnauthorizedResponse(unauthorized)
+  @ApiForbiddenResponse(forbidden)
+  @ApiNotFoundResponse({
+    description: 'The item or the document is not visible',
+  })
+  @ApiConflictResponse({
+    description:
+      'The item is not open, has no files (no_files), or a blob is already on the document (blob_already_attached)',
+  })
+  async attachItem(
+    @Param('organizationId', { schema: organizationIdentifierSchema })
+    organizationId: string,
+    @Param('itemId', { schema: inboxItemIdentifierSchema }) itemId: string,
+    @Body({ schema: attachInboxItemRequestSchema })
+    body: AttachInboxItemRequest,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<InboxItemDetail> {
+    const { entityScope, tenant } = await this.manage(organizationId, request);
+
+    return this.detail(
+      this.inbox.attachItem({
+        ...tenant,
+        documentId: body.documentId,
+        itemId,
+        legalEntityIds: allowedEntityIds(entityScope),
+      }),
+    );
+  }
+
+  @Post(':organizationId/inbox/items/bulk')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ResourceJwtGuard, SubjectRateLimitGuard)
+  @ApiOperation({
+    summary: 'Assign, snooze, discard or approve up to a page of items',
+  })
+  @ApiBody({ schema: bulkInboxItemsBodyOpenApiSchema })
+  @ApiOkResponse({
+    description: 'One result per id, whatever the mix',
+    schema: bulkInboxItemsResponseOpenApiSchema,
+  })
+  @ApiBadRequestResponse({ description: 'The field of the action is off' })
+  @ApiUnauthorizedResponse(unauthorized)
+  @ApiForbiddenResponse(forbidden)
+  async bulk(
+    @Param('organizationId', { schema: organizationIdentifierSchema })
+    organizationId: string,
+    @Body({ schema: bulkInboxItemsRequestSchema })
+    body: BulkInboxItemsRequest,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<BulkInboxItemsResponse> {
+    const { entityScope, tenant } = await this.manage(organizationId, request);
+    return bulkInboxItemsResponseSchema.parse(
+      await this.inbox.bulk({
+        ...tenant,
+        body,
+        legalEntityIds: allowedEntityIds(entityScope),
+      }),
+    );
   }
 
   @Post(':organizationId/inbox/items/:itemId/route/undo')

@@ -5,6 +5,14 @@
   min-inline-size: 0;
 }
 
+// The container never widens its parent: inline-size containment keeps a wide
+// table out of the intrinsic sizing of a Stack or grid track, so the table
+// scrolls inside the container instead of stretching the page.
+.container {
+  contain: inline-size;
+  min-inline-size: 0;
+}
+
 // Non-scrolling positioning context so the loading veil covers the visible box.
 .viewport {
   position: relative;

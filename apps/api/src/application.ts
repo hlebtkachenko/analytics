@@ -61,7 +61,7 @@ export function configureApplication(
       transform: true,
     }),
   );
-  application.useGlobalFilters(new ProblemExceptionFilter());
+  application.useGlobalFilters(new ProblemExceptionFilter(logger));
 
   const openApi = new DocumentBuilder()
     .setTitle('BAP Application API')

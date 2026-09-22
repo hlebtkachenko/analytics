@@ -11,6 +11,7 @@ import {
   NotFoundException,
   PayloadTooLargeException,
   ServiceUnavailableException,
+  UnprocessableEntityException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
 import type { BlobScanStatus } from '@bap/db';
@@ -28,6 +29,7 @@ import {
   createBlobDirectories,
   FilesystemBlobStore,
 } from '../blobs/blob-store.js';
+import { inboxUploadResponseSchema } from './contract.js';
 import type {
   InboxItem,
   InboxItemDetail,
@@ -35,13 +37,16 @@ import type {
   SplitEmailItemJob,
 } from './contract.js';
 import { applyHints, InboxService } from './inbox.service.js';
+import { routingTargetFor } from './routing-targets.js';
 import {
   QuotaExceededError,
+  RouteRefusedError,
   type InboxRepository,
   type ItemFileRecord,
   type ReceiveIntakeInput,
   type RecordExtractionInput,
   type RouteToDocumentInput,
+  type UpdateInboxSettingsInput,
 } from './inbox-repository.js';
 import * as fixtures from './providers/__fixtures__/index.js';
 
@@ -50,6 +55,8 @@ const PARTNER_ID = 'a0813274-5fbd-4c90-a187-c45fd3b0a295';
 const ITEM_ID = '6c4d9e30-1b7f-4e5c-ad43-801b9f7c6e51';
 const BLOB_ID = '9f702163-4eac-4b8f-9076-b34ec2af9184';
 const CHANNEL_ID = 'c2a35496-71df-4eb2-8309-e671f5d2c4b7';
+const MISSING_ITEM_ID = 'd3b46507-82e0-4fc3-9410-f782a6e3d5c8';
+const CONFLICT_ITEM_ID = 'e4c57618-93f1-4ad4-a521-093c7b4e6d09';
 const QUOTA = 100_000;
 const INTAKE_DOMAIN_VALUE = 'in.bap.invalid';
 
@@ -74,6 +81,7 @@ const item: InboxItem = {
   createdAt: '2026-09-16T06:00:00.000Z',
   datasetId: null,
   decidedByKind: null,
+  decidedByRuleId: null,
   decidedByUserId: null,
   detectedType: null,
   documentId: null,
@@ -83,6 +91,7 @@ const item: InboxItem = {
   hintLinkDocumentId: null,
   hintPartnerId: null,
   hintText: null,
+  humanTouched: false,
   id: ITEM_ID,
   legalEntityId: null,
   origin: null,
@@ -96,10 +105,12 @@ const item: InboxItem = {
 };
 
 const detail: InboxItemDetail = {
+  corrections: [],
   events: [],
   extraction: null,
   files: [],
-  item,
+  item: { ...item, sender: null },
+  routingTarget: routingTargetFor('pdf'),
 };
 
 describe('InboxService', () => {
@@ -121,8 +132,12 @@ describe('InboxService', () => {
   const extractions: RecordExtractionInput[] = [];
   const routed: RouteToDocumentInput[] = [];
   const enqueued: SplitEmailItemJob[] = [];
+  const settingsUpdates: UpdateInboxSettingsInput[] = [];
   let enqueueFails = false;
+  let providerItem: Partial<typeof item> = {};
   const queue = {
+    enqueueRerunInboxRule: vi.fn(async () => undefined),
+    enqueueRouteInboxItem: vi.fn(async () => undefined),
     enqueueSplitEmailItem: vi.fn(async (job: SplitEmailItemJob) => {
       if (enqueueFails) {
         throw new Error('queue down');
@@ -133,8 +148,60 @@ describe('InboxService', () => {
 
   // The repository stub mirrors the real transaction order: quota, duplicate, then persist only for new bytes.
   const repository = {
-    assignItem: vi.fn(),
+    adoptRule: vi.fn(),
+    approveItem: vi.fn(async (input: { itemId: string }) => {
+      if (input.itemId === ITEM_ID) {
+        return detail;
+      }
+      if (input.itemId === MISSING_ITEM_ID) {
+        throw new RouteRefusedError(
+          { code: 'missing_required_field', field: 'kind' },
+          {
+            output: {
+              confidence: 0,
+              detectedType: 'unknown',
+              draft: {},
+              fieldConfidences: {},
+              issues: [],
+              reasons: [],
+            },
+            provider: 'manual',
+            providerVersion: '1',
+          },
+        );
+      }
+      if (input.itemId === CONFLICT_ITEM_ID) {
+        throw new ConflictException({
+          code: 'reference_conflict',
+          documentId: ITEM_ID,
+        });
+      }
+      return null;
+    }),
+    attachItem: vi.fn(),
+    reopenEmailItem: vi.fn(async (input: { itemId: string }) =>
+      input.itemId === ITEM_ID
+        ? {
+            detail,
+            job: {
+              channelId: CHANNEL_ID,
+              itemId: ITEM_ID,
+              organizationId: tenant.organizationId,
+            },
+          }
+        : null,
+    ),
+    createRule: vi.fn(),
+    deleteRule: vi.fn(),
+    listRules: vi.fn(),
+    orderRules: vi.fn(),
+    readRule: vi.fn(),
+    updateRule: vi.fn(),
+    assignItem: vi.fn(async (input: { itemId: string }) =>
+      input.itemId === ITEM_ID ? detail : null,
+    ),
     createChannel: vi.fn(),
+    deleteRoutingTarget: vi.fn(),
     discardItem: vi.fn(),
     issueCredential: vi.fn(
       async (input: { channelId: string; intakeDomain: string }) => {
@@ -181,6 +248,8 @@ describe('InboxService', () => {
     ),
     listChannels: vi.fn(),
     listItems: vi.fn(),
+    listRoutingTargets: vi.fn(),
+    putRoutingTarget: vi.fn(),
     readBlob: vi.fn(async (input: { blobId: string }) =>
       storedFile === null || input.blobId !== storedFile.blobId
         ? null
@@ -188,6 +257,11 @@ describe('InboxService', () => {
     ),
     readChannel: vi.fn(),
     readChannelPrincipal: vi.fn(),
+    readInboxSettings: vi.fn(async (input: { platformQuotaBytes: number }) => ({
+      blobQuotaBytes: null,
+      platformQuotaBytes: input.platformQuotaBytes,
+      usedBytes,
+    })),
     readItem: vi.fn(),
     readProviderInput: vi.fn(async (input: { itemId: string }) =>
       input.itemId !== ITEM_ID || storedFile === null
@@ -200,7 +274,7 @@ describe('InboxService', () => {
                 { ...storedFile, sniffedMediaType: storedFile.mediaType },
               ],
               hints,
-              item,
+              item: { ...item, ...providerItem },
             },
           },
     ),
@@ -212,6 +286,7 @@ describe('InboxService', () => {
           files: [],
           item: { ...item, status: 'discarded' as const },
           replayed: false,
+          routeJob: null,
         };
       }
       if (usedBytes + input.byteSize > input.quotaBytes) {
@@ -219,7 +294,13 @@ describe('InboxService', () => {
       }
       await input.persist();
       usedBytes += input.byteSize;
-      return { duplicateOfItemId: null, files: [], item, replayed: false };
+      return {
+        duplicateOfItemId: null,
+        files: [],
+        item,
+        replayed: false,
+        routeJob: null,
+      };
     }),
     recordExtraction: vi.fn(async (input: RecordExtractionInput) => {
       extractions.push(input);
@@ -235,6 +316,14 @@ describe('InboxService', () => {
     undoRoute: vi.fn(),
     updateChannel: vi.fn(),
     updateHints: vi.fn(),
+    updateInboxSettings: vi.fn(async (input: UpdateInboxSettingsInput) => {
+      settingsUpdates.push(input);
+      return {
+        blobQuotaBytes: input.blobQuotaBytes,
+        platformQuotaBytes: input.platformQuotaBytes,
+        usedBytes,
+      };
+    }),
   } satisfies InboxRepository;
 
   async function stage(bytes: Buffer, name = 'upload-1'): Promise<string> {
@@ -280,6 +369,8 @@ describe('InboxService', () => {
     });
 
     expect(response.item).toEqual(item);
+    // The controller parses the response with the strict contract, so an extra key would be a 500.
+    expect(inboxUploadResponseSchema.parse(response)).toEqual(response);
     const input = received[0];
     expect(input).toMatchObject({
       byteSize: bytes.length,
@@ -433,6 +524,94 @@ describe('InboxService', () => {
     expect(output.reasons).toHaveLength(1);
   });
 
+  it('re-enqueues the split for a failed email parent instead of sniffing it', async () => {
+    const previousFile = storedFile;
+    providerItem = {
+      channelId: CHANNEL_ID,
+      channelKind: 'email',
+      payloadKind: 'email',
+      status: 'failed',
+    };
+    storedFile = {
+      blobId: BLOB_ID,
+      byteSize: 3,
+      mediaType: 'message/rfc822',
+      originalFilename: null,
+      position: 1,
+      scanStatus: 'clean',
+      sha256: 'a'.repeat(64),
+      storageKey: 'missing',
+    };
+    enqueued.length = 0;
+
+    const result = await service.process({ ...tenant, itemId: ITEM_ID });
+
+    expect(result).toBe(detail);
+    expect(repository.reopenEmailItem).toHaveBeenCalledWith({
+      ...tenant,
+      itemId: ITEM_ID,
+    });
+    expect(enqueued).toEqual([
+      {
+        channelId: CHANNEL_ID,
+        itemId: ITEM_ID,
+        organizationId: tenant.organizationId,
+      },
+    ]);
+    expect(extractions).toHaveLength(0);
+
+    // A lost enqueue leaves the item received for the maintenance requeue, never a 5xx.
+    enqueueFails = true;
+    await expect(service.process({ ...tenant, itemId: ITEM_ID })).resolves.toBe(
+      detail,
+    );
+    enqueueFails = false;
+    providerItem = {};
+    storedFile = previousFile;
+  });
+
+  it('runs a bulk action per id and maps each refusal to its code', async () => {
+    const assigned = await service.bulk({
+      ...tenant,
+      body: {
+        action: 'assign',
+        assigneeId: 'user_2',
+        itemIds: [ITEM_ID, MISSING_ITEM_ID],
+      },
+    });
+    expect(assigned).toEqual({
+      results: [
+        { itemId: ITEM_ID, status: 'ok' },
+        { code: 'not_found', itemId: MISSING_ITEM_ID, status: 'refused' },
+      ],
+    });
+    expect(repository.assignItem).toHaveBeenCalledTimes(2);
+
+    const approved = await service.bulk({
+      ...tenant,
+      body: {
+        action: 'approve',
+        itemIds: [MISSING_ITEM_ID, CONFLICT_ITEM_ID, ITEM_ID, BLOB_ID],
+      },
+    });
+    expect(approved).toEqual({
+      results: [
+        {
+          code: 'missing_required_field',
+          itemId: MISSING_ITEM_ID,
+          status: 'refused',
+        },
+        {
+          code: 'reference_conflict',
+          itemId: CONFLICT_ITEM_ID,
+          status: 'refused',
+        },
+        { itemId: ITEM_ID, status: 'ok' },
+        { code: 'not_found', itemId: BLOB_ID, status: 'refused' },
+      ],
+    });
+  });
+
   it('validates the draft through the manual provider before routing', async () => {
     await service.routeToDocument({
       ...tenant,
@@ -518,6 +697,7 @@ describe('InboxService', () => {
           files: [],
           item: { ...item, status: 'received' as const },
           replayed: false,
+          routeJob: null,
         };
       },
     );
@@ -583,6 +763,7 @@ describe('InboxService', () => {
         files: [],
         item: { ...item, status: 'received' as const },
         replayed: false,
+        routeJob: null,
       };
     };
 
@@ -735,5 +916,52 @@ describe('InboxService', () => {
     await expect(
       service.issueCredential({ ...tenant, channelId: 'no-domain' }),
     ).rejects.toBeInstanceOf(InternalServerErrorException);
+  });
+
+  it('reads the settings against the platform cap and refuses a quota above it with 422', async () => {
+    const organization = {
+      organizationId: 'organization_1',
+      role: 'owner' as const,
+      userId: 'user_1',
+    };
+
+    await expect(service.readSettings(organization)).resolves.toEqual({
+      blobQuotaBytes: null,
+      platformQuotaBytes: QUOTA,
+      usedBytes,
+    });
+
+    await expect(
+      service.updateSettings({
+        ...organization,
+        body: { blobQuotaBytes: QUOTA + 1 },
+      }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(settingsUpdates).toEqual([]);
+
+    // The cap itself, anything below it and a reset to null all reach the repository with the platform value.
+    await expect(
+      service.updateSettings({
+        ...organization,
+        body: { blobQuotaBytes: QUOTA },
+      }),
+    ).resolves.toMatchObject({ blobQuotaBytes: QUOTA });
+    await expect(
+      service.updateSettings({
+        ...organization,
+        body: { blobQuotaBytes: null },
+      }),
+    ).resolves.toMatchObject({ blobQuotaBytes: null });
+    expect(settingsUpdates).toEqual([
+      expect.objectContaining({
+        blobQuotaBytes: QUOTA,
+        platformQuotaBytes: QUOTA,
+        userId: 'user_1',
+      }),
+      expect.objectContaining({
+        blobQuotaBytes: null,
+        platformQuotaBytes: QUOTA,
+      }),
+    ]);
   });
 });

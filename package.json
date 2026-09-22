@@ -12,6 +12,8 @@
     "compose:verify": "node scripts/verify-compose-models.mjs",
     "demo:documents": "bash scripts/demo-documents.sh",
     "demo:documents:down": "bash scripts/demo-documents.sh --down",
+    "demo:inbox": "bash scripts/demo-inbox.sh",
+    "demo:inbox:down": "bash scripts/demo-inbox.sh --down",
     "demo:tenancy": "bash scripts/demo-tenancy.sh",
     "demo:tenancy:down": "bash scripts/demo-tenancy.sh --down",
     "dev": "IBM_TELEMETRY_DISABLED=true NEXT_TELEMETRY_DISABLED=1 STORYBOOK_DISABLE_TELEMETRY=1 turbo run dev --concurrency=4",

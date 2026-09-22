@@ -162,7 +162,11 @@ const detail = {
       severity: 'warning',
     },
   ],
+  files: [],
+  inboxItems: [],
   links: [],
+  supersededByDocumentId: null,
+  supersedesDocumentId: null,
 };
 
 const LINK_ID = '00000000-0000-4000-8000-000000000050';
@@ -195,6 +199,7 @@ function capabilities(manageDocuments: boolean) {
 }
 
 type RouterOptions = Readonly<{
+  extra?: Record<string, unknown>;
   linkStatus?: number;
   links?: unknown[];
   manageDocuments?: boolean;
@@ -238,7 +243,11 @@ function respond(options: RouterOptions = {}) {
     }
 
     if (input.includes('/documents/')) {
-      return Response.json({ ...detail, links: options.links ?? [] });
+      return Response.json({
+        ...detail,
+        links: options.links ?? [],
+        ...(options.extra ?? {}),
+      });
     }
 
     return new Response(null, { status: 404 });
@@ -386,6 +395,101 @@ describe('DocumentDetailPage', () => {
       await screen.findByText('The link could not be saved.'),
     ).toBeVisible();
     expect(screen.queryByText('The status could not be updated.')).toBeNull();
+  });
+
+  it('lists the original files with their download links and the source items', async () => {
+    const BLOB_ID = '00000000-0000-4000-8000-000000000070';
+    const ITEM_ID = '00000000-0000-4000-8000-000000000071';
+    vi.stubGlobal(
+      'fetch',
+      respond({
+        extra: {
+          files: [
+            {
+              blobId: BLOB_ID,
+              byteSize: 3,
+              filename: 'scan.pdf',
+              mediaType: 'application/pdf',
+              position: 1,
+            },
+            {
+              blobId: OTHER_DOCUMENT_ID,
+              byteSize: 3,
+              filename: null,
+              mediaType: 'application/pdf',
+              position: 2,
+            },
+          ],
+          inboxItems: [
+            {
+              channelKind: 'upload',
+              id: ITEM_ID,
+              receivedAt: '2026-09-02T00:00:00.000Z',
+              status: 'routed',
+            },
+          ],
+        },
+      }),
+    );
+
+    renderDetailPage();
+
+    expect(
+      await screen.findByRole('link', { name: 'scan.pdf' }),
+    ).toHaveAttribute(
+      'href',
+      `/api/bff/application/organizations/organization_1/inbox/blobs/${BLOB_ID}/download`,
+    );
+    expect(screen.getByRole('link', { name: 'File 2' })).toHaveAttribute(
+      'href',
+      `/api/bff/application/organizations/organization_1/inbox/blobs/${OTHER_DOCUMENT_ID}/download`,
+    );
+    expect(screen.getByRole('link', { name: ITEM_ID })).toHaveAttribute(
+      'href',
+      `/inbox/${ITEM_ID}?organization=organization-1`,
+    );
+  });
+
+  it('says so when no original file is stored', async () => {
+    vi.stubGlobal('fetch', respond());
+
+    renderDetailPage();
+
+    expect(
+      await screen.findByText('No original file is stored for this document.'),
+    ).toBeVisible();
+  });
+
+  it('shows the version banner as text and links to the related versions', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respond({
+        extra: {
+          supersededByDocumentId: LINK_ID,
+          supersedesDocumentId: OTHER_DOCUMENT_ID,
+        },
+      }),
+    );
+
+    renderDetailPage();
+
+    expect(await screen.findByText('Version history')).toBeVisible();
+    expect(
+      screen.getByRole('link', {
+        name: 'This document replaces an earlier version',
+      }),
+    ).toHaveAttribute(
+      'href',
+      `/api/bff/application/organizations/organization_1/documents/${OTHER_DOCUMENT_ID}`,
+    );
+    expect(
+      screen.getByRole('link', {
+        name: 'A newer version replaces this document',
+      }),
+    ).toHaveAttribute(
+      'href',
+      `/api/bff/application/organizations/organization_1/documents/${LINK_ID}`,
+    );
   });
 
   it('hides every manage action from an account without the capability', async () => {
