@@ -539,11 +539,18 @@ An unknown recipient or a credential of the wrong kind answers 406 so Mailgun
 stops retrying, and every permanent refusal of a signed request on this route
 answers 406 for the same reason. An in-flight semaphore answers 503 past
 `BAP_INBOUND_MAX_IN_FLIGHT` so a burst degrades instead of queuing unbounded
-work. `From`, `To`, subject and body bind nothing; the parsed `From` header
-address is stored unverified, with no SPF or DKIM check, and an organization's
-own sender-pattern rules match on it, so a rule that auto-routes on a sender
-trusts the secrecy of the intake address. The platform default auto-routes
-nothing.
+work. `From`, `To`, subject and body bind nothing. The split records the parsed
+`From` header address together with a DKIM alignment verdict in
+`inbox_item.sender_authenticated`: true only when Mailgun's
+`X-Mailgun-Dkim-Check-Result` header is present exactly once and reads `Pass`
+and a `DKIM-Signature` header signs the `From` domain or a parent of it. A
+missing or repeated verdict header counts as not authenticated, and so does an
+unaligned signature. An organization's own sender-pattern rules still match on
+the address and still apply their hints whatever the verdict, but such a rule
+auto-routes only when the sender is authenticated, so a spoofed `From` cannot
+drive a route on the secrecy of the intake address alone. The verdict is DKIM
+alignment, not DMARC: no policy is fetched and SPF is not consulted. The
+platform default auto-routes nothing.
 
 Once bound, the worker parses hostile MIME in-process under the channel context:
 mailparser caps enforced in code (20 attachments, 25 MB per attachment, a
