@@ -1,45 +1,32 @@
 'use client';
 
 import type { Route } from 'next';
+import { DataGrid } from '@bap/design-system/blocks';
+import type {
+  GridColumn,
+  GridFilterGroup,
+  GridFilterOption,
+  GridRow,
+  RowAction,
+  ToolbarAction,
+} from '@bap/design-system/blocks';
+import { Download, UserFollow } from '@bap/design-system/icons';
 import {
-  Button,
   Checkbox,
-  DataTable,
-  DataTableSkeleton,
-  IconButton,
   InlineNotification,
   Modal,
-  OverflowMenu,
-  OverflowMenuItem,
-  Pagination,
-  Popover,
-  PopoverContent,
   Select,
   SelectItem,
   Stack,
   Tab,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableExpandedRow,
-  TableExpandHeader,
-  TableExpandRow,
-  TableHead,
-  TableHeader,
-  TableRow,
-  TableToolbar,
-  TableToolbarContent,
-  TableToolbarSearch,
   TabList,
   TabPanel,
   TabPanels,
   Tabs,
   TextInput,
 } from '@bap/design-system/react';
-import { Download, Filter, UserFollow } from '@bap/design-system/icons';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Fragment, useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
 
@@ -56,97 +43,10 @@ import {
 } from '../../../../lib/datasets/client';
 import type { LegalEntity } from '../../../../lib/datasets/client';
 import { StatusIndicator } from '../../../../components/status-indicator';
-import { type FilterGroup, MembersFilterFlyout } from './members-filter-flyout';
 import { memberMatchesFilters, memberRowActionIds } from './members-filter';
 import styles from './members-view.module.scss';
 
-type FilterItem = Readonly<{ id: string; label: string }>;
-
 type FilterSelection = Readonly<Record<string, readonly string[]>>;
-
-// The toolbar funnel: an IconButton trigger over a batch-updates filter panel.
-// The panel only mounts while open so the two tabs never duplicate its inputs.
-function FilterButton({
-  activeCount,
-  applyLabel,
-  groups,
-  idPrefix,
-  label,
-  onApply,
-  onOpenChange,
-  onReset,
-  onToggle,
-  open,
-  resetLabel,
-  staged,
-}: Readonly<{
-  activeCount: number;
-  applyLabel: string;
-  groups: readonly FilterGroup[];
-  idPrefix: string;
-  label: string;
-  onApply: () => void;
-  onOpenChange: (open: boolean) => void;
-  onReset: () => void;
-  onToggle: (groupKey: string, id: string, checked: boolean) => void;
-  open: boolean;
-  resetLabel: string;
-  staged: FilterSelection;
-}>) {
-  return (
-    <Popover
-      align="bottom-end"
-      onRequestClose={() => {
-        onOpenChange(false);
-      }}
-      open={open}
-    >
-      <span className={styles.filterTrigger!}>
-        <IconButton
-          kind="ghost"
-          label={label}
-          onClick={() => {
-            onOpenChange(!open);
-          }}
-          type="button"
-        >
-          <Filter />
-        </IconButton>
-        {activeCount > 0 ? (
-          <span aria-hidden className={styles.filterCount!}>
-            {activeCount}
-          </span>
-        ) : null}
-      </span>
-      <PopoverContent className={styles.filterPopover!}>
-        {open ? (
-          <MembersFilterFlyout
-            applyLabel={applyLabel}
-            groups={groups}
-            idPrefix={idPrefix}
-            onApply={onApply}
-            onReset={onReset}
-            onToggle={onToggle}
-            resetLabel={resetLabel}
-            staged={staged}
-          />
-        ) : null}
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-// The toolbar export control: an icon-only download button.
-function ExportButton({
-  label,
-  onClick,
-}: Readonly<{ label: string; onClick: () => void }>) {
-  return (
-    <IconButton kind="ghost" label={label} onClick={onClick} type="button">
-      <Download />
-    </IconButton>
-  );
-}
 
 export type MemberRole = 'admin' | 'member' | 'owner';
 export type MemberStatus = 'active' | 'inactive';
@@ -174,13 +74,6 @@ export type InvitationRow = Readonly<{
 
 export type ScopeEntry = Readonly<{ scope: EntityScope; userId: string }>;
 
-type TableAction = Readonly<{
-  id: string;
-  isDelete?: boolean;
-  label: string;
-  onClick: () => void;
-}>;
-
 type MembersViewProperties = Readonly<{
   callerIsOwner: boolean;
   canManageEntityAccess: boolean;
@@ -200,7 +93,6 @@ type MembersViewProperties = Readonly<{
 const assignableRoles: readonly MemberRole[] = ['admin', 'member'];
 // Every role a listed member can hold, used only by the role filter columns.
 const filterableRoles: readonly MemberRole[] = ['owner', 'admin', 'member'];
-const pageSizeChoices: number[] = [10, 25, 50];
 
 const emailSchema = z.email().max(254);
 
@@ -236,16 +128,6 @@ function asRole(value: string): MemberRole {
 // A member is active unless the provider reports the inactive status.
 function asStatus(value: string | undefined): MemberStatus {
   return value === 'inactive' ? 'inactive' : 'active';
-}
-
-// Carbon's render-prop helpers type some values as optionally undefined, which the
-// component props reject under exactOptionalPropertyTypes; drop the undefined values.
-function definedProps<T extends Record<string, unknown>>(
-  props: T,
-): { [K in keyof T]: Exclude<T[K], undefined> } {
-  return Object.fromEntries(
-    Object.entries(props).filter(([, value]) => value !== undefined),
-  ) as { [K in keyof T]: Exclude<T[K], undefined> };
 }
 
 // A stored date renders as a plain calendar date, consistent with the other lists.
@@ -338,7 +220,7 @@ export default function MembersView({
   const [membersLoading, setMembersLoading] = useState(false);
   const [invitationsLoading, setInvitationsLoading] = useState(false);
 
-  // Applied filters feed the visible rows and the dismissible-tag row. Members
+  // Applied filters feed the visible rows and the grid filter panel. Members
   // default to the active status; invitations only filter by role.
   const [memberRoleFilter, setMemberRoleFilter] = useState<readonly string[]>(
     [],
@@ -353,22 +235,6 @@ export default function MembersView({
     readonly string[]
   >([]);
 
-  // Staged filter state edited inside the open panel; committed on apply.
-  const [memberFilterOpen, setMemberFilterOpen] = useState(false);
-  const [memberStaged, setMemberStaged] = useState<FilterSelection>({
-    entity: [],
-    role: [],
-    status: ['active'],
-  });
-  const [invitationFilterOpen, setInvitationFilterOpen] = useState(false);
-  const [invitationStaged, setInvitationStaged] = useState<FilterSelection>({
-    role: [],
-  });
-
-  const [memberPage, setMemberPage] = useState(1);
-  const [memberPageSize, setMemberPageSize] = useState(10);
-  const [invitationPage, setInvitationPage] = useState(1);
-  const [invitationPageSize, setInvitationPageSize] = useState(10);
   const [renderedAt] = useState(() => Date.now());
 
   const roleLabels: Readonly<Record<MemberRole, string>> = {
@@ -427,8 +293,8 @@ export default function MembersView({
       : scopeDetail(userId);
   }
 
-  // Filter category items shared by the panel columns and the applied-tag row.
-  const roleItems = useMemo<FilterItem[]>(
+  // Filter category options shared by the two grid filter panels.
+  const roleOptions = useMemo<GridFilterOption[]>(
     () =>
       filterableRoles.map((role) => ({
         id: role,
@@ -436,14 +302,14 @@ export default function MembersView({
       })),
     [t],
   );
-  const entityItems = useMemo<FilterItem[]>(
+  const entityOptions = useMemo<GridFilterOption[]>(
     () =>
       [...legalEntities]
         .toSorted((left, right) => left.name.localeCompare(right.name))
         .map((entity) => ({ id: entity.id, label: entity.name })),
     [legalEntities],
   );
-  const statusItems = useMemo<FilterItem[]>(
+  const statusOptions = useMemo<GridFilterOption[]>(
     () => [
       { id: 'active', label: t('members.status.active') },
       { id: 'inactive', label: t('members.status.inactive') },
@@ -465,12 +331,12 @@ export default function MembersView({
       ),
     )
     .toSorted((left, right) => left.name.localeCompare(right.name));
-  const memberRows = visibleMembers.map((member) => ({
+  const memberRows: readonly GridRow[] = visibleMembers.map((member) => ({
     email: member.email,
     id: member.id,
     joined: member.joinedAt,
     name: member.name,
-    role: roleLabels[member.role],
+    role: member.role,
     scope: scopeSummary(member.userId),
     status: member.status,
   }));
@@ -483,16 +349,18 @@ export default function MembersView({
         invitationRoleSel.includes(invitation.role),
     )
     .toSorted((left, right) => left.email.localeCompare(right.email));
-  const invitationRows = visibleInvitations.map((invitation) => ({
-    email: invitation.email,
-    expires:
-      invitation.expiresAt !== '' &&
-      new Date(invitation.expiresAt).getTime() < renderedAt
-        ? t('members.invitations.expired')
-        : isoDate(invitation.expiresAt),
-    id: invitation.id,
-    role: roleLabels[invitation.role],
-  }));
+  const invitationRows: readonly GridRow[] = visibleInvitations.map(
+    (invitation) => ({
+      email: invitation.email,
+      expires:
+        invitation.expiresAt !== '' &&
+        new Date(invitation.expiresAt).getTime() < renderedAt
+          ? t('members.invitations.expired')
+          : isoDate(invitation.expiresAt),
+      id: invitation.id,
+      role: invitation.role,
+    }),
+  );
 
   // The title names the status the list is filtered to.
   function membersTitle(count: number): string {
@@ -505,22 +373,92 @@ export default function MembersView({
     return t('members.list.allTitle', { count });
   }
 
-  const memberHeaders = [
-    { header: t('members.list.columnName'), key: 'name' },
-    { header: t('members.list.columnEmail'), key: 'email' },
-    { header: t('members.list.columnRole'), key: 'role' },
-    { header: t('members.list.columnScope'), key: 'scope' },
-    { header: t('members.list.columnStatus'), key: 'status' },
-    { header: t('members.list.columnJoined'), key: 'joined' },
+  const memberColumns: readonly GridColumn[] = [
+    { header: t('members.list.columnName'), key: 'name', sortable: true },
+    { header: t('members.list.columnEmail'), key: 'email', sortable: true },
+    {
+      header: t('members.list.columnRole'),
+      key: 'role',
+      renderCell: (row) => roleLabels[asRole(String(row.role))],
+      sortable: true,
+    },
+    { header: t('members.list.columnScope'), key: 'scope', sortable: true },
+    {
+      header: t('members.list.columnStatus'),
+      key: 'status',
+      renderCell: (row) => (
+        <StatusIndicator
+          label={statusLabels[asStatus(String(row.status))]}
+          severity={row.status === 'inactive' ? 'neutral' : 'success'}
+        />
+      ),
+      sortable: true,
+    },
+    { header: t('members.list.columnJoined'), key: 'joined', sortable: true },
   ];
-  const invitationHeaders = [
-    { header: t('members.invitations.columnEmail'), key: 'email' },
-    { header: t('members.invitations.columnRole'), key: 'role' },
-    { header: t('members.invitations.columnExpires'), key: 'expires' },
+  const invitationColumns: readonly GridColumn[] = [
+    {
+      header: t('members.invitations.columnEmail'),
+      key: 'email',
+      sortable: true,
+    },
+    {
+      header: t('members.invitations.columnRole'),
+      key: 'role',
+      renderCell: (row) => roleLabels[asRole(String(row.role))],
+      sortable: true,
+    },
+    {
+      header: t('members.invitations.columnExpires'),
+      key: 'expires',
+      sortable: true,
+    },
   ];
 
-  function memberRowActions(member: MemberRow): readonly TableAction[] {
-    const descriptors: Readonly<Record<string, TableAction>> = {
+  function memberRowActionsFor(row: GridRow): readonly RowAction[] {
+    const member = members.find((candidate) => candidate.id === row.id);
+    return member === undefined ? [] : memberRowActions(member);
+  }
+
+  function memberActionsLabel(row: GridRow): string {
+    const member = members.find((candidate) => candidate.id === row.id);
+    return t('members.table.actionsFor', { name: member?.name ?? '' });
+  }
+
+  function invitationRowActionsFor(row: GridRow): readonly RowAction[] {
+    const invitation = invitations.find((candidate) => candidate.id === row.id);
+    return invitation === undefined ? [] : invitationRowActions(invitation);
+  }
+
+  function invitationActionsLabel(row: GridRow): string {
+    const invitation = invitations.find((candidate) => candidate.id === row.id);
+    return t('members.table.actionsFor', { name: invitation?.email ?? '' });
+  }
+
+  // Supplementary detail only; the row already carries the member line data.
+  function memberDetail(row: GridRow): ReactNode {
+    const member = members.find((candidate) => candidate.id === row.id);
+    if (member === undefined) {
+      return null;
+    }
+    return (
+      <div className={styles.memberDetails!}>
+        <dl>
+          <div>
+            <dt>{t('members.list.rolePermissions')}</dt>
+            <dd>{roleHelp[member.role]}</dd>
+          </div>
+          <div>
+            <dt>{t('members.list.scopeDetails')}</dt>
+            <dd>{scopeExpandedDetail(member.userId)}</dd>
+          </div>
+        </dl>
+      </div>
+    );
+  }
+
+  function memberRowActions(member: MemberRow): readonly RowAction[] {
+    const descriptors: Readonly<Record<string, RowAction>> = {
       'change-role': {
         id: 'change-role',
         label: t('members.actions.changeRole'),
@@ -571,7 +509,7 @@ export default function MembersView({
 
   function invitationRowActions(
     invitation: InvitationRow,
-  ): readonly TableAction[] {
+  ): readonly RowAction[] {
     if (!canManageMembers) {
       return [];
     }
@@ -930,86 +868,80 @@ export default function MembersView({
     ]);
   }
 
-  // The funnel badge counts applied filters; the checked panel shows which ones.
-  const memberAppliedCount =
-    memberRoleFilter.length +
-    memberEntityFilter.length +
-    memberStatusFilter.length;
-  const invitationAppliedCount = invitationRoleFilter.length;
-
-  // A staged category toggle adds or removes the id without touching applied state.
-  function stageToggle(
-    setStaged: (updater: (current: FilterSelection) => FilterSelection) => void,
-    groupKey: string,
-    id: string,
-    checked: boolean,
-  ): void {
-    setStaged((current) => {
-      const selected = current[groupKey] ?? [];
-      return {
-        ...current,
-        [groupKey]: checked
-          ? [...selected, id]
-          : selected.filter((value) => value !== id),
-      };
-    });
+  // The panel stages its checkboxes, so the grid reports a whole selection on apply.
+  function applyMemberFilters(values: FilterSelection): void {
+    setMemberRoleFilter(values.role ?? []);
+    setMemberEntityFilter(values.entity ?? []);
+    setMemberStatusFilter(values.status ?? []);
+  }
+  function applyInvitationFilters(values: FilterSelection): void {
+    setInvitationRoleFilter(values.role ?? []);
   }
 
-  function openMemberFilter(open: boolean): void {
-    if (open) {
-      setMemberStaged({
-        entity: memberEntityFilter,
-        role: memberRoleFilter,
-        status: memberStatusFilter,
-      });
-    }
-    setMemberFilterOpen(open);
-  }
-  function applyMemberFilter(): void {
-    setMemberRoleFilter(memberStaged.role ?? []);
-    setMemberEntityFilter(memberStaged.entity ?? []);
-    setMemberStatusFilter(memberStaged.status ?? []);
-    setMemberPage(1);
-    setMemberFilterOpen(false);
-  }
-  function resetMemberStaged(): void {
-    setMemberStaged({ entity: [], role: [], status: [] });
-  }
+  const memberFilterValues: FilterSelection = {
+    entity: memberEntityFilter,
+    role: memberRoleFilter,
+    status: memberStatusFilter,
+  };
+  const invitationFilterValues: FilterSelection = {
+    role: invitationRoleFilter,
+  };
 
-  function openInvitationFilter(open: boolean): void {
-    if (open) {
-      setInvitationStaged({ role: invitationRoleFilter });
-    }
-    setInvitationFilterOpen(open);
-  }
-  function applyInvitationFilter(): void {
-    setInvitationRoleFilter(invitationStaged.role ?? []);
-    setInvitationPage(1);
-    setInvitationFilterOpen(false);
-  }
-  function resetInvitationStaged(): void {
-    setInvitationStaged({ role: [] });
-  }
-
-  const memberFilterGroups: FilterGroup[] = [
-    { heading: t('members.table.filterRole'), items: roleItems, key: 'role' },
-    ...(entityItems.length > 0
+  const memberFilterGroups: readonly GridFilterGroup[] = [
+    {
+      heading: t('members.table.filterRole'),
+      key: 'role',
+      options: roleOptions,
+    },
+    ...(entityOptions.length > 0
       ? [
           {
             heading: t('members.table.filterEntity'),
-            items: entityItems,
             key: 'entity',
+            options: entityOptions,
           },
         ]
       : []),
     {
       heading: t('members.table.filterStatus'),
-      items: statusItems,
       key: 'status',
+      options: statusOptions,
     },
   ];
-  const invitationFilterGroups: FilterGroup[] = [
-    { heading: t('members.table.filterRole'), items: roleItems, key: 'role' },
+  const invitationFilterGroups: readonly GridFilterGroup[] = [
+    {
+      heading: t('members.table.filterRole'),
+      key: 'role',
+      options: roleOptions,
+    },
+  ];
+
+  // Export first, then the primary invite action at the end of the toolbar.
+  const exportAction = (id: string, onClick: () => void): ToolbarAction => ({
+    icon: Download,
+    id,
+    iconOnly: true,
+    kind: 'ghost',
+    label: t('members.table.exportCsv'),
+    onClick,
+  });
+  const inviteAction: readonly ToolbarAction[] = canManageMembers
+    ? [
+        {
+          icon: UserFollow,
+          id: 'invite-member',
+          label: t('members.list.inviteAction'),
+          onClick: openInvite,
+        },
+      ]
+    : [];
+  const memberToolbarActions: readonly ToolbarAction[] = [
+    exportAction('export-members', exportMembersCsv),
+    ...inviteAction,
+  ];
+  const invitationToolbarActions: readonly ToolbarAction[] = [
+    exportAction('export-invitations', exportInvitationsCsv),
+    ...inviteAction,
   ];
 
   return (
@@ -1036,411 +968,57 @@ export default function MembersView({
           </TabList>
           <TabPanels>
             <TabPanel className={styles.tabPanel!}>
-              {membersLoading ? (
-                <DataTableSkeleton
-                  columnCount={memberHeaders.length}
-                  rowCount={5}
-                />
-              ) : (
-                <DataTable headers={memberHeaders} isSortable rows={memberRows}>
-                  {({
-                    getExpandedRowProps,
-                    getExpandHeaderProps,
-                    getHeaderProps,
-                    getRowProps,
-                    getTableContainerProps,
-                    getTableProps,
-                    getToolbarProps,
-                    headers,
-                    onInputChange,
-                    rows,
-                  }) => {
-                    const expandHeaderProps = getExpandHeaderProps();
-                    const start = (memberPage - 1) * memberPageSize;
-                    const pageRows = rows.slice(start, start + memberPageSize);
-                    return (
-                      <TableContainer
-                        className={styles.tableContainer!}
-                        title={membersTitle(visibleMembers.length)}
-                        {...getTableContainerProps()}
-                      >
-                        <TableToolbar {...definedProps(getToolbarProps())}>
-                          <TableToolbarContent>
-                            <TableToolbarSearch
-                              id="active-members-search"
-                              labelText={t('members.table.searchMembers')}
-                              onChange={(event) => {
-                                onInputChange(event);
-                                setMemberPage(1);
-                              }}
-                              persistent
-                              placeholder={t('members.table.searchMembers')}
-                            />
-                            <FilterButton
-                              activeCount={memberAppliedCount}
-                              applyLabel={t('members.table.applyFilters')}
-                              groups={memberFilterGroups}
-                              idPrefix="active-members"
-                              label={t('members.table.filter')}
-                              onApply={applyMemberFilter}
-                              onOpenChange={openMemberFilter}
-                              onReset={resetMemberStaged}
-                              onToggle={(groupKey, id, checked) => {
-                                stageToggle(
-                                  setMemberStaged,
-                                  groupKey,
-                                  id,
-                                  checked,
-                                );
-                              }}
-                              open={memberFilterOpen}
-                              resetLabel={t('members.table.resetFilters')}
-                              staged={memberStaged}
-                            />
-                            <ExportButton
-                              label={t('members.table.exportCsv')}
-                              onClick={exportMembersCsv}
-                            />
-                            {canManageMembers ? (
-                              <Button
-                                onClick={() => {
-                                  openInvite();
-                                }}
-                                renderIcon={UserFollow}
-                                type="button"
-                              >
-                                {t('members.list.inviteAction')}
-                              </Button>
-                            ) : null}
-                          </TableToolbarContent>
-                        </TableToolbar>
-                        <Table {...getTableProps()}>
-                          <TableHead>
-                            <TableRow>
-                              <TableExpandHeader id={expandHeaderProps.id}>
-                                <span className={styles.visuallyHidden!}>
-                                  {t('members.table.rowDetail')}
-                                </span>
-                              </TableExpandHeader>
-                              {headers.map((header) => {
-                                const { key, ...headerProps } = getHeaderProps({
-                                  header,
-                                });
-                                return (
-                                  <TableHeader
-                                    key={key}
-                                    {...definedProps(headerProps)}
-                                  >
-                                    {header.header}
-                                  </TableHeader>
-                                );
-                              })}
-                              <TableHeader>
-                                <span className={styles.visuallyHidden!}>
-                                  {t('members.table.rowActions')}
-                                </span>
-                              </TableHeader>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {pageRows.length === 0 ? (
-                              <TableRow>
-                                <TableCell colSpan={headers.length + 2}>
-                                  {members.length === 0
-                                    ? t('members.list.empty')
-                                    : t('members.table.noResults')}
-                                </TableCell>
-                              </TableRow>
-                            ) : null}
-                            {pageRows.map((row) => {
-                              const { key, ...rowProps } = getRowProps({ row });
-                              const member = members.find(
-                                (candidate) => candidate.id === row.id,
-                              );
-                              const actions =
-                                member === undefined
-                                  ? []
-                                  : memberRowActions(member);
-                              return (
-                                <Fragment key={key}>
-                                  <TableExpandRow {...definedProps(rowProps)}>
-                                    {row.cells.map((cell) => (
-                                      <TableCell key={cell.id}>
-                                        {cell.info.header === 'status' ? (
-                                          <StatusIndicator
-                                            severity={
-                                              cell.value === 'inactive'
-                                                ? 'neutral'
-                                                : 'success'
-                                            }
-                                            label={
-                                              statusLabels[
-                                                cell.value as MemberStatus
-                                              ] ?? cell.value
-                                            }
-                                          />
-                                        ) : (
-                                          cell.value
-                                        )}
-                                      </TableCell>
-                                    ))}
-                                    <TableCell className="cds--table-column-menu">
-                                      {actions.length > 0 ? (
-                                        <OverflowMenu
-                                          flipped
-                                          iconDescription={t(
-                                            'members.table.actionsFor',
-                                            { name: member?.name ?? '' },
-                                          )}
-                                        >
-                                          {actions.map((action) => (
-                                            <OverflowMenuItem
-                                              itemText={action.label}
-                                              key={action.id}
-                                              onClick={action.onClick}
-                                              {...(action.isDelete === true
-                                                ? {
-                                                    hasDivider: true,
-                                                    isDelete: true,
-                                                  }
-                                                : {})}
-                                            />
-                                          ))}
-                                        </OverflowMenu>
-                                      ) : null}
-                                    </TableCell>
-                                  </TableExpandRow>
-                                  {row.isExpanded ? (
-                                    <TableExpandedRow
-                                      colSpan={headers.length + 2}
-                                      {...getExpandedRowProps({ row })}
-                                    >
-                                      {member === undefined ? null : (
-                                        <div className={styles.memberDetails!}>
-                                          <dl>
-                                            <div>
-                                              <dt>
-                                                {t(
-                                                  'members.list.rolePermissions',
-                                                )}
-                                              </dt>
-                                              <dd>{roleHelp[member.role]}</dd>
-                                            </div>
-                                            <div>
-                                              <dt>
-                                                {t('members.list.scopeDetails')}
-                                              </dt>
-                                              <dd>
-                                                {scopeExpandedDetail(
-                                                  member.userId,
-                                                )}
-                                              </dd>
-                                            </div>
-                                          </dl>
-                                        </div>
-                                      )}
-                                    </TableExpandedRow>
-                                  ) : null}
-                                </Fragment>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
-                        <Pagination
-                          onChange={({ page, pageSize }) => {
-                            setMemberPage(page);
-                            setMemberPageSize(pageSize);
-                          }}
-                          page={memberPage}
-                          pageSize={memberPageSize}
-                          pageSizes={pageSizeChoices}
-                          size="md"
-                          totalItems={rows.length}
-                        />
-                      </TableContainer>
-                    );
-                  }}
-                </DataTable>
-              )}
+              <DataGrid
+                columns={memberColumns}
+                emptyLabel={
+                  members.length === 0
+                    ? t('members.list.empty')
+                    : t('members.table.noResults')
+                }
+                filterValues={memberFilterValues}
+                filters={memberFilterGroups}
+                onFilterChange={applyMemberFilters}
+                pagination
+                renderRowDetail={memberDetail}
+                rowActions={memberRowActionsFor}
+                rowActionsLabel={memberActionsLabel}
+                rows={memberRows}
+                search
+                searchPlaceholder={t('members.table.searchMembers')}
+                searchPlacement="persistent"
+                size="sm"
+                sortable
+                state={membersLoading ? 'loading' : 'ready'}
+                title={membersTitle(visibleMembers.length)}
+                toolbarActions={memberToolbarActions}
+              />
             </TabPanel>
             <TabPanel className={styles.tabPanel!}>
-              {invitationsLoading ? (
-                <DataTableSkeleton
-                  columnCount={invitationHeaders.length}
-                  rowCount={5}
-                />
-              ) : (
-                <DataTable
-                  headers={invitationHeaders}
-                  isSortable
-                  rows={invitationRows}
-                >
-                  {({
-                    getHeaderProps,
-                    getTableContainerProps,
-                    getTableProps,
-                    getToolbarProps,
-                    headers,
-                    onInputChange,
-                    rows,
-                  }) => {
-                    const start = (invitationPage - 1) * invitationPageSize;
-                    const pageRows = rows.slice(
-                      start,
-                      start + invitationPageSize,
-                    );
-                    return (
-                      <TableContainer
-                        className={styles.tableContainer!}
-                        title={t('members.invitations.title', {
-                          count: visibleInvitations.length,
-                        })}
-                        {...getTableContainerProps()}
-                      >
-                        <TableToolbar {...definedProps(getToolbarProps())}>
-                          <TableToolbarContent>
-                            <TableToolbarSearch
-                              id="pending-invitations-search"
-                              labelText={t('members.table.searchInvitations')}
-                              onChange={(event) => {
-                                onInputChange(event);
-                                setInvitationPage(1);
-                              }}
-                              persistent
-                              placeholder={t('members.table.searchInvitations')}
-                            />
-                            <FilterButton
-                              activeCount={invitationAppliedCount}
-                              applyLabel={t('members.table.applyFilters')}
-                              groups={invitationFilterGroups}
-                              idPrefix="pending-invitations"
-                              label={t('members.table.filter')}
-                              onApply={applyInvitationFilter}
-                              onOpenChange={openInvitationFilter}
-                              onReset={resetInvitationStaged}
-                              onToggle={(groupKey, id, checked) => {
-                                stageToggle(
-                                  setInvitationStaged,
-                                  groupKey,
-                                  id,
-                                  checked,
-                                );
-                              }}
-                              open={invitationFilterOpen}
-                              resetLabel={t('members.table.resetFilters')}
-                              staged={invitationStaged}
-                            />
-                            <ExportButton
-                              label={t('members.table.exportCsv')}
-                              onClick={exportInvitationsCsv}
-                            />
-                            {canManageMembers ? (
-                              <Button
-                                onClick={() => {
-                                  openInvite();
-                                }}
-                                renderIcon={UserFollow}
-                                type="button"
-                              >
-                                {t('members.list.inviteAction')}
-                              </Button>
-                            ) : null}
-                          </TableToolbarContent>
-                        </TableToolbar>
-                        <Table {...getTableProps()}>
-                          <TableHead>
-                            <TableRow>
-                              {headers.map((header) => {
-                                const { key, ...headerProps } = getHeaderProps({
-                                  header,
-                                });
-                                return (
-                                  <TableHeader
-                                    key={key}
-                                    {...definedProps(headerProps)}
-                                  >
-                                    {header.header}
-                                  </TableHeader>
-                                );
-                              })}
-                              <TableHeader>
-                                <span className={styles.visuallyHidden!}>
-                                  {t('members.table.rowActions')}
-                                </span>
-                              </TableHeader>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {pageRows.length === 0 ? (
-                              <TableRow>
-                                <TableCell colSpan={headers.length + 1}>
-                                  {invitations.length === 0
-                                    ? t('members.invitations.empty')
-                                    : t('members.table.noResults')}
-                                </TableCell>
-                              </TableRow>
-                            ) : null}
-                            {pageRows.map((row) => {
-                              const invitation = invitations.find(
-                                (candidate) => candidate.id === row.id,
-                              );
-                              const actions =
-                                invitation === undefined
-                                  ? []
-                                  : invitationRowActions(invitation);
-                              return (
-                                <TableRow key={row.id}>
-                                  {row.cells.map((cell) => (
-                                    <TableCell key={cell.id}>
-                                      {cell.value}
-                                    </TableCell>
-                                  ))}
-                                  <TableCell className="cds--table-column-menu">
-                                    {actions.length > 0 ? (
-                                      <OverflowMenu
-                                        flipped
-                                        iconDescription={t(
-                                          'members.table.actionsFor',
-                                          { name: invitation?.email ?? '' },
-                                        )}
-                                      >
-                                        {actions.map((action) => (
-                                          <OverflowMenuItem
-                                            itemText={action.label}
-                                            key={action.id}
-                                            onClick={action.onClick}
-                                            {...(action.isDelete === true
-                                              ? {
-                                                  hasDivider: true,
-                                                  isDelete: true,
-                                                }
-                                              : {})}
-                                          />
-                                        ))}
-                                      </OverflowMenu>
-                                    ) : null}
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
-                        <Pagination
-                          onChange={({ page, pageSize }) => {
-                            setInvitationPage(page);
-                            setInvitationPageSize(pageSize);
-                          }}
-                          page={invitationPage}
-                          pageSize={invitationPageSize}
-                          pageSizes={pageSizeChoices}
-                          size="md"
-                          totalItems={rows.length}
-                        />
-                      </TableContainer>
-                    );
-                  }}
-                </DataTable>
-              )}
+              <DataGrid
+                columns={invitationColumns}
+                emptyLabel={
+                  invitations.length === 0
+                    ? t('members.invitations.empty')
+                    : t('members.table.noResults')
+                }
+                filterValues={invitationFilterValues}
+                filters={invitationFilterGroups}
+                onFilterChange={applyInvitationFilters}
+                pagination
+                rowActions={invitationRowActionsFor}
+                rowActionsLabel={invitationActionsLabel}
+                rows={invitationRows}
+                search
+                searchPlaceholder={t('members.table.searchInvitations')}
+                searchPlacement="persistent"
+                size="sm"
+                sortable
+                state={invitationsLoading ? 'loading' : 'ready'}
+                title={t('members.invitations.title', {
+                  count: visibleInvitations.length,
+                })}
+                toolbarActions={invitationToolbarActions}
+              />
             </TabPanel>
           </TabPanels>
         </Tabs>

@@ -7,6 +7,9 @@ import {
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+// The package is the icon-facade source, so the test reads a Carbon icon directly.
+import { Download } from '@carbon/icons-react';
+
 import { DataGrid } from './data-grid';
 import styles from './data-grid.module.scss';
 import type { GridColumn, GridRow } from './types';
@@ -204,6 +207,46 @@ describe('DataGrid', () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
+  it('renders a labelled toolbar action with its icon', () => {
+    const onClick = vi.fn();
+    render(
+      <DataGrid
+        columns={columns}
+        rows={rows}
+        toolbarActions={[
+          { icon: Download, id: 'export', label: 'Export CSV', onClick },
+        ]}
+      />,
+    );
+    const action = screen.getByRole('button', { name: 'Export CSV' });
+    expect(action.querySelector('svg')).not.toBeNull();
+    fireEvent.click(action);
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders an icon-only toolbar action that keeps its label as the name', () => {
+    const onClick = vi.fn();
+    render(
+      <DataGrid
+        columns={columns}
+        rows={rows}
+        toolbarActions={[
+          {
+            icon: Download,
+            id: 'export',
+            iconOnly: true,
+            label: 'Export CSV',
+            onClick,
+          },
+        ]}
+      />,
+    );
+    const action = screen.getByRole('button', { name: 'Export CSV' });
+    expect(action).not.toHaveTextContent('Export CSV');
+    fireEvent.click(action);
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
   it('opens a per-row overflow menu and runs the chosen action', () => {
     const onEdit = vi.fn();
     render(
@@ -217,6 +260,21 @@ describe('DataGrid', () => {
     fireEvent.click(within(firstBodyRow).getByRole('button'));
     fireEvent.click(screen.getByText('Edit'));
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: '1' }));
+  });
+
+  it('names the row overflow menu per row', () => {
+    render(
+      <DataGrid
+        columns={columns}
+        rowActions={() => [{ id: 'edit', label: 'Edit', onClick: vi.fn() }]}
+        rowActionsLabel={(row) => `Actions for ${String(row.name)}`}
+        rows={rows}
+      />,
+    );
+    const firstBodyRow = screen.getAllByRole('row')[1] as HTMLElement;
+    expect(
+      within(firstBodyRow).getByRole('button', { name: 'Actions for beta' }),
+    ).toBeTruthy();
   });
 
   it('does not fire the row click when the overflow menu is used', () => {
@@ -355,7 +413,7 @@ describe('DataGrid', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Alpha' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
     const body = bodyRowText();
     expect(body).toHaveLength(1);
     expect(body[0]).toContain('alpha');
@@ -383,7 +441,7 @@ describe('DataGrid', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Alpha' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
     expect(onFilterChange).toHaveBeenCalledWith({ name: ['alpha'] });
     expect(bodyRowText()).toHaveLength(3);
   });
@@ -409,7 +467,7 @@ describe('DataGrid', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Alpha' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Beta' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
     expect(
       container.querySelector(`.${styles.filterCount!}`)?.textContent,
     ).toBe('2');
@@ -435,7 +493,7 @@ describe('DataGrid', () => {
     }) as HTMLInputElement;
     fireEvent.click(alpha);
     expect(alpha.checked).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
     expect(
       (screen.getByRole('checkbox', { name: 'Alpha' }) as HTMLInputElement)
         .checked,

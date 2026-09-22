@@ -226,7 +226,7 @@ describe('DocumentsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Received invoice' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
 
     await waitFor(() => {
       expect(

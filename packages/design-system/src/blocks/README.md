@@ -80,9 +80,12 @@ Everything is off by default; turn on only what the page needs.
 - Rows: `rowNumbers`, `onRowClick`, `reorderableRows` (+
   `onRowReorder`/`onRowDrop`).
 - Actions: `toolbarActions` (persistent toolbar buttons such as a primary create
-  action; `kind` defaults to `primary`), `rowActions` (`(row) => RowAction[]`
-  renders a trailing per-row overflow menu; `isDelete` marks the danger item and
-  sorts it last).
+  action; `kind` defaults to `primary`; `icon` takes an icon from the consumer's
+  curated facade and `iconOnly` turns the action into an `IconButton` whose
+  label is its tooltip and accessible name), `rowActions`
+  (`(row) => RowAction[]` renders a trailing per-row overflow menu; `isDelete`
+  marks the danger item and sorts it last), `rowActionsLabel` (`(row) => string`
+  names that menu per row; without it the trigger keeps Carbon's `Options`).
 - Detail rows: `renderRowDetail` (`(row) => ReactNode`) turns each row into a
   Carbon expandable row that reveals the returned content when opened.
 - Inline edit: mark a column with `editor` (`{ type: 'text' }`,
@@ -181,8 +184,9 @@ to see a variation before wiring it into a page.
 ## Boundaries
 
 - Import Carbon only through `@bap/design-system/react`; icons through the
-  curated `@bap/design-system/icons` facade. These components use no icons on
-  purpose so they stay within the facade contract.
+  curated `@bap/design-system/icons` facade. These components own no icon of
+  their own except the toolbar funnel; a toolbar action icon arrives as a prop
+  from the consumer, which keeps the facade contract with the application.
 - Colors come from Carbon theme custom properties (`var(--cds-*)`), never raw
   hex.
 - They use inline `style` for runtime widths, pin offsets, and virtualization
