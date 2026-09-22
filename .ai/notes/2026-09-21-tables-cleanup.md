@@ -21,15 +21,17 @@ hand-roll Carbon `DataTable` markup in a page.
     2026-09-22)
   - `apps/web/src/components/datasets/dataset-table.tsx` (datasets, migrated
     2026-09-22)
-- Hand-rolls Carbon `DataTable` (boundary violation, cleanup targets):
-  - `apps/web/src/app/(product)/[orgSlug]/members/members-view.tsx` (members)
+  - `apps/web/src/app/(product)/[orgSlug]/members/members-view.tsx` (members,
+    migrated 2026-09-22)
 
-Strategic fix: migrate the remaining hand-rolled table to the `DataGrid` block.
-The block already solves empty state, loading skeleton, row actions, expandable
-detail rows, toolbar actions, and a11y headers through props (`state`,
-`loadingMode`, `emptyLabel`, `rowActions`, `renderRowDetail`, `toolbarActions`),
-so migrating fixes several issues below at once. Members was fixed in place
-(kept hand-rolled) this round; whether to migrate it to the block is still open.
+No application table hand-rolls Carbon `DataTable` any more. The block solves
+empty state, loading skeleton, row actions, expandable detail rows, toolbar
+actions, and a11y headers through props (`state`, `loadingMode`, `emptyLabel`,
+`rowActions`, `renderRowDetail`, `toolbarActions`), so each migration fixed
+several issues below at once. Members is migrated: it was the reference for the
+conventions below, and the block grew `searchPlaceholder`, `toolbarActions`
+icons, `rowActionsLabel` and the batch-updates footer wording so none of them
+regressed.
 
 ## Issues found on members, root cause, and fix (each generalizable)
 
@@ -109,8 +111,11 @@ pagination default 10; icon buttons via `IconButton` + curated facade icon.
 
 ## Per-table backlog (review, do not auto-apply)
 
-- members-view: fixes applied in place this round; open decision to migrate to
-  the `DataGrid` block.
+- members-view: migrated to `DataGrid`. Export stays icon-only through the new
+  `ToolbarAction.icon` plus `iconOnly`, the row menu keeps `Actions for {name}`
+  through the new `rowActionsLabel`, and the search placeholders come from
+  `searchPlaceholder`. Issue 2's staged panel is now the block's own, so issue 6
+  no longer needs a page-level `IconButton`.
 - documents/page.tsx: migrated to `DataGrid`. Server sort arrived as the new
   block props `sortMode`, `sort` and `onSortChange`; the kind and status
   MultiSelects became one filter facet; the floating empty `Tile` became

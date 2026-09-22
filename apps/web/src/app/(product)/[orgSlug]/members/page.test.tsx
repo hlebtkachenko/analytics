@@ -168,6 +168,7 @@ function rowFor(text: string): HTMLElement {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -241,7 +242,7 @@ describe('OrganizationMembersPage', () => {
 
     fireEvent.click(
       within(rowFor('Ben Member')).getByRole('button', {
-        name: 'Expand current row',
+        name: 'Toggle detail for row member-2',
       }),
     );
 
@@ -306,6 +307,67 @@ describe('OrganizationMembersPage', () => {
 
     expect(screen.getByText('Ada Owner')).toBeVisible();
     expect(screen.getByText('Ben Member')).toBeVisible();
+  });
+
+  it('sorts the members by the email header', async () => {
+    await renderPage();
+
+    expect(screen.getAllByRole('row')[1]).toHaveTextContent('Ada Owner');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Email' }));
+
+    expect(screen.getAllByRole('row')[1]).toHaveTextContent('Ben Member');
+  });
+
+  it('exports the filtered members as a CSV download', async () => {
+    // jsdom ships no object URL implementation, so the blob is captured on the way out.
+    const blobs: Blob[] = [];
+    URL.createObjectURL = vi.fn((blob: Blob) => {
+      blobs.push(blob);
+      return 'blob:members';
+    });
+    URL.revokeObjectURL = vi.fn();
+    const clicked: HTMLAnchorElement[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      clicked.push(this);
+    });
+
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+
+    expect(clicked.map((anchor) => anchor.getAttribute('download'))).toEqual([
+      'members.csv',
+    ]);
+    await expect(blobs[0]!.text()).resolves.toContain('Ada Owner');
+  });
+
+  it('renders the empty workspace text inside the table', async () => {
+    mocks.listMembers.mockResolvedValue({ members: [] });
+
+    await renderPage();
+
+    expect(
+      screen.getByText('No members are available in this workspace.'),
+    ).toBeVisible();
+  });
+
+  it('renders the no-results text when the search matches nothing', async () => {
+    await renderPage();
+
+    fireEvent.change(
+      screen.getByRole('searchbox', { name: 'Search Active members (2)' }),
+      {
+        target: { value: 'nobody' },
+      },
+    );
+
+    expect(
+      screen.getByText('No rows match the current search and filters.'),
+    ).toBeVisible();
+    expect(screen.queryByText('Ada Owner')).not.toBeInTheDocument();
   });
 
   it('selects the invitations tab from the deep link', async () => {
