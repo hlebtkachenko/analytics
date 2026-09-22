@@ -158,6 +158,12 @@ request.
 4. Add path builders and any mutation helper to
    `apps/web/src/lib/<feature>/client.ts` for the page to use.
 
+The one exception is `GET .../[organizationId]/members`: it sources the
+assignee-picker member list from the Better Auth organization plugin
+(`listMembers`) rather than the application API, exactly as the
+`/[orgSlug]/members` page does, so it mints no resource JWT and Better Auth's
+own access control refuses a caller who is not a member.
+
 A page that works inside one organization takes the membership list from
 `useOrganizationSelection` in
 `apps/web/src/lib/organizations/use-organization-selection.ts`, which honours

@@ -77,6 +77,10 @@ Uploaded bytes are durable, content-addressed and owned per organization.
 - No bytes in PostgreSQL. MinIO, or any object store, is adopted only when a
   second host appears, behind the same `BlobStore` interface, and gets its own
   ADR.
+- Amended 2026-09-21 (inbox-ux): images (`image/png`, `image/jpeg`,
+  `image/webp`) render inline as `<img>`, not inside `<iframe sandbox>`, per the
+  inbox UX spec gate decision (`.ai/specs/2026-09-21-inbox-ux.md`); the PDF and
+  SVG rules are unchanged.
 
 ## Consequences
 
