@@ -1171,53 +1171,6 @@ function decideAutoRoute(input: {
   return { job: 'route', reason: null };
 }
 
-// The route decision an item's rule pass already took, re-read after the scan job cleared every blob. Read only:
-// the newest rule extraction names the rules that matched, so no second extraction row and no second event.
-export async function routeJobForItem(
-  transaction: PoolClient,
-  input: { itemId: string; organizationId: string },
-): Promise<RouteInboxItemJob | null> {
-  const item = await loadItem(transaction, input.itemId, null);
-
-  if (item === null) {
-    return null;
-  }
-
-  const matched = await loadRulesById(
-    transaction,
-    await loadMatchedRuleIds(transaction, item.id),
-  );
-  // The rules are ordered by priority, so the first that asks is the one the matcher would have named.
-  const autoRouteRuleId = matched.find((rule) => rule.autoRoute)?.id ?? null;
-  const files = await loadItemFiles(transaction, item.id);
-  const latest = await loadLatestExtraction(transaction, item.id);
-  const target = routingTargetFor(
-    item.detectedType,
-    await loadRoutingTargetOverrides(transaction),
-  );
-  const composed = composeDocumentDraft(
-    { ...item, primaryFilename: files[0]?.originalFilename ?? null },
-    matched,
-    target,
-  );
-  const decision = decideAutoRoute({
-    autoRouteRuleId,
-    confidence: item.confidence ?? 0,
-    latestIssueCount: latest?.issues.length ?? 0,
-    missing: composed.missing,
-    resolvedKind: composed.draft.kind,
-    target,
-  });
-
-  return decision.job === null
-    ? null
-    : {
-        itemId: item.id,
-        organizationId: input.organizationId,
-        ruleId: autoRouteRuleId,
-      };
-}
-
 // The rule pass: reads the live rules through the definer, applies the actions under hint precedence, writes one
 // rule extraction row and the rule_matched event, discards synchronously on a discard rule, and decides the route job.
 // The route decision runs even without a match: a target default that asks enqueues on its own, with no rule row.

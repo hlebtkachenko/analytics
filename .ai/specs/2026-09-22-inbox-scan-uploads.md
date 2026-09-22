@@ -30,37 +30,41 @@ Contract. `SCAN_INBOX_ITEM_QUEUE = 'scan_inbox_item'` and
 `scanInboxItemJobSchema` join the split and route jobs in
 `apps/api/src/inbox/contract.ts`. The payload is ids only (ADR 0005) and one of
 the two principals `runTenantJob` knows: `{ organizationId, userId, itemId }`
-for an upload, `{ organizationId, channelId, itemId }` for an API push.
-`job-context.ts` gains `scanInboxItemJobPayloadSchema` (the tenant payload plus
-`itemId`) in `jobPayloadSchema`; the channel member already accepts an optional
-`itemId`. The queue is registered in `INBOX_QUEUES` with the split's exclusive
-policy, `retryLimit: 3`, `retryDelay: 60` and `singletonKey = itemId`.
+for an upload, `{ organizationId, channelId, itemId }` for an API push. Both
+carry the optional `routeRuleId`, the route the intake decided on and deferred:
+absent when the rule pass asked for none, null for a target default, the rule id
+otherwise. `job-context.ts` gains `scanInboxItemJobPayloadSchema` (the tenant
+payload plus `itemId`) in `jobPayloadSchema`; the channel member already accepts
+an optional `itemId`. The queue is registered in `INBOX_QUEUES` with the split's
+exclusive policy, `retryLimit: 3`, `retryDelay: 60` and `singletonKey = itemId`.
 
 Intake. `InboxService.receive` enqueues `scan_inbox_item` instead of
 `result.routeJob` when the channel kind is `upload` or `api` and the item stored
-a file whose `scanStatus` is `not_scanned`. A duplicate shares the blob row of
-the item that first carried it, so its blob is already `clean` and the item is
-already `discarded`; nothing is enqueued. An email item is untouched. A failed
-enqueue logs and leaves the item in review, the same as the route enqueue, and
-the maintenance sweep recovers it.
+a file whose `scanStatus` is `not_scanned`, carrying `result.routeJob.ruleId` as
+`routeRuleId` so the decision is deferred rather than recomputed. A duplicate
+shares the blob row of the item that first carried it, so its blob is already
+`clean` and the item is already `discarded`; nothing is enqueued. An email item
+is untouched. A failed enqueue logs and leaves the item in review, the same as
+the route enqueue, and the maintenance sweep recovers it.
 
 Worker. `apps/api/src/worker/scan-inbox-item.ts` mirrors the split: it loads the
 item and its `not_scanned` blobs under `runTenantJob`, completes with nothing
-done when the item is not `received` or `needs_review`, and scans each blob
+done when the item is already `discarded` or `failed`, and scans each blob
 through the shared `ClamdClient`. `clean` records the verdict through
 `app.record_blob_scan` with a `scanned` event; `infected` records the verdict,
 sets the item `discarded` guarded on the status it loaded, appends the
 `discarded` event with reason `policy_rejected` and stops; `error` throws so
 pg-boss retries, and on the last attempt records `failed` for that blob with its
-`scanned` event and completes. When every blob is `clean` the handler re-reads
-the route decision the intake already took, through the new `routeJobForItem` in
-`inbox-repository.ts` (the read-only tail of `applyInboxRules`: the newest rule
-extraction names the rules that matched, so the auto-route rule, the composed
-draft and `decideAutoRoute` are re-derived without writing a second extraction
-row), and sends it through `enqueueRouteInboxItem`. `recordScan` and the guarded
-status update move to `apps/api/src/worker/blob-scan.ts` so the split and the
-scan share them. The worker registers the queue next to the split with
-`localConcurrency: 2`, sharing the `blobs` and `scanner` instances.
+`scanned` event and completes. An item that is already `routed` is scanned too,
+because its blob still serves the document it went to, but its decision stands:
+the handler records the verdict and the `scanned` event only, never a status
+change, never a `discarded` event, and never a route. When every blob is `clean`
+and the item is not routed, the handler enqueues the deferred route as
+`{ itemId, organizationId, ruleId: routeRuleId }`; a job without `routeRuleId`
+routes nothing. `recordScan` and the guarded status update move to
+`apps/api/src/worker/blob-scan.ts` so the split and the scan share them. The
+worker registers the queue next to the split with `localConcurrency: 2`, sharing
+the `blobs` and `scanner` instances.
 
 Reads. `openBlob` is the only gate in front of both blob routes: it now refuses
 every status other than `clean`, with 409 `blob_scan_pending` for `not_scanned`
@@ -71,9 +75,11 @@ Maintenance. Migration `20260922.0009_inbox_scan_sweep.sql` adds
 `app.list_unscanned_inbox_items(stale interval, max_rows integer)`, a
 `SECURITY DEFINER` function owned by `bap_owner` with EXECUTE to `bap_api`, the
 shape of `app.list_stuck_email_items`: it raises `insufficient_privilege` inside
-a tenant context and returns the `upload` and `api` items still `received` or
-`needs_review` past the same 10 minute window with a `not_scanned` blob,
-skipping an item whose channel is disabled or deleted. It also adds
+a tenant context and returns every `upload` and `api` item past the same 10
+minute window with a `not_scanned` blob whose status is not `discarded` or
+`failed`, a routed one included, skipping an item whose channel is disabled or
+deleted. A blob stored before this change is therefore picked up within one
+maintenance tick, at most 15 minutes after the worker starts. It also adds
 `inbox_item_file_maintenance_select`, because `FORCE` row level security applies
 to the definer and no policy admitted `bap_owner` to the item to blob link yet;
 SELECT only, the shape of `blob_maintenance_select`.
@@ -107,9 +113,10 @@ longer served or auto-routed.
   still enqueues the split; `openBlob` answers 409 `blob_scan_pending`; the
   maintenance tick resends a scan job for an upload and for an API item.
 - `apps/api` integration: `scan-inbox-item.integration.test.ts` on
-  Testcontainers for clean (the blob becomes `clean` and the route job is sent),
-  infected (the item is `discarded` with `policy_rejected`) and the exhausted
-  retry (the blob becomes `failed`).
+  Testcontainers for clean (the blob becomes `clean` and the deferred route job
+  is sent), infected (the item is `discarded` with `policy_rejected`), the
+  exhausted retry (the blob becomes `failed`), and a routed item whose verdict
+  is recorded without a status change, a `discarded` event or a route.
 - `packages/db` integration: the new definer refuses a tenant context and lists
   the unscanned upload and API items only.
 - `apps/web` unit: the item page renders the scan-pending indicator instead of
@@ -119,11 +126,10 @@ longer served or auto-routed.
 
 ## Open questions
 
-- `routeJobForItem` re-derives the decision after the rule extraction committed,
-  so an item whose channel carries a kind hint and whose rule matched is decided
-  on the merged confidence rather than the sniff confidence. Carrying the
-  intake's `routeJob.ruleId` in the scan payload would avoid the re-derivation
-  entirely; the re-read was chosen so the payload keeps one shape per principal.
-- A blob stored before this change stays `not_scanned` until the maintenance
-  sweep reaches its item; there is no backfill for a blob whose item is already
-  routed.
+- None. Both questions this spec opened are closed: the route decision rides in
+  the payload as `routeRuleId` rather than being recomputed, so the intake's
+  decision is the one that lands; and the sweep and the handler cover an item
+  that is already routed, so a blob stored before this change gets its verdict
+  within one maintenance tick. A scan job the sweep resends carries no
+  `routeRuleId`, so an item whose intake enqueue was lost is scanned and then
+  waits for a person, the same as a lost route enqueue today.

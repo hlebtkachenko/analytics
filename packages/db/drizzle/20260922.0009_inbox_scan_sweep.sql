@@ -24,7 +24,8 @@ BEGIN
     SELECT item.id, item.channel_id, item.organization_id, item.created_by
     FROM app.inbox_item AS item
     WHERE item.channel_kind IN ('upload', 'api')
-      AND item.status IN ('received', 'needs_review')
+      -- A routed item is swept too: its blob is served from the document, so it must still get a verdict.
+      AND item.status NOT IN ('discarded', 'failed')
       AND item.received_at < now() - floored_stale
       AND EXISTS (
         SELECT 1

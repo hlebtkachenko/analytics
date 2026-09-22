@@ -195,18 +195,19 @@ and a failing task logs and lets the next one run: the orphan blob sweep unlinks
 an untracked file on the volume older than a 60 minute grace period; the stalled
 item reaper fails an `inbox_item` stuck in `processing` past 60 minutes; the
 stuck email requeue re-enqueues `split_email_item` for an email item still
-`received` past 10 minutes; the scan resend re-enqueues `scan_inbox_item` for an
-`upload` or `api` item still waiting for a person whose blob is `not_scanned`
-past the same window, through `app.list_unscanned_inbox_items`.
-`split_email_item`, `scan_inbox_item` and `inbox_maintenance` all use pg-boss
-`policy: 'exclusive'`, because `singletonKey` is inert on a standard queue:
-exclusive admits at most one job per key across `created`, `retry` and `active`,
-so the tick cannot pile up a job per still-received item every 15 minutes and
-two worker replicas cannot split the same item concurrently. A policy is fixed
-at creation, so the worker recreates a `split_email_item` or `inbox_maintenance`
-queue found with another policy at startup, dropping its pending jobs, which the
-requeue task recovers. Metrics carry the queue label only; log lines carry
-counts and ids, never a storage key, filename or organization name.
+`received` past 10 minutes; the scan resend re-enqueues `scan_inbox_item` for
+every `upload` or `api` item past the same window whose blob is `not_scanned`
+and whose status is not `discarded` or `failed`, a routed one included, through
+`app.list_unscanned_inbox_items`. `split_email_item`, `scan_inbox_item` and
+`inbox_maintenance` all use pg-boss `policy: 'exclusive'`, because
+`singletonKey` is inert on a standard queue: exclusive admits at most one job
+per key across `created`, `retry` and `active`, so the tick cannot pile up a job
+per still-received item every 15 minutes and two worker replicas cannot split
+the same item concurrently. A policy is fixed at creation, so the worker
+recreates a `split_email_item` or `inbox_maintenance` queue found with another
+policy at startup, dropping its pending jobs, which the requeue task recovers.
+Metrics carry the queue label only; log lines carry counts and ids, never a
+storage key, filename or organization name.
 
 Amended 2026-09-17 (1b-rules): `route_inbox_item` and `rerun_inbox_rule` are two
 more jobs, payload ids only. `route_inbox_item` carries
@@ -566,12 +567,15 @@ upload or from the API channel is stored `not_scanned` and scanned by the
 that job instead of the route job, the job runs as the uploader or as the
 channel, records each verdict through `app.record_blob_scan`, discards an
 infected item with reason `policy_rejected`, and only after every blob is
-`clean` re-reads the route decision the intake computed and enqueues it. Until a
-verdict lands, both blob routes refuse the blob with 409 `blob_scan_pending`, so
-only a clean verdict is ever served. A lost enqueue is resent by the maintenance
-tick. Nothing from the mail is logged, audited, or sent anywhere: sender,
-recipient, token, subject, headers, body, and attachment names stay out of logs
-and `inbox_event`, which carry ids, reasons, and counts only.
+`clean` enqueues the route the intake decided on and deferred into the job
+payload. An item that was already routed keeps its decision: the job records the
+verdict alone, so an infected blob stops being served without undoing the
+document it went to. Until a verdict lands, both blob routes refuse the blob
+with 409 `blob_scan_pending`, so only a clean verdict is ever served. A lost
+enqueue is resent by the maintenance tick. Nothing from the mail is logged,
+audited, or sent anywhere: sender, recipient, token, subject, headers, body, and
+attachment names stay out of logs and `inbox_event`, which carry ids, reasons,
+and counts only.
 
 Amended 2026-09-17 (1b-runtime): three more `SECURITY DEFINER` functions owned
 by `bap_owner`, with EXECUTE to `bap_api`, back the `inbox_maintenance` tick:

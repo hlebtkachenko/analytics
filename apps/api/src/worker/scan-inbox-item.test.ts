@@ -11,7 +11,6 @@ import { WorkerMetrics } from './worker-metrics.js';
 
 const repository = vi.hoisted(() => ({
   appendEvent: vi.fn(async () => undefined),
-  routeJobForItem: vi.fn(async (): Promise<RouteInboxItemJob | null> => null),
 }));
 
 vi.mock('../inbox/inbox-repository.js', () => repository);
@@ -29,6 +28,8 @@ interface RecordedQuery {
 
 interface FixtureOptions {
   retry?: { count: number; limit: number };
+  // The route the intake deferred; absent means it asked for none.
+  routeRuleId?: string | null;
   status?: string;
   unscanned?: boolean;
   verdict?: ScanOutcome;
@@ -94,6 +95,9 @@ function fixture(options: FixtureOptions = {}): Fixture {
           channelId: CHANNEL_ID,
           itemId: ITEM_ID,
           organizationId: ORGANIZATION,
+          ...('routeRuleId' in options
+            ? { routeRuleId: options.routeRuleId }
+            : {}),
         },
         enqueueRouteInboxItem: async (job) => {
           routed.push(job);
@@ -128,17 +132,11 @@ async function jobCount(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  repository.routeJobForItem.mockResolvedValue(null);
 });
 
 describe('scanInboxItem', () => {
-  it('records a clean verdict and sends the route the intake computed', async () => {
-    repository.routeJobForItem.mockResolvedValue({
-      itemId: ITEM_ID,
-      organizationId: ORGANIZATION,
-      ruleId: null,
-    });
-    const context = fixture();
+  it('records a clean verdict and sends the route the intake deferred', async () => {
+    const context = fixture({ routeRuleId: null });
 
     await context.run();
 
@@ -180,7 +178,6 @@ describe('scanInboxItem', () => {
       'policy_rejected',
     );
     expect(context.routed).toEqual([]);
-    expect(repository.routeJobForItem).not.toHaveBeenCalled();
   });
 
   it('retries a scanner error until the last attempt records the failed verdict', async () => {
@@ -204,23 +201,71 @@ describe('scanInboxItem', () => {
     expect(await jobCount(last.metrics, 'completed')).toBe(1);
   });
 
-  it('scans nothing for an item that already left review', async () => {
-    const context = fixture({ status: 'discarded' });
+  it('scans nothing for an item that was already settled', async () => {
+    for (const status of ['discarded', 'failed']) {
+      const context = fixture({ status });
 
-    await context.run();
+      await context.run();
 
-    expect(context.scanned).toEqual([]);
-    expect(verdicts(context.queries)).toEqual([]);
-    expect(repository.routeJobForItem).not.toHaveBeenCalled();
-    expect(await jobCount(context.metrics, 'completed')).toBe(1);
+      expect(context.scanned).toEqual([]);
+      expect(verdicts(context.queries)).toEqual([]);
+      expect(context.routed).toEqual([]);
+      expect(await jobCount(context.metrics, 'completed')).toBe(1);
+    }
   });
 
-  it('routes straight away when every blob already carries a verdict', async () => {
-    const context = fixture({ unscanned: false });
+  it('records the verdict of a routed item without deciding or routing it again', async () => {
+    const clean = fixture({ routeRuleId: null, status: 'routed' });
+
+    await clean.run();
+
+    expect(verdicts(clean.queries)).toEqual([[BLOB_ID, 'clean']]);
+    // The item keeps the decision a person or a rule already took.
+    expect(
+      clean.queries.filter((query) =>
+        query.text.includes('update app.inbox_item set status'),
+      ),
+    ).toEqual([]);
+    expect(clean.routed).toEqual([]);
+
+    const infected = fixture({
+      status: 'routed',
+      verdict: { outcome: 'infected', signature: 'Eicar-Test-Signature' },
+    });
+    await infected.run();
+
+    expect(verdicts(infected.queries)).toEqual([[BLOB_ID, 'infected']]);
+    expect(
+      infected.queries.filter((query) =>
+        query.text.includes('update app.inbox_item set status'),
+      ),
+    ).toEqual([]);
+    expect(repository.appendEvent).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      ITEM_ID,
+      'discarded',
+      'policy_rejected',
+    );
+  });
+
+  it('sends the deferred route even when every blob already carries a verdict', async () => {
+    const context = fixture({ routeRuleId: null, unscanned: false });
 
     await context.run();
 
     expect(context.scanned).toEqual([]);
-    expect(repository.routeJobForItem).toHaveBeenCalledTimes(1);
+    expect(context.routed).toEqual([
+      { itemId: ITEM_ID, organizationId: ORGANIZATION, ruleId: null },
+    ]);
+  });
+
+  it('sends no route when the intake asked for none', async () => {
+    const context = fixture();
+
+    await context.run();
+
+    expect(verdicts(context.queries)).toEqual([[BLOB_ID, 'clean']]);
+    expect(context.routed).toEqual([]);
   });
 });

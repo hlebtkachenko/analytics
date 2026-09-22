@@ -125,11 +125,12 @@ function run(
   itemId: string,
   scanner: BlobScanner,
   retry = { count: 0, limit: 3 },
+  route: { routeRuleId?: string | null } = {},
 ): Promise<RouteInboxItemJob[]> {
   const routeJobs: RouteInboxItemJob[] = [];
   return scanInboxItem({
     blobs: store,
-    data: { itemId, organizationId: 'org-1', userId: 'user-1' },
+    data: { ...route, itemId, organizationId: 'org-1', userId: 'user-1' },
     enqueueRouteInboxItem: async (job) => {
       routeJobs.push(job);
     },
@@ -216,7 +217,7 @@ afterAll(async () => {
 });
 
 describe('scan_inbox_item', () => {
-  it('records a clean verdict, leaves the item in review and re-reads its route decision', async () => {
+  it('records a clean verdict, leaves the item in review and sends the deferred route', async () => {
     const itemId = await upload(Buffer.from('placeholder bytes'), 'clean');
 
     expect(await itemState(itemId)).toMatchObject({
@@ -224,7 +225,9 @@ describe('scan_inbox_item', () => {
       status: 'received',
     });
 
-    const routeJobs = await run(itemId, new FakeScanner());
+    const routeJobs = await run(itemId, new FakeScanner(), undefined, {
+      routeRuleId: null,
+    });
 
     expect(await itemState(itemId)).toMatchObject({
       events: [
@@ -234,13 +237,74 @@ describe('scan_inbox_item', () => {
       scanStatus: 'clean',
       status: 'received',
     });
-    // Nothing asks for an automatic route by default, so the scan enqueues none.
-    expect(routeJobs).toEqual([]);
+    // The intake deferred a target-default route, so the clean verdict is what sends it.
+    expect(routeJobs).toEqual([
+      { itemId, organizationId: 'org-1', ruleId: null },
+    ]);
 
     // A second attempt finds nothing left to scan and scans no byte twice.
     const scanner = new FakeScanner();
-    await run(itemId, scanner);
+    expect(await run(itemId, scanner)).toEqual([]);
     expect(scanner.calls).toBe(0);
+  });
+
+  it('records the verdict of an already routed item without deciding or routing it again', async () => {
+    const itemId = await upload(Buffer.from('routed bytes'), 'routed');
+    await runInTenantContext(apiPool, owner, async (transaction) => {
+      const partner = await transaction.query<{ id: string }>(
+        `insert into app.partner (organization_id, name, created_by)
+         values ('org-1', 'Placeholder Partner', 'user-1')
+         returning id`,
+      );
+      await transaction.query(
+        "update app.inbox_item set status = 'routed', partner_id = $2 where id = $1",
+        [itemId, partner.rows[0]?.id],
+      );
+    });
+
+    const routeJobs = await run(itemId, new FakeScanner(), undefined, {
+      routeRuleId: null,
+    });
+
+    expect(await itemState(itemId)).toMatchObject({
+      events: [
+        ['received', null],
+        ['scanned', null],
+      ],
+      scanStatus: 'clean',
+      status: 'routed',
+    });
+    expect(routeJobs).toEqual([]);
+  });
+
+  it('quarantines the blob of a routed item without discarding the item', async () => {
+    const itemId = await upload(
+      Buffer.from(`routed ${EICAR}`, 'latin1'),
+      'routed-infected',
+    );
+    await runInTenantContext(apiPool, owner, async (transaction) => {
+      const partner = await transaction.query<{ id: string }>(
+        `insert into app.partner (organization_id, name, created_by)
+         values ('org-1', 'Placeholder Partner', 'user-1')
+         returning id`,
+      );
+      await transaction.query(
+        "update app.inbox_item set status = 'routed', partner_id = $2 where id = $1",
+        [itemId, partner.rows[0]?.id],
+      );
+    });
+
+    await run(itemId, new FakeScanner());
+
+    // The decision stands; only the blob is refused from here on.
+    expect(await itemState(itemId)).toMatchObject({
+      events: [
+        ['received', null],
+        ['scanned', null],
+      ],
+      scanStatus: 'infected',
+      status: 'routed',
+    });
   });
 
   it('discards an infected item with policy_rejected and quarantines its blob', async () => {

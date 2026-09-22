@@ -95,9 +95,10 @@ front of the same controller, which stores the `.eml` and enqueues the
 channel principal, scans the blob through `clamd` using
 `apps/api/src/scanning/clamd-client.ts`, and splits attachments into child inbox
 items. A direct upload and an API push enqueue `scan_inbox_item` instead, an
-ids-only payload naming the uploader or the channel, which scans the stored blob
-through the same client and enqueues the route job only after a clean verdict;
-see [ADR 0016](docs/adr/0016-channel-principal.md) (Webhook and Worker) and
+ids-only payload naming the uploader or the channel and carrying the route the
+intake deferred, which scans the stored blob through the same client and
+enqueues that route only after a clean verdict; see
+[ADR 0016](docs/adr/0016-channel-principal.md) (Webhook and Worker) and
 [the inbox email channel spec](.ai/specs/2026-09-17-inbox-email-channel.md).
 
 The web-local chat route requires a verified session, resolves application
@@ -209,8 +210,9 @@ on `*/15 * * * *` and opening no tenant transaction, runs four tasks each tick:
 it unlinks a blob-volume file left untracked by a failed commit once it clears a
 60 minute grace period, fails an `inbox_item` stuck in `processing` past 60
 minutes, re-enqueues `split_email_item` for an email item still `received` past
-10 minutes, and re-enqueues `scan_inbox_item` for an upload or API item whose
-blob is still `not_scanned` past the same window.
+10 minutes, and re-enqueues `scan_inbox_item` for an upload or API item that is
+neither discarded nor failed whose blob is still `not_scanned` past the same
+window.
 
 Migration `20260917.0005` adds the Phase 1b-rules layer. `app.inbox_rule` holds
 closed condition and action columns, no jsonb, evaluated in priority order at

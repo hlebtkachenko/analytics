@@ -7,14 +7,14 @@ import {
   scanInboxItemJobSchema,
 } from '../inbox/contract.js';
 import type { RouteInboxItemJob, ScanInboxItemJob } from '../inbox/contract.js';
-import { appendEvent, routeJobForItem } from '../inbox/inbox-repository.js';
+import { appendEvent } from '../inbox/inbox-repository.js';
 import type { BlobScanner } from '../scanning/clamd-client.js';
 import { recordScan, setItemStatus } from './blob-scan.js';
 import { runTenantJob } from './job-context.js';
 import type { WorkerMetrics } from './worker-metrics.js';
 
-// An item is scanned while it still waits for a person; anything else was decided and keeps its blobs where they are.
-const SCANNABLE_STATUSES = ['received', 'needs_review'];
+// A decided item keeps its blobs where they are; every other status is scanned, a routed one included.
+const SETTLED_STATUSES = ['discarded', 'failed'];
 
 export interface ScanInboxItemOptions {
   blobs: BlobStore;
@@ -49,7 +49,7 @@ interface PendingItem {
   status: string;
 }
 
-// The item and every blob of it the scanner has not answered for yet; null when the item is past review.
+// The item and every blob of it the scanner has not answered for yet; null when the item is already settled.
 async function loadPending(
   transaction: PoolClient,
   itemId: string,
@@ -70,7 +70,7 @@ async function loadPending(
   );
   const status = result.rows[0]?.status;
 
-  if (status === undefined || !SCANNABLE_STATUSES.includes(status)) {
+  if (status === undefined || SETTLED_STATUSES.includes(status)) {
     return null;
   }
 
@@ -102,11 +102,13 @@ export async function scanInboxItem(
       work: (transaction) => loadPending(transaction, payload.itemId),
     });
 
-    // Discarded, failed or already routed: the job is a committed no-op and the blobs stay where they are.
+    // Discarded or failed: the job is a committed no-op and the blobs stay where they are.
     if (pending === null) {
       options.metrics.recordJob(SCAN_INBOX_ITEM_QUEUE, 'completed');
       return;
     }
+
+    const routed = pending.status === 'routed';
 
     for (const blob of pending.blobs) {
       // The scan is a network call on the stored bytes, so it stays outside the transaction.
@@ -131,7 +133,7 @@ export async function scanInboxItem(
         return;
       }
 
-      const infected = await runTenantJob({
+      await runTenantJob({
         data: payload,
         pool: options.pool,
         work: async (transaction, _job, tenant) => {
@@ -143,8 +145,9 @@ export async function scanInboxItem(
             verdict.outcome,
           );
 
-          if (verdict.outcome !== 'infected') {
-            return false;
+          // A routed item keeps its decision: the verdict alone is recorded, and the blob routes stop serving it.
+          if (verdict.outcome !== 'infected' || routed) {
+            return;
           }
 
           if (
@@ -165,30 +168,23 @@ export async function scanInboxItem(
             'discarded',
             'policy_rejected',
           );
-          return true;
         },
       });
 
       // Nothing else runs on an infected item: the rest of its blobs stay unscanned and unreadable.
-      if (infected) {
+      if (verdict.outcome === 'infected') {
         options.metrics.recordJob(SCAN_INBOX_ITEM_QUEUE, 'completed');
         return;
       }
     }
 
-    // Every blob is clean, so the route the intake computed is re-read and sent after its transaction.
-    const routeJob = await runTenantJob({
-      data: payload,
-      pool: options.pool,
-      work: (transaction) =>
-        routeJobForItem(transaction, {
-          itemId: payload.itemId,
-          organizationId: payload.organizationId,
-        }),
-    });
-
-    if (routeJob !== null) {
-      await options.enqueueRouteInboxItem(routeJob);
+    // Every blob is clean, so the route the intake deferred is sent; a routed item and a swept one carry none.
+    if (!routed && payload.routeRuleId !== undefined) {
+      await options.enqueueRouteInboxItem({
+        itemId: payload.itemId,
+        organizationId: payload.organizationId,
+        ruleId: payload.routeRuleId,
+      });
     }
 
     options.metrics.recordJob(SCAN_INBOX_ITEM_QUEUE, 'completed');

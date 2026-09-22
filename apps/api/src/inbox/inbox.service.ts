@@ -270,13 +270,19 @@ function scanJobFor(
     return null;
   }
 
+  // The route the rule pass asked for is deferred, not dropped: the scan job sends it after a clean verdict.
+  const route =
+    result.routeJob === null ? {} : { routeRuleId: result.routeJob.ruleId };
+
   return staged.channelId === null
     ? {
+        ...route,
         itemId: result.item.id,
         organizationId: staged.organizationId,
         userId: staged.userId,
       }
     : {
+        ...route,
         channelId: staged.channelId,
         itemId: result.item.id,
         organizationId: staged.organizationId,

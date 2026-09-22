@@ -451,10 +451,12 @@ describe('InboxService', () => {
       file: { originalname: 'placeholder.pdf', path, size: bytes.length },
     });
 
+    // The route the rule pass asked for rides along as an id, so the scan job can send it after a clean verdict.
     expect(scanned).toEqual([
       {
         itemId: item.id,
         organizationId: tenant.organizationId,
+        routeRuleId: null,
         userId: tenant.userId,
       },
     ]);
@@ -478,6 +480,7 @@ describe('InboxService', () => {
       channelId: CHANNEL_ID,
       itemId: item.id,
       organizationId: channelTenant.organizationId,
+      routeRuleId: null,
     });
   });
 

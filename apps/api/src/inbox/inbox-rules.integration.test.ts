@@ -196,19 +196,21 @@ async function upload(tenant: TenantContext, bytes: Buffer, name: string) {
     file: { originalname: name, path, size: bytes.length },
   });
   // The scan job stands between the intake and the route now: an upload routes only after a clean verdict.
-  await scanUpload(tenant, response.item.id);
+  await runScan(response.item.id);
   return response;
 }
 
-// The worker's scan handler against a scanner that finds nothing, wired to the same route queue as the intake.
-function scanUpload(tenant: TenantContext, itemId: string): Promise<void> {
-  return scanInboxItem({
+// The worker's scan handler on the job the intake enqueued, against a scanner that finds nothing.
+async function runScan(itemId: string): Promise<void> {
+  const data = scanJobs.find((job) => job.itemId === itemId);
+
+  if (data === undefined) {
+    return;
+  }
+
+  await scanInboxItem({
     blobs: store,
-    data: {
-      itemId,
-      organizationId: tenant.organizationId,
-      userId: tenant.userId,
-    },
+    data,
     enqueueRouteInboxItem: (job) => sendRouteInboxItem(boss, job),
     metrics: new WorkerMetrics(),
     pool: apiPool,
@@ -528,20 +530,8 @@ describe('inbox rules', () => {
         file: { originalname: 'target.pdf', path, size: bytes.length },
         origin: 'abcdef03',
       });
-      // A channel push waits for its own scan job, which re-reads the decision and sends the route job.
-      await scanInboxItem({
-        blobs: store,
-        data: {
-          channelId,
-          itemId: response.itemId,
-          organizationId: owner.organizationId,
-        },
-        enqueueRouteInboxItem: (job) => sendRouteInboxItem(boss, job),
-        metrics: new WorkerMetrics(),
-        pool: apiPool,
-        retry: { count: 0, limit: 3 },
-        scanner: { scan: async () => ({ outcome: 'clean' }) },
-      });
+      // A channel push waits for its own scan job, which sends the route the intake deferred into it.
+      await runScan(response.itemId);
       const detail = await readItem(apiPool, {
         ...owner,
         ...allEntities,

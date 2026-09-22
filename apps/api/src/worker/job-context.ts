@@ -31,6 +31,8 @@ export const channelJobPayloadSchema = z
     channelId: z.string().uuid(),
     itemId: z.string().uuid().optional(),
     organizationId: organizationIdentifierSchema,
+    // The scan job of a channel push carries the route its intake deferred; every other channel job omits it.
+    routeRuleId: z.string().uuid().nullable().optional(),
   })
   .strict();
 
@@ -53,7 +55,10 @@ export type RerunInboxRuleJobPayload = z.infer<
 
 // The scan job of an uploaded item runs as its uploader; an API push scans under the channel payload instead.
 export const scanInboxItemJobPayloadSchema = tenantJobPayloadSchema
-  .extend({ itemId: z.string().uuid() })
+  .extend({
+    itemId: z.string().uuid(),
+    routeRuleId: z.string().uuid().nullable().optional(),
+  })
   .strict();
 
 export type ScanInboxItemJobPayload = z.infer<

@@ -50,6 +50,9 @@ const scannedUploadItemId = '00000000-0000-4000-8000-000000004003';
 const discardedUploadItemId = '00000000-0000-4000-8000-000000004004';
 const oldApiItemId = '00000000-0000-4000-8000-000000004005';
 const disabledApiItemId = '00000000-0000-4000-8000-000000004006';
+const routedUploadItemId = '00000000-0000-4000-8000-000000004007';
+const failedUploadItemId = '00000000-0000-4000-8000-000000004008';
+const routedPartnerId = '00000000-0000-4000-8000-0000000000f1';
 
 const orgOneOwner: TenantContext = {
   organizationId: 'org-1',
@@ -320,16 +323,24 @@ beforeAll(async () => {
       `channel_${foreignChannelId}`,
     ],
   );
+  // A routed item names where it went, so the sweep has one to pick up after the decision.
+  await rootPool.query(
+    `insert into app.partner (id, organization_id, name, created_by)
+     values ($1, 'org-1', 'Placeholder Partner', 'user-1')`,
+    [routedPartnerId],
+  );
   // Direct uploads and one API push, aged by received_at, with the blob verdict the scan sweep sorts on.
   await rootPool.query(
     `insert into app.inbox_item
-       (id, organization_id, channel_kind, channel_id, payload_kind, status, received_at, created_by)
-     values ($1, 'org-1', 'upload', null, 'file', 'needs_review', now() - interval '2 hours', 'user-1'),
-            ($2, 'org-1', 'upload', null, 'file', 'needs_review', now(), 'user-1'),
-            ($3, 'org-1', 'upload', null, 'file', 'needs_review', now() - interval '1 hour', 'user-1'),
-            ($4, 'org-1', 'upload', null, 'file', 'discarded', now() - interval '1 hour', 'user-1'),
-            ($5, 'org-1', 'api', $7, 'file', 'received', now() - interval '1 hour', $9),
-            ($6, 'org-1', 'api', $8, 'file', 'received', now() - interval '1 hour', $10)`,
+       (id, organization_id, channel_kind, channel_id, payload_kind, status, partner_id, received_at, created_by)
+     values ($1, 'org-1', 'upload', null, 'file', 'needs_review', null, now() - interval '2 hours', 'user-1'),
+            ($2, 'org-1', 'upload', null, 'file', 'needs_review', null, now(), 'user-1'),
+            ($3, 'org-1', 'upload', null, 'file', 'needs_review', null, now() - interval '1 hour', 'user-1'),
+            ($4, 'org-1', 'upload', null, 'file', 'discarded', null, now() - interval '1 hour', 'user-1'),
+            ($5, 'org-1', 'api', $9, 'file', 'received', null, now() - interval '1 hour', $11),
+            ($6, 'org-1', 'api', $10, 'file', 'received', null, now() - interval '1 hour', $12),
+            ($7, 'org-1', 'upload', null, 'file', 'routed', $13, now() - interval '1 hour', 'user-1'),
+            ($8, 'org-1', 'upload', null, 'file', 'failed', null, now() - interval '1 hour', 'user-1')`,
     [
       oldUploadItemId,
       freshUploadItemId,
@@ -337,16 +348,20 @@ beforeAll(async () => {
       discardedUploadItemId,
       oldApiItemId,
       disabledApiItemId,
+      routedUploadItemId,
+      failedUploadItemId,
       apiChannelId,
       disabledChannelId,
       `channel_${apiChannelId}`,
       `channel_${disabledChannelId}`,
+      routedPartnerId,
     ],
   );
   await rootPool.query(
     `insert into app.inbox_item_file (item_id, organization_id, blob_id, position)
      select item.id, 'org-1', blob.id, 1
-       from (values ($1::uuid, $7::text), ($2, $7), ($3, $8), ($4, $7), ($5, $7), ($6, $7))
+       from (values ($1::uuid, $9::text), ($2, $9), ($3, $10), ($4, $9), ($5, $9), ($6, $9),
+                    ($7, $9), ($8, $9))
               as item (id, sha256)
        join app.blob as blob on blob.sha256 = item.sha256`,
     [
@@ -356,6 +371,8 @@ beforeAll(async () => {
       discardedUploadItemId,
       oldApiItemId,
       disabledApiItemId,
+      routedUploadItemId,
+      failedUploadItemId,
       unscannedBlobHash,
       scannedBlobHash,
     ],
@@ -1095,7 +1112,7 @@ describe('inbox runtime', () => {
     });
   });
 
-  it('lists the unscanned upload and API items on live channels only, with a floored stale window', async () => {
+  it('lists every unscanned upload and API item that is not settled, with a floored stale window', async () => {
     // '1 minute' is floored to 10 minutes, so the upload received just now is skipped, as is the scanned one.
     const unscanned = await apiPool.query<{
       channel_id: string | null;
@@ -1118,6 +1135,13 @@ describe('inbox runtime', () => {
         item_id: oldApiItemId,
         organization_id: 'org-1',
       },
+      // A routed item is listed too: its blob still serves the document it went to.
+      {
+        channel_id: null,
+        created_by: 'user-1',
+        item_id: routedUploadItemId,
+        organization_id: 'org-1',
+      },
     ]);
     await expect(
       apiPool.query<{ item_id: string }>(
@@ -1126,11 +1150,19 @@ describe('inbox runtime', () => {
     ).resolves.toMatchObject({ rows: [{ item_id: oldUploadItemId }] });
     // The list is read only: nothing changed on the items it named or skipped.
     await expect(
-      readItemStatuses([oldUploadItemId, discardedUploadItemId, oldApiItemId]),
+      readItemStatuses([
+        oldUploadItemId,
+        discardedUploadItemId,
+        failedUploadItemId,
+        oldApiItemId,
+        routedUploadItemId,
+      ]),
     ).resolves.toEqual({
       [discardedUploadItemId]: 'discarded',
+      [failedUploadItemId]: 'failed',
       [oldApiItemId]: 'received',
       [oldUploadItemId]: 'needs_review',
+      [routedUploadItemId]: 'routed',
     });
   });
 
