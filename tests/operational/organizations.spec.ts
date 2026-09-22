@@ -1,8 +1,18 @@
-import { normalizeOrganizationSlug } from '../../apps/web/src/lib/organizations/slug';
 import { expectNoAccessibilityViolations } from './accessibility-support';
 import { expect, test } from './authenticated-test';
 
 const password = process.env.BAP_OPERATIONAL_PASSWORD ?? '';
+
+// Mirrors the app's slug normalizer; the proof never imports application source.
+function normalizeOrganizationSlug(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 20)
+    .replace(/-+$/g, '');
+}
 
 async function expectNoHorizontalOverflow(
   page: import('@playwright/test').Page,
