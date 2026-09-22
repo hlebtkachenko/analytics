@@ -163,9 +163,9 @@ prunes expired rows from only the edge namespace on every consume. A partial
 
 Migration `20260910.0001` implements ADR 0011's two-level tenancy.
 `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
-`20260910.0001` after this migration; rolling application code back after this
-migration leaves readiness at 503 until code expecting that exact version is
-deployed or the expected version is deliberately advanced.
+`20260910.0001` after this migration; rolling application code back after it
+leaves readiness at 503 until code expecting that exact version is deployed or
+the expected version is deliberately advanced.
 
 It adds
 `app.legal_entity(id, organization_id, name, kind, registration_number, created_by, created_at, updated_at)`,
@@ -316,7 +316,7 @@ literals and dropping the five flat workspace routes migration `20260916.0001`
 had added. Migration `20260922.0005` re-adds `inbox` after the platform route
 reservations rebuild the list without it, so the final constraint holds 25
 literals. `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
-`20260916.0002` after this migration, and is now `20260922.0005`.
+`20260916.0002` after this migration.
 
 Migration `20260917.0001` adds the channel principal of ADR 0016. `bap.role`
 gains the value `channel`, which is not a membership role: a channel runs as
@@ -363,9 +363,8 @@ raises on a `channel_` subject and tombstones `inbox_channel.created_by`, for
 which the eraser gains column grants. The migration installs the trusted
 `pgcrypto` extension for `gen_random_bytes`. `DATABASE_MIGRATION_COMPATIBILITY`
 in `packages/db/src/access.ts` was `20260917.0001` after this migration; rolling
-application code back after this migration leaves readiness at 503 until code
-expecting that exact version is deployed or the expected version is deliberately
-advanced.
+application code back after it leaves readiness at 503 until code expecting that
+exact version is deployed or the expected version is deliberately advanced.
 
 Migration `20260917.0002` adds the fourth definer function of ADR 0016,
 `auth.list_channel_credentials(channel_id)`: `bap_api` holds no SELECT on
@@ -410,7 +409,8 @@ address when the revoked row is an `email_address`.
 `auth.resolve_channel_credential` is unchanged: the email caller lowercases the
 local part and hashes exactly that, never the whole address.
 `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
-`20260917.0003` after this migration.
+`20260917.0003` after this migration, and `20260922.0005` after the inbox slug
+reservation.
 
 Migration `20260917.0004` adds the runtime layer of 1b-runtime.
 `app.inbox_routing_target` (`organization_id`, `detected_type`, `destination`,
@@ -492,6 +492,15 @@ bulk routes below write only `app.document`, `app.economic_event`,
 `app.data_issue`, and `app.inbox_item` the same way, through policies this
 migration does not touch. `DATABASE_MIGRATION_COMPATIBILITY` in
 `packages/db/src/access.ts` was `20260917.0006` after this migration.
+
+Migration `20260922.0006` re-declares `app.erase_user` as the union of the two
+bodies the platform and inbox stacks each wrote: the channel-name guard and the
+blob, inbox item, extraction, event, document file and channel tombstones, plus
+the member `resource_id` tombstone on `app.audit_log`. It is needed because
+`20260920.0001` replaced the function with a body that predates the inbox
+tables, and an applied migration cannot be edited in place.
+`DATABASE_MIGRATION_COMPATIBILITY` is now `20260922.0006` in
+`packages/db/src/access.ts`.
 
 ## Tenant policy contract
 

@@ -181,15 +181,15 @@ before-hook test proves an update revalidates and normalizes a submitted slug
 against the reserved contract.
 
 The identity and organization integration closure adds no runtime path. The
-shared TypeScript/PostgreSQL corpus explicitly enumerates all 16 reserved
-routes. The PostgreSQL default-privilege probe creates a disposable `auth.*`
-table as `bap_owner` and executes SELECT, INSERT, UPDATE, and DELETE as
-`bap_auth`; the quota test then proves that `auth.organization_quota` remains a
-SELECT-only exception, while the account-lifecycle proof keeps `bap_auth`
-outside schema `app`. A paired BFF and real resolver proof shows that a valid
-slug-shaped selector is forwarded only to the fixed service, receives a redacted
-403, and resolves no database membership when used as an id. The full
-integration command reruns every pre-existing RLS assertion as its exit gate.
+shared TypeScript/PostgreSQL corpus explicitly enumerates every reserved route.
+The PostgreSQL default-privilege probe creates a disposable `auth.*` table as
+`bap_owner` and executes SELECT, INSERT, UPDATE, and DELETE as `bap_auth`; the
+quota test then proves that `auth.organization_quota` remains a SELECT-only
+exception, while the account-lifecycle proof keeps `bap_auth` outside schema
+`app`. A paired BFF and real resolver proof shows that a valid slug-shaped
+selector is forwarded only to the fixed service, receives a redacted 403, and
+resolves no database membership when used as an id. The full integration command
+reruns every pre-existing RLS assertion as its exit gate.
 
 PostgreSQL integration keeps the TypeScript and database slug corpus in exact
 parity. It also runs the forward reservation SQL inside a rollback-only
