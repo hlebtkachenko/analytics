@@ -843,6 +843,34 @@ export const splitEmailItemJobSchema = z
 
 export type SplitEmailItemJob = z.infer<typeof splitEmailItemJobSchema>;
 
+// The worker job that scans the blobs of a direct upload or an API-channel push before anything serves or routes them.
+export const SCAN_INBOX_ITEM_QUEUE = 'scan_inbox_item';
+
+// The route the intake decided on and deferred: absent when it asked for none, null for a target default.
+const scanRouteRuleIdSchema = inboxRuleIdentifierSchema.nullable().optional();
+
+// Identifiers only, and one of the two principals runTenantJob knows: the uploader, or the channel that pushed.
+export const scanInboxItemJobSchema = z.union([
+  z
+    .object({
+      itemId: inboxItemIdentifierSchema,
+      organizationId: z.string().trim().min(1),
+      routeRuleId: scanRouteRuleIdSchema,
+      userId: subjectIdentifierSchema,
+    })
+    .strict(),
+  z
+    .object({
+      channelId: inboxChannelIdentifierSchema,
+      itemId: inboxItemIdentifierSchema,
+      organizationId: z.string().trim().min(1),
+      routeRuleId: scanRouteRuleIdSchema,
+    })
+    .strict(),
+]);
+
+export type ScanInboxItemJob = z.infer<typeof scanInboxItemJobSchema>;
+
 // The worker job that routes one item automatically: the item, and the rule that asked or null for a target default.
 export const ROUTE_INBOX_ITEM_QUEUE = 'route_inbox_item';
 

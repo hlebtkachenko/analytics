@@ -59,6 +59,7 @@ import {
   inboxDiscardReasonSchema,
   inboxItemDetailSchema,
   isBlobQuarantined,
+  isBlobScanPending,
   isInlineMediaType,
 } from '../../../../lib/inbox/contract.ts';
 import type {
@@ -554,6 +555,11 @@ export default function InboxItemPage() {
                   </h2>
                   {previewFile === undefined ? (
                     <p>{t('inbox.noPreview')}</p>
+                  ) : isBlobScanPending(previewFile) ? (
+                    <StatusIndicator
+                      label={t('inbox.scanPending')}
+                      severity="neutral"
+                    />
                   ) : isBlobQuarantined(previewFile) ? (
                     <InlineNotification
                       hideCloseButton
@@ -600,7 +606,12 @@ export default function InboxItemPage() {
                               B)
                             </StructuredListCell>
                             <StructuredListCell>
-                              {isBlobQuarantined(file) ? (
+                              {isBlobScanPending(file) ? (
+                                <StatusIndicator
+                                  label={t('inbox.scanPending')}
+                                  severity="neutral"
+                                />
+                              ) : isBlobQuarantined(file) ? (
                                 <StatusIndicator
                                   label={t('inbox.quarantined')}
                                   severity="error"

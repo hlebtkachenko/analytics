@@ -204,6 +204,11 @@ export function isBlobQuarantined(file: InboxItemFile): boolean {
   return file.scanStatus === 'infected' || file.scanStatus === 'failed';
 }
 
+// The scan job has not answered yet, so the blob routes answer 409 blob_scan_pending until it does.
+export function isBlobScanPending(file: InboxItemFile): boolean {
+  return file.scanStatus === 'not_scanned';
+}
+
 export const providerReasonSchema = z
   .object({
     evidence: z.string().min(1).max(500),

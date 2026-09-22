@@ -458,6 +458,7 @@ beforeAll(async () => {
   service = new InboxService(repository, store, QUOTA, INTAKE_DOMAIN, {
     enqueueRerunInboxRule: async () => undefined,
     enqueueRouteInboxItem: async () => undefined,
+    enqueueScanInboxItem: async () => undefined,
     enqueueSplitEmailItem: async (job) => {
       enqueued.push(job);
     },
@@ -1232,6 +1233,7 @@ describe('inbox maintenance', () => {
     return runInboxMaintenance({
       blobs: store,
       data: {},
+      enqueueScanInboxItem: async () => undefined,
       enqueueSplitEmailItem: async (job) => {
         requeued.push(job);
       },

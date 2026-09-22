@@ -634,6 +634,7 @@ export const resources = {
         routingTargetOrganization: 'organization setting',
         routingTargetPlatform: 'platform default',
         saveHints: 'Save hints',
+        scanPending: 'Scan pending',
         senderAuthenticated: 'Sender verified by DKIM',
         senderUnverified: 'Sender not verified',
         settings: 'Settings',

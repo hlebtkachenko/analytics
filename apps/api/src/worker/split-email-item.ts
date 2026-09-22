@@ -36,6 +36,7 @@ import {
   toProviderOutput,
 } from '../inbox/providers/sniff.js';
 import type { BlobScanner } from '../scanning/clamd-client.js';
+import { recordScan, setItemStatus } from './blob-scan.js';
 import { runTenantJob } from './job-context.js';
 import type { WorkerMetrics } from './worker-metrics.js';
 
@@ -150,21 +151,6 @@ async function sha256Of(path: string): Promise<string> {
   return hash.digest('hex');
 }
 
-// The scan verdict is written by the definer and evented; an error never reaches the database so a retry sees not_scanned.
-async function recordScan(
-  transaction: PoolClient,
-  tenant: ReturnType<typeof channelTenant>,
-  itemId: string,
-  blobId: string,
-  status: 'clean' | 'infected' | 'failed',
-): Promise<void> {
-  await transaction.query('select app.record_blob_scan($1, $2)', [
-    blobId,
-    status,
-  ]);
-  await appendEvent(transaction, tenant, itemId, 'scanned');
-}
-
 // The parent's terminal updates are guarded on processing: a reaped (failed) parent is never resurrected.
 async function setStatus(
   transaction: PoolClient,
@@ -172,14 +158,8 @@ async function setStatus(
   status: string,
   expected: 'processing' | null = null,
 ): Promise<void> {
-  const updated = await transaction.query(
-    `update app.inbox_item set status = $2, updated_at = now()
-      where id = $1 and ($3::text is null or status = $3::text)`,
-    [itemId, status, expected],
-  );
-
   // The channel update policy refused the row, or the reaper failed it meanwhile: the split stops here.
-  if (updated.rowCount !== 1) {
+  if (!(await setItemStatus(transaction, itemId, status, expected))) {
     throw new SplitEmailError('item_unavailable');
   }
 }

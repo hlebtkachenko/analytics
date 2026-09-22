@@ -35,6 +35,7 @@ import type {
   InboxItemDetail,
   RerunInboxRuleJob,
   RouteInboxItemJob,
+  ScanInboxItemJob,
 } from '../inbox/contract.js';
 import { InboxService } from '../inbox/inbox.service.js';
 import {
@@ -88,6 +89,7 @@ import { createQueue, createQueueClientFromConfiguration } from './queue.js';
 import { rerunInboxRule } from './rerun-inbox-rule.js';
 import { AUTO_ROUTE_PROVIDER, routeInboxItem } from './route-inbox-item.js';
 import type { RouteInboxItemOutcome } from './route-inbox-item.js';
+import { scanInboxItem } from './scan-inbox-item.js';
 import { WorkerMetrics } from './worker-metrics.js';
 
 const postgresImage =
@@ -102,6 +104,7 @@ let boss: PgBoss;
 let directory: string;
 let store: FilesystemBlobStore;
 let service: InboxService;
+const scanJobs: ScanInboxItemJob[] = [];
 
 const owner: TenantContext = {
   organizationId: 'org-1',
@@ -183,10 +186,32 @@ function unique(bytes: Buffer): Buffer {
 async function upload(tenant: TenantContext, bytes: Buffer, name: string) {
   const path = join(store.temporaryDirectory(), `${counter}-${name}`);
   await writeFile(path, bytes);
-  return service.upload({
+  const response = await service.upload({
     ...tenant,
     ...allEntities,
     file: { originalname: name, path, size: bytes.length },
+  });
+  // The scan job stands between the intake and the route now: an upload routes only after a clean verdict.
+  await runScan(response.item.id);
+  return response;
+}
+
+// The worker's scan handler on the job the intake enqueued, against a scanner that finds nothing.
+async function runScan(itemId: string): Promise<void> {
+  const data = scanJobs.find((job) => job.itemId === itemId);
+
+  if (data === undefined) {
+    return;
+  }
+
+  await scanInboxItem({
+    blobs: store,
+    data,
+    enqueueRouteInboxItem: (job) => sendRouteInboxItem(boss, job),
+    metrics: new WorkerMetrics(),
+    pool: apiPool,
+    retry: { count: 0, limit: 3 },
+    scanner: { scan: async () => ({ outcome: 'clean' }) },
   });
 }
 
@@ -348,6 +373,9 @@ beforeAll(async () => {
       sendRerunInboxRule(boss, job),
     enqueueRouteInboxItem: (job: RouteInboxItemJob) =>
       sendRouteInboxItem(boss, job),
+    enqueueScanInboxItem: async (job) => {
+      scanJobs.push(job);
+    },
     enqueueSplitEmailItem: async () => undefined,
   });
 });
@@ -406,6 +434,7 @@ describe('route_inbox_item', () => {
         ['received', owner.userId],
         ['classified', owner.userId],
         ['rule_matched', owner.userId],
+        ['scanned', owner.userId],
         ['classified', admin.userId],
         ['routed', admin.userId],
       ]);

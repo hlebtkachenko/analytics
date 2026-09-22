@@ -9,11 +9,13 @@ import {
 import {
   RERUN_INBOX_RULE_QUEUE,
   ROUTE_INBOX_ITEM_QUEUE,
+  SCAN_INBOX_ITEM_QUEUE,
   SPLIT_EMAIL_ITEM_QUEUE,
 } from './contract.js';
 import type {
   RerunInboxRuleJob,
   RouteInboxItemJob,
+  ScanInboxItemJob,
   SplitEmailItemJob,
 } from './contract.js';
 
@@ -25,6 +27,7 @@ export const SPLIT_EMAIL_ITEM_RETRY_DELAY_SECONDS = 60;
 // The route and rerun jobs share the split's shape; every inbox queue is exclusive so the singleton key holds.
 export const INBOX_QUEUES = [
   SPLIT_EMAIL_ITEM_QUEUE,
+  SCAN_INBOX_ITEM_QUEUE,
   ROUTE_INBOX_ITEM_QUEUE,
   RERUN_INBOX_RULE_QUEUE,
 ] as const;
@@ -35,6 +38,18 @@ export async function sendSplitEmailItem(
   job: SplitEmailItemJob,
 ): Promise<void> {
   await client.send(SPLIT_EMAIL_ITEM_QUEUE, job, {
+    retryDelay: SPLIT_EMAIL_ITEM_RETRY_DELAY_SECONDS,
+    retryLimit: SPLIT_EMAIL_ITEM_RETRY_LIMIT,
+    singletonKey: job.itemId,
+  });
+}
+
+// The one way a scan job is sent, shared by the intake and the maintenance resend; one per item at a time.
+export async function sendScanInboxItem(
+  client: PgBoss,
+  job: ScanInboxItemJob,
+): Promise<void> {
+  await client.send(SCAN_INBOX_ITEM_QUEUE, job, {
     retryDelay: SPLIT_EMAIL_ITEM_RETRY_DELAY_SECONDS,
     retryLimit: SPLIT_EMAIL_ITEM_RETRY_LIMIT,
     singletonKey: job.itemId,
@@ -75,6 +90,7 @@ export async function sendRerunInboxRule(
 export abstract class InboxQueue {
   abstract enqueueRerunInboxRule(job: RerunInboxRuleJob): Promise<void>;
   abstract enqueueRouteInboxItem(job: RouteInboxItemJob): Promise<void>;
+  abstract enqueueScanInboxItem(job: ScanInboxItemJob): Promise<void>;
   abstract enqueueSplitEmailItem(job: SplitEmailItemJob): Promise<void>;
 }
 
@@ -89,6 +105,10 @@ export class PgBossInboxQueue extends InboxQueue implements OnModuleDestroy {
 
   async enqueueRouteInboxItem(job: RouteInboxItemJob): Promise<void> {
     await sendRouteInboxItem(await this.getClient(), job);
+  }
+
+  async enqueueScanInboxItem(job: ScanInboxItemJob): Promise<void> {
+    await sendScanInboxItem(await this.getClient(), job);
   }
 
   async enqueueSplitEmailItem(job: SplitEmailItemJob): Promise<void> {

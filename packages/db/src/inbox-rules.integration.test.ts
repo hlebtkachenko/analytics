@@ -341,12 +341,12 @@ describe('inbox rules', () => {
     const compatibility = await checkMigrationCompatibility(apiPool);
 
     expect(result.applied).toEqual([]);
-    expect(result.currentVersion).toBe('20260922.0008');
-    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260922.0008');
+    expect(result.currentVersion).toBe('20260922.0009');
+    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260922.0009');
     expect(compatibility).toEqual({
       compatible: true,
-      expectedVersion: '20260922.0008',
-      version: '20260922.0008',
+      expectedVersion: '20260922.0009',
+      version: '20260922.0009',
     });
 
     const functions = await rootPool.query<{

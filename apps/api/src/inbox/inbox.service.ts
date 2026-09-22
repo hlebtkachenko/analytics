@@ -42,6 +42,7 @@ import type {
   IssueInboxChannelCredentialResponse,
   ProviderOutput,
   RouteInboxItemToDocumentRequest,
+  ScanInboxItemJob,
   UpdateInboxSettingsRequest,
 } from './contract.js';
 import {
@@ -253,6 +254,39 @@ function mediaTypeOf(
   }
 
   return sniffed.mediaType;
+}
+
+// A direct upload and an API push store an unscanned blob: the scan job runs before anything serves or routes it.
+// A duplicate shares the blob row of the item that first carried it, so its verdict is already recorded.
+function scanJobFor(
+  staged: StagedIntake,
+  result: ReceiveIntakeResult,
+): ScanInboxItemJob | null {
+  const pending =
+    (staged.channelKind === 'upload' || staged.channelKind === 'api') &&
+    result.files.some((file) => file.scanStatus === 'not_scanned');
+
+  if (!pending) {
+    return null;
+  }
+
+  // The route the rule pass asked for is deferred, not dropped: the scan job sends it after a clean verdict.
+  const route =
+    result.routeJob === null ? {} : { routeRuleId: result.routeJob.ruleId };
+
+  return staged.channelId === null
+    ? {
+        ...route,
+        itemId: result.item.id,
+        organizationId: staged.organizationId,
+        userId: staged.userId,
+      }
+    : {
+        ...route,
+        channelId: staged.channelId,
+        itemId: result.item.id,
+        organizationId: staged.organizationId,
+      };
 }
 
 function toIntakeResponse(result: ReceiveIntakeResult): InboxIntakeResponse {
@@ -536,8 +570,19 @@ export class InboxService {
         storageKey,
       });
 
-      // Sent after the commit; nothing routes inside a request. A lost job leaves the item in review for a person.
-      if (result.routeJob !== null) {
+      // Sent after the commit; nothing scans or routes inside a request. A lost job is resent by the maintenance tick.
+      const scanJob = scanJobFor(staged, result);
+
+      if (scanJob !== null) {
+        try {
+          await this.queue.enqueueScanInboxItem(scanJob);
+        } catch {
+          this.logger.error(
+            `Enqueue of scan_inbox_item failed for item ${result.item.id}.`,
+          );
+        }
+      } else if (result.routeJob !== null) {
+        // A lost job leaves the item in review for a person.
         try {
           await this.queue.enqueueRouteInboxItem(result.routeJob);
         } catch {
@@ -906,9 +951,13 @@ export class InboxService {
       throw new NotFoundException();
     }
 
-    // A blob the scanner flagged, or could not scan, never leaves the store.
-    if (blob.scanStatus === 'infected' || blob.scanStatus === 'failed') {
-      throw new ConflictException('blob_quarantined');
+    // Only a clean verdict leaves the store: a flagged or unscannable blob is quarantined, an unanswered one waits.
+    if (blob.scanStatus !== 'clean') {
+      throw new ConflictException(
+        blob.scanStatus === 'not_scanned'
+          ? 'blob_scan_pending'
+          : 'blob_quarantined',
+      );
     }
 
     if (

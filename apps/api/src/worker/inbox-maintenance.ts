@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 import type { BlobStore } from '../blobs/blob-store.js';
 import { INBOX_MAINTENANCE_QUEUE } from '../inbox/contract.js';
-import type { SplitEmailItemJob } from '../inbox/contract.js';
+import type { ScanInboxItemJob, SplitEmailItemJob } from '../inbox/contract.js';
 import type { WorkerMetrics } from './worker-metrics.js';
 
 export const INBOX_MAINTENANCE_CRON = '*/15 * * * *';
@@ -36,6 +36,7 @@ export interface MaintenanceLogger {
 export interface InboxMaintenanceOptions {
   blobs: BlobStore;
   data: unknown;
+  enqueueScanInboxItem: (job: ScanInboxItemJob) => Promise<void>;
   enqueueSplitEmailItem: (job: SplitEmailItemJob) => Promise<void>;
   logger: MaintenanceLogger;
   metrics: WorkerMetrics;
@@ -47,6 +48,7 @@ export interface InboxMaintenanceReport {
   orphansRemoved: number;
   reapedItemIds: string[];
   requeuedItemIds: string[];
+  rescannedItemIds: string[];
 }
 
 // Registered once at worker boot; pg-boss keys the schedule by queue and singleton key, so a restart replaces it.
@@ -131,7 +133,43 @@ async function requeueStuckEmailItems(
   return requeued;
 }
 
-// Three tasks, each on the pool outside any tenant context; a failing task is logged and the next one still runs.
+// An upload or API item whose blob is still not_scanned past the grace period lost its scan enqueue.
+async function requeueUnscannedItems(
+  options: InboxMaintenanceOptions,
+): Promise<string[]> {
+  const stuck = await options.pool.query<{
+    channel_id: string | null;
+    created_by: string;
+    item_id: string;
+    organization_id: string;
+  }>(
+    'select item_id, channel_id, organization_id, created_by from app.list_unscanned_inbox_items($1::interval, $2)',
+    [REQUEUE_STALE, MAINTENANCE_ROW_LIMIT],
+  );
+  const requeued: string[] = [];
+
+  for (const row of stuck.rows) {
+    // A direct upload runs as its uploader; a channel push runs as the channel, the same principals the intake used.
+    await options.enqueueScanInboxItem(
+      row.channel_id === null
+        ? {
+            itemId: row.item_id,
+            organizationId: row.organization_id,
+            userId: row.created_by,
+          }
+        : {
+            channelId: row.channel_id,
+            itemId: row.item_id,
+            organizationId: row.organization_id,
+          },
+    );
+    requeued.push(row.item_id);
+  }
+
+  return requeued;
+}
+
+// Four tasks, each on the pool outside any tenant context; a failing task is logged and the next one still runs.
 export async function runInboxMaintenance(
   options: InboxMaintenanceOptions,
 ): Promise<InboxMaintenanceReport> {
@@ -141,6 +179,7 @@ export async function runInboxMaintenance(
     orphansRemoved: 0,
     reapedItemIds: [],
     requeuedItemIds: [],
+    rescannedItemIds: [],
   };
 
   const attempt = async (task: string, work: () => Promise<void>) => {
@@ -174,6 +213,9 @@ export async function runInboxMaintenance(
   await attempt('requeue_stuck_email_items', async () => {
     report.requeuedItemIds = await requeueStuckEmailItems(options);
   });
+  await attempt('requeue_unscanned_items', async () => {
+    report.rescannedItemIds = await requeueUnscannedItems(options);
+  });
 
   options.metrics.recordJob(
     INBOX_MAINTENANCE_QUEUE,
@@ -181,11 +223,11 @@ export async function runInboxMaintenance(
   );
   // Counts only on the info line; the ids at debug; never a storage key, a filename or an organization name.
   options.logger.log(
-    `Inbox maintenance tick: ${report.orphansRemoved} orphaned files removed, ${report.reapedItemIds.length} stalled items reaped, ${report.requeuedItemIds.length} email items requeued, ${report.failedTasks.length} tasks failed`,
+    `Inbox maintenance tick: ${report.orphansRemoved} orphaned files removed, ${report.reapedItemIds.length} stalled items reaped, ${report.requeuedItemIds.length} email items requeued, ${report.rescannedItemIds.length} items resent for scanning, ${report.failedTasks.length} tasks failed`,
     CONTEXT,
   );
   options.logger.debug(
-    `Inbox maintenance ids: reaped ${report.reapedItemIds.join(',')}; requeued ${report.requeuedItemIds.join(',')}`,
+    `Inbox maintenance ids: reaped ${report.reapedItemIds.join(',')}; requeued ${report.requeuedItemIds.join(',')}; rescanned ${report.rescannedItemIds.join(',')}`,
     CONTEXT,
   );
 

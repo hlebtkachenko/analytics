@@ -48,6 +48,7 @@ import { DETECTED_TYPES, inboxItemListQuerySchema } from './contract.js';
 import type {
   PutInboxRoutingTargetRequest,
   RouteInboxItemJob,
+  ScanInboxItemJob,
 } from './contract.js';
 import { InboxService } from './inbox.service.js';
 import {
@@ -133,6 +134,7 @@ let firstItemId = '';
 let firstBlobId = '';
 let documentId = '';
 const routeJobs: RouteInboxItemJob[] = [];
+const scanJobs: ScanInboxItemJob[] = [];
 
 function configurationFor(role: DatabaseRole): DatabaseConfiguration {
   return {
@@ -293,6 +295,9 @@ beforeAll(async () => {
     enqueueRerunInboxRule: async () => undefined,
     enqueueRouteInboxItem: async (job) => {
       routeJobs.push(job);
+    },
+    enqueueScanInboxItem: async (job) => {
+      scanJobs.push(job);
     },
     enqueueSplitEmailItem: async () => undefined,
   });
@@ -795,6 +800,14 @@ describe('inbox intake', () => {
   });
 
   it('serves a blob only inside the scope that sees an item carrying it', async () => {
+    // Only a clean verdict is served, so the scan job's verdict is recorded first, as the job records it.
+    await asTenant(creator, (transaction) =>
+      transaction.query('select app.record_blob_scan($1, $2)', [
+        firstBlobId,
+        'clean',
+      ]),
+    );
+
     const opened = await service.openBlob({
       ...creator,
       ...allEntities,

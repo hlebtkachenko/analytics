@@ -514,8 +514,21 @@ Migration `20260922.0008` adds
 when Mailgun's DKIM check passed and a DKIM signature domain aligns with the
 `From` domain. It is the same table, so no policy changes: every existing policy
 already covers the column, and the default leaves every earlier row and every
-non-email item not authenticated. `DATABASE_MIGRATION_COMPATIBILITY` is now
-`20260922.0008` in `packages/db/src/access.ts`.
+non-email item not authenticated. `DATABASE_MIGRATION_COMPATIBILITY` was
+`20260922.0008` after this migration.
+
+Migration `20260922.0009` adds
+`app.list_unscanned_inbox_items(stale, max_rows)`, a fourth organization-less
+maintenance definer owned by `bap_owner` with EXECUTE to `bap_api`. It raises
+`insufficient_privilege` inside a tenant context, exactly like
+`app.list_stuck_email_items`, and returns the identifiers of the `upload` and
+`api` inbox items past the requeue window whose blob is `not_scanned` and whose
+status is neither `discarded` nor `failed`, so the worker tick can resend their
+`scan_inbox_item` job. It also adds `inbox_item_file_maintenance_select`, a
+SELECT-only policy admitting `bap_owner` to the item to blob link, which the
+definer needs under `FORCE` row level security and which no earlier maintenance
+policy covered. `DATABASE_MIGRATION_COMPATIBILITY` is now `20260922.0009` in
+`packages/db/src/access.ts`.
 
 ## Tenant policy contract
 

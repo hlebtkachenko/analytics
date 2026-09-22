@@ -15,11 +15,13 @@ import {
   INBOX_MAINTENANCE_QUEUE,
   RERUN_INBOX_RULE_QUEUE,
   ROUTE_INBOX_ITEM_QUEUE,
+  SCAN_INBOX_ITEM_QUEUE,
   SPLIT_EMAIL_ITEM_QUEUE,
 } from './inbox/contract.js';
 import {
   sendRerunInboxRule,
   sendRouteInboxItem,
+  sendScanInboxItem,
   sendSplitEmailItem,
 } from './inbox/inbox-queue.js';
 import { INGEST_DATASET_QUEUE } from './ingestion/contract.js';
@@ -39,6 +41,7 @@ import { ingestDataset } from './worker/ingest-dataset.js';
 import { curateJobFailure } from './worker/job-failure.js';
 import { rerunInboxRule } from './worker/rerun-inbox-rule.js';
 import { routeInboxItem } from './worker/route-inbox-item.js';
+import { scanInboxItem } from './worker/scan-inbox-item.js';
 import { splitEmailItem } from './worker/split-email-item.js';
 import { summarizeDataset } from './worker/summarize-dataset.js';
 import { startObservabilityServer } from './worker/observability.js';
@@ -107,6 +110,12 @@ async function bootstrap(): Promise<void> {
   await createQueue(
     queue,
     SPLIT_EMAIL_ITEM_QUEUE,
+    { policy: 'exclusive' },
+    warnQueue,
+  );
+  await createQueue(
+    queue,
+    SCAN_INBOX_ITEM_QUEUE,
     { policy: 'exclusive' },
     warnQueue,
   );
@@ -222,6 +231,31 @@ async function bootstrap(): Promise<void> {
     },
   );
 
+  // A direct upload and an API push are scanned here; the bytes are already stored, so a few run side by side.
+  await queue.work<
+    unknown,
+    void,
+    { includeMetadata: true; localConcurrency: 2 }
+  >(
+    SCAN_INBOX_ITEM_QUEUE,
+    { includeMetadata: true, localConcurrency: 2 },
+    async (jobs) => {
+      for (const job of jobs) {
+        await runJob(() =>
+          scanInboxItem({
+            blobs,
+            data: job.data,
+            enqueueRouteInboxItem: (route) => sendRouteInboxItem(queue, route),
+            metrics,
+            pool,
+            retry: { count: job.retryCount, limit: job.retryLimit },
+            scanner,
+          }),
+        );
+      }
+    },
+  );
+
   // The platform's first cron: one organization-less tick every quarter hour, never through runTenantJob.
   await scheduleInboxMaintenance(queue);
   await queue.work<unknown, void, { localConcurrency: 1 }>(
@@ -233,6 +267,7 @@ async function bootstrap(): Promise<void> {
           await runInboxMaintenance({
             blobs,
             data: job.data,
+            enqueueScanInboxItem: (scan) => sendScanInboxItem(queue, scan),
             enqueueSplitEmailItem: (split) => sendSplitEmailItem(queue, split),
             logger,
             metrics,
