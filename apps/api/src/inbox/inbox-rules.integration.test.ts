@@ -38,6 +38,7 @@ import {
 import type {
   PutInboxRoutingTargetRequest,
   RouteInboxItemJob,
+  ScanInboxItemJob,
 } from './contract.js';
 import { InboxService } from './inbox.service.js';
 import { sendRouteInboxItem } from './inbox-queue.js';
@@ -102,6 +103,7 @@ let boss: PgBoss;
 let directory: string;
 let store: FilesystemBlobStore;
 let service: InboxService;
+const scanJobs: ScanInboxItemJob[] = [];
 
 const owner: TenantContext = {
   organizationId: 'org-1',
@@ -292,6 +294,9 @@ beforeAll(async () => {
     enqueueRerunInboxRule: async () => undefined,
     enqueueRouteInboxItem: (job: RouteInboxItemJob) =>
       sendRouteInboxItem(boss, job),
+    enqueueScanInboxItem: async (job) => {
+      scanJobs.push(job);
+    },
     enqueueSplitEmailItem: async () => undefined,
   });
 });

@@ -34,6 +34,7 @@ import type {
   InboxItem,
   InboxItemDetail,
   ProviderInput,
+  ScanInboxItemJob,
   SplitEmailItemJob,
 } from './contract.js';
 import { applyHints, InboxService } from './inbox.service.js';
@@ -132,12 +133,19 @@ describe('InboxService', () => {
   const extractions: RecordExtractionInput[] = [];
   const routed: RouteToDocumentInput[] = [];
   const enqueued: SplitEmailItemJob[] = [];
+  const scanned: ScanInboxItemJob[] = [];
   const settingsUpdates: UpdateInboxSettingsInput[] = [];
   let enqueueFails = false;
   let providerItem: Partial<typeof item> = {};
   const queue = {
     enqueueRerunInboxRule: vi.fn(async () => undefined),
     enqueueRouteInboxItem: vi.fn(async () => undefined),
+    enqueueScanInboxItem: vi.fn(async (job: ScanInboxItemJob) => {
+      if (enqueueFails) {
+        throw new Error('queue down');
+      }
+      scanned.push(job);
+    }),
     enqueueSplitEmailItem: vi.fn(async (job: SplitEmailItemJob) => {
       if (enqueueFails) {
         throw new Error('queue down');

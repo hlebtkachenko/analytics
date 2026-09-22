@@ -249,6 +249,7 @@ beforeAll(async () => {
   service = new InboxService(repository, store, QUOTA, INTAKE_DOMAIN, {
     enqueueRerunInboxRule: async () => undefined,
     enqueueRouteInboxItem: async () => undefined,
+    enqueueScanInboxItem: async () => undefined,
     enqueueSplitEmailItem: async (job) => {
       enqueued.push(job);
     },
