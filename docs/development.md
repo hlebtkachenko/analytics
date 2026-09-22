@@ -182,11 +182,12 @@ strings, and tests, is [Adding a product page](product-pages.md). In short:
   shows them too, under **BAP Extensions**. See
   [the blocks README](../packages/design-system/src/blocks/README.md).
 - Breadcrumbs are derived from the route segments by the layout. Give a new
-  segment a human label in `moduleLabels` in
-  `apps/web/src/components/shell/breadcrumb-trail.ts`.
+  segment a `shell.nav.*` string in `apps/web/src/i18n/resources.ts` and its key
+  in `moduleLabelKeys` in `apps/web/src/components/shell/breadcrumb-trail.ts`.
 - Adding a new top-level segment (a direct child of `(product)`, for example
   `/reports`) also requires adding that segment to `reservedOrganizationSlugs`
-  in `apps/web/src/lib/organizations/slug.ts`, an entry in `railDestinations` in
+  in `packages/db/src/organization-slug.ts` (exported as
+  `@bap/db/organization-slug`), an entry in `railDestinations` in
   `apps/web/src/components/shell/product-navigation.ts`, and a row in
   [the route table](application-routes.md), all in the same change, so the
   segment can never collide with an organization slug and stays discoverable.

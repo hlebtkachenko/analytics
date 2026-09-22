@@ -53,7 +53,12 @@ Add one entry to `railDestinations` in
 `apps/web/src/components/shell/product-navigation.ts`:
 
 ```ts
-{ href: '/documents', icon: Document, label: 'Documents', route: 'documents' },
+{
+  href: '/documents',
+  icon: Document,
+  labelKey: 'shell.nav.documents',
+  route: 'documents',
+},
 ```
 
 The shell renders the rail, the active state, and the workspace section straight
@@ -65,26 +70,27 @@ Add the new label to the rail assertion in
 
 ## 4. Give the segment a breadcrumb label
 
-Add a top-level segment to `moduleLabels` in
+Add the visible string to `shell.nav` in `apps/web/src/i18n/resources.ts`, then
+map the top-level segment to its key in `moduleLabelKeys` in
 `apps/web/src/components/shell/breadcrumb-trail.ts`, for example
-`documents: 'Documents'`. The layout derives the trail from the route segments
-and shows ancestors only.
+`documents: 'shell.nav.documents'`. The layout derives the trail from the route
+segments and shows ancestors only.
 
 Child labels are scoped by the parent module, because the same segment means
 different things under different modules: `/documents/new` reads `New document`
-while `/workspaces/new` reads `Create workspace`. Name a child in `childLabels`
-under its parent, not in `moduleLabels`:
+while `/workspaces/new` reads `Create workspace`. Name a child in
+`childLabelKeys` under its parent, not in `moduleLabelKeys`:
 
 ```ts
-const childLabels = {
-  documents: { new: 'New document' },
+const childLabelKeys = {
+  documents: { new: 'shell.nav.documentsNew' },
 };
 ```
 
 A dynamic segment carries an opaque identifier, which must never reach the
-trail. Give its parent an entry in `childFallbacks`, for example
-`documents: 'Document'`, so an unknown child renders that label instead of the
-raw value. Cover both in `breadcrumb-trail.test.ts`.
+trail. Give its parent an entry in `childFallbackKeys`, for example
+`documents: 'shell.nav.singleDocument'`, so an unknown child renders that label
+instead of the raw value. Cover both in `breadcrumb-trail.test.ts`.
 
 A whole-app destination in `railDestinations` is already in the header search
 index, which `global-search.tsx` builds from the rail destinations, the
@@ -116,14 +122,17 @@ Then update `apps/web/src/components/icon-contract.test.tsx`:
 A top-level segment must never collide with an organization slug. Change all
 three in the same pull request:
 
-- `reservedOrganizationSlugs` in `apps/web/src/lib/organizations/slug.ts`,
-  appended at the end in the same order as the database check constraint.
+- `reservedOrganizationSlugs` in `packages/db/src/organization-slug.ts`
+  (exported as `@bap/db/organization-slug`), appended at the end in the same
+  order as the database check constraint.
 - The literal list in `apps/web/src/lib/organizations/slug.test.ts`.
 - A `{ "slug": "<segment>", "valid": false }` row in
   `tests/fixtures/organization-slugs.json`, the corpus shared with the database.
 
 The database migration that appends the same value to
-`organization_slug_reserved_check` belongs to the same change.
+`organization_slug_reserved_check` belongs to the same change. The `packages/db`
+integration test `postgres.integration.test.ts` asserts that the list and the
+constraint stay in parity, so a missing migration fails `pnpm test:integration`.
 
 ## 7. Add the data path: contract mirror, BFF function, fixed route
 
