@@ -711,7 +711,9 @@ export function DataGrid(props: DataGridProps) {
       )}
       <TableToolbarContent>
         {search && (
+          // Name the search landmark from the title so multi-grid pages stay unique
           <TableToolbarSearch
+            labelText={title === undefined ? 'Search rows' : `Search ${title}`}
             onChange={(event) =>
               handleSearch(typeof event === 'string' ? '' : event.target.value)
             }

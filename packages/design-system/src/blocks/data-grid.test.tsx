@@ -68,6 +68,26 @@ describe('DataGrid', () => {
     expect(screen.queryByText('beta')).not.toBeInTheDocument();
   });
 
+  it('names each search landmark from its grid title', () => {
+    render(
+      <>
+        <DataGrid columns={columns} rows={rows} search title="My workspaces" />
+        <DataGrid
+          columns={columns}
+          rows={rows}
+          search
+          title="Joined workspaces"
+        />
+      </>,
+    );
+    expect(screen.getAllByRole('search')).toHaveLength(2);
+    expect(
+      screen.getByRole('search', { name: 'Search My workspaces' }),
+    ).not.toBe(
+      screen.getByRole('search', { name: 'Search Joined workspaces' }),
+    );
+  });
+
   it('reports multi selection changes', () => {
     const onSelectionChange = vi.fn();
     render(

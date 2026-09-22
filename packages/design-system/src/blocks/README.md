@@ -64,7 +64,8 @@ Everything is off by default; turn on only what the page needs.
 - Selection: `selection` (`none`/`single`/`multi`), `batchActions` (text-only,
   needs `multi`), `selectAllScope` (`page`/`all`), `onSelectionChange`.
 - Search: `search`, `searchPlacement` (`toolbar`/`persistent`). Pass `onSearch`
-  to switch client filtering to server search.
+  to switch client filtering to server search. The search landmark is labelled
+  from the grid `title`, so several grids on one page stay distinguishable.
 - Faceted filter: `filters` (`GridFilterGroup[]`) renders a toolbar funnel with
   a count badge over a staged checkbox popover (Reset/Apply). A row passes when,
   for each group with a selection, `String(row[group.key])` is in that
