@@ -292,7 +292,7 @@ and grants are otherwise table level and unchanged.
 `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
 `20260915.0001` after this migration.
 
-Migration `20260916.0001` adds the Inbox intake tables of ADR 0014 and ADR 0015:
+Migration `20260916.0002` adds the Inbox intake tables of ADR 0014 and ADR 0015:
 `app.blob` (content addressed per organization, unique on
 `(organization_id, sha256)`), `app.inbox_item` (the intake envelope, with a
 nullable `legal_entity_id`, typed destination columns `document_id`,
@@ -313,7 +313,7 @@ SELECT. The eraser gains column grants on `blob.created_by`,
 tombstones all 7. The migration reserves the `inbox` organization slug with the
 guard-then-replace pattern, bringing `organization_slug_reserved_check` to 18
 literals. `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
-`20260916.0001` after this migration.
+`20260916.0002` after this migration.
 
 Migration `20260917.0001` adds the channel principal of ADR 0016. `bap.role`
 gains the value `channel`, which is not a membership role: a channel runs as

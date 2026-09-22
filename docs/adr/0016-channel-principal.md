@@ -22,7 +22,7 @@ than manual upload. Today no non-human actor can write tenant data.
 - Every tenant INSERT policy requires
   `created_by = current_setting('bap.user_id')` and `app.role_can_write()`
   (`packages/db/drizzle/20260914.0002_documents.sql:622-627`,
-  `packages/db/drizzle/20260916.0001_inbox.sql:375-380`), and
+  `packages/db/drizzle/20260916.0002_inbox.sql:375-380`), and
   `app.role_can_write()` is `bap.role IN ('owner', 'admin')`
   (`packages/db/drizzle/20260910.0001_legal_entities.sql:75-82`).
 

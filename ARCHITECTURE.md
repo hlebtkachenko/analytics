@@ -173,7 +173,7 @@ legal entities, and `app.directive_account` carries no tenant column at all,
 because the shared chart of accounts is identical for every organization. See
 [documents](docs/documents.md) for the full model.
 
-Migration `20260916.0001` adds the Inbox and the durable blob register on the
+Migration `20260916.0002` adds the Inbox and the durable blob register on the
 same tenancy shape: `app.blob`, `app.inbox_item`, `app.inbox_item_file`,
 `app.inbox_item_extraction`, `app.inbox_event`, and `app.document_file` each
 carry `organization_id` for row level security, and `app.inbox_item` carries a
