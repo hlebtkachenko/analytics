@@ -115,6 +115,12 @@ async function bootstrap(): Promise<void> {
   );
   await createQueue(
     queue,
+    SCAN_INBOX_ITEM_QUEUE,
+    { policy: 'exclusive' },
+    warnQueue,
+  );
+  await createQueue(
+    queue,
     INBOX_MAINTENANCE_QUEUE,
     { policy: 'exclusive' },
     warnQueue,
