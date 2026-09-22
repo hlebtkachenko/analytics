@@ -16,9 +16,11 @@ const expectedNames = [
   'DataSet',
   'Document',
   'DocumentAdd',
+  'DotMark',
   'Download',
   'Email',
   'Enterprise',
+  'ErrorFilled',
   'Filter',
   'Help',
   'InformationFilled',
@@ -38,6 +40,7 @@ const expectedNames = [
   'UserFollow',
   'UserMultiple',
   'View',
+  'WarningFilled',
 ] as const;
 
 afterEach(cleanup);

@@ -326,9 +326,11 @@ describe('Carbon catalog', () => {
       'DataSet',
       'Document',
       'DocumentAdd',
+      'DotMark',
       'Download',
       'Email',
       'Enterprise',
+      'ErrorFilled',
       'Filter',
       'Help',
       'InformationFilled',
@@ -348,6 +350,7 @@ describe('Carbon catalog', () => {
       'UserFollow',
       'UserMultiple',
       'View',
+      'WarningFilled',
     ]);
     expect(facadeKeys(bapPictograms)).toEqual(
       facadeEsmKeys('@carbon/pictograms-react'),

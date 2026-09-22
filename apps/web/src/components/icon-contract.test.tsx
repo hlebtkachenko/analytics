@@ -56,6 +56,12 @@ const reviewedImports = {
     'Switcher',
     'UserAvatar',
   ],
+  'components/status-indicator.tsx': [
+    'CheckmarkFilled',
+    'DotMark',
+    'ErrorFilled',
+    'WarningFilled',
+  ],
   'lib/notifications/severity.tsx': ['CheckmarkFilled', 'InformationFilled'],
 } as const;
 
@@ -631,6 +637,50 @@ describe('Carbon application icon AST contract', () => {
         attributes: { size: '{20}' },
         file: 'components/shell/product-shell.tsx',
         icon: 'Switcher',
+        selfClosing: true,
+      },
+      {
+        attributes: {
+          'aria-hidden': 'true',
+          className: '{styles.success!}',
+          focusable: 'false',
+          size: '{16}',
+        },
+        file: 'components/status-indicator.tsx',
+        icon: 'CheckmarkFilled',
+        selfClosing: true,
+      },
+      {
+        attributes: {
+          'aria-hidden': 'true',
+          className: '{styles.warning!}',
+          focusable: 'false',
+          size: '{16}',
+        },
+        file: 'components/status-indicator.tsx',
+        icon: 'WarningFilled',
+        selfClosing: true,
+      },
+      {
+        attributes: {
+          'aria-hidden': 'true',
+          className: '{styles.error!}',
+          focusable: 'false',
+          size: '{16}',
+        },
+        file: 'components/status-indicator.tsx',
+        icon: 'ErrorFilled',
+        selfClosing: true,
+      },
+      {
+        attributes: {
+          'aria-hidden': 'true',
+          className: '{styles.neutral!}',
+          focusable: 'false',
+          size: '{16}',
+        },
+        file: 'components/status-indicator.tsx',
+        icon: 'DotMark',
         selfClosing: true,
       },
       {

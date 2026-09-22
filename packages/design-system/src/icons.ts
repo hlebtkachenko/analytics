@@ -12,9 +12,11 @@ export {
   DataSet,
   Document,
   DocumentAdd,
+  DotMark,
   Download,
   Email,
   Enterprise,
+  ErrorFilled,
   Filter,
   Help,
   InformationFilled,
@@ -34,4 +36,5 @@ export {
   UserFollow,
   UserMultiple,
   View,
+  WarningFilled,
 } from '@carbon/icons-react';

@@ -1,0 +1,24 @@
+// Carbon icon indicator: icon and label on one line, left-aligned, able to
+// shrink inside a narrow table cell.
+.indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-inline-size: 0;
+}
+
+.success {
+  color: var(--cds-support-success);
+}
+
+.warning {
+  color: var(--cds-support-warning);
+}
+
+.error {
+  color: var(--cds-support-error);
+}
+
+.neutral {
+  color: var(--cds-icon-secondary);
+}
