@@ -27,6 +27,7 @@ export type {
   SearchPlacement,
   SelectionMode,
   SortDirection,
+  SortMode,
   SortSpec,
   ToolbarAction,
   TreeDataGridProps,

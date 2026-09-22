@@ -1,15 +1,7 @@
 'use client';
 
-import {
-  DataTable,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@bap/design-system/react';
+import { DataGrid } from '@bap/design-system/blocks';
+import type { GridColumn, GridRow } from '@bap/design-system/blocks';
 import { useTranslation } from 'react-i18next';
 
 import type {
@@ -35,14 +27,14 @@ function cellText(value: DatasetCell | undefined): string {
 
 export function DatasetTable({ columns, rows }: DatasetTableProps) {
   const { t } = useTranslation();
-  const headers = [
+  const gridColumns: readonly GridColumn[] = [
     { header: t('datasets.rowNumber'), key: 'rowNumber' },
     ...columns.map((column) => ({
       header: column.name,
       key: columnKey(column),
     })),
   ];
-  const tableRows = rows.map((row) => ({
+  const gridRows: readonly GridRow[] = rows.map((row) => ({
     ...Object.fromEntries(
       columns.map((column) => [
         columnKey(column),
@@ -54,34 +46,12 @@ export function DatasetTable({ columns, rows }: DatasetTableProps) {
   }));
 
   return (
-    <DataTable headers={headers} rows={tableRows} size="sm">
-      {({ getTableProps, headers: renderedHeaders, rows: renderedRows }) => (
-        <TableContainer
-          description={t('datasets.rowsDescription')}
-          title={t('datasets.rowsTitle')}
-        >
-          <Table {...getTableProps()} aria-label={t('datasets.rowsTitle')}>
-            <TableHead>
-              <TableRow>
-                {renderedHeaders.map((header) => (
-                  <TableHeader key={header.key} scope="col">
-                    {header.header}
-                  </TableHeader>
-                ))}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {renderedRows.map((row) => (
-                <TableRow key={row.id}>
-                  {row.cells.map((cell) => (
-                    <TableCell key={cell.id}>{String(cell.value)}</TableCell>
-                  ))}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      )}
-    </DataTable>
+    <DataGrid
+      columns={gridColumns}
+      description={t('datasets.rowsDescription')}
+      rows={gridRows}
+      size="sm"
+      title={t('datasets.rowsTitle')}
+    />
   );
 }

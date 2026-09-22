@@ -65,6 +65,58 @@ describe('DataGrid', () => {
     expect(bodyRowText().at(-1)).toContain('beta');
   });
 
+  it('reports the next sort spec without reordering rows in server mode', () => {
+    const onSortChange = vi.fn();
+    render(
+      <DataGrid
+        columns={columns}
+        onSortChange={onSortChange}
+        rows={rows}
+        sortMode="server"
+        sortable
+      />,
+    );
+    fireEvent.click(screen.getByText('Score'));
+    expect(onSortChange).toHaveBeenCalledWith([
+      { key: 'score', direction: 'ASC' },
+    ]);
+    expect(bodyRowText()[0]).toContain('beta');
+  });
+
+  it('cycles the controlled server sort through descending and cleared', () => {
+    const onSortChange = vi.fn();
+    const { rerender } = render(
+      <DataGrid
+        columns={columns}
+        onSortChange={onSortChange}
+        rows={rows}
+        sort={[{ key: 'score', direction: 'ASC' }]}
+        sortMode="server"
+        sortable
+      />,
+    );
+    expect(screen.getByText('Score').closest('th')).toHaveAttribute(
+      'aria-sort',
+      'ascending',
+    );
+    fireEvent.click(screen.getByText('Score'));
+    expect(onSortChange).toHaveBeenLastCalledWith([
+      { key: 'score', direction: 'DESC' },
+    ]);
+    rerender(
+      <DataGrid
+        columns={columns}
+        onSortChange={onSortChange}
+        rows={rows}
+        sort={[{ key: 'score', direction: 'DESC' }]}
+        sortMode="server"
+        sortable
+      />,
+    );
+    fireEvent.click(screen.getByText('Score'));
+    expect(onSortChange).toHaveBeenLastCalledWith([]);
+  });
+
   it('filters rows with the client search', () => {
     render(<DataGrid columns={columns} rows={rows} search />);
     fireEvent.change(screen.getByPlaceholderText('Search rows'), {
@@ -254,6 +306,30 @@ describe('DataGrid', () => {
     expect(screen.getByText('Nothing here')).toBeInTheDocument();
   });
 
+  it('announces the error state through an alert', () => {
+    render(
+      <DataGrid
+        columns={columns}
+        errorLabel="Rows went missing"
+        rows={[]}
+        state="error"
+      />,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent('Rows went missing');
+  });
+
+  it('places the given placeholder in the search field', () => {
+    render(
+      <DataGrid
+        columns={columns}
+        rows={rows}
+        search
+        searchPlaceholder="Search documents"
+      />,
+    );
+    expect(screen.getByPlaceholderText('Search documents')).toBeInTheDocument();
+  });
+
   it('marks its root so it shrinks inside a grid or flex parent', () => {
     const { container } = render(<DataGrid columns={columns} rows={rows} />);
     const root = container.firstElementChild as HTMLElement;
@@ -283,6 +359,33 @@ describe('DataGrid', () => {
     const body = bodyRowText();
     expect(body).toHaveLength(1);
     expect(body[0]).toContain('alpha');
+  });
+
+  it('leaves rows untouched and reports the applied values in server mode', () => {
+    const onFilterChange = vi.fn();
+    render(
+      <DataGrid
+        columns={columns}
+        filters={[
+          {
+            heading: 'Name',
+            key: 'name',
+            options: [
+              { id: 'alpha', label: 'Alpha' },
+              { id: 'beta', label: 'Beta' },
+            ],
+          },
+        ]}
+        filterValues={{ name: [] }}
+        onFilterChange={onFilterChange}
+        rows={rows}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Alpha' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(onFilterChange).toHaveBeenCalledWith({ name: ['alpha'] });
+    expect(bodyRowText()).toHaveLength(3);
   });
 
   it('shows the count of applied filter selections in the badge', () => {

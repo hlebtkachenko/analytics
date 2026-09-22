@@ -12,6 +12,7 @@ export type SelectionMode = 'none' | 'single' | 'multi';
 export type GridState = 'ready' | 'loading' | 'empty' | 'error';
 export type SearchPlacement = 'toolbar' | 'persistent';
 export type PaginationMode = 'client' | 'server';
+export type SortMode = 'client' | 'server';
 export type LoadingMode = 'skeleton' | 'overlay';
 
 // One active sort key; the list models single or multi column sort.
@@ -104,6 +105,11 @@ export type DataGridProps = Readonly<{
   initialSort?: readonly SortSpec[];
   // Fixed sort renders the order without interactive headers.
   lockSort?: boolean;
+  // Server mode leaves row order to the caller and only reports header clicks.
+  sortMode?: SortMode;
+  // Controlled sort specs for server mode; the grid never owns them there.
+  sort?: readonly SortSpec[];
+  onSortChange?: (sort: readonly SortSpec[]) => void;
 
   // Selection and bulk actions.
   selection?: SelectionMode;
@@ -116,6 +122,8 @@ export type DataGridProps = Readonly<{
   // Search.
   search?: boolean;
   searchPlacement?: SearchPlacement;
+  // Placeholder for the search field; defaults to a generic one.
+  searchPlaceholder?: string;
   // Controlled value plus handler switches client filtering to server search.
   searchValue?: string;
   onSearch?: (query: string) => void;

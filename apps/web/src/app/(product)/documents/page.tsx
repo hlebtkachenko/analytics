@@ -1,31 +1,24 @@
 'use client';
 
+import { DataGrid } from '@bap/design-system/blocks';
+import type {
+  GridColumn,
+  GridFilterGroup,
+  GridRow,
+  SortSpec,
+  ToolbarAction,
+} from '@bap/design-system/blocks';
 import { DocumentAdd } from '@bap/design-system/icons';
 import {
   Button,
   ComboBox,
-  DataTable,
-  DataTableSkeleton,
   DatePicker,
   DatePickerInput,
   InlineNotification,
   Layer,
-  MultiSelect,
-  OverflowMenu,
-  OverflowMenuItem,
-  Pagination,
+  Link,
   Select,
   SelectItem,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableHeader,
-  TableRow,
-  TableToolbar,
-  TableToolbarContent,
-  TableToolbarSearch,
   Tag,
   Tile,
 } from '@bap/design-system/react';
@@ -75,6 +68,8 @@ type LoadState = 'error' | 'idle' | 'loading';
 const allEntitiesValue = '';
 const searchDebounceMs = 300;
 const pageSizes = [25, 50, 100];
+const defaultSort: DocumentSort = 'documentDate';
+const defaultOrder: DocumentOrder = 'desc';
 const sortableColumns: readonly DocumentSort[] = [
   'reference',
   'title',
@@ -86,17 +81,24 @@ function isSortable(key: string): key is DocumentSort {
   return (sortableColumns as readonly string[]).includes(key);
 }
 
-// The stored filters are read from the URL, so a reload or a shared link reopens the same view.
-function storedKinds(value: string | null): DocumentKind[] {
-  const parsed = z.array(documentKindSchema).safeParse(value?.split(',') ?? []);
+// Both the URL and the grid filter panel hand back plain strings to validate.
+function asKinds(values: readonly string[]): DocumentKind[] {
+  const parsed = z.array(documentKindSchema).safeParse(values);
   return parsed.success ? parsed.data : [];
 }
 
-function storedStatuses(value: string | null): DocumentStatus[] {
-  const parsed = z
-    .array(documentStatusSchema)
-    .safeParse(value?.split(',') ?? []);
+function asStatuses(values: readonly string[]): DocumentStatus[] {
+  const parsed = z.array(documentStatusSchema).safeParse(values);
   return parsed.success ? parsed.data : [];
+}
+
+// The stored filters are read from the URL, so a reload or a shared link reopens the same view.
+function storedKinds(value: string | null): DocumentKind[] {
+  return asKinds(value?.split(',') ?? []);
+}
+
+function storedStatuses(value: string | null): DocumentStatus[] {
+  return asStatuses(value?.split(',') ?? []);
 }
 
 function storedPage(value: string | null): number {
@@ -145,10 +147,10 @@ export default function DocumentsPage() {
     storedPageSize(searchParams.get('pageSize')),
   );
   const [sort, setSort] = useState<DocumentSort>(() =>
-    documentSortSchema.catch('documentDate').parse(searchParams.get('sort')),
+    documentSortSchema.catch(defaultSort).parse(searchParams.get('sort')),
   );
   const [order, setOrder] = useState<DocumentOrder>(() =>
-    documentOrderSchema.catch('desc').parse(searchParams.get('order')),
+    documentOrderSchema.catch(defaultOrder).parse(searchParams.get('order')),
   );
   const [result, setResult] = useState<ListResult>();
 
@@ -294,32 +296,135 @@ export default function DocumentsPage() {
       (accessState === 'loading' || listState === 'loading'));
   const failed = organization.state === 'error' || listState === 'error';
 
-  const headers = [
-    { header: t('documents.columnReference'), key: 'reference' },
-    { header: t('documents.columnTitle'), key: 'title' },
-    { header: t('documents.columnKind'), key: 'kind' },
-    { header: t('documents.columnDate'), key: 'documentDate' },
+  const columns: readonly GridColumn[] = [
+    {
+      header: t('documents.columnReference'),
+      key: 'reference',
+      sortable: true,
+    },
+    { header: t('documents.columnTitle'), key: 'title', sortable: true },
+    {
+      header: t('documents.columnKind'),
+      key: 'kind',
+      renderCell: (row) => (
+        <Tag size="sm" type="outline">
+          {t(documentKindLabelKeys[row['kind'] as DocumentKind])}
+        </Tag>
+      ),
+    },
+    {
+      header: t('documents.columnDate'),
+      key: 'documentDate',
+      sortable: true,
+    },
     { header: t('documents.columnPartner'), key: 'partnerName' },
-    { header: t('documents.columnTotal'), key: 'totalAmount' },
+    {
+      align: 'end',
+      header: t('documents.columnTotal'),
+      key: 'totalAmount',
+      sortable: true,
+    },
     { header: t('documents.columnCurrency'), key: 'currencyCode' },
-    { header: t('documents.columnStatus'), key: 'status' },
-    { header: t('documents.columnBalanced'), key: 'balanced' },
-    { header: t('documents.columnIssues'), key: 'issues' },
-    { header: t('documents.columnActions'), key: 'actions' },
+    {
+      header: t('documents.columnStatus'),
+      key: 'status',
+      renderCell: (row) => {
+        const status = row['status'] as DocumentStatus;
+        return (
+          <StatusIndicator
+            label={t(documentStatusLabelKeys[status])}
+            severity={documentStatusSeverity[status]}
+          />
+        );
+      },
+    },
+    {
+      header: t('documents.columnBalanced'),
+      key: 'balanced',
+      renderCell: (row) => {
+        const balanced = row['balanced'];
+        if (balanced === null || balanced === undefined) {
+          return t('documents.notAvailable');
+        }
+        return (
+          <StatusIndicator
+            label={t(
+              balanced ? 'documents.balancedYes' : 'documents.balancedNo',
+            )}
+            severity={balanced ? 'success' : 'error'}
+          />
+        );
+      },
+    },
+    { align: 'end', header: t('documents.columnIssues'), key: 'issues' },
+    {
+      header: t('documents.columnActions'),
+      key: 'actions',
+      renderCell: (row) => (
+        <Link href={documentHref(row.id)}>
+          {t('documents.viewNamed', { title: String(row['title']) })}
+        </Link>
+      ),
+    },
   ];
 
-  // The body renders the documents directly, so the table only needs their identities.
-  const rows = documents.map((document) => ({ id: document.id }));
+  // Kind and status stay raw so the grid filter matches them; labels come from renderCell.
+  const rows: readonly GridRow[] = documents.map((document) => ({
+    balanced: document.isBalanced,
+    currencyCode: document.currencyCode,
+    documentDate: document.documentDate,
+    id: document.id,
+    issues: document.openIssueCount,
+    kind: document.kind,
+    partnerName: document.partnerName ?? t('documents.notAvailable'),
+    reference: document.reference ?? t('documents.notAvailable'),
+    status: document.status,
+    title: document.title,
+    totalAmount:
+      document.totalAmount === null
+        ? t('documents.notAvailable')
+        : formatAmount(document.totalAmount, document.currencyCode),
+  }));
 
-  function sortBy(key: string): void {
-    if (!isSortable(key)) {
-      return;
-    }
-    if (sort === key) {
-      setOrder(order === 'asc' ? 'desc' : 'asc');
+  const filterGroups: readonly GridFilterGroup[] = [
+    {
+      heading: t('documents.filterKind'),
+      key: 'kind',
+      options: documentKindSchema.options.map((kind) => ({
+        id: kind,
+        label: t(documentKindLabelKeys[kind]),
+      })),
+    },
+    {
+      heading: t('documents.filterStatus'),
+      key: 'status',
+      options: documentStatusSchema.options.map((status) => ({
+        id: status,
+        label: t(documentStatusLabelKeys[status]),
+      })),
+    },
+  ];
+
+  const toolbarActions: readonly ToolbarAction[] = filtered
+    ? [
+        {
+          id: 'clear-filters',
+          kind: 'ghost',
+          label: t('documents.clearFilters'),
+          onClick: clearFilters,
+        },
+      ]
+    : [];
+
+  // The register is always sorted, so a cleared header falls back to the default order.
+  function sortBy(specs: readonly SortSpec[]): void {
+    const spec = specs[0];
+    if (spec === undefined || !isSortable(spec.key)) {
+      setSort(defaultSort);
+      setOrder(defaultOrder);
     } else {
-      setSort(key);
-      setOrder('desc');
+      setSort(spec.key);
+      setOrder(spec.direction === 'ASC' ? 'asc' : 'desc');
     }
     setPage(1);
   }
@@ -383,14 +488,6 @@ export default function DocumentsPage() {
           title={t('documents.denied')}
         />
       ) : null}
-      {failed ? (
-        <InlineNotification
-          kind="error"
-          lowContrast
-          role="alert"
-          title={t('documents.error')}
-        />
-      ) : null}
       {organization.organizations.length > 0 ? (
         <Select
           id="documents-organization"
@@ -442,229 +539,90 @@ export default function DocumentsPage() {
           </section>
         </Layer>
       ) : null}
-      {loading ? (
-        <DataTableSkeleton
-          aria-label={t('documents.loading')}
-          columnCount={headers.length}
-          rowCount={5}
-          showHeader={false}
-          showToolbar={false}
+      <ComboBox
+        className={styles.filter!}
+        id="documents-partner"
+        items={partners}
+        itemToString={(item) => item?.name ?? ''}
+        onChange={(change) => {
+          setPartnerId(change.selectedItem?.id ?? '');
+          setPage(1);
+        }}
+        onInputChange={(value) => {
+          setPartnerQuery(value);
+        }}
+        placeholder={t('documents.filterPartnerPlaceholder')}
+        selectedItem={
+          partners.find((partner) => partner.id === partnerId) ?? null
+        }
+        titleText={t('documents.filterPartner')}
+      />
+      <DatePicker
+        className={styles.filter!}
+        datePickerType="range"
+        dateFormat="Y-m-d"
+        onChange={(dates: Date[]) => {
+          setDateFrom(isoDate(dates[0]));
+          setDateTo(isoDate(dates[1]));
+          setPage(1);
+        }}
+      >
+        <DatePickerInput
+          id="documents-date-from"
+          labelText={t('documents.dateFrom')}
+          placeholder="yyyy-mm-dd"
         />
-      ) : null}
-      {!loading && documents.length === 0 ? (
-        <Tile>
-          <p>{t(filtered ? 'documents.emptyFiltered' : 'documents.empty')}</p>
-          {filtered ? (
-            <Button kind="tertiary" onClick={clearFilters} type="button">
-              {t('documents.clearFilters')}
-            </Button>
-          ) : null}
-          {!filtered && canManage ? (
-            <Button href={newDocumentHref()} kind="primary">
-              {t('documents.newDocument')}
-            </Button>
-          ) : null}
-        </Tile>
-      ) : null}
-      {!loading && documents.length > 0 ? (
-        <DataTable headers={headers} rows={rows}>
-          {({ getHeaderProps, getTableContainerProps, getTableProps }) => (
-            <TableContainer
-              className={styles.tableContainer!}
-              description={t('documents.listDescription')}
-              title={t('documents.listTitle')}
-              {...getTableContainerProps()}
-            >
-              <TableToolbar>
-                <TableToolbarContent>
-                  <TableToolbarSearch
-                    labelText={t('documents.search')}
-                    onChange={(event) => {
-                      setSearchInput(event === '' ? '' : event.target.value);
-                    }}
-                    persistent
-                    placeholder={t('documents.searchPlaceholder')}
-                    value={searchInput}
-                  />
-                  <MultiSelect
-                    className={styles.filter!}
-                    id="documents-kind"
-                    items={documentKindSchema.options}
-                    itemToString={(item) =>
-                      item === null ? '' : t(documentKindLabelKeys[item])
-                    }
-                    label={t('documents.filterKind')}
-                    onChange={(change) => {
-                      setKinds(change.selectedItems ?? []);
-                      setPage(1);
-                    }}
-                    selectedItems={kinds}
-                    titleText={t('documents.filterKind')}
-                  />
-                  <MultiSelect
-                    className={styles.filter!}
-                    id="documents-status"
-                    items={documentStatusSchema.options}
-                    itemToString={(item) =>
-                      item === null ? '' : t(documentStatusLabelKeys[item])
-                    }
-                    label={t('documents.filterStatus')}
-                    onChange={(change) => {
-                      setStatuses(change.selectedItems ?? []);
-                      setPage(1);
-                    }}
-                    selectedItems={statuses}
-                    titleText={t('documents.filterStatus')}
-                  />
-                  <ComboBox
-                    className={styles.filter!}
-                    id="documents-partner"
-                    items={partners}
-                    itemToString={(item) => item?.name ?? ''}
-                    onChange={(change) => {
-                      setPartnerId(change.selectedItem?.id ?? '');
-                      setPage(1);
-                    }}
-                    onInputChange={(value) => {
-                      setPartnerQuery(value);
-                    }}
-                    placeholder={t('documents.filterPartnerPlaceholder')}
-                    selectedItem={
-                      partners.find((partner) => partner.id === partnerId) ??
-                      null
-                    }
-                    titleText={t('documents.filterPartner')}
-                  />
-                  <DatePicker
-                    className={styles.filter!}
-                    datePickerType="range"
-                    dateFormat="Y-m-d"
-                    onChange={(dates: Date[]) => {
-                      setDateFrom(isoDate(dates[0]));
-                      setDateTo(isoDate(dates[1]));
-                      setPage(1);
-                    }}
-                  >
-                    <DatePickerInput
-                      id="documents-date-from"
-                      labelText={t('documents.dateFrom')}
-                      placeholder="yyyy-mm-dd"
-                    />
-                    <DatePickerInput
-                      id="documents-date-to"
-                      labelText={t('documents.dateTo')}
-                      placeholder="yyyy-mm-dd"
-                    />
-                  </DatePicker>
-                </TableToolbarContent>
-              </TableToolbar>
-              <Table {...getTableProps()} size="md">
-                <TableHead>
-                  <TableRow>
-                    {headers.map((header) => {
-                      const sortable = isSortable(header.key);
-                      return (
-                        <TableHeader
-                          {...getHeaderProps({
-                            header,
-                            isSortable: sortable,
-                            onClick: () => {
-                              sortBy(header.key);
-                            },
-                          })}
-                          isSortable={sortable}
-                          isSortHeader={sort === header.key}
-                          key={header.key}
-                          sortDirection={order === 'asc' ? 'ASC' : 'DESC'}
-                        >
-                          {header.header}
-                        </TableHeader>
-                      );
-                    })}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {documents.map((document) => (
-                    <TableRow key={document.id}>
-                      <TableCell>
-                        {document.reference ?? t('documents.notAvailable')}
-                      </TableCell>
-                      <TableCell>{document.title}</TableCell>
-                      <TableCell>
-                        <Tag size="sm" type="outline">
-                          {t(documentKindLabelKeys[document.kind])}
-                        </Tag>
-                      </TableCell>
-                      <TableCell>{document.documentDate}</TableCell>
-                      <TableCell>
-                        {document.partnerName ?? t('documents.notAvailable')}
-                      </TableCell>
-                      <TableCell className={styles.amount!}>
-                        {document.totalAmount === null
-                          ? t('documents.notAvailable')
-                          : formatAmount(
-                              document.totalAmount,
-                              document.currencyCode,
-                            )}
-                      </TableCell>
-                      <TableCell>{document.currencyCode}</TableCell>
-                      <TableCell>
-                        <StatusIndicator
-                          label={t(documentStatusLabelKeys[document.status])}
-                          severity={documentStatusSeverity[document.status]}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {document.isBalanced === null ? (
-                          t('documents.notAvailable')
-                        ) : (
-                          <StatusIndicator
-                            label={t(
-                              document.isBalanced
-                                ? 'documents.balancedYes'
-                                : 'documents.balancedNo',
-                            )}
-                            severity={document.isBalanced ? 'success' : 'error'}
-                          />
-                        )}
-                      </TableCell>
-                      <TableCell className={styles.amount!}>
-                        {document.openIssueCount}
-                      </TableCell>
-                      <TableCell>
-                        <OverflowMenu
-                          flipped
-                          iconDescription={t('documents.viewNamed', {
-                            title: document.title,
-                          })}
-                          size="sm"
-                        >
-                          <OverflowMenuItem
-                            href={documentHref(document.id)}
-                            itemText={t('documents.view')}
-                          />
-                        </OverflowMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          )}
-        </DataTable>
-      ) : null}
-      {list !== undefined && list.total > 0 ? (
-        <Pagination
-          onChange={(change) => {
-            setPage(change.page);
-            setPageSize(change.pageSize);
-          }}
-          page={page}
-          pageSize={pageSize}
-          pageSizes={pageSizes}
-          totalItems={list.total}
+        <DatePickerInput
+          id="documents-date-to"
+          labelText={t('documents.dateTo')}
+          placeholder="yyyy-mm-dd"
         />
-      ) : null}
+      </DatePicker>
+      <DataGrid
+        columns={columns}
+        description={t('documents.listDescription')}
+        emptyLabel={t(filtered ? 'documents.emptyFiltered' : 'documents.empty')}
+        errorLabel={t('documents.error')}
+        filterValues={{ kind: kinds, status: statuses }}
+        filters={filterGroups}
+        onFilterChange={(values) => {
+          setKinds(asKinds(values['kind'] ?? []));
+          setStatuses(asStatuses(values['status'] ?? []));
+          setPage(1);
+        }}
+        onPageChange={(nextPage, nextPageSize) => {
+          setPage(nextPage);
+          setPageSize(nextPageSize);
+        }}
+        onSearch={setSearchInput}
+        onSortChange={sortBy}
+        page={page}
+        pageSize={pageSize}
+        pageSizes={pageSizes}
+        pagination
+        paginationMode="server"
+        rows={rows}
+        search
+        searchPlaceholder={t('documents.searchPlaceholder')}
+        searchPlacement="persistent"
+        searchValue={searchInput}
+        size="md"
+        sort={[{ direction: order === 'asc' ? 'ASC' : 'DESC', key: sort }]}
+        sortMode="server"
+        sortable
+        state={
+          failed
+            ? 'error'
+            : loading
+              ? 'loading'
+              : rows.length === 0
+                ? 'empty'
+                : 'ready'
+        }
+        title={t('documents.listTitle')}
+        toolbarActions={toolbarActions}
+        totalItems={list?.total ?? 0}
+      />
     </PageContainer>
   );
 }

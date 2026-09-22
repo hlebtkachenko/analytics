@@ -60,7 +60,7 @@ import type {
 } from './types';
 import { useCellSelection } from './use-cell-selection';
 import { useColumnLayout } from './use-column-layout';
-import { useGridSort } from './use-grid-sort';
+import { directionForKey, nextSortSpecs, useGridSort } from './use-grid-sort';
 import { useVirtualWindow } from './use-virtual-window';
 
 const SELECT_WIDTH = 48;
@@ -314,12 +314,16 @@ export function DataGrid(props: DataGridProps) {
     multiSort = false,
     initialSort = [],
     lockSort = false,
+    sortMode = 'client',
+    sort: sortValue,
+    onSortChange,
     selection = 'none',
     batchActions = [],
     selectAllScope = 'page',
     onSelectionChange,
     search = false,
     searchPlacement = 'toolbar',
+    searchPlaceholder = 'Search rows',
     searchValue,
     onSearch,
     filters = [],
@@ -371,6 +375,8 @@ export function DataGrid(props: DataGridProps) {
 
   // Faceted filter selection is controlled when filterValues is passed, else owned.
   const filtersControlled = filterValues !== undefined;
+  // A handler means the caller filters, so the grid only reports the selection.
+  const serverFilters = typeof onFilterChange === 'function';
   const [ownedFilters, setOwnedFilters] = useState<
     Record<string, readonly string[]>
   >({});
@@ -396,11 +402,19 @@ export function DataGrid(props: DataGridProps) {
                 .includes(query.toLowerCase()),
             ),
           );
-    if (activeFilters.length === 0) return searched;
+    if (serverFilters || activeFilters.length === 0) return searched;
     return searched.filter((row) =>
       activeFilters.every(([key, ids]) => ids.includes(String(row[key]))),
     );
-  }, [rows, columns, query, search, serverSearch, activeFilters]);
+  }, [
+    rows,
+    columns,
+    query,
+    search,
+    serverSearch,
+    serverFilters,
+    activeFilters,
+  ]);
 
   // The filter popover stages its checkboxes and only commits on Apply.
   const [filterOpen, setFilterOpen] = useState(false);
@@ -412,8 +426,19 @@ export function DataGrid(props: DataGridProps) {
     0,
   );
 
+  // Server sort keeps the caller's row order and only reports header clicks.
+  const serverSort = sortMode === 'server';
   const sort = useGridSort(filtered, initialSort, multiSort);
-  const orderedRows = lockSort ? filtered : sort.sortedRows;
+  const sortSpecs = serverSort ? (sortValue ?? []) : sort.specs;
+  const sortDirectionFor = (key: string) => directionForKey(sortSpecs, key);
+  const toggleSort = (key: string, additive: boolean): void => {
+    if (!serverSort) {
+      sort.toggle(key, additive);
+      return;
+    }
+    onSortChange?.(nextSortSpecs(sortSpecs, key, additive, multiSort));
+  };
+  const orderedRows = lockSort || serverSort ? filtered : sort.sortedRows;
 
   // Pagination state is controlled for server mode and local otherwise.
   const serverPaging = paginationMode === 'server';
@@ -681,6 +706,7 @@ export function DataGrid(props: DataGridProps) {
         <InlineNotification
           hideCloseButton
           kind="error"
+          role="alert"
           subtitle={errorLabel}
           title="Error"
         />
@@ -716,7 +742,7 @@ export function DataGrid(props: DataGridProps) {
               handleSearch(typeof event === 'string' ? '' : event.target.value)
             }
             persistent={searchPlacement === 'persistent'}
-            placeholder="Search rows"
+            placeholder={searchPlaceholder}
             value={query}
           />
         )}
@@ -824,7 +850,7 @@ export function DataGrid(props: DataGridProps) {
                   const sortHandler = canSort
                     ? {
                         onClick: (event: ReactMouseEvent) =>
-                          sort.toggle(column.key, event.shiftKey),
+                          toggleSort(column.key, event.shiftKey),
                       }
                     : {};
                   const dragHandlers = reorderableColumns
@@ -851,12 +877,12 @@ export function DataGrid(props: DataGridProps) {
                         pinnedClass(column.key),
                       )}
                       isSortHeader={
-                        canSort && sort.directionFor(column.key) !== 'NONE'
+                        canSort && sortDirectionFor(column.key) !== 'NONE'
                       }
                       isSortable={canSort}
                       key={column.key}
                       scope="col"
-                      sortDirection={sort.directionFor(column.key)}
+                      sortDirection={sortDirectionFor(column.key)}
                       style={columnStyle(column)}
                       {...sortHandler}
                       {...dragHandlers}
