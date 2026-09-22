@@ -17,6 +17,35 @@ export type GridSort = Readonly<{
   toggle: (key: string, additive: boolean) => void;
 }>;
 
+// Cycle one column through ascending, descending, then cleared.
+export function nextSortSpecs(
+  current: readonly SortSpec[],
+  key: string,
+  additive: boolean,
+  multi: boolean,
+): readonly SortSpec[] {
+  const existing = current.find((spec) => spec.key === key);
+  const next: SortSpec | null =
+    existing?.direction === 'ASC'
+      ? { key, direction: 'DESC' }
+      : existing?.direction === 'DESC'
+        ? null
+        : { key, direction: 'ASC' };
+  if (multi && additive) {
+    const without = current.filter((spec) => spec.key !== key);
+    return next ? [...without, next] : without;
+  }
+  return next ? [next] : [];
+}
+
+// Read the active direction for a column out of the current sort specs.
+export function directionForKey(
+  specs: readonly SortSpec[],
+  key: string,
+): SortDirection {
+  return specs.find((spec) => spec.key === key)?.direction ?? 'NONE';
+}
+
 // Manage single or multi column sort and return the sorted rows.
 export function useGridSort(
   rows: readonly GridRow[],
@@ -26,21 +55,7 @@ export function useGridSort(
   const [specs, setSpecs] = useState<readonly SortSpec[]>(initial);
 
   const toggle = (key: string, additive: boolean): void => {
-    setSpecs((current) => {
-      const existing = current.find((spec) => spec.key === key);
-      // Cycle a single column through ascending, descending, then cleared.
-      const next: SortSpec | null =
-        existing?.direction === 'ASC'
-          ? { key, direction: 'DESC' }
-          : existing?.direction === 'DESC'
-            ? null
-            : { key, direction: 'ASC' };
-      if (multi && additive) {
-        const without = current.filter((spec) => spec.key !== key);
-        return next ? [...without, next] : without;
-      }
-      return next ? [next] : [];
-    });
+    setSpecs((current) => nextSortSpecs(current, key, additive, multi));
   };
 
   const sortedRows = useMemo(() => {
@@ -63,7 +78,7 @@ export function useGridSort(
   }, [rows, specs]);
 
   const directionFor = (key: string): SortDirection =>
-    specs.find((spec) => spec.key === key)?.direction ?? 'NONE';
+    directionForKey(specs, key);
 
   return { specs, sortedRows, directionFor, toggle };
 }

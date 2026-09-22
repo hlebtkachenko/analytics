@@ -57,17 +57,24 @@ Everything is off by default; turn on only what the page needs.
 
 - Density and look: `size` (`xs`–`xl`, default `sm`), `zebra`, `wrapCells`.
 - Sorting: `sortable`, `multiSort` (shift-click), `initialSort`, `lockSort`
-  (fixed order, non-interactive).
+  (fixed order, non-interactive), `sortMode` (`client`/`server`). Server mode
+  renders the header affordance and the controlled `sort` specs but never
+  reorders rows; each header click reports the next specs through
+  `onSortChange`.
 - Selection: `selection` (`none`/`single`/`multi`), `batchActions` (text-only,
   needs `multi`), `selectAllScope` (`page`/`all`), `onSelectionChange`.
-- Search: `search`, `searchPlacement` (`toolbar`/`persistent`). Pass `onSearch`
-  to switch client filtering to server search. The search landmark is labelled
-  from the grid `title`, so several grids on one page stay distinguishable.
+- Search: `search`, `searchPlacement` (`toolbar`/`persistent`),
+  `searchPlaceholder`. Pass `onSearch` to switch client filtering to server
+  search. The search landmark is labelled from the grid `title`, so several
+  grids on one page stay distinguishable.
 - Faceted filter: `filters` (`GridFilterGroup[]`) renders a toolbar funnel with
   a count badge over a staged checkbox popover (Reset/Apply). A row passes when,
   for each group with a selection, `String(row[group.key])` is in that
   selection; applied on top of search before pagination. Selection is owned
   internally unless you pass `filterValues` + `onFilterChange` to control it.
+  Like `onSearch`, passing `onFilterChange` switches client filtering to server
+  filtering: the grid renders the rows as given and only reports the applied
+  values.
 - Pagination: `pagination`, `paginationMode` (`client`/`server`), `pageSize`,
   `pageSizes`. Server mode needs `page`, `totalItems`, `onPageChange`.
 - Rows: `rowNumbers`, `onRowClick`, `reorderableRows` (+
@@ -99,6 +106,10 @@ Full types live in `types.ts`.
 - **Server-backed list**: `pagination` + `paginationMode="server"` +
   `page`/`totalItems`/`onPageChange`, usually with `onSearch` for server search.
   Same UI as client mode; you supply the data.
+- **Server-sorted list**: `sortable` + `sortMode="server"` + `sort` +
+  `onSortChange`. The grid owns no sort state there, so a missing `sort` reads
+  as unsorted; keep it in the same state that builds the request. `lockSort`
+  still wins over both modes.
 - **Long client dataset**: `virtualized` + `maxHeight` + `stickyHeader`.
   `virtualized` renders only visible rows and **ignores `pagination`** (pick
   one).
