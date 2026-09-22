@@ -16,3 +16,16 @@ class TestResizeObserver implements ResizeObserver {
 }
 
 globalThis.ResizeObserver ??= TestResizeObserver;
+
+// jsdom ships no matchMedia, which the media-query hook reads on mount.
+globalThis.matchMedia ??= (query: string): MediaQueryList =>
+  ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  }) as MediaQueryList;
