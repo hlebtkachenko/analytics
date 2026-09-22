@@ -1,3 +1,5 @@
+import type { StatusSeverity } from '../../components/status-indicator.tsx';
+
 import type {
   InboxBulkAction,
   InboxBulkRefusalCode,
@@ -21,18 +23,16 @@ export const inboxStatusLabelKeys: Readonly<Record<InboxItemStatus, string>> = {
   routed: 'inbox.statusRouted',
 };
 
-// The Carbon Tag types this column renders; documents now use the status indicator instead.
-type InboxStatusTagType = 'blue' | 'cool-gray' | 'gray' | 'green' | 'red';
-
-export const inboxStatusTagTypes: Readonly<
-  Record<InboxItemStatus, InboxStatusTagType>
+// The status indicator severity this column renders, the same indicator documents use.
+export const inboxStatusSeverity: Readonly<
+  Record<InboxItemStatus, StatusSeverity>
 > = {
-  discarded: 'cool-gray',
-  failed: 'red',
-  needs_review: 'blue',
-  processing: 'gray',
-  received: 'gray',
-  routed: 'green',
+  discarded: 'neutral',
+  failed: 'error',
+  needs_review: 'warning',
+  processing: 'neutral',
+  received: 'neutral',
+  routed: 'success',
 };
 
 export const inboxDiscardReasonLabelKeys: Readonly<
@@ -161,11 +161,11 @@ export const inboxItemStateLabelKeys: Readonly<Record<InboxItemState, string>> =
     untouched: 'inbox.stateUntouched',
   };
 
-export const inboxItemStateTagTypes: Readonly<
-  Record<InboxItemState, InboxStatusTagType>
+export const inboxItemStateSeverity: Readonly<
+  Record<InboxItemState, StatusSeverity>
 > = {
-  discarded: 'red',
-  routed: 'green',
-  touched: 'blue',
-  untouched: 'gray',
+  discarded: 'neutral',
+  routed: 'success',
+  touched: 'neutral',
+  untouched: 'neutral',
 };

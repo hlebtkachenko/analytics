@@ -16,7 +16,6 @@ import {
   Select,
   SelectItem,
   Stack,
-  Tag,
   TextInput,
   Tile,
 } from '@bap/design-system/react';
@@ -26,6 +25,7 @@ import { useTranslation } from 'react-i18next';
 
 import UploadDropZone from '../../../components/inbox/upload-drop-zone';
 import PageContainer from '../../../components/page-container';
+import { StatusIndicator } from '../../../components/status-indicator';
 import { getJson, isAbortError } from '../../../lib/datasets/client';
 import { withOrganization } from '../../../lib/documents/client';
 import { bulkInboxItems, inboxItemsPath } from '../../../lib/inbox/client';
@@ -54,11 +54,11 @@ import {
   inboxDiscardReasonLabelKeys,
   inboxItemState,
   inboxItemStateLabelKeys,
-  inboxItemStateTagTypes,
+  inboxItemStateSeverity,
   inboxStatusFilterLabelKeys,
   inboxStatusFilters,
   inboxStatusLabelKeys,
-  inboxStatusTagTypes,
+  inboxStatusSeverity,
 } from '../../../lib/inbox/labels.ts';
 import type {
   InboxItemState,
@@ -302,9 +302,10 @@ export default function InboxPage() {
       renderCell: (row) => {
         const status = row['status'] as InboxItemStatus;
         return (
-          <Tag size="sm" type={inboxStatusTagTypes[status]}>
-            {t(inboxStatusLabelKeys[status])}
-          </Tag>
+          <StatusIndicator
+            label={t(inboxStatusLabelKeys[status])}
+            severity={inboxStatusSeverity[status]}
+          />
         );
       },
     },
@@ -314,9 +315,10 @@ export default function InboxPage() {
       renderCell: (row) => {
         const state = row['state'] as InboxItemState;
         return (
-          <Tag size="sm" type={inboxItemStateTagTypes[state]}>
-            {t(inboxItemStateLabelKeys[state])}
-          </Tag>
+          <StatusIndicator
+            label={t(inboxItemStateLabelKeys[state])}
+            severity={inboxItemStateSeverity[state]}
+          />
         );
       },
     },

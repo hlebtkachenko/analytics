@@ -59,12 +59,14 @@ function StatusIcon({ severity }: { severity: StatusSeverity }) {
 export function StatusIndicator({
   label,
   severity,
+  title,
 }: {
   label: string;
   severity: StatusSeverity;
+  title?: string | undefined;
 }) {
   return (
-    <span className={styles.indicator!}>
+    <span className={styles.indicator!} title={title}>
       <StatusIcon severity={severity} />
       <span>{label}</span>
     </span>
