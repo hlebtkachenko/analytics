@@ -42,6 +42,7 @@ const facts: RuleFacts = {
   filename: 'Faktura-2026-001.pdf',
   hintText: 'Received from the supplier',
   sender: 'billing@dodavatel.cz',
+  senderAuthenticated: false,
   text: null,
 };
 
@@ -184,6 +185,56 @@ describe('evaluateRules', () => {
       ruleId: 'quiet',
       value: 'user_2',
     });
+  });
+});
+
+describe('auto-route and sender authentication', () => {
+  const senderRule = rule('sender', 1, {
+    autoRoute: true,
+    senderPattern: '@dodavatel.cz',
+    setLegalEntityId: ENTITY_ID,
+  });
+
+  it('lets a sender rule hint but not auto-route while the sender is unauthenticated', () => {
+    const evaluation = evaluateRules([senderRule], facts);
+
+    expect(evaluation.matched.map((matched) => matched.id)).toEqual(['sender']);
+    expect(evaluation.fields.legalEntityId).toEqual({
+      ruleId: 'sender',
+      value: ENTITY_ID,
+    });
+    expect(evaluation.autoRouteRuleId).toBeNull();
+  });
+
+  it('lets the same rule auto-route once the sender is authenticated', () => {
+    const evaluation = evaluateRules([senderRule], {
+      ...facts,
+      senderAuthenticated: true,
+    });
+
+    expect(evaluation.autoRouteRuleId).toBe('sender');
+  });
+
+  it('leaves a rule that matched without a sender pattern unaffected by the flag', () => {
+    const channelRule = rule('channel', 1, {
+      autoRoute: true,
+      channelId: CHANNEL_ID,
+    });
+
+    expect(evaluateRules([channelRule], facts).autoRouteRuleId).toBe('channel');
+    expect(
+      evaluateRules([channelRule], { ...facts, senderAuthenticated: true })
+        .autoRouteRuleId,
+    ).toBe('channel');
+  });
+
+  it('falls through to the next rule that may auto-route', () => {
+    const evaluation = evaluateRules(
+      [senderRule, rule('type', 2, { autoRoute: true, detectedType: 'pdf' })],
+      facts,
+    );
+
+    expect(evaluation.autoRouteRuleId).toBe('type');
   });
 });
 

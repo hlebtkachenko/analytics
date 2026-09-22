@@ -42,6 +42,8 @@ export interface RuleFacts {
   hintText: string | null;
   // The lowercased envelope sender of an email child; null for every other item.
   sender: string | null;
+  // Whether that sender is DKIM aligned; false for every item the split never authenticated.
+  senderAuthenticated: boolean;
   // The body text of a text payload, at most MAX_TEXT_BYTES, read outside the transaction.
   text: string | null;
 }
@@ -164,7 +166,11 @@ export function evaluateRules(
       }
     }
 
-    if (rule.autoRoute && autoRouteRuleId === null) {
+    // An unauthenticated sender may hint, never auto-route: the From header alone decides nothing.
+    const senderDecided =
+      rule.senderPattern !== null && !facts.senderAuthenticated;
+
+    if (rule.autoRoute && !senderDecided && autoRouteRuleId === null) {
       autoRouteRuleId = rule.id;
     }
   }

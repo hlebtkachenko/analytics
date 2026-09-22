@@ -1183,10 +1183,12 @@ export async function applyInboxRules(
     throw new Error('The rule pass names an item that is not readable.');
   }
 
-  const sender = await transaction.query<{ sender: string | null }>(
-    'select sender from app.inbox_item where id = $1',
-    [item.id],
-  );
+  const sender = await transaction.query<{
+    sender: string | null;
+    sender_authenticated: boolean;
+  }>('select sender, sender_authenticated from app.inbox_item where id = $1', [
+    item.id,
+  ]);
   const files = await loadItemFiles(transaction, item.id);
   const primaryFilename = files[0]?.originalFilename ?? null;
   const evaluation = evaluateRules(rules, {
@@ -1195,6 +1197,7 @@ export async function applyInboxRules(
     filename: primaryFilename,
     hintText: item.hintText,
     sender: sender.rows[0]?.sender ?? null,
+    senderAuthenticated: sender.rows[0]?.sender_authenticated ?? false,
     text: input.text,
   });
 
