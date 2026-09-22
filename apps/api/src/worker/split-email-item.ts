@@ -230,6 +230,64 @@ function envelopeSender(mail: ParsedMail): string | null {
     : null;
 }
 
+// Every d= tag of every DKIM-Signature header, lowercased; the raw lines keep the RFC 6376 tag list and its folding.
+function signatureDomains(mail: ParsedMail): string[] {
+  const domains: string[] = [];
+
+  for (const header of mail.headerLines) {
+    if (header.key !== 'dkim-signature') {
+      continue;
+    }
+
+    for (const tag of header.line
+      .slice(header.line.indexOf(':') + 1)
+      .split(';')) {
+      const separator = tag.indexOf('=');
+
+      if (separator < 0 || tag.slice(0, separator).trim() !== 'd') {
+        continue;
+      }
+
+      domains.push(
+        tag
+          .slice(separator + 1)
+          .replaceAll(/\s+/gu, '')
+          .toLowerCase(),
+      );
+    }
+  }
+
+  return domains;
+}
+
+// DKIM alignment, never DMARC: Mailgun's check must have passed and a signature domain must cover the From domain.
+// A missing or repeated verdict header is no verdict, so it reads as not authenticated.
+export function senderAuthenticated(mail: ParsedMail): boolean {
+  const verdict = mail.headers.get('x-mailgun-dkim-check-result');
+
+  if (typeof verdict !== 'string' || verdict.trim().toLowerCase() !== 'pass') {
+    return false;
+  }
+
+  const address = envelopeSender(mail);
+  const at = address === null ? -1 : address.lastIndexOf('@');
+
+  if (address === null || at < 0) {
+    return false;
+  }
+
+  // Relaxed alignment: the signature domain is the From domain or a parent of it.
+  const from = address.slice(at + 1).toLowerCase();
+
+  return (
+    from.length > 0 &&
+    signatureDomains(mail).some(
+      (domain) =>
+        domain.length > 0 && (from === domain || from.endsWith(`.${domain}`)),
+    )
+  );
+}
+
 // Counts how deep message/rfc822 parts nest by parsing each nested message for its structure only.
 async function nestingDepth(mail: ParsedMail, depth: number): Promise<number> {
   let deepest = depth;
@@ -400,8 +458,10 @@ export async function splitEmailItem(
     }
 
     const sender = envelopeSender(mail);
+    const authenticated = senderAuthenticated(mail);
     const outcome = await splitParts(options, payload, tenant, parent, mail, {
       sender,
+      senderAuthenticated: authenticated,
       staged,
     });
 
@@ -410,8 +470,10 @@ export async function splitEmailItem(
       pool: options.pool,
       work: async (transaction) => {
         await transaction.query(
-          'update app.inbox_item set sender = $2, updated_at = now() where id = $1',
-          [payload.itemId, sender],
+          `update app.inbox_item
+              set sender = $2, sender_authenticated = $3, updated_at = now()
+            where id = $1`,
+          [payload.itemId, sender, authenticated],
         );
 
         if (outcome.kind === 'empty') {
@@ -484,7 +546,11 @@ async function splitParts(
   tenant: ReturnType<typeof channelTenant>,
   parent: ParentItem,
   mail: ParsedMail,
-  context: { sender: string | null; staged: string[] },
+  context: {
+    sender: string | null;
+    senderAuthenticated: boolean;
+    staged: string[];
+  },
 ): Promise<SplitOutcome> {
   let depth: number;
 
@@ -569,7 +635,12 @@ async function createChildren(
   tenant: ReturnType<typeof channelTenant>,
   parent: ParentItem,
   parts: readonly StagedPart[],
-  context: { outcome: SplitOutcome; sender: string | null; staged: string[] },
+  context: {
+    outcome: SplitOutcome;
+    sender: string | null;
+    senderAuthenticated: boolean;
+    staged: string[];
+  },
 ): Promise<SplitOutcome> {
   for (const [index, part] of parts.entries()) {
     const externalId = `${payload.itemId}:${index + 1}`;
@@ -647,6 +718,7 @@ async function createChildren(
             },
             quotaBytes: options.quotaBytes,
             sender: context.sender,
+            senderAuthenticated: context.senderAuthenticated,
             sha256: part.sha256,
             sniff: null,
             storageKey,

@@ -109,7 +109,7 @@ const detail: InboxItemDetail = {
   events: [],
   extraction: null,
   files: [],
-  item: { ...item, sender: null },
+  item: { ...item, sender: null, senderAuthenticated: false },
   routingTarget: routingTargetFor('pdf'),
 };
 

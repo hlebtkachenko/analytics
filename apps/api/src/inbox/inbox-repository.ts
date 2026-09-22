@@ -141,6 +141,8 @@ export interface ReceiveIntakeInput extends EntityScopeSelector {
   quotaBytes: number;
   // The parsed envelope sender a child inherits; null until the split has read the MIME.
   sender: string | null;
+  // The DKIM alignment verdict a child inherits; false for every path that has no verified sender.
+  senderAuthenticated: boolean;
   sha256: string;
   // Null for an email: the worker scans and splits it, so the item stays received and nothing is classified yet.
   sniff: ExtractionRecord | null;
@@ -692,17 +694,23 @@ async function loadDetail(
   transaction: PoolClient,
   item: InboxItem,
 ): Promise<InboxItemDetail> {
-  const sender = await transaction.query<{ sender: string | null }>(
-    'select sender from app.inbox_item where id = $1',
-    [item.id],
-  );
+  const sender = await transaction.query<{
+    sender: string | null;
+    sender_authenticated: boolean;
+  }>('select sender, sender_authenticated from app.inbox_item where id = $1', [
+    item.id,
+  ]);
 
   return {
     corrections: await loadCorrections(transaction, item.id),
     events: await loadEvents(transaction, item.id),
     extraction: await loadLatestExtraction(transaction, item.id),
     files: (await loadItemFiles(transaction, item.id)).map(publicFile),
-    item: { ...item, sender: sender.rows[0]?.sender ?? null },
+    item: {
+      ...item,
+      sender: sender.rows[0]?.sender ?? null,
+      senderAuthenticated: sender.rows[0]?.sender_authenticated ?? false,
+    },
     routingTarget: routingTargetFor(
       item.detectedType,
       await loadRoutingTargetOverrides(transaction),
@@ -918,8 +926,9 @@ export async function receiveIntakeInTransaction(
   const inserted = await transaction.query<{ id: string }>(
     `insert into app.inbox_item
          (organization_id, channel_kind, channel_id, payload_kind, status, duplicate_of_item_id,
-          legal_entity_id, hint_kind, origin, external_id, parent_item_id, sender, created_by)
-       values ($1, $2, $3, $4, 'received', $5, $6, $7, $8, $9, $10, $11, $12)
+          legal_entity_id, hint_kind, origin, external_id, parent_item_id, sender,
+          sender_authenticated, created_by)
+       values ($1, $2, $3, $4, 'received', $5, $6, $7, $8, $9, $10, $11, $12, $13)
        returning id`,
     [
       input.organizationId,
@@ -933,6 +942,7 @@ export async function receiveIntakeInTransaction(
       input.externalId,
       input.parentItemId,
       input.sender,
+      input.senderAuthenticated,
       input.userId,
     ],
   );
@@ -1179,10 +1189,12 @@ export async function applyInboxRules(
     throw new Error('The rule pass names an item that is not readable.');
   }
 
-  const sender = await transaction.query<{ sender: string | null }>(
-    'select sender from app.inbox_item where id = $1',
-    [item.id],
-  );
+  const sender = await transaction.query<{
+    sender: string | null;
+    sender_authenticated: boolean;
+  }>('select sender, sender_authenticated from app.inbox_item where id = $1', [
+    item.id,
+  ]);
   const files = await loadItemFiles(transaction, item.id);
   const primaryFilename = files[0]?.originalFilename ?? null;
   const evaluation = evaluateRules(rules, {
@@ -1191,6 +1203,7 @@ export async function applyInboxRules(
     filename: primaryFilename,
     hintText: item.hintText,
     sender: sender.rows[0]?.sender ?? null,
+    senderAuthenticated: sender.rows[0]?.sender_authenticated ?? false,
     text: input.text,
   });
 

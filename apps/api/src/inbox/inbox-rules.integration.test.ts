@@ -627,6 +627,7 @@ describe('inbox rules', () => {
         persist: async () => undefined,
         quotaBytes: QUOTA,
         sender: 'Billing@Dodavatel.cz',
+        senderAuthenticated: false,
         sha256: `${'0'.repeat(60)}${String(counter).padStart(4, '0')}`,
         sniff: null,
         storageKey: `org/org-1/child-${counter}`,

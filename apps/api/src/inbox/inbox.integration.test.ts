@@ -438,6 +438,7 @@ describe('inbox intake', () => {
         persist: () => store.put({ key: storageKey, temporaryPath: path }),
         quotaBytes: QUOTA,
         sender: null,
+        senderAuthenticated: false,
         sha256,
         sniff: {
           output: toProviderOutput(sniffed),

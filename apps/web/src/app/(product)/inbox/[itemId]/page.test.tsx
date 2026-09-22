@@ -65,6 +65,7 @@ const inboxItem = {
   receivedAt: '2026-09-16T08:00:00.000Z',
   routedAt: null,
   sender: null,
+  senderAuthenticated: false,
   snoozedUntil: null,
   status: 'needs_review',
   updatedAt: '2026-09-16T08:00:00.000Z',
@@ -624,6 +625,42 @@ describe('InboxItemPage', () => {
       organization: 'organization-1',
     });
     expect(screen.queryByRole('list', { name: 'Corrections' })).toBeNull();
+  });
+
+  it('shows whether the sender of an email item was authenticated', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respondWith({
+        events: [],
+        extraction: null,
+        files: [file('application/pdf')],
+        item: {
+          ...inboxItem,
+          sender: 'billing@dodavatel.cz',
+          senderAuthenticated: true,
+        },
+      }),
+    );
+
+    const view = renderItemPage();
+
+    expect(await screen.findByText('Sender verified by DKIM')).toBeTruthy();
+    expect(screen.queryByText('Sender not verified')).toBeNull();
+    view.unmount();
+
+    vi.stubGlobal(
+      'fetch',
+      respondWith({
+        events: [],
+        extraction: null,
+        files: [file('application/pdf')],
+        item: { ...inboxItem, sender: 'billing@dodavatel.cz' },
+      }),
+    );
+
+    renderItemPage();
+
+    expect(await screen.findByText('Sender not verified')).toBeTruthy();
   });
 
   it('carries the lowercased sender domain on the create-a-rule link', async () => {

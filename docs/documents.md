@@ -359,11 +359,15 @@ in the web service, which forwards a signature-verified message as raw MIME to
 the email route above with a `ChannelAccess` only; a `TenantAccess` answers 403
 there, unlike the items route. The stored `.eml` enqueues `split_email_item`,
 which parses the MIME, scans every new blob through `clamd`, and splits
-attachments into child items. `inboxItemSchema` gains `sender`, the parsed
-`From` header address as the worker read it from the MIME (not `MAIL FROM`),
-unverified, null for a manual upload or before the split runs; it is
-display-only for the platform default, but an organization's own sender-pattern
-rules match on it. An email channel's credential issue response carries
+attachments into child items. The item detail gains `sender`, the parsed `From`
+header address as the worker read it from the MIME (not `MAIL FROM`), null for a
+manual upload or before the split runs, and `senderAuthenticated`, the DKIM
+alignment verdict the split computed from Mailgun's
+`X-Mailgun-Dkim-Check-Result` header and the `DKIM-Signature` domains; a missing
+or repeated verdict header counts as not authenticated. An organization's own
+sender-pattern rules match on the address and apply their hints whatever the
+verdict, but they auto-route only when the sender is authenticated. An email
+channel's credential issue response carries
 `secret: intakeToken | intakeEmailAddress`: an API channel's `secret` is the
 bearer token shown once, an email channel's is the issued address itself
 (`in-<32 hex>@<intake domain>`), stored plain on `inbox_channel.email_address`
