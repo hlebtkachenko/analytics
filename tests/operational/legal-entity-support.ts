@@ -36,3 +36,80 @@ export async function selectUploadLegalEntity(
   await expect(selector).toBeVisible();
   await selector.selectOption({ label: name });
 }
+
+// The documents pages scope by a "Legal entity" MultiSelect with several checkable options.
+export async function selectMultiSelectLegalEntities(
+  page: Page,
+  names: readonly string[],
+): Promise<void> {
+  const field = page.getByRole('combobox', { name: 'Legal entity' });
+  await expect(field).toBeVisible();
+  await field.click();
+  for (const name of names) {
+    await page.getByRole('option', { exact: true, name }).click();
+  }
+  // The fixed selection keeps the menu open, so it is closed by hand once every name is checked.
+  await page.keyboard.press('Escape');
+}
+
+// The selection renders as a count tag whose clear control drops every scoped entity at once.
+export async function clearLegalEntities(page: Page): Promise<void> {
+  const clear = page.getByRole('button', { name: /Clear selected item/ });
+  await expect(clear).toBeVisible();
+  await clear.click();
+}
+
+type LegalEntityList = Readonly<{
+  legalEntities: ReadonlyArray<Readonly<{ id: string; name: string }>>;
+}>;
+
+type PartnerList = Readonly<{
+  partners: ReadonlyArray<Readonly<{ id: string; name: string }>>;
+}>;
+
+// The entity is created through the real owner UI, then its identifier is read back from the register.
+export async function resolveLegalEntityId(
+  page: Page,
+  legalEntitiesPath: string,
+  entityName: string,
+): Promise<string> {
+  const listed = await page.request.get(legalEntitiesPath);
+  expect(listed.status()).toBe(200);
+  const body = (await listed.json()) as LegalEntityList;
+  const found = body.legalEntities.find((entity) => entity.name === entityName);
+  expect(found, 'The demo legal entity is missing.').toBeDefined();
+  return found!.id;
+}
+
+// A registration number is unique per organization, so an earlier run's partner is reused rather than duplicated.
+export async function ensurePartner(
+  page: Page,
+  partner: Readonly<{
+    partnersPath: string;
+    name: string;
+    registrationNumber: string;
+    legalEntityId: string;
+  }>,
+): Promise<string> {
+  const listed = await page.request.get(
+    `${partner.partnersPath}?q=${encodeURIComponent(partner.name)}`,
+  );
+  expect(listed.status()).toBe(200);
+  const existing = ((await listed.json()) as PartnerList).partners.find(
+    (found) => found.name === partner.name,
+  );
+  if (existing !== undefined) {
+    return existing.id;
+  }
+
+  const created = await page.request.post(partner.partnersPath, {
+    data: {
+      countryCode: 'CZ',
+      legalEntityId: partner.legalEntityId,
+      name: partner.name,
+      registrationNumber: partner.registrationNumber,
+    },
+  });
+  expect(created.status(), 'The demo partner was refused.').toBe(201);
+  return ((await created.json()) as Readonly<{ id: string }>).id;
+}

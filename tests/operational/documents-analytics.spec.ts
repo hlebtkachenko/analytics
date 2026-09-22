@@ -1,10 +1,13 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { expectNoAccessibilityViolations } from './accessibility-support';
 import { expect, test } from './authenticated-test';
 import {
+  clearLegalEntities,
   ensureLegalEntity,
-  selectUploadLegalEntity,
+  ensurePartner,
+  resolveLegalEntityId,
+  selectMultiSelectLegalEntities,
 } from './legal-entity-support';
 
 const organizationId =
@@ -110,53 +113,8 @@ const fiveMonthDeductionLines = [
 // The amount due is a generated column; formatting differs per locale, so only the digits are asserted.
 const amountDuePattern = /500[\s ,.']?000/;
 
-type LegalEntityList = Readonly<{
-  legalEntities: ReadonlyArray<Readonly<{ id: string; name: string }>>;
-}>;
-
-type PartnerList = Readonly<{
-  partners: ReadonlyArray<Readonly<{ id: string; name: string }>>;
-}>;
-
 let legalEntityId = '';
 let partnerId = '';
-
-// The entity is created through the real owner UI, then its identifier is read back from the register.
-async function resolveLegalEntityId(page: Page): Promise<string> {
-  const listed = await page.request.get(legalEntitiesPath);
-  expect(listed.status()).toBe(200);
-  const body = (await listed.json()) as LegalEntityList;
-  const found = body.legalEntities.find((entity) => entity.name === entityName);
-  expect(found, 'The demo legal entity is missing.').toBeDefined();
-  return found!.id;
-}
-
-// A registration number is unique per organization, so an earlier run's partner is reused rather than duplicated.
-async function ensurePartner(page: Page): Promise<string> {
-  const listed = await page.request.get(
-    `${partnersPath}?q=${encodeURIComponent(partnerName)}`,
-  );
-  expect(listed.status()).toBe(200);
-  const existing = ((await listed.json()) as PartnerList).partners.find(
-    (partner) => partner.name === partnerName,
-  );
-
-  if (existing !== undefined) {
-    return existing.id;
-  }
-
-  const created = await page.request.post(partnersPath, {
-    data: {
-      countryCode: 'CZ',
-      legalEntityId,
-      name: partnerName,
-      registrationNumber: partnerRegistrationNumber,
-    },
-  });
-  expect(created.status(), 'The demo partner was refused.').toBe(201);
-  const partner = (await created.json()) as Readonly<{ id: string }>;
-  return partner.id;
-}
 
 async function registerDocument(
   page: Page,
@@ -176,8 +134,17 @@ test.describe.serial('document analytics read from the stored split', () => {
     test.setTimeout(180_000);
 
     await ensureLegalEntity(page, organizationSlug, entityName);
-    legalEntityId = await resolveLegalEntityId(page);
-    partnerId = await ensurePartner(page);
+    legalEntityId = await resolveLegalEntityId(
+      page,
+      legalEntitiesPath,
+      entityName,
+    );
+    partnerId = await ensurePartner(page, {
+      partnersPath,
+      name: partnerName,
+      registrationNumber: partnerRegistrationNumber,
+      legalEntityId,
+    });
 
     // D1: the five month received invoice with mixed VAT, two deducted advances and a rounding difference.
     await registerDocument(page, 'The five month invoice', {
@@ -333,14 +300,14 @@ test.describe.serial('document analytics read from the stored split', () => {
     await page.goto(
       `/documents/analytics?organization=${encodeURIComponent(organizationSlug)}`,
     );
-    await selectUploadLegalEntity(page, entityName);
+    await selectMultiSelectLegalEntities(page, [entityName]);
 
     const documents = page.getByTestId('analytics-documents');
     await expect(documents).toBeVisible();
     // The contract carries no economic event, so this run adds four invoice rows; earlier runs may have left more.
-    expect(await documents.locator('tbody tr').count()).toBeGreaterThanOrEqual(
-      4,
-    );
+    const rows = documents.locator('tbody tr');
+    await expect.poll(async () => rows.count()).toBeGreaterThanOrEqual(4);
+    const scopedRowCount = await rows.count();
 
     const fiveMonthRow = documents
       .locator('tbody tr')
@@ -350,12 +317,13 @@ test.describe.serial('document analytics read from the stored split', () => {
 
     const byMonth = page.getByTestId('analytics-by-month');
     await expect(byMonth).toBeVisible();
+    // The month column renders a humanised label, not the stored ISO period.
     for (const month of [
-      '2026-01',
-      '2026-02',
-      '2026-03',
-      '2026-04',
-      '2026-05',
+      'January 2026',
+      'February 2026',
+      'March 2026',
+      'April 2026',
+      'May 2026',
     ]) {
       await expect(byMonth).toContainText(month);
     }
@@ -384,16 +352,231 @@ test.describe.serial('document analytics read from the stored split', () => {
       await expect(byAccount).toContainText(account);
     }
 
-    // The page states its own cost, so the read is visibly a stored split rather than a recompute.
-    await expect(page.getByTestId('analytics-stats')).toContainText(
-      /\d+ event lines/,
+    // Three stat tiles with counts, never a query budget.
+    const stats = page.getByTestId('analytics-stats');
+    for (const label of ['Invoices analysed', 'Event lines', 'Invoice lines']) {
+      await expect(stats.getByText(label, { exact: true })).toBeVisible();
+    }
+    await expect(stats).toContainText(/\d/);
+
+    // The scope field's right edge matches the stat tiles' page edge.
+    const analyticsBox = async (locator: Locator) => {
+      const rect = await locator.boundingBox();
+      expect(rect).not.toBeNull();
+      return rect!;
+    };
+    const scopeField = await analyticsBox(
+      page.locator('.cds--multi-select').first(),
     );
+    const statsBox = await analyticsBox(stats);
+    expect(
+      Math.abs(scopeField.x + scopeField.width - (statsBox.x + statsBox.width)),
+    ).toBeLessThanOrEqual(1);
+
+    // Wait for the cleared-scope reload so stale rows and the skeleton never satisfy the checks.
+    const clearedReload = page.waitForResponse(
+      (response) =>
+        response.url().includes('/documents/analytics') &&
+        response.request().method() === 'GET',
+    );
+    await clearLegalEntities(page);
+    await clearedReload;
+    await expect
+      .poll(async () => rows.count())
+      .toBeGreaterThanOrEqual(scopedRowCount);
+    await expect(fiveMonthRow).toHaveCount(1);
+
+    // No query statistics leak anywhere on the page.
+    const analyticsText = await page.locator('main').innerText();
+    expect(analyticsText).not.toMatch(/quer(y|ies)/i);
+    expect(analyticsText).not.toMatch(/\d+\s?ms\b/);
 
     await expectNoAccessibilityViolations(page);
     // The full page image is the human readable proof the demo command leaves behind.
     await page.screenshot({
       fullPage: true,
       path: 'test-results/documents-analytics.png',
+    });
+  });
+
+  test('the documents list shows tiles, tabs, filters, sort and opens a document', async ({
+    page,
+  }) => {
+    test.skip(password.length === 0, 'BAP_OPERATIONAL_PASSWORD is required.');
+    test.setTimeout(120_000);
+
+    await page.goto(
+      `/documents?organization=${encodeURIComponent(organizationSlug)}`,
+    );
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Documents' }),
+    ).toBeVisible();
+    const table = page.getByRole('table', { name: 'Registered documents' });
+
+    // The count the status All tab carries between parentheses, or -1 with none yet.
+    const allTabCount = async () => {
+      const text = await page.getByRole('tab', { name: /^All \(/ }).innerText();
+      const match = /\((\d+)\)/.exec(text);
+      return match === null ? -1 : Number(match[1]);
+    };
+
+    // Scope to the seeded entity, then clear and confirm totals before re-scoping.
+    await selectMultiSelectLegalEntities(page, [entityName]);
+    await expect(table.locator('tbody tr').first()).toBeVisible();
+    const scopedTabCount = await allTabCount();
+    expect(scopedTabCount).toBeGreaterThanOrEqual(1);
+
+    await clearLegalEntities(page);
+    // Every entity in scope is a superset of the seeded one, so the total never drops.
+    await expect.poll(allTabCount).toBeGreaterThanOrEqual(scopedTabCount);
+
+    // Re-scope so the tiles, tabs and the opened row below belong to this run.
+    await selectMultiSelectLegalEntities(page, [entityName]);
+    await expect.poll(allTabCount).toBe(scopedTabCount);
+
+    await test.step('the four stat tiles show numbers', async () => {
+      const stats = page.getByRole('region', { name: 'Document statistics' });
+      for (const label of [
+        'Documents',
+        'Needs review',
+        'With issues',
+        'Total shown',
+      ]) {
+        await expect(stats.getByText(label, { exact: true })).toBeVisible();
+      }
+      // Poll until the tiles settle past the defaulted loading counts.
+      await expect
+        .poll(async () => stats.locator('p').filter({ hasText: /\d/ }).count())
+        .toBeGreaterThanOrEqual(4);
+    });
+
+    await test.step('the All tab count matches the rows it shows', async () => {
+      // Match the "All (n)" tab by its count, not "All legal entities".
+      const tabText = await page
+        .getByRole('tab', { name: /^All \(/ })
+        .innerText();
+      const match = /\((\d+)\)/.exec(tabText);
+      expect(match, 'The All tab carries no count.').not.toBeNull();
+      const rows = await table.locator('tbody tr').count();
+      expect(Number(match![1])).toBe(rows);
+    });
+
+    await test.step('Filter reveals the date pickers', async () => {
+      await page.getByRole('button', { name: 'Filter' }).click();
+      await expect(page.getByLabel('Document date from')).toBeVisible();
+      await expect(page.getByLabel('Document date to')).toBeVisible();
+      await page.getByRole('button', { name: 'Filter' }).click();
+    });
+
+    await test.step('the title, toolbar, grid container, table and footer share the page edges', async () => {
+      // Measure only after the loading skeleton is gone.
+      await expect(page.locator('.cds--pagination')).toBeVisible();
+      const box = async (locator: Locator) => {
+        const rect = await locator.boundingBox();
+        expect(rect).not.toBeNull();
+        return rect!;
+      };
+      const title = await box(
+        page.getByRole('heading', { level: 1, name: 'Documents' }),
+      );
+      const toolbar = await box(page.locator('.cds--table-toolbar').first());
+      const container = await box(page.locator('.cds--data-table-container'));
+      const grid = await box(table);
+      const footer = await box(page.locator('.cds--pagination').first());
+      // Every row starts at the one left edge the page grid sets.
+      for (const rect of [toolbar, container, grid, footer]) {
+        expect(Math.abs(title.x - rect.x)).toBeLessThanOrEqual(1);
+      }
+      // The table body and the footer end where the grid container does.
+      expect(
+        Math.abs(container.x + container.width - (grid.x + grid.width)),
+      ).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs(container.x + container.width - (footer.x + footer.width)),
+      ).toBeLessThanOrEqual(1);
+
+      // The scope field and New document share one row, field on the left.
+      const scopeField = await box(page.locator('.cds--multi-select').first());
+      const primary = await box(
+        page.getByRole('link', { name: 'New document' }),
+      );
+      const midY = (rect: { height: number; y: number }) =>
+        rect.y + rect.height / 2;
+      expect(Math.abs(midY(scopeField) - midY(primary))).toBeLessThanOrEqual(1);
+      expect(scopeField.x + scopeField.width).toBeLessThanOrEqual(
+        primary.x + 1,
+      );
+    });
+
+    await test.step('a column sort changes the row order', async () => {
+      const order = async () =>
+        (await table.locator('tbody tr td:first-child').allInnerTexts()).join(
+          '|',
+        );
+      const before = await order();
+      await Promise.all([
+        page.waitForResponse(
+          (response) =>
+            response.url().includes('/documents?') &&
+            response.request().method() === 'GET',
+        ),
+        table.getByText('Total', { exact: true }).click(),
+      ]);
+      // Wait out the reload skeleton before comparing the settled order.
+      await expect(page.locator('.cds--pagination')).toBeVisible();
+      await expect(table.locator('tbody tr').first()).toBeVisible();
+      await expect.poll(order).not.toBe(before);
+    });
+
+    await test.step('an invoice row opens on its Lines tab with a full-width header, summary tile and tabs', async () => {
+      // An invoice kind is opened by name so the default tab is provably Lines.
+      await table
+        .locator('tbody tr')
+        .filter({ hasText: fiveMonthReference })
+        .first()
+        .click();
+      await expect(page).toHaveURL(/\/documents\/[^/?]+/);
+
+      // Invoices open on Lines; every other kind opens on the Original tab.
+      const linesTab = page.getByRole('tab', { name: /^Lines/ });
+      await expect(linesTab).toHaveAttribute('aria-selected', 'true');
+
+      const summaryHeading = page.getByRole('heading', {
+        level: 2,
+        name: 'Summary',
+      });
+      await expect(summaryHeading).toBeVisible();
+
+      const box = async (locator: Locator) => {
+        const rect = await locator.boundingBox();
+        expect(rect).not.toBeNull();
+        return rect!;
+      };
+      // The h1 is icon-indented, so its parent row carries the left edge.
+      const title = await box(
+        page.getByRole('heading', { level: 1 }).locator('xpath=..'),
+      );
+      // The one-line subtitle joins the kind, reference, date and partner with a middot.
+      const subtitle = await box(
+        page.locator('main p').filter({ hasText: '·' }).first(),
+      );
+      const summaryTile = await box(page.locator('.cds--tile').first());
+      const tabs = await box(page.getByRole('tablist').first());
+      // The header actions row's right edge is where the header ends.
+      const actions = await box(
+        page.getByRole('button', { name: 'Mark verified' }).locator('xpath=..'),
+      );
+
+      // The title, subtitle, summary tile and tabs all start at the page-grid left edge.
+      for (const rect of [subtitle, summaryTile, tabs]) {
+        expect(Math.abs(title.x - rect.x)).toBeLessThanOrEqual(1);
+      }
+      // The actions sit level at the right page edge, so the header never wraps.
+      expect(
+        Math.abs(
+          actions.x + actions.width - (summaryTile.x + summaryTile.width),
+        ),
+      ).toBeLessThanOrEqual(1);
     });
   });
 });

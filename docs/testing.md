@@ -239,9 +239,12 @@ of the application API. Dataset readiness is polled on a widening interval, the
 legal entity proof reuses its own scope switch instead of a second page load,
 and a scope switch that is denied is driven again rather than trusted, because a
 denied request consumes no budget and the fixed window resets within a minute.
-The proof and demo stacks raise that budget to 240 requests a minute through
+The proof and demo stacks raise that budget to 480 requests a minute through
 `BAP_API_RATE_LIMIT`, because the icon and legal entity specs run back to back
-on the same synthetic owner within one worker.
+on the same synthetic owner within one worker, and the rebuilt inbox and
+documents pages read access, entities, members and list counts on every
+navigation, so the shared owner now crosses the old 240 ceiling inside a single
+60-second window.
 
 The two-level tenancy proof runs as `tests/operational/legal-entities.spec.ts`
 against the same disposable stack. Its narrated steps prove that the owner
@@ -437,3 +440,27 @@ strict shape, `{ email, name, password, organizationSlug, role }` with role
 `admin` or `member`, which resolves the existing organization by slug before any
 user write and joins the verified user through Better Auth's server-only
 `addMember`. That shape creates no organization and seeds no creation quota.
+
+## Visual gate
+
+The visual gate is a standalone browser tool, not a collected spec. It runs
+against a running demo stack with the operational environment exported and
+writes a screenshot plus one edge-measurement table per shot:
+
+```sh
+pnpm visual-gate [outputDir]
+```
+
+It reuses the same operational fixture variables as the proofs above
+(`BAP_OPERATIONAL_BASE_URL`, `BAP_OPERATIONAL_EMAIL`,
+`BAP_OPERATIONAL_PASSWORD`, `BAP_OPERATIONAL_ORGANIZATION_SLUG`), never a
+hard-coded password. The output directory is the first argument and defaults to
+`test-results/visual-gate`, which `.gitignore` already excludes. It signs in
+once, then shoots the documents and inbox pages at 1440 and 1056 wide, a
+rail-expanded pass, and the inbox upload modal.
+
+Each shot injects a classic 15 px scrollbar so a gutter is always measurable,
+then reports the left and right edges of the framing elements. The gate flags a
+left-edge spread over 1 px, a right-edge spread over 1 px across the full-width
+blocks, any horizontal overflow, and an empty preview box taller than 400 px. A
+page that shows an error notification fails the run.
