@@ -163,7 +163,7 @@ join, approved role parsing, and real member, nonmember, and unknown-slug
 outcomes through `bap_auth`. Web tests prove malformed slugs reach neither
 session nor database work, unauthenticated and unverified requests fail closed,
 resolver errors disclose nothing, and the layout uses the same not-found path
-for every negative result. The root redirect is pinned to `/organizations`.
+for every negative result. The root redirect is pinned to `/workspaces`.
 Separate BFF and PostgreSQL assertions prove a valid slug-shaped selector can
 cross the web's syntax check but cannot resolve as an id at the service
 membership boundary. Organization page tests cover every route: membership
@@ -173,12 +173,12 @@ permission-based control visibility, and settings name and slug prefill that
 stays read-only for non-owners and for a failed access read. The settings page
 tests also prove that a save calls Better Auth with the resolved id and
 refreshes, a slug change navigates to the new URL, a taken slug shows an inline
-error with the form kept, and that leaving pushes to `/organizations` while a
-sole owner's leave surfaces inline. Action tests prove normalized creation
-preserves ambient session state, invitation accept and decline carry only a
-verified invitation id, and failures expose only fixed generic outcomes. The
-auth before-hook test proves an update revalidates and normalizes a submitted
-slug against the reserved contract.
+error with the form kept, and that leaving pushes to `/workspaces` while a sole
+owner's leave surfaces inline. Action tests prove normalized creation preserves
+ambient session state, invitation accept and decline carry only a verified
+invitation id, and failures expose only fixed generic outcomes. The auth
+before-hook test proves an update revalidates and normalizes a submitted slug
+against the reserved contract.
 
 The identity and organization integration closure adds no runtime path. The
 shared TypeScript/PostgreSQL corpus explicitly enumerates all 16 reserved
@@ -197,10 +197,10 @@ collision fixture and proves the migration aborts before replacing the
 constraint. The real quota reader covers positive, exhausted, and absent grants
 through `bap_auth`.
 
-The live organization browser walk starts from `/organizations`, creates an
-allowed organization, and traverses its overview, members, and settings pages
-through Caddy. It also covers the shared skip link and primary navigation, the
-shared shell breadcrumbs, native keyboard operation, axe, a mobile viewport, 640
+The live organization browser walk starts from `/workspaces`, creates an allowed
+organization, and traverses its overview, members, and settings pages through
+Caddy. It also covers the shared skip link and primary navigation, the shared
+shell breadcrumbs, native keyboard operation, axe, a mobile viewport, 640
 CSS-pixel layout-equivalent reflow, horizontal overflow, and page/console
 errors. This is not a browser-zoom assertion. The overview, members, and
 settings pages are Carbon pages under the product shell layout under

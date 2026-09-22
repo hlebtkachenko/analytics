@@ -451,26 +451,26 @@ leaves no identifier behind. Demoting the last active owner is refused by the
 
 ## Organization and account action boundary
 
-The Carbon `/organizations` list and create pages expose the remaining
-organization server actions, which are untrusted public POST boundaries. They
-rederive the verified session, validate `FormData`, ignore any browser-supplied
-organization id, and call only installed Better Auth APIs. Creation resolves and
-normalizes the slug and keeps the stored active organization unchanged;
-invitation accept and decline carry only an invitation id that Better Auth
-matches to the verified session. Malformed input reaches only a fixed
-`/organizations` result marker with no side effect; provider and database
-failures become generic messages and are not logged. Settings, membership, and
-entity-scope mutations are no longer server actions: the Carbon
-`/[orgSlug]/settings`, `/[orgSlug]/members`, and `/[orgSlug]/entities` pages
-call Better Auth or the BFF directly with the organization id resolved
-server-side from the route slug, so no browser-supplied id selects a tenant.
+The Carbon `/workspaces` list and create pages expose the remaining organization
+server actions, which are untrusted public POST boundaries. They rederive the
+verified session, validate `FormData`, ignore any browser-supplied organization
+id, and call only installed Better Auth APIs. Creation resolves and normalizes
+the slug and keeps the stored active organization unchanged; invitation accept
+and decline carry only an invitation id that Better Auth matches to the verified
+session. Malformed input reaches only a fixed `/workspaces` result marker with
+no side effect; provider and database failures become generic messages and are
+not logged. Settings, membership, and entity-scope mutations are no longer
+server actions: the Carbon `/[orgSlug]/settings`, `/[orgSlug]/members`, and
+`/[orgSlug]/entities` pages call Better Auth or the BFF directly with the
+organization id resolved server-side from the route slug, so no browser-supplied
+id selects a tenant.
 
 The `/[orgSlug]` landing page is now a Carbon overview that reads member,
 invitation, entity, and dataset counts server-side from the caller's session and
 the server-resolved organization id; no browser-supplied id reaches a query
 string or a log, and only aggregate counts reach the browser. A shared Carbon
 shell surrounds these authenticated routes without changing their trust
-boundary. The `/organizations` list and create pages, the account pages, and the
+boundary. The `/workspaces` list and create pages, the account pages, and the
 `/[orgSlug]` landing, `/[orgSlug]/entities`, `/[orgSlug]/members`, and
 `/[orgSlug]/settings` pages are all Carbon.
 

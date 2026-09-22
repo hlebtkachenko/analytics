@@ -72,8 +72,8 @@ and shows ancestors only.
 
 Child labels are scoped by the parent module, because the same segment means
 different things under different modules: `/documents/new` reads `New document`
-while `/organizations/new` reads `Create organization`. Name a child in
-`childLabels` under its parent, not in `moduleLabels`:
+while `/workspaces/new` reads `Create workspace`. Name a child in `childLabels`
+under its parent, not in `moduleLabels`:
 
 ```ts
 const childLabels = {

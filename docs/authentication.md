@@ -74,10 +74,10 @@ header or UI shell:
 Both sign-in steps accept an optional `next` parameter, and `safeReturnPath` in
 `apps/web/src/lib/auth/return-path.ts` honours it only when it is a same-origin
 path of at most 2048 characters that starts with a single slash and carries no
-scheme or backslash, otherwise the flow lands on `/organizations`. A value
-carrying a control character, a protocol-relative or cross-origin target, or a
-route that cannot follow a sign in (`/api` and the identity pages) falls back to
-`/organizations` as well, and the same validator builds every `/sign-in?next=`
+scheme or backslash, otherwise the flow lands on `/workspaces`. A value carrying
+a control character, a protocol-relative or cross-origin target, or a route that
+cannot follow a sign in (`/api` and the identity pages) falls back to
+`/workspaces` as well, and the same validator builds every `/sign-in?next=`
 link.
 
 The sign-up page reads the switch through the server-only database boundary. The
@@ -118,7 +118,7 @@ Activation callback error codes are canonicalized before render to the fixed
 rendered. A live session redirects from `/activate` to `/welcome`. With no
 session, the page explains generically that an email scanner may have consumed
 the link and offers sign-in. `/welcome` redirects an unauthenticated request to
-`/sign-in` and links an authenticated account to `/organizations`.
+`/sign-in` and links an authenticated account to `/workspaces`.
 
 All identity forms use standard Carbon form controls through
 `@bap/design-system`. Auth failures use a non-dismissible, low-contrast error
@@ -165,7 +165,7 @@ into, the entities named there.
 Subordinate routes expose semantic breadcrumbs. Carbon content uses Carbon
 breadcrumbs, including `Datasets > {dataset name}` for an inline dataset view
 and `Account > Security`, `Account > Preferences`, and `Account > Access` for
-the account children. The `/organizations` list and create pages, the account
+the account children. The `/workspaces` list and create pages, the account
 pages, and the `/[orgSlug]` landing, `/[orgSlug]/entities`,
 `/[orgSlug]/members`, and `/[orgSlug]/settings` pages are all Carbon.
 
@@ -550,7 +550,7 @@ slug-accepting sibling. A slug-shaped value forwarded by mistake can pass the
 BFF syntax check, but resolves no id membership and is refused with 403 by the
 service boundary.
 
-`/` redirects unconditionally to `/organizations`, not to a last-visited
+`/` redirects unconditionally to `/workspaces`, not to a last-visited
 organization. That page lists only the verified session user's memberships and
 links creation. `/{orgSlug}` links the member and settings pages. Literal
 top-level routes take precedence over the dynamic segment, so migration
@@ -574,12 +574,12 @@ server-resolved organization id; a failed read fails closed and surfaces an
 call, so the temporary `[orgSlug]` loop is gone and the account pages are Carbon
 as well.
 
-The `/organizations` list and `/organizations/new` create pages are now Carbon
-pages inside `PageContainer`. The list reads the caller's workspaces with their
-role through a narrow SELECT-only `@bap/db` membership accessor and lists
-pending invitations with accept and decline server actions. `/organizations/new`
-reads creator-attributed quota through a narrow SELECT-only `@bap/db` accessor.
-A missing row, malformed state, or read failure renders remaining quota as zero
+The `/workspaces` list and `/workspaces/new` create pages are now Carbon pages
+inside `PageContainer`. The list reads the caller's workspaces with their role
+through a narrow SELECT-only `@bap/db` membership accessor and lists pending
+invitations with accept and decline server actions. `/workspaces/new` reads
+creator-attributed quota through a narrow SELECT-only `@bap/db` accessor. A
+missing row, malformed state, or read failure renders remaining quota as zero
 and replaces the form with one message. When capacity exists, the account name
 prefills the workspace name and the shared normalizer keeps the slug field in
 step with name edits.

@@ -60,3 +60,9 @@ beneath `[orgSlug]`. All of their scoped server actions resolve the slug through
 this same member gate and call Better Auth with the resulting explicit id. The
 new literal is reserved in TypeScript and PostgreSQL by migration
 `20260831.0004` before the route becomes reachable.
+
+## Amendment (2026-09-22)
+
+The list and create pages moved from `/organizations` to `/workspaces`
+(`/workspaces/new`) and the root redirect now targets `/workspaces`. The
+resolution rules above are unchanged; only the route segment differs.

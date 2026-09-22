@@ -44,7 +44,7 @@ outside that shell. The layout owns the single `main-content` landmark and
 renders small Carbon breadcrumbs for subordinate views, including the inline
 dataset view. The `/account` area is now Carbon: profile, security, and
 preferences pages plus the access diagnostic at `/account/access`, each rendered
-inside `PageContainer`. The `/organizations` list and create pages and the
+inside `PageContainer`. The `/workspaces` list and create pages and the
 `/[orgSlug]` landing, `/[orgSlug]/entities`, `/[orgSlug]/members`, and
 `/[orgSlug]/settings` pages are now Carbon; converting the remaining page
 content to Carbon is future work.

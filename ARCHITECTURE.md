@@ -251,14 +251,14 @@ session user id through `bap_auth`. React `cache` deduplicates that whole
 resolution within 1 request only. Every negative or failed lookup becomes the
 same 404, and no slug-to-id mapping is cached across requests. The BFF,
 application API, reporting API, RLS context, and service membership resolver
-remain id-only. The root route redirects to `/organizations`. The
-`/organizations` index and `/organizations/new` are Carbon pages inside
-`PageContainer`: the index lists the caller's workspaces with their role through
-a narrow `@bap/db` membership accessor, shows a get-started checklist when
-empty, and lists pending invitations with accept and decline server actions; the
-create page renders a Carbon form with live slug validation and quota-gated
-creation. Since ADR 0011 the landing page at `/[orgSlug]`, the legal entities
-page at `/[orgSlug]/entities`, the members page at `/[orgSlug]/members`, and the
+remain id-only. The root route redirects to `/workspaces`. The `/workspaces`
+index and `/workspaces/new` are Carbon pages inside `PageContainer`: the index
+lists the caller's workspaces with their role through a narrow `@bap/db`
+membership accessor, shows a get-started checklist when empty, and lists pending
+invitations with accept and decline server actions; the create page renders a
+Carbon form with live slug validation and quota-gated creation. Since ADR 0011
+the landing page at `/[orgSlug]`, the legal entities page at
+`/[orgSlug]/entities`, the members page at `/[orgSlug]/members`, and the
 settings page at `/[orgSlug]/settings` are Carbon pages that read from the BFF
 and Better Auth, so the temporary `[orgSlug]` loop is gone. The landing page
 reads members, invitations, entities, and datasets counts server-side and
