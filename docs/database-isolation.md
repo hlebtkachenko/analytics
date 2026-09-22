@@ -162,10 +162,10 @@ prunes expired rows from only the edge namespace on every consume. A partial
 `last_request` index supports that cleanup; Better Auth's own keys are retained.
 
 Migration `20260910.0001` implements ADR 0011's two-level tenancy.
-`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
-`20260910.0001`; rolling application code back after this migration leaves
-readiness at 503 until code expecting that exact version is deployed or the
-expected version is deliberately advanced.
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
+`20260910.0001` after this migration; rolling application code back after it
+leaves readiness at 503 until code expecting that exact version is deployed or
+the expected version is deliberately advanced.
 
 It adds
 `app.legal_entity(id, organization_id, name, kind, registration_number, created_by, created_at, updated_at)`,
@@ -362,8 +362,8 @@ before the insert instead of reading it back. `auth."user"` gains
 raises on a `channel_` subject and tombstones `inbox_channel.created_by`, for
 which the eraser gains column grants. The migration installs the trusted
 `pgcrypto` extension for `gen_random_bytes`. `DATABASE_MIGRATION_COMPATIBILITY`
-in `packages/db/src/access.ts` is now `20260917.0001`; rolling application code
-back after this migration leaves readiness at 503 until code expecting that
+in `packages/db/src/access.ts` was `20260917.0001` after this migration; rolling
+application code back after it leaves readiness at 503 until code expecting that
 exact version is deployed or the expected version is deliberately advanced.
 
 Migration `20260917.0002` adds the fourth definer function of ADR 0016,
@@ -409,7 +409,17 @@ address when the revoked row is an `email_address`.
 `auth.resolve_channel_credential` is unchanged: the email caller lowercases the
 local part and hashes exactly that, never the whole address.
 `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` was
-`20260917.0003` after this migration, and is now `20260922.0005`.
+`20260917.0003` after this migration, and `20260922.0005` after the inbox slug
+reservation.
+
+Migration `20260922.0006` re-declares `app.erase_user` as the union of the two
+bodies the platform and inbox stacks each wrote: the channel-name guard and the
+blob, inbox item, extraction, event, document file and channel tombstones, plus
+the member `resource_id` tombstone on `app.audit_log`. It is needed because
+`20260920.0001` replaced the function with a body that predates the inbox
+tables, and an applied migration cannot be edited in place.
+`DATABASE_MIGRATION_COMPATIBILITY` is now `20260922.0006` in
+`packages/db/src/access.ts`.
 
 ## Tenant policy contract
 
