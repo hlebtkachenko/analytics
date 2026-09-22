@@ -800,6 +800,14 @@ describe('inbox intake', () => {
   });
 
   it('serves a blob only inside the scope that sees an item carrying it', async () => {
+    // Only a clean verdict is served, so the scan job's verdict is recorded first, as the job records it.
+    await asTenant(creator, (transaction) =>
+      transaction.query('select app.record_blob_scan($1, $2)', [
+        firstBlobId,
+        'clean',
+      ]),
+    );
+
     const opened = await service.openBlob({
       ...creator,
       ...allEntities,

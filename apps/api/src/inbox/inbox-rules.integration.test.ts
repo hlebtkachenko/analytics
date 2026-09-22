@@ -29,6 +29,8 @@ import {
   createQueue,
   createQueueClientFromConfiguration,
 } from '../worker/queue.js';
+import { scanInboxItem } from '../worker/scan-inbox-item.js';
+import { WorkerMetrics } from '../worker/worker-metrics.js';
 import { endPools } from '../test-support/end-pools.js';
 import {
   ROUTE_INBOX_ITEM_QUEUE,
@@ -188,10 +190,30 @@ function uniquePdf(): Buffer {
 async function upload(tenant: TenantContext, bytes: Buffer, name: string) {
   const path = join(store.temporaryDirectory(), `${counter}-${name}`);
   await writeFile(path, bytes);
-  return service.upload({
+  const response = await service.upload({
     ...tenant,
     ...allEntities,
     file: { originalname: name, path, size: bytes.length },
+  });
+  // The scan job stands between the intake and the route now: an upload routes only after a clean verdict.
+  await scanUpload(tenant, response.item.id);
+  return response;
+}
+
+// The worker's scan handler against a scanner that finds nothing, wired to the same route queue as the intake.
+function scanUpload(tenant: TenantContext, itemId: string): Promise<void> {
+  return scanInboxItem({
+    blobs: store,
+    data: {
+      itemId,
+      organizationId: tenant.organizationId,
+      userId: tenant.userId,
+    },
+    enqueueRouteInboxItem: (job) => sendRouteInboxItem(boss, job),
+    metrics: new WorkerMetrics(),
+    pool: apiPool,
+    retry: { count: 0, limit: 3 },
+    scanner: { scan: async () => ({ outcome: 'clean' }) },
   });
 }
 
@@ -335,6 +357,7 @@ describe('inbox rules', () => {
       'received',
       'classified',
       'rule_matched',
+      'scanned',
     ]);
     expect(detail?.extraction).toMatchObject({
       legalEntityId: entityA,
@@ -372,6 +395,7 @@ describe('inbox rules', () => {
     expect(detail?.events.map((event) => event.kind)).toEqual([
       'received',
       'classified',
+      'scanned',
     ]);
     expect(detail?.extraction?.provider).toBe(SNIFF_PROVIDER);
   });
@@ -504,6 +528,20 @@ describe('inbox rules', () => {
         file: { originalname: 'target.pdf', path, size: bytes.length },
         origin: 'abcdef03',
       });
+      // A channel push waits for its own scan job, which re-reads the decision and sends the route job.
+      await scanInboxItem({
+        blobs: store,
+        data: {
+          channelId,
+          itemId: response.itemId,
+          organizationId: owner.organizationId,
+        },
+        enqueueRouteInboxItem: (job) => sendRouteInboxItem(boss, job),
+        metrics: new WorkerMetrics(),
+        pool: apiPool,
+        retry: { count: 0, limit: 3 },
+        scanner: { scan: async () => ({ outcome: 'clean' }) },
+      });
       const detail = await readItem(apiPool, {
         ...owner,
         ...allEntities,
@@ -580,6 +618,7 @@ describe('inbox rules', () => {
     expect(detail?.events.map((event) => event.kind)).toEqual([
       'received',
       'classified',
+      'scanned',
     ]);
 
     // Adoption moves the author to the caller, so the rule runs again.

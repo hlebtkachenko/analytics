@@ -89,6 +89,7 @@ import { createQueue, createQueueClientFromConfiguration } from './queue.js';
 import { rerunInboxRule } from './rerun-inbox-rule.js';
 import { AUTO_ROUTE_PROVIDER, routeInboxItem } from './route-inbox-item.js';
 import type { RouteInboxItemOutcome } from './route-inbox-item.js';
+import { scanInboxItem } from './scan-inbox-item.js';
 import { WorkerMetrics } from './worker-metrics.js';
 
 const postgresImage =
@@ -185,10 +186,30 @@ function unique(bytes: Buffer): Buffer {
 async function upload(tenant: TenantContext, bytes: Buffer, name: string) {
   const path = join(store.temporaryDirectory(), `${counter}-${name}`);
   await writeFile(path, bytes);
-  return service.upload({
+  const response = await service.upload({
     ...tenant,
     ...allEntities,
     file: { originalname: name, path, size: bytes.length },
+  });
+  // The scan job stands between the intake and the route now: an upload routes only after a clean verdict.
+  await scanUpload(tenant, response.item.id);
+  return response;
+}
+
+// The worker's scan handler against a scanner that finds nothing, wired to the same route queue as the intake.
+function scanUpload(tenant: TenantContext, itemId: string): Promise<void> {
+  return scanInboxItem({
+    blobs: store,
+    data: {
+      itemId,
+      organizationId: tenant.organizationId,
+      userId: tenant.userId,
+    },
+    enqueueRouteInboxItem: (job) => sendRouteInboxItem(boss, job),
+    metrics: new WorkerMetrics(),
+    pool: apiPool,
+    retry: { count: 0, limit: 3 },
+    scanner: { scan: async () => ({ outcome: 'clean' }) },
   });
 }
 
@@ -411,6 +432,7 @@ describe('route_inbox_item', () => {
         ['received', owner.userId],
         ['classified', owner.userId],
         ['rule_matched', owner.userId],
+        ['scanned', owner.userId],
         ['classified', admin.userId],
         ['routed', admin.userId],
       ]);
