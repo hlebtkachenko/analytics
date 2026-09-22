@@ -7,7 +7,7 @@ import {
   scanInboxItemJobSchema,
 } from '../inbox/contract.js';
 import type { RouteInboxItemJob, ScanInboxItemJob } from '../inbox/contract.js';
-import { appendEvent } from '../inbox/inbox-repository.js';
+import { appendEvent } from '../inbox/inbox-repository-support.js';
 import type { BlobScanner } from '../scanning/clamd-client.js';
 import { recordScan, setItemStatus } from './blob-scan.js';
 import { runTenantJob } from './job-context.js';

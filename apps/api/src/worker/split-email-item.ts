@@ -21,10 +21,10 @@ import {
 import type { RouteInboxItemJob } from '../inbox/contract.js';
 import {
   appendEvent,
-  applyInboxRules,
   insertExtraction,
-  receiveIntakeInTransaction,
-} from '../inbox/inbox-repository.js';
+} from '../inbox/inbox-repository-support.js';
+import { receiveIntakeInTransaction } from '../inbox/inbox-repository.js';
+import { applyInboxRules } from '../inbox/inbox-rule-repository.js';
 import type {
   ExtractionRecord,
   ReceiveIntakeResult,

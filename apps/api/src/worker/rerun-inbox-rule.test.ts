@@ -22,7 +22,8 @@ const repository = vi.hoisted(() => ({
   >(async () => []),
 }));
 
-vi.mock('../inbox/inbox-repository.js', () => repository);
+vi.mock('../inbox/inbox-repository-support.js', () => repository);
+vi.mock('../inbox/inbox-rule-repository.js', () => repository);
 
 const ORGANIZATION = 'org_1';
 const RULE_ID = '4a2b7c1e-9f5d-4c3a-8b21-6e0f7d5a4c39';

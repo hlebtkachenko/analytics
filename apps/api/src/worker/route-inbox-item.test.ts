@@ -28,6 +28,7 @@ const documents = vi.hoisted(() => ({
 const BLOB_ID = '7d1c8a44-3d29-4b4a-9d9b-1f0c3e2a5b6c';
 
 vi.mock('../inbox/inbox-repository.js', () => repository);
+vi.mock('../inbox/inbox-repository-support.js', () => repository);
 vi.mock('../documents/document-repository.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createDocumentInTransaction: documents.createDocumentInTransaction,

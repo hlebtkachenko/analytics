@@ -40,43 +40,49 @@ import type {
 } from '../inbox/contract.js';
 import { InboxService } from '../inbox/inbox.service.js';
 import {
-  adoptRule,
+  createChannel,
+  issueCredential,
+  listChannels,
+  readChannel,
+  readChannelPrincipal,
+  revokeCredential,
+  updateChannel,
+} from '../inbox/inbox-channel-repository.js';
+import {
   approveItem,
   attachItem,
   assignItem,
-  createChannel,
-  createRule,
-  deleteRule,
-  listRules,
-  orderRules,
-  readRule,
-  updateRule,
-  deleteRoutingTarget,
   discardItem,
-  issueCredential,
-  listChannels,
   listItems,
-  listRoutingTargets,
-  putRoutingTarget,
   readBlob,
-  readChannel,
-  readChannelPrincipal,
-  readInboxSettings,
   readItem,
   readProviderInput,
   receiveIntake,
   recordExtraction,
   reopenEmailItem,
   restoreItem,
-  revokeCredential,
   routeToDocument,
   snoozeItem,
   undoRoute,
-  updateChannel,
   updateHints,
-  updateInboxSettings,
   type InboxRepository,
 } from '../inbox/inbox-repository.js';
+import {
+  adoptRule,
+  createRule,
+  deleteRule,
+  listRules,
+  orderRules,
+  readRule,
+  updateRule,
+} from '../inbox/inbox-rule-repository.js';
+import {
+  deleteRoutingTarget,
+  listRoutingTargets,
+  putRoutingTarget,
+  readInboxSettings,
+  updateInboxSettings,
+} from '../inbox/inbox-settings-repository.js';
 import * as fixtures from '../inbox/providers/__fixtures__/index.js';
 import type { BlobScanner, ScanOutcome } from '../scanning/clamd-client.js';
 import { endPools } from '../test-support/end-pools.js';

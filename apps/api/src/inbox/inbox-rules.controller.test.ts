@@ -32,12 +32,12 @@ import type { InboxRule, UpdateInboxRuleRequest } from './contract.js';
 import { InboxRulesController } from './inbox-rules.controller.js';
 import { InboxService } from './inbox.service.js';
 import {
-  RuleLimitError,
   type CreateRuleInput,
   type OrderRulesInput,
   type RuleSelector,
   type UpdateRuleInput,
 } from './inbox-repository.js';
+import { RuleLimitError } from './inbox-rule-repository.js';
 
 const ENTITY_ID = '4a2b7c1e-9f5d-4c3a-8b21-6e0f7d5a4c39';
 const FOREIGN_ENTITY_ID = '6c4d9e30-1b7f-4e5c-ad43-801b9f7c6e51';

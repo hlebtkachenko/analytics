@@ -34,16 +34,18 @@ import { SubjectRateLimitGuard } from '../subject-rate-limit.guard.js';
 import { resolveTenantAccess } from '../tenant-access.js';
 import type { TenantAccess } from '../tenant-access.js';
 import {
-  detectedTypeSchema,
   inboxRoutingTargetListOpenApiSchema,
-  inboxRoutingTargetListResponseSchema,
   inboxRoutingTargetOpenApiSchema,
-  inboxRoutingTargetSchema,
   inboxSettingsOpenApiSchema,
-  inboxSettingsSchema,
   putInboxRoutingTargetBodyOpenApiSchema,
-  putInboxRoutingTargetRequestSchema,
   updateInboxSettingsBodyOpenApiSchema,
+} from './contract-openapi.js';
+import {
+  detectedTypeSchema,
+  inboxRoutingTargetListResponseSchema,
+  inboxRoutingTargetSchema,
+  inboxSettingsSchema,
+  putInboxRoutingTargetRequestSchema,
   updateInboxSettingsRequestSchema,
 } from './contract.js';
 import type {

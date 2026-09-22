@@ -5,13 +5,12 @@ import {
   NotFoundException,
   type OnModuleDestroy,
 } from '@nestjs/common';
-import { readEntityScope, runInTenantContext } from '@bap/db';
+import { runInTenantContext } from '@bap/db';
 import type {
   BlobScanStatus,
   InboxChannelKind,
   InboxCorrectionField,
   InboxCorrectionSource,
-  InboxDiscardReason,
   TenantContext,
 } from '@bap/db';
 import { loadDatabaseConfiguration } from '@bap/db/config';
@@ -19,15 +18,9 @@ import { createDatabasePool } from '@bap/db/pool';
 import type { DatabasePool } from '@bap/db/pool';
 import type { PoolClient } from 'pg';
 
-import {
-  channelTenant,
-  type ChannelPrincipalReader,
-} from '../channel-access.js';
+import type { ChannelPrincipalReader } from '../channel-access.js';
 import type { EntityScopeSelector } from '../datasets/dataset-repository.js';
-import {
-  createDocumentRequestSchema,
-  INVOICE_KINDS,
-} from '../documents/contract.js';
+import { createDocumentRequestSchema } from '../documents/contract.js';
 import type { CreateDocumentRequest } from '../documents/contract.js';
 import {
   createDocumentInTransaction,
@@ -37,26 +30,16 @@ import {
 } from '../documents/document-repository.js';
 import { entityFilter } from '../documents/sql.js';
 import {
-  DETECTED_TYPES,
-  HUMAN_TOUCH_EVENT_KINDS,
   INBOX_ASSIGNEE_NONE,
   INBOX_CONFIDENCE_HIGH_FROM,
   INBOX_CONFIDENCE_MEDIUM_FROM,
-  MAX_ENABLED_INBOX_RULES,
-  RULE_PROVIDER,
-  RULE_PROVIDER_VERSION,
-  ruleDraftSchema,
 } from './contract.js';
 import type {
   CorrectionReasons,
   DuplicateCandidate,
-  CreateInboxChannelRequest,
-  CreateInboxRuleRequest,
   InboxChannel,
-  InboxChannelCredential,
   InboxCorrection,
   InboxEvent,
-  InboxExtraction,
   InboxItem,
   InboxItemDetail,
   InboxItemFile,
@@ -68,14 +51,9 @@ import type {
   InboxSettings,
   IssueInboxChannelCredentialResponse,
   ProviderInput,
-  ProviderOutput,
-  PutInboxRoutingTargetRequest,
   RouteInboxItemJob,
-  RuleDraft,
   SplitEmailItemJob,
-  UpdateInboxChannelRequest,
   UpdateInboxHintsRequest,
-  UpdateInboxRuleRequest,
 } from './contract.js';
 import {
   CORRECTION_FIELD_BY_DRAFT_KEY,
@@ -84,28 +62,90 @@ import {
   type ComposedDocumentDraft,
 } from './draft-composer.js';
 import {
+  createChannel,
+  issueCredential,
+  listChannels,
+  readChannel,
+  readChannelPrincipal,
+  revokeCredential,
+  updateChannel,
+  type ChannelSelector,
+  type CreateChannelInput,
+  type IssueCredentialInput,
+  type RevokeCredentialInput,
+  type UpdateChannelInput,
+} from './inbox-channel-repository.js';
+import {
+  ITEM_COLUMNS,
+  SCOPE_FILTER,
+  appendEvent,
+  insertExtraction,
+  loadItem,
+  loadItemFiles,
+  loadLatestExtraction,
+  loadRoutingTargetOverrides,
+  toItem,
+  type ExtractionRecord,
+  type InboxEventKind,
+  type InboxEventReason,
+  type ItemFileRecord,
+  type ItemRow,
+} from './inbox-repository-support.js';
+import {
+  adoptRule,
+  applyInboxRules,
+  createRule,
+  deleteRule,
+  listRules,
+  loadMatchedRuleIds,
+  loadRulesById,
+  orderRules,
+  readRule,
+  updateRule,
+  type AdoptRuleInput,
+  type CreateRuleInput,
+  type OrderRulesInput,
+  type RuleSelector,
+  type UpdateRuleInput,
+} from './inbox-rule-repository.js';
+import {
+  deleteRoutingTarget,
+  listRoutingTargets,
+  putRoutingTarget,
+  readInboxSettings,
+  updateInboxSettings,
+  type PutRoutingTargetInput,
+  type ReadInboxSettingsInput,
+  type RoutingTargetSelector,
+  type UpdateInboxSettingsInput,
+} from './inbox-settings-repository.js';
+import {
   MANUAL_PROVIDER,
   MANUAL_PROVIDER_VERSION,
   manualProvider,
 } from './providers/manual.js';
-import {
-  evaluateRules,
-  ruleReasons,
-  type InboxRuleDefinition,
-  type RuleActionField,
-} from './rules.js';
-import {
-  knownDetectedType,
-  routingTargetFor,
-  type DetectedType,
-  type RoutingTarget,
-  type RoutingTargetOverrides,
-} from './routing-targets.js';
+import { routingTargetFor } from './routing-targets.js';
 
-export type { EntityScopeSelector };
-
-type InboxEventKind = InboxEvent['kind'];
-type InboxEventReason = NonNullable<InboxEvent['reason']>;
+// The repository contract keeps one import site for its callers.
+export type {
+  AdoptRuleInput,
+  ChannelSelector,
+  CreateChannelInput,
+  CreateRuleInput,
+  EntityScopeSelector,
+  ExtractionRecord,
+  IssueCredentialInput,
+  ItemFileRecord,
+  OrderRulesInput,
+  PutRoutingTargetInput,
+  ReadInboxSettingsInput,
+  RevokeCredentialInput,
+  RoutingTargetSelector,
+  RuleSelector,
+  UpdateChannelInput,
+  UpdateInboxSettingsInput,
+  UpdateRuleInput,
+};
 
 export interface ReadItemInput extends EntityScopeSelector {
   itemId: string;
@@ -113,12 +153,6 @@ export interface ReadItemInput extends EntityScopeSelector {
 
 export interface ListItemsInput extends EntityScopeSelector {
   query: InboxItemListQuery;
-}
-
-export interface ExtractionRecord {
-  output: ProviderOutput;
-  provider: string;
-  providerVersion: string;
 }
 
 export interface ReceiveIntakeInput extends EntityScopeSelector {
@@ -157,27 +191,6 @@ export interface ReceiveIntakeResult {
   replayed: boolean;
   // The automatic route the rule pass asked for, sent by the caller once the transaction has committed.
   routeJob: RouteInboxItemJob | null;
-}
-
-export interface ChannelSelector extends TenantContext {
-  channelId: string;
-}
-
-export interface CreateChannelInput extends TenantContext {
-  body: CreateInboxChannelRequest;
-}
-
-export interface UpdateChannelInput extends ChannelSelector {
-  body: UpdateInboxChannelRequest;
-}
-
-export interface RevokeCredentialInput extends ChannelSelector {
-  credentialId: string;
-}
-
-export interface IssueCredentialInput extends ChannelSelector {
-  // The platform intake domain an email address is issued under; unused for an API channel.
-  intakeDomain: string;
 }
 
 export interface UpdateHintsInput extends ReadItemInput {
@@ -226,85 +239,11 @@ export interface ReopenedEmailItem {
   job: SplitEmailItemJob;
 }
 
-export interface RulePassInput extends TenantContext {
-  itemId: string;
-  // A rerun narrows the pass to one rule; absent means every live rule of the organization.
-  ruleIds?: readonly string[];
-  // The body text of a text payload, read outside the transaction; null for every other item.
-  text: string | null;
-}
-
 // Who decided a route: the person, the rule that asked, or the editor of the target default that asked.
 export type RouteDecision =
   | { kind: 'rule'; ruleId: string }
   | { kind: 'target_default'; userId: string }
   | { kind: 'user'; userId: string };
-
-export interface RulePassResult {
-  discarded: boolean;
-  matchedRuleIds: string[];
-  // The route job to send after the commit, or null when the item waits for a person.
-  routeJob: RouteInboxItemJob | null;
-}
-
-export interface RuleSelector extends TenantContext {
-  ruleId: string;
-}
-
-// Adoption re-checks the rule's targets against the adopter's scope, exactly like a create or a patch.
-export interface AdoptRuleInput extends EntityScopeSelector {
-  ruleId: string;
-}
-
-export interface CreateRuleInput extends EntityScopeSelector {
-  body: CreateInboxRuleRequest;
-}
-
-export interface UpdateRuleInput extends EntityScopeSelector {
-  body: UpdateInboxRuleRequest;
-  ruleId: string;
-}
-
-export interface OrderRulesInput extends TenantContext {
-  ruleIds: readonly string[];
-}
-
-// The rule row as the table holds it, plus the author check the matcher applies.
-interface RuleRow {
-  auto_route: boolean;
-  channel_id: string | null;
-  created_at: Date;
-  created_by: string;
-  detected_type: string | null;
-  discard_reason: string | null;
-  enabled: boolean;
-  id: string;
-  keyword: string | null;
-  name: string;
-  paused: boolean;
-  priority: number;
-  sender_pattern: string | null;
-  set_assignee_id: string | null;
-  set_document_kind: string | null;
-  set_legal_entity_id: string | null;
-  set_partner_id: string | null;
-  updated_at: Date;
-}
-
-interface RuleDefinitionRow {
-  auto_route: boolean;
-  channel_id: string | null;
-  detected_type: string | null;
-  discard_reason: string | null;
-  id: string;
-  keyword: string | null;
-  priority: number;
-  sender_pattern: string | null;
-  set_assignee_id: string | null;
-  set_document_kind: string | null;
-  set_legal_entity_id: string | null;
-  set_partner_id: string | null;
-}
 
 interface CorrectionRow {
   created_at: Date;
@@ -333,22 +272,6 @@ export interface ReadBlobInput extends EntityScopeSelector {
   blobId: string;
 }
 
-export interface RoutingTargetSelector extends TenantContext {
-  detectedType: DetectedType;
-}
-
-export interface PutRoutingTargetInput extends RoutingTargetSelector {
-  body: PutInboxRoutingTargetRequest;
-}
-
-export interface ReadInboxSettingsInput extends TenantContext {
-  platformQuotaBytes: number;
-}
-
-export interface UpdateInboxSettingsInput extends ReadInboxSettingsInput {
-  blobQuotaBytes: number | null;
-}
-
 export interface BlobRecord {
   byteSize: number;
   id: string;
@@ -359,135 +282,9 @@ export interface BlobRecord {
   storageKey: string;
 }
 
-export interface ItemFileRecord extends InboxItemFile {
-  storageKey: string;
-}
-
-interface ItemRow {
-  assignee_id: string | null;
-  channel_id: string | null;
-  channel_kind: string;
-  confidence: string | null;
-  created_at: Date;
-  dataset_id: string | null;
-  decided_by_kind: string | null;
-  decided_by_rule_id: string | null;
-  decided_by_user_id: string | null;
-  detected_type: string | null;
-  document_id: string | null;
-  duplicate_of_item_id: string | null;
-  hint_kind: string | null;
-  human_touched: boolean;
-  hint_legal_entity_id: string | null;
-  hint_link_document_id: string | null;
-  hint_partner_id: string | null;
-  hint_text: string | null;
-  id: string;
-  legal_entity_id: string | null;
-  origin: string | null;
-  partner_id: string | null;
-  payload_kind: string;
-  received_at: Date;
-  routed_at: Date | null;
-  snoozed_until: Date | null;
-  status: string;
-  updated_at: Date;
-}
-
-interface ChannelRow {
-  created_at: Date;
-  email_address: string | null;
-  enabled: boolean;
-  hint_kind: string | null;
-  id: string;
-  item_count: number;
-  kind: string;
-  legal_entity_id: string | null;
-  name: string;
-  updated_at: Date;
-}
-
-interface CredentialRow {
-  created_at: Date;
-  credential_id: string;
-  display_prefix: string;
-  last_used_at: Date | null;
-}
-
 interface ListRow extends ItemRow {
   file_count: number;
   primary_filename: string | null;
-}
-
-interface RoutingTargetRow {
-  auto: string;
-  auto_threshold: string | null;
-  default_assignee_id: string | null;
-  default_legal_entity_id: string | null;
-  destination: string;
-  detected_type: string;
-  document_kind: string | null;
-  partner_policy: string;
-  required_fields: string[];
-}
-
-interface FileRow {
-  blob_id: string;
-  byte_size: string;
-  media_type: string;
-  original_filename: string | null;
-  position: number;
-  scan_status: BlobScanStatus;
-  sha256: string;
-  storage_key: string;
-}
-
-const ITEM_COLUMNS = `i.id, i.legal_entity_id, i.channel_kind, i.channel_id, i.origin, i.payload_kind, i.status, i.detected_type,
-          i.confidence::text as confidence, i.hint_text, i.hint_legal_entity_id, i.hint_kind, i.hint_partner_id,
-          i.hint_link_document_id, i.duplicate_of_item_id, i.document_id, i.dataset_id, i.partner_id,
-          i.decided_by_kind, i.decided_by_rule_id, i.decided_by_user_id, i.routed_at, i.assignee_id, i.snoozed_until,
-          i.received_at, i.created_at, i.updated_at,
-          exists (select 1 from app.inbox_event as e
-                   where e.item_id = i.id and e.organization_id = i.organization_id
-                     and e.actor_user_id is not null
-                     and e.kind in (${HUMAN_TOUCH_EVENT_KINDS.map((kind) => `'${kind}'`).join(', ')})) as human_touched`;
-
-// An unrouted item has no entity, so only the unrestricted scope sees it; a restricted member sees its own entities.
-const SCOPE_FILTER = `($1::uuid[] is null
-       or (i.legal_entity_id is not null and i.legal_entity_id = any($1::uuid[])))`;
-
-function toItem(row: ItemRow): InboxItem {
-  return {
-    assigneeId: row.assignee_id,
-    channelId: row.channel_id,
-    channelKind: row.channel_kind as InboxItem['channelKind'],
-    confidence: row.confidence === null ? null : Number(row.confidence),
-    createdAt: row.created_at.toISOString(),
-    datasetId: row.dataset_id,
-    decidedByKind: row.decided_by_kind as InboxItem['decidedByKind'],
-    decidedByRuleId: row.decided_by_rule_id,
-    decidedByUserId: row.decided_by_user_id,
-    detectedType: row.detected_type,
-    documentId: row.document_id,
-    duplicateOfItemId: row.duplicate_of_item_id,
-    hintKind: row.hint_kind,
-    hintLegalEntityId: row.hint_legal_entity_id,
-    hintLinkDocumentId: row.hint_link_document_id,
-    hintPartnerId: row.hint_partner_id,
-    hintText: row.hint_text,
-    humanTouched: row.human_touched,
-    id: row.id,
-    legalEntityId: row.legal_entity_id,
-    origin: row.origin,
-    partnerId: row.partner_id,
-    payloadKind: row.payload_kind as InboxItem['payloadKind'],
-    receivedAt: row.received_at.toISOString(),
-    routedAt: row.routed_at === null ? null : row.routed_at.toISOString(),
-    snoozedUntil:
-      row.snoozed_until === null ? null : row.snoozed_until.toISOString(),
-    status: row.status as InboxItem['status'],
-    updatedAt: row.updated_at.toISOString(),
-  };
 }
 
 function toListEntry(row: ListRow): InboxItemListEntry {
@@ -495,19 +292,6 @@ function toListEntry(row: ListRow): InboxItemListEntry {
     ...toItem(row),
     fileCount: row.file_count,
     primaryFilename: row.primary_filename,
-  };
-}
-
-function toFile(row: FileRow): ItemFileRecord {
-  return {
-    blobId: row.blob_id,
-    byteSize: Number(row.byte_size),
-    mediaType: row.media_type,
-    originalFilename: row.original_filename,
-    position: row.position,
-    scanStatus: row.scan_status,
-    sha256: row.sha256,
-    storageKey: row.storage_key,
   };
 }
 
@@ -522,85 +306,6 @@ function publicFile(file: ItemFileRecord): InboxItemFile {
     scanStatus: file.scanStatus,
     sha256: file.sha256,
   };
-}
-
-// Every write path locks the row it is about to change, so two concurrent decisions on one item serialise.
-export async function loadItem(
-  transaction: PoolClient,
-  itemId: string,
-  legalEntityIds: readonly string[] | null,
-  forUpdate = false,
-): Promise<InboxItem | null> {
-  const result = await transaction.query<ItemRow>(
-    `select ${ITEM_COLUMNS}
-       from app.inbox_item as i
-      where i.id = $2 and ${SCOPE_FILTER}${forUpdate ? ' for update' : ''}`,
-    [entityFilter(legalEntityIds), itemId],
-  );
-  const row = result.rows[0];
-
-  return row === undefined ? null : toItem(row);
-}
-
-export async function loadItemFiles(
-  transaction: PoolClient,
-  itemId: string,
-): Promise<ItemFileRecord[]> {
-  const result = await transaction.query<FileRow>(
-    `select f.blob_id, f.position, b.sha256, b.byte_size::text as byte_size, b.media_type,
-            b.original_filename, b.scan_status, b.storage_key
-       from app.inbox_item_file as f
-       join app.blob as b on b.id = f.blob_id
-      where f.item_id = $1
-      order by f.position`,
-    [itemId],
-  );
-
-  return result.rows.map(toFile);
-}
-
-export async function loadLatestExtraction(
-  transaction: PoolClient,
-  itemId: string,
-): Promise<InboxExtraction | null> {
-  const result = await transaction.query<{
-    confidence: string;
-    created_at: Date;
-    detected_type: string | null;
-    draft: Record<string, unknown>;
-    field_confidences: Record<string, number>;
-    id: string;
-    issues: InboxExtraction['issues'];
-    legal_entity_id: string | null;
-    provider: string;
-    provider_version: string;
-    reasons: InboxExtraction['reasons'];
-  }>(
-    `select id, provider, provider_version, detected_type, confidence::text as confidence, legal_entity_id,
-            draft, field_confidences, reasons, issues, created_at
-       from app.inbox_item_extraction
-      where item_id = $1
-      order by created_at desc, id desc
-      limit 1`,
-    [itemId],
-  );
-  const row = result.rows[0];
-
-  return row === undefined
-    ? null
-    : {
-        confidence: Number(row.confidence),
-        createdAt: row.created_at.toISOString(),
-        detectedType: row.detected_type,
-        draft: row.draft,
-        fieldConfidences: row.field_confidences,
-        id: row.id,
-        issues: row.issues,
-        legalEntityId: row.legal_entity_id,
-        provider: row.provider,
-        providerVersion: row.provider_version,
-        reasons: row.reasons,
-      };
 }
 
 async function loadEvents(
@@ -628,42 +333,6 @@ async function loadEvents(
     kind: row.kind as InboxEvent['kind'],
     reason: row.reason as InboxEvent['reason'],
   }));
-}
-
-function toRoutingTarget(row: RoutingTargetRow): RoutingTarget {
-  return {
-    auto: row.auto as RoutingTarget['auto'],
-    autoThreshold:
-      row.auto_threshold === null ? null : Number(row.auto_threshold),
-    defaultAssigneeId: row.default_assignee_id,
-    defaultLegalEntityId: row.default_legal_entity_id,
-    destination: row.destination as RoutingTarget['destination'],
-    documentKind: row.document_kind as RoutingTarget['documentKind'],
-    partnerPolicy: row.partner_policy as RoutingTarget['partnerPolicy'],
-    requiredFields: row.required_fields,
-  };
-}
-
-// The one read path of the targets: the definer serves the organization's rows to every principal, the channel included.
-async function loadRoutingTargetOverrides(
-  transaction: PoolClient,
-): Promise<RoutingTargetOverrides> {
-  const result = await transaction.query<RoutingTargetRow>(
-    `select detected_type, destination, document_kind, default_legal_entity_id, partner_policy,
-            auto, auto_threshold::text as auto_threshold, default_assignee_id, required_fields
-       from app.list_inbox_routing_targets()`,
-  );
-  const overrides: RoutingTargetOverrides = {};
-
-  for (const row of result.rows) {
-    const known = DETECTED_TYPES.find((type) => type === row.detected_type);
-
-    if (known !== undefined) {
-      overrides[known] = toRoutingTarget(row);
-    }
-  }
-
-  return overrides;
 }
 
 async function loadCorrections(
@@ -731,67 +400,6 @@ async function loadEffectiveQuotaBytes(
   return own === null
     ? platformQuotaBytes
     : Math.min(Number(own), platformQuotaBytes);
-}
-
-export async function appendEvent(
-  transaction: PoolClient,
-  input: TenantContext,
-  itemId: string,
-  kind: InboxEventKind,
-  reason: InboxEventReason | null = null,
-): Promise<void> {
-  // clock_timestamp, not now(): several events of one transaction must keep their insertion order.
-  // A channel is not a person, so its events carry no actor; the audit log still names the channel subject.
-  await transaction.query(
-    `insert into app.inbox_event (organization_id, item_id, kind, reason, actor_user_id, created_at)
-     values ($1, $2, $3, $4, $5, clock_timestamp())`,
-    [
-      input.organizationId,
-      itemId,
-      kind,
-      reason,
-      input.role === 'channel' ? null : input.userId,
-    ],
-  );
-}
-
-// One row per provider run; the item carries the latest verdict so the list can filter on it.
-export async function insertExtraction(
-  transaction: PoolClient,
-  input: TenantContext,
-  itemId: string,
-  extraction: ExtractionRecord,
-  event: InboxEventKind = 'classified',
-): Promise<void> {
-  const { output } = extraction;
-
-  await transaction.query(
-    `insert into app.inbox_item_extraction
-       (organization_id, item_id, provider, provider_version, detected_type, confidence, legal_entity_id,
-        draft, field_confidences, reasons, issues, created_by, created_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12, clock_timestamp())`,
-    [
-      input.organizationId,
-      itemId,
-      extraction.provider,
-      extraction.providerVersion,
-      output.detectedType,
-      output.confidence,
-      output.legalEntityId ?? null,
-      JSON.stringify(output.draft),
-      JSON.stringify(output.fieldConfidences),
-      JSON.stringify(output.reasons),
-      JSON.stringify(output.issues),
-      input.userId,
-    ],
-  );
-  await transaction.query(
-    `update app.inbox_item
-        set detected_type = $2, confidence = $3, updated_at = now()
-      where id = $1`,
-    [itemId, output.detectedType, output.confidence],
-  );
-  await appendEvent(transaction, input, itemId, event);
 }
 
 // The whole intake in one transaction: blob, item, file, events and the sniff verdict, then the bytes move into place.
@@ -1032,358 +640,6 @@ export async function receiveIntakeInTransaction(
     replayed: false,
     routeJob: rulePass?.routeJob ?? null,
   };
-}
-
-function toRuleDefinition(row: RuleDefinitionRow): InboxRuleDefinition {
-  return {
-    autoRoute: row.auto_route,
-    channelId: row.channel_id,
-    detectedType: row.detected_type,
-    discardReason: row.discard_reason as InboxDiscardReason | null,
-    id: row.id,
-    keyword: row.keyword,
-    priority: row.priority,
-    senderPattern: row.sender_pattern,
-    setAssigneeId: row.set_assignee_id,
-    setDocumentKind: row.set_document_kind,
-    setLegalEntityId: row.set_legal_entity_id,
-    setPartnerId: row.set_partner_id,
-  };
-}
-
-const RULE_DEFINITION_COLUMNS = `id, priority, channel_id, sender_pattern, keyword, detected_type, set_legal_entity_id,
-          set_document_kind, set_partner_id, set_assignee_id, discard_reason, auto_route`;
-
-// The one read path of the matcher: the definer admits only rules whose author is still a verified owner or admin.
-async function loadLiveRules(
-  transaction: PoolClient,
-): Promise<InboxRuleDefinition[]> {
-  const result = await transaction.query<RuleDefinitionRow>(
-    `select ${RULE_DEFINITION_COLUMNS} from app.list_inbox_rules()`,
-  );
-
-  return result.rows.map(toRuleDefinition);
-}
-
-// The rules a routed item's newest rule extraction named, for the composer; a deleted rule still reads.
-async function loadRulesById(
-  transaction: PoolClient,
-  ruleIds: readonly string[],
-): Promise<InboxRuleDefinition[]> {
-  if (ruleIds.length === 0) {
-    return [];
-  }
-
-  const result = await transaction.query<RuleDefinitionRow>(
-    `select ${RULE_DEFINITION_COLUMNS} from app.inbox_rule where id = any($1::uuid[]) order by priority`,
-    [[...ruleIds]],
-  );
-
-  return result.rows.map(toRuleDefinition);
-}
-
-const EMPTY_RULE_DRAFT: RuleDraft = {
-  kind: null,
-  matchedRuleIds: [],
-  partnerId: null,
-};
-
-// The newest rule extraction's draft: the rules that matched and the merged kind and partner a rerun keeps.
-async function loadPreviousRuleDraft(
-  transaction: PoolClient,
-  itemId: string,
-): Promise<RuleDraft> {
-  const result = await transaction.query<{ draft: unknown }>(
-    `select draft
-       from app.inbox_item_extraction
-      where item_id = $1 and provider = $2
-      order by created_at desc, id desc
-      limit 1`,
-    [itemId, RULE_PROVIDER],
-  );
-  const parsed = ruleDraftSchema.safeParse(result.rows[0]?.draft);
-
-  return parsed.success ? parsed.data : EMPTY_RULE_DRAFT;
-}
-
-// The newest rule extraction names the rules that matched; a rerun skips a rule already in that list.
-export async function loadMatchedRuleIds(
-  transaction: PoolClient,
-  itemId: string,
-): Promise<string[]> {
-  return (await loadPreviousRuleDraft(transaction, itemId)).matchedRuleIds;
-}
-
-// The auto-route decision of the spec, conditions (a) to (e), taken inside the same transaction as the matcher.
-function decideAutoRoute(input: {
-  autoRouteRuleId: string | null;
-  confidence: number;
-  latestIssueCount: number;
-  missing: readonly string[];
-  resolvedKind: string | null;
-  target: InboxRoutingTarget;
-}): { job: 'route' | null; reason: string | null } {
-  const { target } = input;
-  const asked =
-    input.autoRouteRuleId !== null ||
-    target.auto === 'always' ||
-    (target.auto === 'above_threshold' &&
-      target.autoThreshold !== null &&
-      input.confidence >= target.autoThreshold);
-
-  if (!asked) {
-    return { job: null, reason: null };
-  }
-
-  if (target.destination !== 'documents') {
-    return {
-      job: null,
-      reason:
-        'Auto-route waits: only the documents destination routes automatically.',
-    };
-  }
-
-  if (
-    input.resolvedKind !== null &&
-    INVOICE_KINDS.includes(input.resolvedKind as (typeof INVOICE_KINDS)[number])
-  ) {
-    return {
-      job: null,
-      reason:
-        'Auto-route waits: an invoice kind needs the ISDOC parser on the connections track.',
-    };
-  }
-
-  if (input.missing.length > 0) {
-    return {
-      job: null,
-      reason: `Auto-route waits: the draft is missing ${input.missing.join(', ')}.`,
-    };
-  }
-
-  if (input.latestIssueCount > 0) {
-    return {
-      job: null,
-      reason: 'Auto-route waits: the newest extraction raised an issue.',
-    };
-  }
-
-  return { job: 'route', reason: null };
-}
-
-// The rule pass: reads the live rules through the definer, applies the actions under hint precedence, writes one
-// rule extraction row and the rule_matched event, discards synchronously on a discard rule, and decides the route job.
-// The route decision runs even without a match: a target default that asks enqueues on its own, with no rule row.
-export async function applyInboxRules(
-  transaction: PoolClient,
-  input: RulePassInput,
-): Promise<RulePassResult> {
-  const live = await loadLiveRules(transaction);
-  const rules =
-    input.ruleIds === undefined
-      ? live
-      : live.filter((rule) => input.ruleIds?.includes(rule.id));
-  const item = await loadItem(transaction, input.itemId, null);
-
-  if (item === null) {
-    throw new Error('The rule pass names an item that is not readable.');
-  }
-
-  const sender = await transaction.query<{
-    sender: string | null;
-    sender_authenticated: boolean;
-  }>('select sender, sender_authenticated from app.inbox_item where id = $1', [
-    item.id,
-  ]);
-  const files = await loadItemFiles(transaction, item.id);
-  const primaryFilename = files[0]?.originalFilename ?? null;
-  const evaluation = evaluateRules(rules, {
-    channelId: item.channelId,
-    detectedType: item.detectedType,
-    filename: primaryFilename,
-    hintText: item.hintText,
-    sender: sender.rows[0]?.sender ?? null,
-    senderAuthenticated: sender.rows[0]?.sender_authenticated ?? false,
-    text: input.text,
-  });
-
-  // A rerun merges with the newest rule row: its matches stay listed and its kind and partner keep first-writer-wins.
-  const previous =
-    input.ruleIds === undefined
-      ? EMPTY_RULE_DRAFT
-      : await loadPreviousRuleDraft(transaction, item.id);
-  const previousRules = await loadRulesById(
-    transaction,
-    previous.matchedRuleIds,
-  );
-  const latest = await loadLatestExtraction(transaction, item.id);
-  const target = routingTargetFor(
-    item.detectedType,
-    await loadRoutingTargetOverrides(transaction),
-  );
-  const composed = composeDocumentDraft(
-    { ...item, primaryFilename },
-    evaluation.discard === null
-      ? [...previousRules, ...evaluation.matched]
-      : [],
-    target,
-  );
-  const decision =
-    evaluation.discard === null
-      ? decideAutoRoute({
-          autoRouteRuleId: evaluation.autoRouteRuleId,
-          confidence: item.confidence ?? 0,
-          latestIssueCount: latest?.issues.length ?? 0,
-          missing: composed.missing,
-          resolvedKind: composed.draft.kind,
-          target,
-        })
-      : { job: null, reason: null };
-  const routeJob: RouteInboxItemJob | null =
-    decision.job === null
-      ? null
-      : {
-          itemId: item.id,
-          organizationId: input.organizationId,
-          ruleId: evaluation.autoRouteRuleId,
-        };
-
-  // Without a match the target default alone decides the route, and the item keeps its rows untouched.
-  if (evaluation.matched.length === 0) {
-    return { discarded: false, matchedRuleIds: [], routeJob };
-  }
-
-  // A hint a person set and the standing channel hint copied at intake both outrank every rule action.
-  const applied: Partial<Record<RuleActionField, boolean>> = {};
-  const { fields } = evaluation;
-  const entityFromRule =
-    fields.legalEntityId !== null &&
-    item.legalEntityId === null &&
-    item.hintLegalEntityId === null;
-  const kindFromRule =
-    fields.documentKind !== null &&
-    item.hintKind === null &&
-    previous.kind === null;
-  const partnerFromRule =
-    fields.partnerId !== null &&
-    item.hintPartnerId === null &&
-    previous.partnerId === null;
-  const assigneeFromRule =
-    fields.assigneeId !== null && item.assigneeId === null;
-
-  if (fields.legalEntityId !== null) {
-    applied.legalEntityId = entityFromRule;
-  }
-  if (fields.documentKind !== null) {
-    applied.documentKind = kindFromRule;
-  }
-  if (fields.partnerId !== null) {
-    applied.partnerId = partnerFromRule;
-  }
-  if (fields.assigneeId !== null) {
-    applied.assigneeId = assigneeFromRule;
-  }
-
-  const legalEntityId =
-    item.hintLegalEntityId ??
-    item.legalEntityId ??
-    (entityFromRule ? (fields.legalEntityId?.value ?? null) : null);
-  const partnerId =
-    item.hintPartnerId ??
-    previous.partnerId ??
-    (partnerFromRule ? (fields.partnerId?.value ?? null) : null);
-  const matchedRuleIds = [
-    ...new Set([
-      ...previous.matchedRuleIds,
-      ...evaluation.matched.map((rule) => rule.id),
-    ]),
-  ];
-  const reasons = ruleReasons({ applied, evaluation });
-
-  if (decision.reason !== null) {
-    reasons.push({ evidence: decision.reason, step: 'rule', weight: 1 });
-  }
-
-  // The merged output: the sniff plus the hints plus the rule actions, with the matched rules typed in the draft.
-  await insertExtraction(
-    transaction,
-    input,
-    item.id,
-    {
-      output: {
-        confidence: item.hintKind !== null ? 1 : (item.confidence ?? 0),
-        detectedType: item.hintKind ?? item.detectedType ?? 'unknown',
-        draft: {
-          kind:
-            item.hintKind ??
-            previous.kind ??
-            (kindFromRule ? composed.draft.kind : null),
-          matchedRuleIds,
-          partnerId,
-        },
-        fieldConfidences: {},
-        issues: [],
-        ...(legalEntityId === null ? {} : { legalEntityId }),
-        ...(partnerId === null ? {} : { partnerId }),
-        reasons,
-      },
-      provider: RULE_PROVIDER,
-      providerVersion: RULE_PROVIDER_VERSION,
-    },
-    'rule_matched',
-  );
-
-  if (entityFromRule || assigneeFromRule) {
-    await transaction.query(
-      `update app.inbox_item
-          set legal_entity_id = case when $2 then $3::uuid else legal_entity_id end,
-              assignee_id = case when $4 then $5 else assignee_id end,
-              updated_at = now()
-        where id = $1`,
-      [
-        item.id,
-        entityFromRule,
-        fields.legalEntityId?.value ?? null,
-        assigneeFromRule,
-        fields.assigneeId?.value ?? null,
-      ],
-    );
-  }
-
-  if (evaluation.discard !== null) {
-    await transaction.query(
-      `update app.inbox_item
-          set status = 'discarded',
-              decided_by_kind = 'rule',
-              decided_by_rule_id = $2,
-              decided_by_user_id = null,
-              updated_at = now()
-        where id = $1`,
-      [item.id, evaluation.discard.ruleId],
-    );
-    await appendEvent(
-      transaction,
-      input,
-      item.id,
-      'discarded',
-      evaluation.discard.reason,
-    );
-    await transaction.query(
-      "select app.record_audit('inbox_item.discarded', 'inbox_item', $1, $2::jsonb)",
-      [
-        item.id,
-        JSON.stringify({
-          decidedByKind: 'rule',
-          reason: evaluation.discard.reason,
-          ruleId: evaluation.discard.ruleId,
-        }),
-      ],
-    );
-
-    return { discarded: true, matchedRuleIds, routeJob: null };
-  }
-
-  return { discarded: false, matchedRuleIds, routeJob };
 }
 
 export class QuotaExceededError extends Error {
@@ -2524,913 +1780,6 @@ export async function readBlob(
           sha256: row.sha256,
           storageKey: row.storage_key,
         };
-  });
-}
-
-// The channel answers only for itself: the tenant transaction runs as the channel and RLS shows it its own row.
-export async function readChannelPrincipal(
-  pool: DatabasePool,
-  input: { channelId: string; organizationId: string },
-): Promise<boolean> {
-  return runInTenantContext(
-    pool,
-    channelTenant(input.organizationId, input.channelId),
-    async (transaction) => {
-      const found = await transaction.query(
-        'select 1 from app.inbox_channel where id = $1 and enabled and deleted_at is null',
-        [input.channelId],
-      );
-      return found.rows.length > 0;
-    },
-  );
-}
-
-const CHANNEL_COLUMNS = `c.id, c.kind, c.name, c.enabled, c.email_address, c.legal_entity_id, c.hint_kind, c.created_at,
-          c.updated_at,
-          (select count(*)::int from app.inbox_item as i where i.channel_id = c.id) as item_count`;
-
-async function loadCredentials(
-  transaction: PoolClient,
-  channelId: string,
-): Promise<InboxChannelCredential[]> {
-  const result = await transaction.query<CredentialRow>(
-    'select credential_id, display_prefix, created_at, last_used_at from auth.list_channel_credentials($1)',
-    [channelId],
-  );
-
-  return result.rows.map((row) => ({
-    createdAt: row.created_at.toISOString(),
-    credentialId: row.credential_id,
-    displayPrefix: row.display_prefix,
-    lastUsedAt:
-      row.last_used_at === null ? null : row.last_used_at.toISOString(),
-  }));
-}
-
-async function toChannel(
-  transaction: PoolClient,
-  row: ChannelRow,
-): Promise<InboxChannel> {
-  return {
-    createdAt: row.created_at.toISOString(),
-    credentials: await loadCredentials(transaction, row.id),
-    emailAddress: row.email_address,
-    enabled: row.enabled,
-    hintKind: row.hint_kind,
-    id: row.id,
-    itemCount: row.item_count,
-    kind: row.kind as InboxChannel['kind'],
-    legalEntityId: row.legal_entity_id,
-    name: row.name,
-    updatedAt: row.updated_at.toISOString(),
-  };
-}
-
-async function loadChannel(
-  transaction: PoolClient,
-  channelId: string,
-): Promise<InboxChannel | null> {
-  const result = await transaction.query<ChannelRow>(
-    `select ${CHANNEL_COLUMNS}
-       from app.inbox_channel as c
-      where c.id = $1 and c.deleted_at is null`,
-    [channelId],
-  );
-  const row = result.rows[0];
-
-  return row === undefined ? null : toChannel(transaction, row);
-}
-
-// A legal entity of another organization fails the composite foreign key, which is a not-visible entity, not a fault.
-function isForeignKeyViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    (error as { code?: unknown }).code === '23503'
-  );
-}
-
-// An insert the row policy refuses raises instead of matching no row; the API gate answers before it, so this is not a fault.
-function isPolicyViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    (error as { code?: unknown }).code === '42501'
-  );
-}
-
-export async function listChannels(
-  pool: DatabasePool,
-  input: TenantContext,
-): Promise<InboxChannel[]> {
-  return runInTenantContext(pool, input, async (transaction) => {
-    const result = await transaction.query<ChannelRow>(
-      `select ${CHANNEL_COLUMNS}
-         from app.inbox_channel as c
-        where c.deleted_at is null
-        order by c.created_at, c.id`,
-    );
-    const channels: InboxChannel[] = [];
-
-    for (const row of result.rows) {
-      channels.push(await toChannel(transaction, row));
-    }
-
-    return channels;
-  });
-}
-
-export async function readChannel(
-  pool: DatabasePool,
-  input: ChannelSelector,
-): Promise<InboxChannel | null> {
-  return runInTenantContext(pool, input, (transaction) =>
-    loadChannel(transaction, input.channelId),
-  );
-}
-
-export async function createChannel(
-  pool: DatabasePool,
-  input: CreateChannelInput,
-): Promise<InboxChannel | null> {
-  const { body } = input;
-
-  return runInTenantContext(pool, input, async (transaction) => {
-    let created: { rows: { id: string }[] };
-
-    try {
-      created = await transaction.query<{ id: string }>(
-        `insert into app.inbox_channel (organization_id, kind, name, legal_entity_id, hint_kind, created_by)
-         values ($1, $2, $3, $4::uuid, $5, $6)
-         returning id`,
-        [
-          input.organizationId,
-          body.kind,
-          body.name,
-          body.legalEntityId ?? null,
-          body.hintKind ?? null,
-          input.userId,
-        ],
-      );
-    } catch (error) {
-      if (isForeignKeyViolation(error)) {
-        return null;
-      }
-
-      throw error;
-    }
-
-    const channelId = created.rows[0]?.id;
-
-    if (channelId === undefined) {
-      throw new Error('The inbox channel insert returned no row.');
-    }
-
-    await transaction.query(
-      "select app.record_audit('inbox_channel.created', 'inbox_channel', $1, $2::jsonb)",
-      [channelId, JSON.stringify({ kind: body.kind })],
-    );
-
-    return loadChannel(transaction, channelId);
-  });
-}
-
-export async function updateChannel(
-  pool: DatabasePool,
-  input: UpdateChannelInput,
-): Promise<InboxChannel | null> {
-  const { body } = input;
-
-  return runInTenantContext(pool, input, async (transaction) => {
-    let updated: { rowCount: number | null };
-
-    try {
-      updated = await transaction.query(
-        `update app.inbox_channel
-            set name = case when $2 then $3 else name end,
-                enabled = case when $4 then $5 else enabled end,
-                legal_entity_id = case when $6 then $7::uuid else legal_entity_id end,
-                hint_kind = case when $8 then $9 else hint_kind end,
-                deleted_at = case when $10 then now() else deleted_at end,
-                updated_at = now()
-          where id = $1 and deleted_at is null`,
-        [
-          input.channelId,
-          body.name !== undefined,
-          body.name ?? null,
-          body.enabled !== undefined,
-          body.enabled ?? null,
-          body.legalEntityId !== undefined,
-          body.legalEntityId ?? null,
-          body.hintKind !== undefined,
-          body.hintKind ?? null,
-          body.deleted === true,
-        ],
-      );
-    } catch (error) {
-      if (isForeignKeyViolation(error)) {
-        return null;
-      }
-
-      throw error;
-    }
-
-    if (updated.rowCount === 0) {
-      return null;
-    }
-
-    await transaction.query(
-      "select app.record_audit('inbox_channel.updated', 'inbox_channel', $1, $2::jsonb)",
-      [
-        input.channelId,
-        JSON.stringify({
-          deleted: body.deleted === true,
-          enabled: body.enabled ?? null,
-        }),
-      ],
-    );
-
-    // A soft deleted channel is gone for the caller from this response on.
-    if (body.deleted === true) {
-      const gone = await transaction.query<ChannelRow>(
-        `select ${CHANNEL_COLUMNS} from app.inbox_channel as c where c.id = $1`,
-        [input.channelId],
-      );
-      const row = gone.rows[0];
-      return row === undefined ? null : toChannel(transaction, row);
-    }
-
-    return loadChannel(transaction, input.channelId);
-  });
-}
-
-// The definer decides everything: owner role, organization, the per-kind active limit. Its errors map in the service.
-// The credential kind follows the channel kind; an email channel is issued its address under the intake domain.
-export async function issueCredential(
-  pool: DatabasePool,
-  input: IssueCredentialInput,
-): Promise<IssueInboxChannelCredentialResponse> {
-  return runInTenantContext(pool, input, async (transaction) => {
-    const channel = await transaction.query<{ kind: string }>(
-      'select kind from app.inbox_channel where id = $1 and deleted_at is null',
-      [input.channelId],
-    );
-    const kind = channel.rows[0]?.kind;
-
-    if (kind === undefined) {
-      throw new NotFoundException();
-    }
-
-    const issued = await transaction.query<{
-      credential_id: string;
-      display_prefix: string;
-      secret: string;
-    }>(
-      'select credential_id, secret, display_prefix from auth.issue_channel_credential($1, $2, $3)',
-      kind === 'email'
-        ? [input.channelId, 'email_address', input.intakeDomain]
-        : [input.channelId, 'api_token', null],
-    );
-    const row = issued.rows[0];
-
-    if (row === undefined) {
-      throw new Error('The credential issue returned no row.');
-    }
-
-    await transaction.query(
-      "select app.record_audit('inbox_channel_credential.issued', 'inbox_channel', $1, $2::jsonb)",
-      [input.channelId, JSON.stringify({ credentialId: row.credential_id })],
-    );
-
-    return {
-      credentialId: row.credential_id,
-      displayPrefix: row.display_prefix,
-      secret: row.secret,
-    };
-  });
-}
-
-// False when the credential is unknown, revoked, or not one of this channel's; the caller answers 404.
-export async function revokeCredential(
-  pool: DatabasePool,
-  input: RevokeCredentialInput,
-): Promise<boolean> {
-  return runInTenantContext(pool, input, async (transaction) => {
-    const active = await loadCredentials(transaction, input.channelId);
-
-    if (
-      !active.some(
-        (credential) => credential.credentialId === input.credentialId,
-      )
-    ) {
-      return false;
-    }
-
-    const revoked = await transaction.query<{ revoked: boolean }>(
-      'select auth.revoke_channel_credential($1) as revoked',
-      [input.credentialId],
-    );
-
-    if (revoked.rows[0]?.revoked !== true) {
-      return false;
-    }
-
-    await transaction.query(
-      "select app.record_audit('inbox_channel_credential.revoked', 'inbox_channel', $1, $2::jsonb)",
-      [input.channelId, JSON.stringify({ credentialId: input.credentialId })],
-    );
-
-    return true;
-  });
-}
-
-export async function listRoutingTargets(
-  pool: DatabasePool,
-  input: TenantContext,
-): Promise<InboxRoutingTarget[]> {
-  return runInTenantContext(pool, input, async (transaction) => {
-    const overrides = await loadRoutingTargetOverrides(transaction);
-    return DETECTED_TYPES.map((type) => routingTargetFor(type, overrides));
-  });
-}
-
-// An upsert of the whole target; the row remembers who saved it because the rules auto-route runs as that account.
-export async function putRoutingTarget(
-  pool: DatabasePool,
-  input: PutRoutingTargetInput,
-): Promise<InboxRoutingTarget | null> {
-  const { body } = input;
-  const detectedType = knownDetectedType(input.detectedType);
-
-  return runInTenantContext(pool, input, async (transaction) => {
-    // The auto route runs as the saver, so a default entity outside the saver's scope is refused like an unknown one.
-    if (body.defaultLegalEntityId !== null) {
-      const scope = await readEntityScope(transaction, input);
-
-      if (
-        scope.mode === 'restricted' &&
-        !scope.legalEntityIds.includes(body.defaultLegalEntityId)
-      ) {
-        return null;
-      }
-    }
-
-    let saved: { rows: { id: string }[] };
-
-    try {
-      saved = await transaction.query<{ id: string }>(
-        `insert into app.inbox_routing_target
-           (organization_id, detected_type, destination, document_kind, default_legal_entity_id, partner_policy,
-            auto, auto_threshold, default_assignee_id, required_fields, created_by, updated_by)
-         values ($1, $2, $3, $4, $5::uuid, $6, $7, $8, $9, $10::text[], $11, $11)
-         on conflict (organization_id, detected_type) do update
-           set destination = excluded.destination,
-               document_kind = excluded.document_kind,
-               default_legal_entity_id = excluded.default_legal_entity_id,
-               partner_policy = excluded.partner_policy,
-               auto = excluded.auto,
-               auto_threshold = excluded.auto_threshold,
-               default_assignee_id = excluded.default_assignee_id,
-               required_fields = excluded.required_fields,
-               updated_at = now(),
-               updated_by = excluded.updated_by
-         returning id`,
-        [
-          input.organizationId,
-          detectedType,
-          body.destination,
-          body.documentKind,
-          body.defaultLegalEntityId,
-          body.partnerPolicy,
-          body.auto,
-          body.autoThreshold,
-          body.defaultAssigneeId,
-          body.requiredFields,
-          input.userId,
-        ],
-      );
-    } catch (error) {
-      if (isForeignKeyViolation(error) || isPolicyViolation(error)) {
-        return null;
-      }
-
-      throw error;
-    }
-
-    const id = saved.rows[0]?.id;
-
-    if (id === undefined) {
-      throw new Error('The routing target upsert returned no row.');
-    }
-
-    await transaction.query(
-      "select app.record_audit('inbox_routing_target.updated', 'inbox_routing_target', $1, $2::jsonb)",
-      [
-        id,
-        JSON.stringify({
-          auto: body.auto,
-          destination: body.destination,
-          detectedType,
-          documentKind: body.documentKind,
-        }),
-      ],
-    );
-
-    return routingTargetFor(
-      detectedType,
-      await loadRoutingTargetOverrides(transaction),
-    );
-  });
-}
-
-// False when the organization holds no row for the type; the platform default was already in force.
-export async function deleteRoutingTarget(
-  pool: DatabasePool,
-  input: RoutingTargetSelector,
-): Promise<boolean> {
-  const detectedType = knownDetectedType(input.detectedType);
-
-  return runInTenantContext(pool, input, async (transaction) => {
-    const deleted = await transaction.query<{ id: string }>(
-      'delete from app.inbox_routing_target where detected_type = $1 returning id',
-      [detectedType],
-    );
-    const id = deleted.rows[0]?.id;
-
-    if (id === undefined) {
-      return false;
-    }
-
-    await transaction.query(
-      "select app.record_audit('inbox_routing_target.deleted', 'inbox_routing_target', $1, $2::jsonb)",
-      [id, JSON.stringify({ detectedType })],
-    );
-
-    return true;
-  });
-}
-
-async function loadInboxSettings(
-  transaction: PoolClient,
-  platformQuotaBytes: number,
-): Promise<InboxSettings> {
-  const setting = await transaction.query<{ blob_quota_bytes: string | null }>(
-    'select blob_quota_bytes::text as blob_quota_bytes from app.organization_inbox_setting',
-  );
-  const used = await transaction.query<{ total: string }>(
-    'select coalesce(sum(byte_size), 0)::text as total from app.blob',
-  );
-  const own = setting.rows[0]?.blob_quota_bytes ?? null;
-
-  return {
-    blobQuotaBytes: own === null ? null : Number(own),
-    platformQuotaBytes,
-    usedBytes: Number(used.rows[0]?.total ?? 0),
-  };
-}
-
-export async function readInboxSettings(
-  pool: DatabasePool,
-  input: ReadInboxSettingsInput,
-): Promise<InboxSettings> {
-  return runInTenantContext(pool, input, (transaction) =>
-    loadInboxSettings(transaction, input.platformQuotaBytes),
-  );
-}
-
-// The row is created on first write and reset by nulling the column, never deleted; only an owner passes the policy.
-export async function updateInboxSettings(
-  pool: DatabasePool,
-  input: UpdateInboxSettingsInput,
-): Promise<InboxSettings | null> {
-  return runInTenantContext(pool, input, async (transaction) => {
-    try {
-      await transaction.query(
-        `insert into app.organization_inbox_setting (organization_id, blob_quota_bytes, created_by)
-         values ($1, $2, $3)
-         on conflict (organization_id) do update
-           set blob_quota_bytes = excluded.blob_quota_bytes, updated_at = now()`,
-        [input.organizationId, input.blobQuotaBytes, input.userId],
-      );
-    } catch (error) {
-      if (isPolicyViolation(error)) {
-        return null;
-      }
-
-      throw error;
-    }
-
-    await transaction.query(
-      "select app.record_audit('organization_inbox_setting.updated', 'organization_inbox_setting', $1, $2::jsonb)",
-      [
-        input.organizationId,
-        JSON.stringify({ blobQuotaBytes: input.blobQuotaBytes }),
-      ],
-    );
-
-    return loadInboxSettings(transaction, input.platformQuotaBytes);
-  });
-}
-
-export class RuleLimitError extends Error {
-  constructor() {
-    super(
-      'The organization already holds the maximum number of enabled rules.',
-    );
-  }
-}
-
-const RULE_COLUMNS = `r.id, r.name, r.enabled, r.priority, r.channel_id, r.sender_pattern, r.keyword, r.detected_type,
-          r.set_legal_entity_id, r.set_document_kind, r.set_partner_id, r.set_assignee_id, r.discard_reason,
-          r.auto_route, r.created_by, r.created_at, r.updated_at,
-          not exists (
-            select 1 from auth.resolve_membership(r.created_by, r.organization_id) as m
-             where m.role in ('owner', 'admin')
-          ) as paused`;
-
-function toRule(row: RuleRow): InboxRule {
-  return {
-    autoRoute: row.auto_route,
-    channelId: row.channel_id,
-    createdAt: row.created_at.toISOString(),
-    createdBy: row.created_by,
-    detectedType: row.detected_type,
-    discardReason: row.discard_reason as InboxRule['discardReason'],
-    enabled: row.enabled,
-    id: row.id,
-    keyword: row.keyword,
-    name: row.name,
-    paused: row.paused,
-    priority: row.priority,
-    senderPattern: row.sender_pattern,
-    setAssigneeId: row.set_assignee_id,
-    setDocumentKind: row.set_document_kind as InboxRule['setDocumentKind'],
-    setLegalEntityId: row.set_legal_entity_id,
-    setPartnerId: row.set_partner_id,
-    updatedAt: row.updated_at.toISOString(),
-  };
-}
-
-async function loadRule(
-  transaction: PoolClient,
-  ruleId: string,
-): Promise<InboxRule | null> {
-  const result = await transaction.query<RuleRow>(
-    `select ${RULE_COLUMNS} from app.inbox_rule as r where r.id = $1 and r.deleted_at is null`,
-    [ruleId],
-  );
-  const row = result.rows[0];
-
-  return row === undefined ? null : toRule(row);
-}
-
-// A rule steers items into an entity or a partner, so both must be visible to the caller; false answers 404.
-async function ruleTargetsVisible(
-  transaction: PoolClient,
-  input: EntityScopeSelector,
-  targets: {
-    setLegalEntityId?: string | null | undefined;
-    setPartnerId?: string | null | undefined;
-  },
-): Promise<boolean> {
-  if (
-    targets.setLegalEntityId !== undefined &&
-    targets.setLegalEntityId !== null
-  ) {
-    const entity = await transaction.query(
-      `select 1 from app.legal_entity
-        where id = $1 and ($2::uuid[] is null or id = any($2::uuid[]))`,
-      [targets.setLegalEntityId, entityFilter(input.legalEntityIds)],
-    );
-
-    if (entity.rows.length === 0) {
-      return false;
-    }
-  }
-
-  if (targets.setPartnerId !== undefined && targets.setPartnerId !== null) {
-    const partner = await transaction.query(
-      'select 1 from app.partner where id = $1',
-      [targets.setPartnerId],
-    );
-
-    if (partner.rows.length === 0) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-export async function listRules(
-  pool: DatabasePool,
-  input: TenantContext,
-): Promise<InboxRule[]> {
-  return runInTenantContext(pool, input, async (transaction) => {
-    const result = await transaction.query<RuleRow>(
-      `select ${RULE_COLUMNS} from app.inbox_rule as r where r.deleted_at is null order by r.priority`,
-    );
-    return result.rows.map(toRule);
-  });
-}
-
-export async function readRule(
-  pool: DatabasePool,
-  input: RuleSelector,
-): Promise<InboxRule | null> {
-  return runInTenantContext(pool, input, (transaction) =>
-    loadRule(transaction, input.ruleId),
-  );
-}
-
-// A new rule takes the next priority slot; the enabled cap is checked here, under the per-organization lock.
-export async function createRule(
-  pool: DatabasePool,
-  input: CreateRuleInput,
-): Promise<InboxRule | null> {
-  const { body } = input;
-
-  return runInTenantContext(pool, input, async (transaction) => {
-    await transaction.query('select pg_advisory_xact_lock(hashtext($1))', [
-      `inbox_rule:${input.organizationId}`,
-    ]);
-
-    if (!(await ruleTargetsVisible(transaction, input, body))) {
-      return null;
-    }
-
-    const counted = await transaction.query<{ enabled: number; top: number }>(
-      `select count(*) filter (where enabled)::int as enabled, coalesce(max(priority), 0)::int as top
-         from app.inbox_rule
-        where deleted_at is null`,
-    );
-    const { enabled = 0, top = 0 } = counted.rows[0] ?? {};
-
-    if (body.enabled && enabled >= MAX_ENABLED_INBOX_RULES) {
-      throw new RuleLimitError();
-    }
-
-    let created: { rows: { id: string }[] };
-
-    try {
-      created = await transaction.query<{ id: string }>(
-        `insert into app.inbox_rule
-           (organization_id, name, enabled, priority, channel_id, sender_pattern, keyword, detected_type,
-            set_legal_entity_id, set_document_kind, set_partner_id, set_assignee_id, discard_reason, auto_route,
-            created_by)
-         values ($1, $2, $3, $4, $5::uuid, $6, $7, $8, $9::uuid, $10, $11::uuid, $12, $13, $14, $15)
-         returning id`,
-        [
-          input.organizationId,
-          body.name,
-          body.enabled,
-          top + 1,
-          body.channelId,
-          body.senderPattern,
-          body.keyword,
-          body.detectedType,
-          body.setLegalEntityId,
-          body.setDocumentKind,
-          body.setPartnerId,
-          body.setAssigneeId,
-          body.discardReason,
-          body.autoRoute,
-          input.userId,
-        ],
-      );
-    } catch (error) {
-      if (isForeignKeyViolation(error)) {
-        return null;
-      }
-
-      throw error;
-    }
-
-    const ruleId = created.rows[0]?.id;
-
-    if (ruleId === undefined) {
-      throw new Error('The inbox rule insert returned no row.');
-    }
-
-    // Identifiers and enum values only: never the pattern, the keyword or the name.
-    await transaction.query(
-      "select app.record_audit('inbox_rule.created', 'inbox_rule', $1, $2::jsonb)",
-      [
-        ruleId,
-        JSON.stringify({
-          autoRoute: body.autoRoute,
-          discardReason: body.discardReason,
-          enabled: body.enabled,
-          setDocumentKind: body.setDocumentKind,
-        }),
-      ],
-    );
-
-    return loadRule(transaction, ruleId);
-  });
-}
-
-// Absence leaves a column alone; null clears it. created_by never changes here: adoption is its own route.
-export async function updateRule(
-  pool: DatabasePool,
-  input: UpdateRuleInput,
-): Promise<InboxRule | null> {
-  const { body } = input;
-
-  return runInTenantContext(pool, input, async (transaction) => {
-    if (!(await ruleTargetsVisible(transaction, input, body))) {
-      return null;
-    }
-
-    // Enabling counts against the same cap as a create, under the same per-organization lock.
-    if (body.enabled === true) {
-      await transaction.query('select pg_advisory_xact_lock(hashtext($1))', [
-        `inbox_rule:${input.organizationId}`,
-      ]);
-      const counted = await transaction.query<{ enabled: number }>(
-        `select count(*) filter (where enabled and id <> $1)::int as enabled
-           from app.inbox_rule
-          where deleted_at is null`,
-        [input.ruleId],
-      );
-
-      if ((counted.rows[0]?.enabled ?? 0) >= MAX_ENABLED_INBOX_RULES) {
-        throw new RuleLimitError();
-      }
-    }
-
-    let updated: { rowCount: number | null };
-
-    try {
-      updated = await transaction.query(
-        `update app.inbox_rule
-            set name = case when $2 then $3 else name end,
-                enabled = case when $4 then $5 else enabled end,
-                channel_id = case when $6 then $7::uuid else channel_id end,
-                sender_pattern = case when $8 then $9 else sender_pattern end,
-                keyword = case when $10 then $11 else keyword end,
-                detected_type = case when $12 then $13 else detected_type end,
-                set_legal_entity_id = case when $14 then $15::uuid else set_legal_entity_id end,
-                set_document_kind = case when $16 then $17 else set_document_kind end,
-                set_partner_id = case when $18 then $19::uuid else set_partner_id end,
-                set_assignee_id = case when $20 then $21 else set_assignee_id end,
-                discard_reason = case when $22 then $23 else discard_reason end,
-                auto_route = case when $24 then $25 else auto_route end,
-                updated_at = now()
-          where id = $1 and deleted_at is null`,
-        [
-          input.ruleId,
-          body.name !== undefined,
-          body.name ?? null,
-          body.enabled !== undefined,
-          body.enabled ?? null,
-          body.channelId !== undefined,
-          body.channelId ?? null,
-          body.senderPattern !== undefined,
-          body.senderPattern ?? null,
-          body.keyword !== undefined,
-          body.keyword ?? null,
-          body.detectedType !== undefined,
-          body.detectedType ?? null,
-          body.setLegalEntityId !== undefined,
-          body.setLegalEntityId ?? null,
-          body.setDocumentKind !== undefined,
-          body.setDocumentKind ?? null,
-          body.setPartnerId !== undefined,
-          body.setPartnerId ?? null,
-          body.setAssigneeId !== undefined,
-          body.setAssigneeId ?? null,
-          body.discardReason !== undefined,
-          body.discardReason ?? null,
-          body.autoRoute !== undefined,
-          body.autoRoute ?? null,
-        ],
-      );
-    } catch (error) {
-      if (isForeignKeyViolation(error)) {
-        return null;
-      }
-
-      throw error;
-    }
-
-    if (updated.rowCount === 0) {
-      return null;
-    }
-
-    await transaction.query(
-      "select app.record_audit('inbox_rule.updated', 'inbox_rule', $1, $2::jsonb)",
-      [
-        input.ruleId,
-        JSON.stringify({
-          autoRoute: body.autoRoute ?? null,
-          discardReason: body.discardReason ?? null,
-          enabled: body.enabled ?? null,
-          setDocumentKind: body.setDocumentKind ?? null,
-        }),
-      ],
-    );
-
-    return loadRule(transaction, input.ruleId);
-  });
-}
-
-// Soft: the row stays for the items it decided, disabled, with its priority slot freed.
-export async function deleteRule(
-  pool: DatabasePool,
-  input: RuleSelector,
-): Promise<boolean> {
-  return runInTenantContext(pool, input, async (transaction) => {
-    const deleted = await transaction.query(
-      `update app.inbox_rule
-          set enabled = false, priority = null, deleted_at = now(), updated_at = now()
-        where id = $1 and deleted_at is null`,
-      [input.ruleId],
-    );
-
-    if (deleted.rowCount === 0) {
-      return false;
-    }
-
-    await transaction.query(
-      "select app.record_audit('inbox_rule.updated', 'inbox_rule', $1, $2::jsonb)",
-      [input.ruleId, JSON.stringify({ deleted: true, enabled: false })],
-    );
-
-    return true;
-  });
-}
-
-// The full ordered id list in one statement; the deferred unique lets every priority move at once.
-export async function orderRules(
-  pool: DatabasePool,
-  input: OrderRulesInput,
-): Promise<InboxRule[]> {
-  return runInTenantContext(pool, input, async (transaction) => {
-    const live = await transaction.query<{ id: string }>(
-      'select id from app.inbox_rule where deleted_at is null',
-    );
-    const liveIds = new Set(live.rows.map((row) => row.id));
-
-    // The list names every live rule exactly once and nothing else.
-    if (
-      liveIds.size !== input.ruleIds.length ||
-      !input.ruleIds.every((ruleId) => liveIds.has(ruleId))
-    ) {
-      throw new BadRequestException();
-    }
-
-    await transaction.query(
-      `update app.inbox_rule as r
-          set priority = ordered.position, updated_at = now()
-         from unnest($1::uuid[]) with ordinality as ordered(id, position)
-        where r.id = ordered.id and r.deleted_at is null`,
-      [[...input.ruleIds]],
-    );
-    await transaction.query(
-      "select app.record_audit('inbox_rule.reordered', 'inbox_rule', null, $1::jsonb)",
-      [JSON.stringify({ count: input.ruleIds.length })],
-    );
-
-    const result = await transaction.query<RuleRow>(
-      `select ${RULE_COLUMNS} from app.inbox_rule as r where r.deleted_at is null order by r.priority`,
-    );
-    return result.rows.map(toRule);
-  });
-}
-
-// The caller becomes the author; the trigger refuses any other created_by, so this is the only way it moves.
-export async function adoptRule(
-  pool: DatabasePool,
-  input: AdoptRuleInput,
-): Promise<InboxRule | null> {
-  return runInTenantContext(pool, input, async (transaction) => {
-    const current = await loadRule(transaction, input.ruleId);
-
-    if (
-      current === null ||
-      !(await ruleTargetsVisible(transaction, input, current))
-    ) {
-      return null;
-    }
-
-    const adopted = await transaction.query(
-      `update app.inbox_rule
-          set created_by = $2, updated_at = now()
-        where id = $1 and deleted_at is null`,
-      [input.ruleId, input.userId],
-    );
-
-    if (adopted.rowCount === 0) {
-      return null;
-    }
-
-    await transaction.query(
-      "select app.record_audit('inbox_rule.adopted', 'inbox_rule', $1, '{}'::jsonb)",
-      [input.ruleId],
-    );
-
-    return loadRule(transaction, input.ruleId);
   });
 }
 

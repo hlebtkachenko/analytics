@@ -40,15 +40,17 @@ import { allowedEntityIds, resolveTenantAccess } from '../tenant-access.js';
 import type { TenantAccess } from '../tenant-access.js';
 import {
   createInboxRuleBodyOpenApiSchema,
+  inboxRuleListOpenApiSchema,
+  inboxRuleOpenApiSchema,
+  orderInboxRulesBodyOpenApiSchema,
+  updateInboxRuleBodyOpenApiSchema,
+} from './contract-openapi.js';
+import {
   createInboxRuleRequestSchema,
   inboxRuleIdentifierSchema,
-  inboxRuleListOpenApiSchema,
   inboxRuleListResponseSchema,
-  inboxRuleOpenApiSchema,
   inboxRuleSchema,
-  orderInboxRulesBodyOpenApiSchema,
   orderInboxRulesRequestSchema,
-  updateInboxRuleBodyOpenApiSchema,
   updateInboxRuleRequestSchema,
 } from './contract.js';
 import type {
@@ -58,7 +60,7 @@ import type {
   OrderInboxRulesRequest,
   UpdateInboxRuleRequest,
 } from './contract.js';
-import { RuleLimitError } from './inbox-repository.js';
+import { RuleLimitError } from './inbox-rule-repository.js';
 import { InboxService } from './inbox.service.js';
 import { isInvoiceAutoRoute } from './rules.js';
 
