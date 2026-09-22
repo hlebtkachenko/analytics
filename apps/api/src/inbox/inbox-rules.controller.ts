@@ -40,15 +40,17 @@ import { allowedEntityIds, resolveTenantAccess } from '../tenant-access.js';
 import type { TenantAccess } from '../tenant-access.js';
 import {
   createInboxRuleBodyOpenApiSchema,
+  inboxRuleListOpenApiSchema,
+  inboxRuleOpenApiSchema,
+  orderInboxRulesBodyOpenApiSchema,
+  updateInboxRuleBodyOpenApiSchema,
+} from './contract-openapi.js';
+import {
   createInboxRuleRequestSchema,
   inboxRuleIdentifierSchema,
-  inboxRuleListOpenApiSchema,
   inboxRuleListResponseSchema,
-  inboxRuleOpenApiSchema,
   inboxRuleSchema,
-  orderInboxRulesBodyOpenApiSchema,
   orderInboxRulesRequestSchema,
-  updateInboxRuleBodyOpenApiSchema,
   updateInboxRuleRequestSchema,
 } from './contract.js';
 import type {

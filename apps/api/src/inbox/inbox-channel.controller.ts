@@ -65,26 +65,28 @@ import { allowedEntityIds, resolveTenantAccess } from '../tenant-access.js';
 import type { TenantAccess } from '../tenant-access.js';
 import {
   createInboxChannelBodyOpenApiSchema,
+  emailIntakeBodyOpenApiSchema,
+  fileIntakeBodyOpenApiSchema,
+  inboxChannelListOpenApiSchema,
+  inboxChannelOpenApiSchema,
+  inboxIntakeResponseOpenApiSchema,
+  issueInboxChannelCredentialResponseOpenApiSchema,
+  structuredIntakeBodyOpenApiSchema,
+  updateInboxChannelBodyOpenApiSchema,
+} from './contract-openapi.js';
+import {
   createInboxChannelRequestSchema,
   credentialIdentifierSchema,
   EMAIL_MEDIA_TYPE,
   emailExternalIdSchema,
-  emailIntakeBodyOpenApiSchema,
   emailSenderHeaderSchema,
-  fileIntakeBodyOpenApiSchema,
   fileIntakeFieldsSchema,
   inboxChannelIdentifierSchema,
-  inboxChannelListOpenApiSchema,
   inboxChannelListResponseSchema,
-  inboxChannelOpenApiSchema,
   inboxChannelSchema,
-  inboxIntakeResponseOpenApiSchema,
   inboxIntakeResponseSchema,
-  issueInboxChannelCredentialResponseOpenApiSchema,
   issueInboxChannelCredentialResponseSchema,
-  structuredIntakeBodyOpenApiSchema,
   structuredIntakeRequestSchema,
-  updateInboxChannelBodyOpenApiSchema,
   updateInboxChannelRequestSchema,
 } from './contract.js';
 import type {
