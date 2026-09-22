@@ -1,3 +1,5 @@
+// The package is the icon-facade source, so the blocks type Carbon icons directly.
+import type { CarbonIconType } from '@carbon/icons-react';
 import type { ReactNode } from 'react';
 
 // Primitive cell value used for sorting, searching, and plain text rendering.
@@ -63,6 +65,10 @@ export type ToolbarAction = Readonly<{
   label: string;
   kind?: 'primary' | 'secondary' | 'ghost';
   disabled?: boolean;
+  // Icon from the consumer's curated facade, rendered beside the label.
+  icon?: CarbonIconType;
+  // Drops the visible label; the label becomes the tooltip and accessible name.
+  iconOnly?: boolean;
   onClick: () => void;
 }>;
 
@@ -154,6 +160,8 @@ export type DataGridProps = Readonly<{
   onRowClick?: (row: GridRow) => void;
   // Per-row overflow menu; return the actions available for each row.
   rowActions?: (row: GridRow) => readonly RowAction[];
+  // Accessible name for that menu, e.g. a row-specific "Actions for {name}".
+  rowActionsLabel?: (row: GridRow) => string;
   // Expandable detail; return the content shown when a row is expanded.
   renderRowDetail?: (row: GridRow) => ReactNode;
   reorderableRows?: boolean;

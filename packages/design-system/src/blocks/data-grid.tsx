@@ -57,6 +57,7 @@ import type {
   GridFilterGroup,
   GridRow,
   RowAction,
+  ToolbarAction,
 } from './types';
 import { useCellSelection } from './use-cell-selection';
 import { useColumnLayout } from './use-column-layout';
@@ -84,15 +85,26 @@ function cx(...classes: (string | false | undefined)[]): string {
 // Trailing per-row overflow menu; delete actions sort last as the danger item.
 function RowActionsMenu({
   actions,
+  label,
   row,
-}: Readonly<{ actions: readonly RowAction[]; row: GridRow }>): ReactNode {
+}: Readonly<{
+  actions: readonly RowAction[];
+  label: string | undefined;
+  row: GridRow;
+}>): ReactNode {
   if (actions.length === 0) return null;
   const ordered = [...actions].sort(
     (first, second) =>
       Number(Boolean(first.isDelete)) - Number(Boolean(second.isDelete)),
   );
   return (
-    <OverflowMenu aria-label="Row actions" flipped size="sm">
+    // Carbon names the container from aria-label and the trigger from iconDescription.
+    <OverflowMenu
+      aria-label={label ?? 'Row actions'}
+      flipped
+      size="sm"
+      {...(label === undefined ? {} : { iconDescription: label })}
+    >
       {ordered.map((action) => (
         <OverflowMenuItem
           disabled={Boolean(action.disabled)}
@@ -104,6 +116,37 @@ function RowActionsMenu({
         />
       ))}
     </OverflowMenu>
+  );
+}
+
+// A persistent toolbar button: icon-only keeps its label as tooltip and name.
+function ToolbarButton({
+  action,
+}: Readonly<{ action: ToolbarAction }>): ReactNode {
+  const Icon = action.icon;
+  if (action.iconOnly === true && Icon) {
+    return (
+      <IconButton
+        disabled={Boolean(action.disabled)}
+        kind={action.kind ?? 'ghost'}
+        label={action.label}
+        onClick={action.onClick}
+        type="button"
+      >
+        <Icon />
+      </IconButton>
+    );
+  }
+  return (
+    <Button
+      disabled={Boolean(action.disabled)}
+      kind={action.kind ?? 'primary'}
+      onClick={action.onClick}
+      size="lg"
+      {...(Icon ? { renderIcon: Icon } : {})}
+    >
+      {action.label}
+    </Button>
   );
 }
 
@@ -173,10 +216,10 @@ function FilterFacet({
             </div>
             <div className={styles.filterFooter}>
               <Button kind="ghost" onClick={onReset} size="lg" type="button">
-                Reset
+                Reset filters
               </Button>
               <Button kind="primary" onClick={onApply} size="lg" type="button">
-                Apply
+                Apply filters
               </Button>
             </div>
           </div>
@@ -340,6 +383,7 @@ export function DataGrid(props: DataGridProps) {
     rowNumbers = false,
     onRowClick,
     rowActions,
+    rowActionsLabel,
     renderRowDetail,
     reorderableRows = false,
     onRowReorder,
@@ -774,15 +818,7 @@ export function DataGrid(props: DataGridProps) {
           </TableToolbarMenu>
         )}
         {toolbarActions.map((action) => (
-          <Button
-            disabled={Boolean(action.disabled)}
-            key={action.id}
-            kind={action.kind ?? 'primary'}
-            onClick={action.onClick}
-            size="lg"
-          >
-            {action.label}
-          </Button>
+          <ToolbarButton action={action} key={action.id} />
         ))}
       </TableToolbarContent>
     </TableToolbar>
@@ -816,10 +852,12 @@ export function DataGrid(props: DataGridProps) {
             <TableHead>
               <TableRow>
                 {expandable && (
-                  <TableExpandHeader
-                    aria-label="Row detail"
-                    id="data-grid-expand"
-                  />
+                  <TableExpandHeader id="data-grid-expand">
+                    {/* Visible text, because axe empty-table-header ignores aria-label. */}
+                    <span className={cx(styles.visuallyHidden)}>
+                      Row detail
+                    </span>
+                  </TableExpandHeader>
                 )}
                 {selection === 'multi' && (
                   <TableSelectAll
@@ -1003,6 +1041,7 @@ export function DataGrid(props: DataGridProps) {
                         <TableCell className={cx(styles.rowActionsCell)}>
                           <RowActionsMenu
                             actions={rowActions?.(row) ?? []}
+                            label={rowActionsLabel?.(row)}
                             row={row}
                           />
                         </TableCell>
