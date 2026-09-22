@@ -63,6 +63,7 @@ export function SwitcherPanel({
   expanded,
 }: PanelProperties &
   Readonly<{ activeOrganization?: ActiveOrganizationValue }>) {
+  const { t } = useTranslation();
   const [organizations, setOrganizations] = useState<
     z.infer<typeof organizationsSchema>
   >([]);
@@ -100,7 +101,7 @@ export function SwitcherPanel({
     <HeaderPanel expanded={expanded}>
       {expanded ? (
         // Only an expanded Switcher gives its items a tab stop.
-        <Switcher aria-label="Workspaces" expanded>
+        <Switcher aria-label={t('shell.workspaces.title')} expanded>
           {list.map((organization) => (
             <SwitcherItem
               aria-label={organization.name}
@@ -112,11 +113,17 @@ export function SwitcherPanel({
             </SwitcherItem>
           ))}
           <SwitcherDivider />
-          <SwitcherItem aria-label="Create workspace" href="/workspaces/new">
-            Create workspace
+          <SwitcherItem
+            aria-label={t('shell.workspaces.create')}
+            href="/workspaces/new"
+          >
+            {t('shell.workspaces.create')}
           </SwitcherItem>
-          <SwitcherItem aria-label="Manage workspaces" href="/workspaces">
-            Manage workspaces
+          <SwitcherItem
+            aria-label={t('shell.workspaces.manage')}
+            href="/workspaces"
+          >
+            {t('shell.workspaces.manage')}
           </SwitcherItem>
         </Switcher>
       ) : null}

@@ -1,57 +1,73 @@
 export type Crumb = Readonly<{ current: boolean; href: string; label: string }>;
 
-// The module label for a top-level segment, and the label a shared descendant reuses.
-export const moduleLabels: Readonly<Record<string, string>> = {
-  account: 'Account',
-  assistant: 'AI Assistant',
-  datasets: 'Datasets',
-  documents: 'Documents',
-  entities: 'Entities',
-  inbox: 'Inbox',
-  members: 'Members',
-  notifications: 'Notifications',
-  settings: 'Settings',
-  workspaces: 'Workspaces',
+// Resolves a navigation translation key; the trail never hands it a workspace name or an opaque id.
+type Translate = (key: string) => string;
+
+// The module label key for a top-level segment, and the key a shared descendant reuses.
+export const moduleLabelKeys: Readonly<Record<string, string>> = {
+  account: 'shell.nav.account',
+  assistant: 'shell.nav.assistant',
+  datasets: 'shell.nav.datasets',
+  documents: 'shell.nav.documents',
+  entities: 'shell.nav.entities',
+  inbox: 'shell.nav.inbox',
+  members: 'shell.nav.members',
+  notifications: 'shell.nav.notifications',
+  settings: 'shell.nav.settings',
+  workspaces: 'shell.nav.workspaces',
 };
 
-// Child labels are scoped by their parent module, so `new` never reads the same
-// under two modules. Add the parent, then the child segment, to name one.
-const childLabels: Readonly<Record<string, Readonly<Record<string, string>>>> =
-  {
-    account: {
-      access: 'Access',
-      preferences: 'Preferences',
-      security: 'Security',
-    },
-    documents: { analytics: 'Analytics', new: 'New document' },
-    inbox: { channels: 'Channels', rules: 'Rules', settings: 'Settings' },
-    workspaces: { new: 'Create workspace' },
-  };
-
-// The label an unknown child segment takes, so an opaque identifier never reaches the trail.
-const childFallbacks: Readonly<Record<string, string>> = {
-  documents: 'Document',
-  inbox: 'Item',
+// Child label keys are scoped by their parent module, so `new` never reads the
+// same under two modules. Add the parent, then the child segment, to name one.
+const childLabelKeys: Readonly<
+  Record<string, Readonly<Record<string, string>>>
+> = {
+  account: {
+    access: 'shell.nav.accountAccess',
+    preferences: 'shell.nav.accountPreferences',
+    security: 'shell.nav.accountSecurity',
+  },
+  documents: {
+    analytics: 'shell.nav.documentsAnalytics',
+    new: 'shell.nav.documentsNew',
+  },
+  inbox: {
+    channels: 'shell.nav.inboxChannels',
+    rules: 'shell.nav.inboxRules',
+    settings: 'shell.nav.inboxSettings',
+  },
+  workspaces: { new: 'shell.nav.workspacesNew' },
 };
 
-function segmentLabel(segment: string, parent: string | undefined): string {
+// The label key an unknown child segment takes, so an opaque identifier never reaches the trail.
+const childFallbackKeys: Readonly<Record<string, string>> = {
+  documents: 'shell.nav.singleDocument',
+  inbox: 'shell.nav.inboxItem',
+};
+
+function segmentLabel(
+  segment: string,
+  parent: string | undefined,
+  translate: Translate,
+): string {
   const scoped =
-    parent === undefined ? undefined : childLabels[parent]?.[segment];
+    parent === undefined ? undefined : childLabelKeys[parent]?.[segment];
   if (scoped !== undefined) {
-    return scoped;
+    return translate(scoped);
   }
-  return (
-    moduleLabels[segment] ??
-    (parent === undefined ? undefined : childFallbacks[parent]) ??
-    segment
-  );
+  const key =
+    moduleLabelKeys[segment] ??
+    (parent === undefined ? undefined : childFallbackKeys[parent]);
+  // An unknown segment is an opaque identifier, never a key.
+  return key === undefined ? segment : translate(key);
 }
 
 // Builds the full breadcrumb trail from route segments. Route-group segments are
 // filtered out. The first segment is either a known module or a workspace slug.
 export function buildTrail(
   segments: readonly string[],
-  organization?: Readonly<{ name: string; slug: string }>,
+  organization: Readonly<{ name: string; slug: string }> | undefined,
+  translate: Translate,
 ): Crumb[] {
   const parts = segments.filter((segment) => !/^\(.*\)$/.test(segment));
   if (parts.length === 0) {
@@ -60,7 +76,7 @@ export function buildTrail(
 
   const crumbs: Crumb[] = [];
   const first = parts[0]!;
-  const isModule = first in moduleLabels;
+  const isModule = first in moduleLabelKeys;
 
   let href = '';
   let start = 0;
@@ -70,7 +86,7 @@ export function buildTrail(
     crumbs.push({
       current: false,
       href: '/workspaces',
-      label: moduleLabels.workspaces!,
+      label: translate(moduleLabelKeys.workspaces!),
     });
     href = `/${first}`;
     crumbs.push({
@@ -87,7 +103,11 @@ export function buildTrail(
     crumbs.push({
       current: index === parts.length - 1,
       href,
-      label: segmentLabel(segment, index === 0 ? undefined : parts[index - 1]),
+      label: segmentLabel(
+        segment,
+        index === 0 ? undefined : parts[index - 1],
+        translate,
+      ),
     });
   }
 
