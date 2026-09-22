@@ -426,7 +426,12 @@ export async function routeInboxItem(
             AUTHOR_UNAVAILABLE_REASON,
           ]),
         );
-      } catch {
+      } catch (error) {
+        // Only the definer's own refusal is terminal; anything else is a fault the queue must retry.
+        if (!isDefinerRefusal(error)) {
+          throw error;
+        }
+
         // The item left review between the two transactions: the definer refused, nothing to retry.
         return finish(options, payload, {
           kind: 'refused',
@@ -440,6 +445,15 @@ export async function routeInboxItem(
     options.metrics.recordJob(ROUTE_INBOX_ITEM_QUEUE, 'failed');
     throw error;
   }
+}
+
+// The skip definer raises a bare plpgsql exception when the item is no longer in review.
+function isDefinerRefusal(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === 'P0001'
+  );
 }
 
 // Ids and outcome codes only on the log line, never a pattern, a filename or a draft value.

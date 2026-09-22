@@ -539,19 +539,24 @@ An unknown recipient or a credential of the wrong kind answers 406 so Mailgun
 stops retrying, and every permanent refusal of a signed request on this route
 answers 406 for the same reason. An in-flight semaphore answers 503 past
 `BAP_INBOUND_MAX_IN_FLIGHT` so a burst degrades instead of queuing unbounded
-work. `From`, `To`, subject and body bind nothing; the sender stored for display
-is the parsed `From` header address, unverified, never used for routing.
+work. `From`, `To`, subject and body bind nothing; the parsed `From` header
+address is stored unverified, with no SPF or DKIM check, and an organization's
+own sender-pattern rules match on it, so a rule that auto-routes on a sender
+trusts the secrecy of the intake address. The platform default auto-routes
+nothing.
 
 Once bound, the worker parses hostile MIME in-process under the channel context:
 mailparser caps enforced in code (20 attachments, 25 MB per attachment, a
 nesting depth of 10, 1 MB of text) bound what mailparser itself cannot, and
-every new blob is scanned by `clamd` before it is treated as content, recorded
-through the security-definer `app.record_blob_scan`. An infected or unscannable
-blob is quarantined: `readBlob` refuses it on both the download and inline
-routes with 409 `blob_quarantined`. Nothing from the mail is logged, audited, or
-sent anywhere: sender, recipient, token, subject, headers, body, and attachment
-names stay out of logs and `inbox_event`, which carry ids, reasons, and counts
-only.
+every blob the email split stores is scanned by `clamd` before it is treated as
+content, recorded through the security-definer `app.record_blob_scan`. An
+infected or unscannable blob is quarantined: `readBlob` refuses it on both the
+download and inline routes with 409 `blob_quarantined`. A blob from a direct
+upload or from the API channel is stored `not_scanned` and is served on both
+routes; scanning on those paths is tracked as a follow-up. Nothing from the mail
+is logged, audited, or sent anywhere: sender, recipient, token, subject,
+headers, body, and attachment names stay out of logs and `inbox_event`, which
+carry ids, reasons, and counts only.
 
 Amended 2026-09-17 (1b-runtime): three more `SECURITY DEFINER` functions owned
 by `bap_owner`, with EXECUTE to `bap_api`, back the `inbox_maintenance` tick:

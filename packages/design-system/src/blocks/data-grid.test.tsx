@@ -257,7 +257,7 @@ describe('DataGrid', () => {
   it('marks its root so it shrinks inside a grid or flex parent', () => {
     const { container } = render(<DataGrid columns={columns} rows={rows} />);
     const root = container.firstElementChild as HTMLElement;
-    expect(root).toHaveClass(styles.root!);
+    expect(root).toHaveClass(styles.container!);
   });
 
   it('narrows rows to the applied filter selection', () => {
@@ -337,26 +337,6 @@ describe('DataGrid', () => {
       (screen.getByRole('checkbox', { name: 'Alpha' }) as HTMLInputElement)
         .checked,
     ).toBe(false);
-  });
-
-  it('places the title on the same row as the toolbar when inline', () => {
-    const { container } = render(
-      <DataGrid
-        columns={columns}
-        rows={rows}
-        search
-        title="Reports"
-        titleInline
-      />,
-    );
-    const header = container.querySelector(`.${styles.inlineHeader!}`);
-    expect(header).not.toBeNull();
-    expect(
-      within(header as HTMLElement).getByText('Reports'),
-    ).toBeInTheDocument();
-    expect(
-      within(header as HTMLElement).getByPlaceholderText('Search rows'),
-    ).toBeInTheDocument();
   });
 
   it('limits the page to the client page size', () => {

@@ -10,6 +10,7 @@ import {
 } from '@bap/design-system/react';
 import Link from 'next/link';
 import { useSelectedLayoutSegments } from 'next/navigation';
+import { useTranslation } from 'react-i18next';
 
 import { useActiveOrganization } from './active-organization';
 import { buildTrail, collapseTrail } from './breadcrumb-trail';
@@ -25,11 +26,13 @@ function renderCrumb(crumb: Crumb) {
 }
 
 export default function Breadcrumbs() {
+  const { t } = useTranslation();
   const segments = useSelectedLayoutSegments();
   const organization = useActiveOrganization();
   const crumbs = buildTrail(
     segments,
     organization && { name: organization.name, slug: organization.slug },
+    (key) => t(key),
   );
 
   // The current page is the page title, so the breadcrumb shows only ancestors.
@@ -48,7 +51,10 @@ export default function Breadcrumbs() {
             {head.map(renderCrumb)}
             {hidden.length > 0 ? (
               <BreadcrumbItem data-floating-menu-container>
-                <OverflowMenu aria-label="Show hidden breadcrumbs" size="sm">
+                <OverflowMenu
+                  aria-label={t('shell.nav.hiddenBreadcrumbs')}
+                  size="sm"
+                >
                   {hidden.map((crumb) => (
                     <OverflowMenuItem
                       href={crumb.href}

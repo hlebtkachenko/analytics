@@ -19,7 +19,6 @@ import {
   StructuredListHead,
   StructuredListRow,
   StructuredListWrapper,
-  Tag,
   TextArea,
   TextInput,
   Tile,
@@ -30,6 +29,7 @@ import { useTranslation } from 'react-i18next';
 
 import PageContainer from '../../../../components/page-container';
 import { useToast } from '../../../../components/shell/toast';
+import { StatusIndicator } from '../../../../components/status-indicator';
 import { getJson, isAbortError } from '../../../../lib/datasets/client';
 import {
   documentsPath,
@@ -77,7 +77,7 @@ import {
   inboxRoutingDestinationLabelKeys,
   inboxRoutingDestinationNoneLabelKey,
   inboxStatusLabelKeys,
-  inboxStatusTagTypes,
+  inboxStatusSeverity,
 } from '../../../../lib/inbox/labels.ts';
 import { useLegalEntities } from '../../../../lib/organizations/use-legal-entities';
 import { useOrganizationAccess } from '../../../../lib/organizations/use-organization-access';
@@ -499,9 +499,10 @@ export default function InboxItemPage() {
         <h1>{t('inbox.detail')}</h1>
         {item === undefined ? null : (
           <div className={styles.summary!}>
-            <Tag size="sm" type={inboxStatusTagTypes[item.status]}>
-              {t(inboxStatusLabelKeys[item.status])}
-            </Tag>
+            <StatusIndicator
+              label={t(inboxStatusLabelKeys[item.status])}
+              severity={inboxStatusSeverity[item.status]}
+            />
             <span>{item.receivedAt}</span>
             {item.duplicateOfItemId === null ? null : (
               <Link href={itemHref(item.duplicateOfItemId)}>
@@ -590,9 +591,10 @@ export default function InboxItemPage() {
                             </StructuredListCell>
                             <StructuredListCell>
                               {isBlobQuarantined(file) ? (
-                                <Tag size="sm" type="red">
-                                  {t('inbox.quarantined')}
-                                </Tag>
+                                <StatusIndicator
+                                  label={t('inbox.quarantined')}
+                                  severity="error"
+                                />
                               ) : (
                                 <Link
                                   href={inboxBlobDownloadPath(

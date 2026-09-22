@@ -2,13 +2,10 @@
 
 import { readFile } from 'node:fs/promises';
 
+import { reservedOrganizationSlugs } from '@bap/db/organization-slug';
 import { describe, expect, it } from 'vitest';
 
-import {
-  normalizeOrganizationSlug,
-  organizationSlugSchema,
-  reservedOrganizationSlugs,
-} from './slug.js';
+import { normalizeOrganizationSlug, organizationSlugSchema } from './slug.js';
 
 type SlugCase = Readonly<{ slug: string; valid: boolean }>;
 

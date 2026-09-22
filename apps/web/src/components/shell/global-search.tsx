@@ -81,14 +81,14 @@ export default function GlobalSearch({
     const pages: SearchEntry[] = railDestinations.map((destination) => ({
       href: destination.href,
       kind: 'page',
-      label: destination.label,
+      label: t(destination.labelKey),
     }));
     if (activeOrganization !== undefined) {
       for (const item of workspaceSectionItems) {
         pages.push({
           href: `/${activeOrganization.slug}/${item.segment}`,
           kind: 'page',
-          label: item.label,
+          label: t(item.labelKey),
         });
       }
     }
@@ -106,7 +106,7 @@ export default function GlobalSearch({
             label: entity.name,
           }));
     return [...pages, ...workspaceEntries, ...entityEntries];
-  }, [activeOrganization, entities, workspaces]);
+  }, [activeOrganization, entities, t, workspaces]);
 
   const normalized = query.trim().toLowerCase();
   const matches = useMemo(

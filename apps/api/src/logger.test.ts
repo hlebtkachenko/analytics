@@ -20,12 +20,16 @@ describe('ApplicationLogger', () => {
       database: 'postgresql://private',
       email: 'private@example.invalid',
       password: 'private',
+      secret: 'private-secret',
+      token: 'private-token',
     });
 
     expect(output).not.toContain('Bearer private');
     expect(output).not.toContain('private@example.invalid');
     expect(output).not.toContain('postgresql://private');
-    expect(output.match(/\[Redacted\]/g)?.length).toBe(4);
+    expect(output).not.toContain('private-secret');
+    expect(output).not.toContain('private-token');
+    expect(output.match(/\[Redacted\]/g)?.length).toBe(6);
   });
 
   it('does not serialize raw error messages or traces', () => {

@@ -56,9 +56,6 @@ customer, employee, company, transaction, or analytics data.**
 Everything is off by default; turn on only what the page needs.
 
 - Density and look: `size` (`xs`–`xl`, default `sm`), `zebra`, `wrapCells`.
-- Header layout: `titleInline` renders the `title` (and `description`) on the
-  same row as the toolbar (title left, controls right) instead of stacked above
-  it; needs both a `title` and a toolbar. Default is the stacked layout.
 - Sorting: `sortable`, `multiSort` (shift-click), `initialSort`, `lockSort`
   (fixed order, non-interactive).
 - Selection: `selection` (`none`/`single`/`multi`), `batchActions` (text-only,

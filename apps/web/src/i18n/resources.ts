@@ -1105,6 +1105,30 @@ export const resources = {
         invitations: {
           action: 'Workspace invitations ({{count}} pending)',
         },
+        nav: {
+          account: 'Account',
+          accountAccess: 'Access',
+          accountPreferences: 'Preferences',
+          accountSecurity: 'Security',
+          assistant: 'AI Assistant',
+          datasets: 'Datasets',
+          documents: 'Documents',
+          documentsAnalytics: 'Analytics',
+          documentsNew: 'New document',
+          entities: 'Entities',
+          hiddenBreadcrumbs: 'Show hidden breadcrumbs',
+          inbox: 'Inbox',
+          inboxChannels: 'Channels',
+          inboxItem: 'Item',
+          inboxRules: 'Rules',
+          inboxSettings: 'Settings',
+          members: 'Members',
+          notifications: 'Notifications',
+          settings: 'Settings',
+          singleDocument: 'Document',
+          workspaces: 'Workspaces',
+          workspacesNew: 'Create workspace',
+        },
         notifications: {
           dismiss: 'Dismiss',
           dismissAll: 'Dismiss all',
@@ -1133,6 +1157,11 @@ export const resources = {
           description:
             'Application preferences arrive with the first product module.',
           title: 'Settings',
+        },
+        workspaces: {
+          create: 'Create workspace',
+          manage: 'Manage workspaces',
+          title: 'Workspaces',
         },
       },
       signUp: {

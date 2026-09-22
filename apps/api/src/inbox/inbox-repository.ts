@@ -5,7 +5,7 @@ import {
   NotFoundException,
   type OnModuleDestroy,
 } from '@nestjs/common';
-import { runInTenantContext } from '@bap/db';
+import { readEntityScope, runInTenantContext } from '@bap/db';
 import type {
   BlobScanStatus,
   InboxChannelKind,
@@ -2850,6 +2850,18 @@ export async function putRoutingTarget(
   const detectedType = knownDetectedType(input.detectedType);
 
   return runInTenantContext(pool, input, async (transaction) => {
+    // The auto route runs as the saver, so a default entity outside the saver's scope is refused like an unknown one.
+    if (body.defaultLegalEntityId !== null) {
+      const scope = await readEntityScope(transaction, input);
+
+      if (
+        scope.mode === 'restricted' &&
+        !scope.legalEntityIds.includes(body.defaultLegalEntityId)
+      ) {
+        return null;
+      }
+    }
+
     let saved: { rows: { id: string }[] };
 
     try {

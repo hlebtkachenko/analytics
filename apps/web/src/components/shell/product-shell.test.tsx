@@ -10,6 +10,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { I18nProvider } from '../../i18n/client-provider';
+import { resources } from '../../i18n/resources';
 
 const navigation = { pathname: '/account', segments: ['account'] as string[] };
 
@@ -32,6 +33,16 @@ vi.mock('../../lib/notifications/actions', () => notificationActions);
 import { ActiveOrganization } from './active-organization';
 import ProductShell from './product-shell';
 import { railDestinations, workspaceSectionItems } from './product-navigation';
+
+// The shell renders label keys, so the assertions read the same English the provider serves.
+function englishFor(key: string): string {
+  return key
+    .split('.')
+    .reduce<unknown>(
+      (node, segment) => (node as Record<string, unknown>)[segment],
+      resources['en-US'].translation,
+    ) as string;
+}
 
 function stubMatchMedia(matches: boolean): void {
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
@@ -372,7 +383,9 @@ describe('ProductShell', () => {
 
     expect(links).toHaveLength(railDestinations.length);
     railDestinations.forEach((destination, index) => {
-      expect(links[index]!.textContent).toContain(destination.label);
+      expect(links[index]!.textContent).toContain(
+        englishFor(destination.labelKey),
+      );
       expect(links[index]!.getAttribute('href')).toBe(destination.href);
     });
   });
@@ -474,7 +487,9 @@ describe('ProductShell', () => {
 
     expect(workspaceLinks).toHaveLength(workspaceSectionItems.length);
     workspaceSectionItems.forEach((item, index) => {
-      expect(workspaceLinks[index]!.textContent).toContain(item.label);
+      expect(workspaceLinks[index]!.textContent).toContain(
+        englishFor(item.labelKey),
+      );
       expect(workspaceLinks[index]!.getAttribute('href')).toBe(
         `/acme-legal/${item.segment}`,
       );

@@ -1,4 +1,4 @@
-import { postInboxItemProcess } from '../../../../../../../../../../lib/auth/bff';
+import { writeInboxItem } from '../../../../../../../../../../lib/auth/bff';
 import { getAuth } from '../../../../../../../../../../lib/auth/server';
 
 type RouteContext = Readonly<{
@@ -11,5 +11,5 @@ export async function POST(
 ): Promise<Response> {
   const { itemId, organizationId } = await context.params;
   const auth = await getAuth();
-  return postInboxItemProcess(auth.api, request, organizationId, itemId);
+  return writeInboxItem(auth.api, request, organizationId, itemId, 'process');
 }

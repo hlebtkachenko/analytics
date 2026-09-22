@@ -234,7 +234,7 @@ const reviewedCallsites = [
     'components/shell/product-shell.tsx',
     'SideNavLink',
     'destination.icon',
-    '{destination.label}',
+    '{t(destination.labelKey)}',
   ],
   [
     'components/shell/product-shell.tsx',

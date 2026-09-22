@@ -11,7 +11,6 @@ import {
   Select,
   SelectItem,
   Stack,
-  Tag,
   TextInput,
   Toggle,
 } from '@bap/design-system/react';
@@ -20,6 +19,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import PageContainer from '../../../../components/page-container';
+import { StatusIndicator } from '../../../../components/status-indicator';
 import { getJson, isAbortError } from '../../../../lib/datasets/client';
 import { sendJson, sendWithoutContent } from '../../../../lib/documents/client';
 import {
@@ -421,9 +421,11 @@ export default function InboxRulesPage() {
           <span className={styles.name!}>
             {rule?.name}
             {rule?.paused ? (
-              <Tag size="sm" title={t('inboxRules.pausedHelp')} type="magenta">
-                {t('inboxRules.paused')}
-              </Tag>
+              <StatusIndicator
+                label={t('inboxRules.paused')}
+                severity="warning"
+                title={t('inboxRules.pausedHelp')}
+              />
             ) : null}
           </span>
         );

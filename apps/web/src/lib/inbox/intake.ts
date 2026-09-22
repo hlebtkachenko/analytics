@@ -107,7 +107,7 @@ export async function consumeEdgeBucket(
   await pool.query(
     `with pruned as (
        delete from auth.rate_limit
-       where "key" like '${prefix}%'
+       where "key" like $5
          and "key" <> $1
          and last_request <= $2::bigint - $3::bigint
      )
@@ -124,7 +124,7 @@ export async function consumeEdgeBucket(
          end
      where auth.rate_limit.last_request <= $2::bigint - $3::bigint
         or auth.rate_limit.count < $4::integer`,
-    [key, now, windowMilliseconds, INTAKE_EDGE_RATE_LIMIT.max],
+    [key, now, windowMilliseconds, INTAKE_EDGE_RATE_LIMIT.max, `${prefix}%`],
   );
 }
 

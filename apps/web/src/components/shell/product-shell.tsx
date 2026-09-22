@@ -208,7 +208,7 @@ function ShellChrome({
       key={destination.route}
       renderIcon={destination.icon}
     >
-      {destination.label}
+      {t(destination.labelKey)}
     </SideNavLink>
   ));
   const workspaceLinks =
@@ -219,7 +219,7 @@ function ShellChrome({
             href={`/${organization.slug}/${item.segment}`}
             key={item.segment}
           >
-            {item.label}
+            {t(item.labelKey)}
           </SideNavMenuItem>
         ));
 

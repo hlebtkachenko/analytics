@@ -7,33 +7,43 @@ type RailIcon = ComponentType<Readonly<{ size?: number }>>;
 export type RailDestination = Readonly<{
   href: string;
   icon: RailIcon;
-  label: string;
+  labelKey: string;
   route: string;
 }>;
 
 export type WorkspaceSectionItem = Readonly<{
-  label: string;
+  labelKey: string;
   segment: string;
 }>;
 
 // The rail's whole-app destinations, all real routes, rendered straight from this array.
 export const railDestinations: readonly RailDestination[] = [
-  { href: '/datasets', icon: DataSet, label: 'Datasets', route: 'datasets' },
-  { href: '/inbox', icon: Email, label: 'Inbox', route: 'inbox' },
+  {
+    href: '/datasets',
+    icon: DataSet,
+    labelKey: 'shell.nav.datasets',
+    route: 'datasets',
+  },
+  { href: '/inbox', icon: Email, labelKey: 'shell.nav.inbox', route: 'inbox' },
   {
     href: '/documents',
     icon: Document,
-    label: 'Documents',
+    labelKey: 'shell.nav.documents',
     route: 'documents',
   },
-  { href: '/account', icon: UserAvatar, label: 'Account', route: 'account' },
+  {
+    href: '/account',
+    icon: UserAvatar,
+    labelKey: 'shell.nav.account',
+    route: 'account',
+  },
 ];
 
 // The workspace section links shown when an organization is active.
 export const workspaceSectionItems: readonly WorkspaceSectionItem[] = [
-  { label: 'Members', segment: 'members' },
-  { label: 'Entities', segment: 'entities' },
-  { label: 'Settings', segment: 'settings' },
+  { labelKey: 'shell.nav.members', segment: 'members' },
+  { labelKey: 'shell.nav.entities', segment: 'entities' },
+  { labelKey: 'shell.nav.settings', segment: 'settings' },
 ];
 
 // Classifies the current path into the active rail destination id.

@@ -11,6 +11,9 @@ const REDACTED_PATHS = [
   '*.database',
   '*.email',
   '*.password',
+  '*.secret',
+  '*.signature',
+  '*.token',
   'authorization',
   'configuration',
   'cookie',
@@ -21,10 +24,16 @@ const REDACTED_PATHS = [
   'data.database',
   'data.email',
   'data.password',
+  'data.secret',
+  'data.signature',
+  'data.token',
   'email',
   'password',
   'req.headers.authorization',
   'req.headers.cookie',
+  'secret',
+  'signature',
+  'token',
 ];
 
 export class ApplicationLogger implements LoggerService {

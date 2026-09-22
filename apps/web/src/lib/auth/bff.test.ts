@@ -34,9 +34,6 @@ import {
   postDocument,
   postInboxChannel,
   postInboxChannelCredential,
-  postInboxItemAttach,
-  postInboxItemDiscard,
-  postInboxItemRouteDocument,
   postInboxItemsBulk,
   postInboxRule,
   postInboxRuleAdopt,
@@ -45,6 +42,7 @@ import {
   putInboxRoutingTarget,
   putInboxRuleOrder,
   putMemberEntityScope,
+  writeInboxItem,
 } from './bff.js';
 import type { BffAuth } from './bff.js';
 
@@ -1906,7 +1904,7 @@ describe('inbox item reads and writes', () => {
       });
     });
 
-    const routed = await postInboxItemRouteDocument(
+    const routed = await writeInboxItem(
       auth,
       inboxRequest(`items/${INBOX_ITEM_ID}/route/document`, {
         body: JSON.stringify({
@@ -1923,9 +1921,10 @@ describe('inbox item reads and writes', () => {
       }),
       'org_1',
       INBOX_ITEM_ID,
+      'routeDocument',
       fetchImplementation,
     );
-    const refused = await postInboxItemRouteDocument(
+    const refused = await writeInboxItem(
       auth,
       inboxRequest(`items/${INBOX_ITEM_ID}/route/document`, {
         body: JSON.stringify({ document: {}, fileBlobIds: [] }),
@@ -1933,6 +1932,7 @@ describe('inbox item reads and writes', () => {
       }),
       'org_1',
       INBOX_ITEM_ID,
+      'routeDocument',
       fetchImplementation,
     );
 
@@ -1975,7 +1975,7 @@ describe('inbox item reads and writes', () => {
       return Response.json({ code: 'something_else' }, { status: 409 });
     });
     const route = (extra: Record<string, unknown>) =>
-      postInboxItemRouteDocument(
+      writeInboxItem(
         auth,
         inboxRequest(`items/${INBOX_ITEM_ID}/route/document`, {
           body: JSON.stringify({
@@ -1992,6 +1992,7 @@ describe('inbox item reads and writes', () => {
         }),
         'org_1',
         INBOX_ITEM_ID,
+        'routeDocument',
         fetchImplementation,
       );
 
@@ -2033,7 +2034,7 @@ describe('inbox item reads and writes', () => {
       });
     });
     const attach = (body: unknown) =>
-      postInboxItemAttach(
+      writeInboxItem(
         auth,
         inboxRequest(`items/${INBOX_ITEM_ID}/attach`, {
           body: JSON.stringify(body),
@@ -2041,6 +2042,7 @@ describe('inbox item reads and writes', () => {
         }),
         'org_1',
         INBOX_ITEM_ID,
+        'attach',
         fetchImplementation,
       );
 
@@ -2114,7 +2116,7 @@ describe('inbox item reads and writes', () => {
       });
     });
 
-    const discarded = await postInboxItemDiscard(
+    const discarded = await writeInboxItem(
       auth,
       inboxRequest(`items/${INBOX_ITEM_ID}/discard`, {
         body: JSON.stringify({ reason: 'spam' }),
@@ -2122,9 +2124,10 @@ describe('inbox item reads and writes', () => {
       }),
       'org_1',
       INBOX_ITEM_ID,
+      'discard',
       fetchImplementation,
     );
-    const refused = await postInboxItemDiscard(
+    const refused = await writeInboxItem(
       auth,
       inboxRequest(`items/${INBOX_ITEM_ID}/discard`, {
         body: JSON.stringify({ reason: 'boring' }),
@@ -2132,6 +2135,7 @@ describe('inbox item reads and writes', () => {
       }),
       'org_1',
       INBOX_ITEM_ID,
+      'discard',
       fetchImplementation,
     );
 

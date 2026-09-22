@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import PageContainer from '../../../../components/page-container';
+import { StatusIndicator } from '../../../../components/status-indicator';
 import { getJson, isAbortError } from '../../../../lib/datasets/client';
 import { sendJson, sendWithoutContent } from '../../../../lib/documents/client';
 import {
@@ -249,13 +250,14 @@ export default function InboxChannelsPage() {
       header: t('inboxChannels.columnEnabled'),
       key: 'enabled',
       renderCell: (row) => (
-        <Tag size="sm" type={row['enabled'] === 'yes' ? 'green' : 'gray'}>
-          {t(
+        <StatusIndicator
+          label={t(
             row['enabled'] === 'yes'
               ? 'inboxChannels.enabled'
               : 'inboxChannels.disabled',
           )}
-        </Tag>
+          severity={row['enabled'] === 'yes' ? 'success' : 'neutral'}
+        />
       ),
     },
     {

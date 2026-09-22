@@ -362,12 +362,12 @@ which parses the MIME, scans every new blob through `clamd`, and splits
 attachments into child items. `inboxItemSchema` gains `sender`, the parsed
 `From` header address as the worker read it from the MIME (not `MAIL FROM`),
 unverified, null for a manual upload or before the split runs; it is
-display-only and never used for routing. An email channel's credential issue
-response carries `secret: intakeToken | intakeEmailAddress`: an API channel's
-`secret` is the bearer token shown once, an email channel's is the issued
-address itself (`in-<32 hex>@<intake domain>`), stored plain on
-`inbox_channel.email_address` because the owner must read it back to hand it
-out.
+display-only for the platform default, but an organization's own sender-pattern
+rules match on it. An email channel's credential issue response carries
+`secret: intakeToken | intakeEmailAddress`: an API channel's `secret` is the
+bearer token shown once, an email channel's is the issued address itself
+(`in-<32 hex>@<intake domain>`), stored plain on `inbox_channel.email_address`
+because the owner must read it back to hand it out.
 
 The channel items route accepts a channel's own resource JWT, minted only by the
 public intake route below, or a person's `TenantAccess` with `manageDocuments`
