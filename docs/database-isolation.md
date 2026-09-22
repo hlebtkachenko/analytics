@@ -507,8 +507,15 @@ Migration `20260922.0007` re-declares `app.erase_user` once more, because
 target, setting, rule and correction erasure rules `20260917.0004` and
 `20260917.0005` had added. Its body is the automation body plus the member
 `resource_id` tombstone on `app.audit_log`, so no stack loses a rule.
-`DATABASE_MIGRATION_COMPATIBILITY` is now `20260922.0007` in
-`packages/db/src/access.ts`.
+`DATABASE_MIGRATION_COMPATIBILITY` was `20260922.0007` after this migration.
+
+Migration `20260922.0008` adds
+`app.inbox_item.sender_authenticated boolean not null default false`, true only
+when Mailgun's DKIM check passed and a DKIM signature domain aligns with the
+`From` domain. It is the same table, so no policy changes: every existing policy
+already covers the column, and the default leaves every earlier row and every
+non-email item not authenticated. `DATABASE_MIGRATION_COMPATIBILITY` is now
+`20260922.0008` in `packages/db/src/access.ts`.
 
 ## Tenant policy contract
 
