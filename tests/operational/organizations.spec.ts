@@ -148,6 +148,10 @@ test('walks the Carbon workspace loop through explicit member-scoped actions', a
   await inviteDialog
     .getByLabel('Email')
     .fill(`phase10-${Date.now()}@example.test`);
+  // The scope picker starts restricted and empty, so grant all entities to enable sending.
+  await inviteDialog
+    .getByLabel('Entity access', { exact: true })
+    .selectOption('all');
   await inviteDialog.getByRole('button', { name: 'Send invitation' }).click();
   await expect(page.getByText('The invitation was sent.')).toBeVisible();
   await expect(inviteDialog).toBeHidden();
