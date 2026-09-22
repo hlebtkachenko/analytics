@@ -251,20 +251,6 @@ tbody tr:global(.cds--data-table--selected) td.pinned {
   gap: 0.5rem;
 }
 
-// Inline header: title on the left, toolbar controls on the right, one row.
-.inlineHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-// Keep the title block from stretching so the toolbar hugs the right edge.
-.inlineHeaderTitle {
-  flex: 0 1 auto;
-  min-inline-size: 0;
-}
-
 // Two equal-width flush footer buttons span the full panel width.
 .filterFooter {
   display: flex;

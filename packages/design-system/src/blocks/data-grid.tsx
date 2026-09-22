@@ -307,7 +307,6 @@ export function DataGrid(props: DataGridProps) {
     rows,
     title,
     description,
-    titleInline = false,
     size = 'sm',
     zebra = false,
     wrapCells = false,
@@ -656,8 +655,6 @@ export function DataGrid(props: DataGridProps) {
     columnMenu || reorderableColumns || resizableColumns || Boolean(persistKey);
   const isEmpty = state === 'empty' || orderedRows.length === 0;
   const showOverlay = state === 'loading' && loadingMode === 'overlay';
-  // Inline layout puts the title beside the toolbar; needs both to be present.
-  const inlineHeader = titleInline && Boolean(title) && showToolbar;
 
   // The skeleton stands in for the whole grid while first data loads.
   // The wrapper clips it to the column so wide skeletons do not bleed out.
@@ -768,24 +765,10 @@ export function DataGrid(props: DataGridProps) {
   return (
     <TableContainer
       className={styles.container}
-      description={inlineHeader ? undefined : description}
-      title={inlineHeader ? undefined : title}
+      description={description}
+      title={title}
     >
-      {inlineHeader ? (
-        <div className={styles.inlineHeader}>
-          <div className={styles.inlineHeaderTitle}>
-            <h4 className="cds--data-table-header__title">{title}</h4>
-            {description ? (
-              <p className="cds--data-table-header__description">
-                {description}
-              </p>
-            ) : null}
-          </div>
-          {toolbar}
-        </div>
-      ) : (
-        toolbar
-      )}
+      {toolbar}
 
       <div className={styles.viewport}>
         <div

@@ -339,26 +339,6 @@ describe('DataGrid', () => {
     ).toBe(false);
   });
 
-  it('places the title on the same row as the toolbar when inline', () => {
-    const { container } = render(
-      <DataGrid
-        columns={columns}
-        rows={rows}
-        search
-        title="Reports"
-        titleInline
-      />,
-    );
-    const header = container.querySelector(`.${styles.inlineHeader!}`);
-    expect(header).not.toBeNull();
-    expect(
-      within(header as HTMLElement).getByText('Reports'),
-    ).toBeInTheDocument();
-    expect(
-      within(header as HTMLElement).getByPlaceholderText('Search rows'),
-    ).toBeInTheDocument();
-  });
-
   it('limits the page to the client page size', () => {
     const many: GridRow[] = Array.from({ length: 5 }, (_, index) => ({
       id: String(index),
