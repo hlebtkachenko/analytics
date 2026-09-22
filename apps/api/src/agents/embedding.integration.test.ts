@@ -78,6 +78,14 @@ function configurationFor(role: DatabaseRole): DatabaseConfiguration {
   };
 }
 
+// Pools for one role; the guard mirrors the database suites.
+function poolFor(role: DatabaseRole): DatabasePool {
+  const pool = createDatabasePool(configurationFor(role));
+  // pg emits 'error' on idle clients when the backend dies at teardown; swallow it so the container shutdown race is not an unhandled error.
+  pool.on('error', () => undefined);
+  return pool;
+}
+
 // A deterministic one-hot vector per text, so two identical documents embed identically.
 function vectorFor(text: string): number[] {
   const slot =
@@ -182,7 +190,7 @@ beforeAll(async () => {
     .withUsername('postgres')
     .withPassword(testPassword)
     .start();
-  const rootPool = createDatabasePool(configurationFor('postgres'));
+  const rootPool = poolFor('postgres');
   const root = await rootPool.connect();
 
   try {
@@ -197,7 +205,7 @@ beforeAll(async () => {
     root.release();
   }
 
-  migratorPool = createDatabasePool(configurationFor('bap_migrator'));
+  migratorPool = poolFor('bap_migrator');
   await runMigrations(migratorPool);
   const migrator = await migratorPool.connect();
 
@@ -223,7 +231,7 @@ beforeAll(async () => {
   }
 
   await rootPool.end();
-  apiPool = createDatabasePool(configurationFor('bap_api'));
+  apiPool = poolFor('bap_api');
   metrics = new WorkerMetrics();
   alpha.legalEntityId = await createLegalEntity(alpha);
   beta.legalEntityId = alpha.legalEntityId;

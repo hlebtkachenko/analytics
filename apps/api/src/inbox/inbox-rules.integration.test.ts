@@ -128,6 +128,14 @@ function configurationFor(role: DatabaseRole): DatabaseConfiguration {
   };
 }
 
+// Pools for one role; the guard mirrors the database suites.
+function poolFor(role: DatabaseRole): DatabasePool {
+  const pool = createDatabasePool(configurationFor(role));
+  // pg emits 'error' on idle clients when the backend dies at teardown; swallow it so the container shutdown race is not an unhandled error.
+  pool.on('error', () => undefined);
+  return pool;
+}
+
 async function asTenant<T>(
   tenant: TenantContext,
   operation: (transaction: PoolClient) => Promise<T>,
@@ -205,7 +213,7 @@ beforeAll(async () => {
     .withUsername('postgres')
     .withPassword(testPassword)
     .start();
-  const rootPool = createDatabasePool(configurationFor('postgres'));
+  const rootPool = poolFor('postgres');
   const root = await rootPool.connect();
 
   try {
@@ -220,7 +228,7 @@ beforeAll(async () => {
     root.release();
   }
 
-  migratorPool = createDatabasePool(configurationFor('bap_migrator'));
+  migratorPool = poolFor('bap_migrator');
   await runMigrations(migratorPool);
   await asMigrator(`
     insert into auth."user" (id, name, email, email_verified)
@@ -232,7 +240,7 @@ beforeAll(async () => {
            ('member-2', 'org-1', 'user-2', 'admin');
   `);
   await rootPool.end();
-  apiPool = createDatabasePool(configurationFor('bap_api'));
+  apiPool = poolFor('bap_api');
   boss = createQueueClientFromConfiguration(configurationFor('bap_api'));
   await boss.start();
   await createQueue(boss, ROUTE_INBOX_ITEM_QUEUE, { policy: 'exclusive' });

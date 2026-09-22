@@ -274,6 +274,14 @@ function configurationFor(role: DatabaseRole): DatabaseConfiguration {
   };
 }
 
+// Pools for one role; the guard mirrors the database suites.
+function poolFor(role: DatabaseRole): DatabasePool {
+  const pool = createDatabasePool(configurationFor(role));
+  // pg emits 'error' on idle clients when the backend dies at teardown; swallow it so the container shutdown race is not an unhandled error.
+  pool.on('error', () => undefined);
+  return pool;
+}
+
 async function intake(bytes: Buffer, externalId: string): Promise<string> {
   const path = join(store.temporaryDirectory(), `stage-${externalId}`);
   await writeFile(path, bytes);
@@ -360,7 +368,7 @@ beforeAll(async () => {
     .withUsername('postgres')
     .withPassword(testPassword)
     .start();
-  const rootPool = createDatabasePool(configurationFor('postgres'));
+  const rootPool = poolFor('postgres');
   const root = await rootPool.connect();
 
   try {
@@ -375,7 +383,7 @@ beforeAll(async () => {
     root.release();
   }
 
-  migratorPool = createDatabasePool(configurationFor('bap_migrator'));
+  migratorPool = poolFor('bap_migrator');
   await runMigrations(migratorPool);
   const migrator = await migratorPool.connect();
 
@@ -399,7 +407,7 @@ beforeAll(async () => {
   }
 
   await rootPool.end();
-  apiPool = createDatabasePool(configurationFor('bap_api'));
+  apiPool = poolFor('bap_api');
   directory = await mkdtemp(join(tmpdir(), 'bap-split-email-'));
   await createBlobDirectories(directory);
   store = new FilesystemBlobStore(directory);
@@ -971,7 +979,7 @@ describe('splitEmailItem', () => {
       buildMime({ text: 'decided before the worker got to it' }),
       'token-user-decided',
     );
-    const root = createDatabasePool(configurationFor('postgres'));
+    const root = poolFor('postgres');
     try {
       await root.query(
         `update app.inbox_item
@@ -1172,7 +1180,7 @@ describe('inbox maintenance', () => {
     itemId: string,
     column: 'received_at' | 'updated_at',
   ) {
-    const root = createDatabasePool(configurationFor('postgres'));
+    const root = poolFor('postgres');
     try {
       await root.query(
         `update app.inbox_item set ${column} = now() - interval '2 hours' where id = $1`,
