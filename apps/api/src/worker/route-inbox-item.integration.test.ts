@@ -358,84 +358,102 @@ describe('route_inbox_item', () => {
   afterEach(clearRules);
 
   it('routes as the rule author with decided_by_kind rule, an auto_route row and the audit entry', async () => {
-    const created = await rule(
-      {
-        autoRoute: true,
-        detectedType: 'pdf',
-        name: 'Auto contracts',
-        setDocumentKind: 'contract',
-        setLegalEntityId: entityA,
-      },
-      admin,
-    );
-    const response = await upload(owner, unique(fixtures.pdf()), 'auto.pdf');
-    const job = await enqueuedRouteJob(response.item.id);
-    expect(job.ruleId).toBe(created?.id);
-
-    const outcome = await runRoute(job);
-    expect(outcome.kind).toBe('routed');
-
-    const after = await detail(response.item.id);
-    expect(after?.item).toMatchObject({
-      decidedByKind: 'rule',
-      decidedByRuleId: created?.id,
-      decidedByUserId: null,
-      legalEntityId: entityA,
-      status: 'routed',
-    });
-    expect(after?.item.documentId).not.toBeNull();
-    expect(after?.corrections).toEqual([]);
-    expect(
-      after?.events.map((event) => [event.kind, event.actorUserId]),
-    ).toEqual([
-      ['received', owner.userId],
-      ['classified', owner.userId],
-      ['rule_matched', owner.userId],
-      ['classified', admin.userId],
-      ['routed', admin.userId],
-    ]);
-
-    const document = await asTenant(owner, (transaction) =>
-      transaction.query<{ created_by: string; kind: string; source: string }>(
-        'select created_by, kind, source from app.document where id = $1',
-        [after?.item.documentId],
+    // The rule author routes under their own entity scope, which now denies by default.
+    await asTenant(owner, (transaction) =>
+      transaction.query(
+        `insert into app.member_entity_scope (organization_id, user_id, mode, updated_by)
+         values ($1, $2, 'all', $3)`,
+        [owner.organizationId, admin.userId, owner.userId],
       ),
     );
-    expect(document.rows).toEqual([
-      { created_by: admin.userId, kind: 'contract', source: 'upload' },
-    ]);
-    const files = await asTenant(owner, (transaction) =>
-      transaction.query<{ created_by: string }>(
-        'select created_by from app.document_file where document_id = $1',
-        [after?.item.documentId],
-      ),
-    );
-    expect(files.rows).toEqual([{ created_by: admin.userId }]);
 
-    const extractions = await extractionsOf(response.item.id);
-    expect(extractions.map((row) => [row.provider, row.created_by])).toEqual([
-      ['sniff', owner.userId],
-      [RULE_PROVIDER, owner.userId],
-      [AUTO_ROUTE_PROVIDER, admin.userId],
-    ]);
-    expect(extractions[2]?.reasons).toEqual(extractions[1]?.reasons);
-    expect(extractions[2]?.issues).toEqual([]);
-    expect(after?.extraction?.draft).toMatchObject({
-      kind: 'contract',
-      legalEntityId: entityA,
-      title: 'auto.pdf',
-    });
+    try {
+      const created = await rule(
+        {
+          autoRoute: true,
+          detectedType: 'pdf',
+          name: 'Auto contracts',
+          setDocumentKind: 'contract',
+          setLegalEntityId: entityA,
+        },
+        admin,
+      );
+      const response = await upload(owner, unique(fixtures.pdf()), 'auto.pdf');
+      const job = await enqueuedRouteJob(response.item.id);
+      expect(job.ruleId).toBe(created?.id);
 
-    const audit = await auditOf(response.item.id);
-    expect(audit.at(-1)).toMatchObject({
-      action: 'inbox_item.routed',
-      metadata: {
+      const outcome = await runRoute(job);
+      expect(outcome.kind).toBe('routed');
+
+      const after = await detail(response.item.id);
+      expect(after?.item).toMatchObject({
         decidedByKind: 'rule',
+        decidedByRuleId: created?.id,
+        decidedByUserId: null,
+        legalEntityId: entityA,
+        status: 'routed',
+      });
+      expect(after?.item.documentId).not.toBeNull();
+      expect(after?.corrections).toEqual([]);
+      expect(
+        after?.events.map((event) => [event.kind, event.actorUserId]),
+      ).toEqual([
+        ['received', owner.userId],
+        ['classified', owner.userId],
+        ['rule_matched', owner.userId],
+        ['classified', admin.userId],
+        ['routed', admin.userId],
+      ]);
+
+      const document = await asTenant(owner, (transaction) =>
+        transaction.query<{ created_by: string; kind: string; source: string }>(
+          'select created_by, kind, source from app.document where id = $1',
+          [after?.item.documentId],
+        ),
+      );
+      expect(document.rows).toEqual([
+        { created_by: admin.userId, kind: 'contract', source: 'upload' },
+      ]);
+      const files = await asTenant(owner, (transaction) =>
+        transaction.query<{ created_by: string }>(
+          'select created_by from app.document_file where document_id = $1',
+          [after?.item.documentId],
+        ),
+      );
+      expect(files.rows).toEqual([{ created_by: admin.userId }]);
+
+      const extractions = await extractionsOf(response.item.id);
+      expect(extractions.map((row) => [row.provider, row.created_by])).toEqual([
+        ['sniff', owner.userId],
+        [RULE_PROVIDER, owner.userId],
+        [AUTO_ROUTE_PROVIDER, admin.userId],
+      ]);
+      expect(extractions[2]?.reasons).toEqual(extractions[1]?.reasons);
+      expect(extractions[2]?.issues).toEqual([]);
+      expect(after?.extraction?.draft).toMatchObject({
         kind: 'contract',
-        ruleId: created?.id,
-      },
-      user_id: admin.userId,
-    });
+        legalEntityId: entityA,
+        title: 'auto.pdf',
+      });
+
+      const audit = await auditOf(response.item.id);
+      expect(audit.at(-1)).toMatchObject({
+        action: 'inbox_item.routed',
+        metadata: {
+          decidedByKind: 'rule',
+          kind: 'contract',
+          ruleId: created?.id,
+        },
+        user_id: admin.userId,
+      });
+    } finally {
+      await asTenant(owner, (transaction) =>
+        transaction.query(
+          'delete from app.member_entity_scope where user_id = $1',
+          [admin.userId],
+        ),
+      );
+    }
   });
 
   it('leaves the item in review with a rule_author_unavailable event when the author was demoted', async () => {
@@ -722,6 +740,14 @@ describe('route_inbox_item', () => {
   });
 
   it('routes a target default with auto always as the account that saved the target, with no rule at all', async () => {
+    // The target author routes under their own entity scope, which now denies by default.
+    await asTenant(owner, (transaction) =>
+      transaction.query(
+        `insert into app.member_entity_scope (organization_id, user_id, mode, updated_by)
+         values ($1, $2, 'all', $3)`,
+        [owner.organizationId, admin.userId, owner.userId],
+      ),
+    );
     await putRoutingTarget(apiPool, {
       ...admin,
       body: {
@@ -770,6 +796,12 @@ describe('route_inbox_item', () => {
       });
     } finally {
       await deleteRoutingTarget(apiPool, { ...owner, detectedType: 'image' });
+      await asTenant(owner, (transaction) =>
+        transaction.query(
+          'delete from app.member_entity_scope where user_id = $1',
+          [admin.userId],
+        ),
+      );
     }
   });
 });
