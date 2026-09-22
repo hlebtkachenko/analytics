@@ -13,6 +13,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { StatusIndicator } from '../../../components/status-indicator';
 import { useToast } from '../../../components/shell/toast';
 import {
   acceptOrganizationInvitationAction,
@@ -130,12 +131,10 @@ export default function WorkspaceList({
       renderCell: (row) => {
         const workspace = byId.get(row.id);
         return workspace === undefined ? null : (
-          <Tag
-            size="sm"
-            type={workspace.status === 'active' ? 'green' : 'gray'}
-          >
-            {statusLabels[workspace.status]}
-          </Tag>
+          <StatusIndicator
+            severity={workspace.status === 'active' ? 'success' : 'neutral'}
+            label={statusLabels[workspace.status]}
+          />
         );
       },
       sortable: true,

@@ -15,13 +15,13 @@ import {
   Modal,
   PasswordInput,
   Stack,
-  Tag,
   TextInput,
 } from '@bap/design-system/react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { StatusIndicator } from '../../../../components/status-indicator';
 import { useToast } from '../../../../components/shell/toast';
 import { authClient } from '../../../../lib/auth/client';
 import { revokeAccountSessionAction } from './actions';
@@ -132,7 +132,10 @@ export default function SecurityView({
       key: 'current',
       renderCell: (row: GridRow) =>
         row.id === currentSessionId ? (
-          <Tag type="green">{t('account.sessions.current')}</Tag>
+          <StatusIndicator
+            severity="success"
+            label={t('account.sessions.current')}
+          />
         ) : null,
     },
   ];

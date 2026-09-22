@@ -35,7 +35,6 @@ import {
   TabPanel,
   TabPanels,
   Tabs,
-  Tag,
   TextInput,
 } from '@bap/design-system/react';
 import { Download, Filter, UserFollow } from '@bap/design-system/icons';
@@ -56,6 +55,7 @@ import {
   mutateJson,
 } from '../../../../lib/datasets/client';
 import type { LegalEntity } from '../../../../lib/datasets/client';
+import { StatusIndicator } from '../../../../components/status-indicator';
 import { type FilterGroup, MembersFilterFlyout } from './members-filter-flyout';
 import { memberMatchesFilters, memberRowActionIds } from './members-filter';
 import styles from './members-view.module.scss';
@@ -1167,18 +1167,18 @@ export default function MembersView({
                                     {row.cells.map((cell) => (
                                       <TableCell key={cell.id}>
                                         {cell.info.header === 'status' ? (
-                                          <Tag
-                                            size="sm"
-                                            type={
+                                          <StatusIndicator
+                                            severity={
                                               cell.value === 'inactive'
-                                                ? 'gray'
-                                                : 'green'
+                                                ? 'neutral'
+                                                : 'success'
                                             }
-                                          >
-                                            {statusLabels[
-                                              cell.value as MemberStatus
-                                            ] ?? cell.value}
-                                          </Tag>
+                                            label={
+                                              statusLabels[
+                                                cell.value as MemberStatus
+                                              ] ?? cell.value
+                                            }
+                                          />
                                         ) : (
                                           cell.value
                                         )}
