@@ -35,7 +35,10 @@ import {
   readDocument,
 } from '../documents/document-repository.js';
 import { DETECTED_TYPES, inboxItemListQuerySchema } from './contract.js';
-import type { PutInboxRoutingTargetRequest } from './contract.js';
+import type {
+  PutInboxRoutingTargetRequest,
+  RouteInboxItemJob,
+} from './contract.js';
 import { InboxService } from './inbox.service.js';
 import {
   SNIFF_PROVIDER,
@@ -44,8 +47,15 @@ import {
   toProviderOutput,
 } from './providers/sniff.js';
 import {
+  adoptRule,
   assignItem,
   createChannel,
+  createRule,
+  deleteRule,
+  listRules,
+  orderRules,
+  readRule,
+  updateRule,
   deleteRoutingTarget,
   discardItem,
   issueCredential,
@@ -108,6 +118,7 @@ let otherEntityId = '';
 let firstItemId = '';
 let firstBlobId = '';
 let documentId = '';
+const routeJobs: RouteInboxItemJob[] = [];
 
 function configurationFor(role: DatabaseRole): DatabaseConfiguration {
   return {
@@ -223,7 +234,14 @@ beforeAll(async () => {
   store = new FilesystemBlobStore(directory);
   // The service is exercised against the container pool through the same functions the Nest repository wraps.
   const repository: InboxRepository = {
+    adoptRule: (input) => adoptRule(apiPool, input),
     assignItem: (input) => assignItem(apiPool, input),
+    createRule: (input) => createRule(apiPool, input),
+    deleteRule: (input) => deleteRule(apiPool, input),
+    listRules: (input) => listRules(apiPool, input),
+    orderRules: (input) => orderRules(apiPool, input),
+    readRule: (input) => readRule(apiPool, input),
+    updateRule: (input) => updateRule(apiPool, input),
     createChannel: (input) => createChannel(apiPool, input),
     deleteRoutingTarget: (input) => deleteRoutingTarget(apiPool, input),
     discardItem: (input) => discardItem(apiPool, input),
@@ -250,6 +268,10 @@ beforeAll(async () => {
     updateInboxSettings: (input) => updateInboxSettings(apiPool, input),
   };
   service = new InboxService(repository, store, QUOTA, 'intake.invalid', {
+    enqueueRerunInboxRule: async () => undefined,
+    enqueueRouteInboxItem: async (job) => {
+      routeJobs.push(job);
+    },
     enqueueSplitEmailItem: async () => undefined,
   });
 });

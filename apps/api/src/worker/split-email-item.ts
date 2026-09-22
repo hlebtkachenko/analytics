@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
@@ -18,8 +18,10 @@ import {
   MEDIA_TYPE_PATTERN,
   SPLIT_EMAIL_ITEM_QUEUE,
 } from '../inbox/contract.js';
+import type { RouteInboxItemJob } from '../inbox/contract.js';
 import {
   appendEvent,
+  applyInboxRules,
   insertExtraction,
   receiveIntakeInTransaction,
 } from '../inbox/inbox-repository.js';
@@ -61,6 +63,8 @@ type SplitEmailItemPayload = z.infer<typeof splitEmailItemPayloadSchema>;
 export interface SplitEmailItemOptions {
   blobs: BlobStore;
   data: unknown;
+  // Sent after a child's transaction has committed when its rule pass asked for an automatic route.
+  enqueueRouteInboxItem: (job: RouteInboxItemJob) => Promise<void>;
   metrics: WorkerMetrics;
   pool: DatabasePool;
   quotaBytes: number;
@@ -612,7 +616,12 @@ async function createChildren(
             provider: SNIFF_PROVIDER,
             providerVersion: SNIFF_PROVIDER_VERSION,
           };
-    await runTenantJob({
+    // The keyword source of a text child, read outside the transaction; the part is already under MAX_TEXT_BYTES.
+    const text =
+      part.payloadKind === 'text'
+        ? await readFile(part.temporaryPath, 'utf8')
+        : null;
+    const routeJob = await runTenantJob<RouteInboxItemJob | null>({
       data: payload,
       pool: options.pool,
       work: async (transaction) => {
@@ -646,7 +655,7 @@ async function createChildren(
 
         // A replayed child was handled by an earlier attempt; a duplicate blob was scanned when it first arrived.
         if (result.replayed || result.duplicateOfItemId !== null) {
-          return;
+          return null;
         }
 
         const blobId = result.files[0]?.blobId;
@@ -672,7 +681,7 @@ async function createChildren(
             'discarded',
             'policy_rejected',
           );
-          return;
+          return null;
         }
 
         if (extraction === null) {
@@ -684,13 +693,25 @@ async function createChildren(
             'discarded',
             'decorative_image',
           );
-          return;
+          return null;
         }
 
         await insertExtraction(transaction, tenant, result.item.id, extraction);
         await setStatus(transaction, result.item.id, 'needs_review');
+
+        // The rule pass runs under the channel principal, still inside the child's transaction.
+        const rulePass = await applyInboxRules(transaction, {
+          ...tenant,
+          itemId: result.item.id,
+          text,
+        });
+        return rulePass.routeJob;
       },
     });
+
+    if (routeJob !== null) {
+      await options.enqueueRouteInboxItem(routeJob);
+    }
   }
 
   return context.outcome;

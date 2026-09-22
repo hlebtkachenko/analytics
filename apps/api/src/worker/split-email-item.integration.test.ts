@@ -34,11 +34,21 @@ import {
   FilesystemBlobStore,
 } from '../blobs/blob-store.js';
 import { channelTenant } from '../channel-access.js';
-import type { SplitEmailItemJob } from '../inbox/contract.js';
+import type {
+  RouteInboxItemJob,
+  SplitEmailItemJob,
+} from '../inbox/contract.js';
 import { InboxService } from '../inbox/inbox.service.js';
 import {
+  adoptRule,
   assignItem,
   createChannel,
+  createRule,
+  deleteRule,
+  listRules,
+  orderRules,
+  readRule,
+  updateRule,
   deleteRoutingTarget,
   discardItem,
   issueCredential,
@@ -110,6 +120,7 @@ let store: FilesystemBlobStore;
 let service: InboxService;
 let channelId = '';
 const enqueued: SplitEmailItemJob[] = [];
+const routeJobs: RouteInboxItemJob[] = [];
 
 const owner: TenantContext = {
   organizationId: 'org-1',
@@ -281,6 +292,9 @@ function run(
   return splitEmailItem({
     blobs: store,
     data: { channelId, itemId, organizationId: 'org-1' },
+    enqueueRouteInboxItem: async (job) => {
+      routeJobs.push(job);
+    },
     metrics: new WorkerMetrics(),
     pool: apiPool,
     quotaBytes: QUOTA,
@@ -386,7 +400,14 @@ beforeAll(async () => {
   await createBlobDirectories(directory);
   store = new FilesystemBlobStore(directory);
   const repository: InboxRepository = {
+    adoptRule: (input) => adoptRule(apiPool, input),
     assignItem: (input) => assignItem(apiPool, input),
+    createRule: (input) => createRule(apiPool, input),
+    deleteRule: (input) => deleteRule(apiPool, input),
+    listRules: (input) => listRules(apiPool, input),
+    orderRules: (input) => orderRules(apiPool, input),
+    readRule: (input) => readRule(apiPool, input),
+    updateRule: (input) => updateRule(apiPool, input),
     createChannel: (input) => createChannel(apiPool, input),
     deleteRoutingTarget: (input) => deleteRoutingTarget(apiPool, input),
     discardItem: (input) => discardItem(apiPool, input),
@@ -413,6 +434,8 @@ beforeAll(async () => {
     updateInboxSettings: (input) => updateInboxSettings(apiPool, input),
   };
   service = new InboxService(repository, store, QUOTA, INTAKE_DOMAIN, {
+    enqueueRerunInboxRule: async () => undefined,
+    enqueueRouteInboxItem: async () => undefined,
     enqueueSplitEmailItem: async (job) => {
       enqueued.push(job);
     },

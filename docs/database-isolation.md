@@ -420,6 +420,43 @@ both tables get full DML for `bap_api` and SELECT for `bap_reporting` and
 `bap_backup`. `DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts`
 is now `20260917.0004`.
 
+Migration `20260917.0005` adds the rules layer of 1b-rules. `app.inbox_rule`
+carries closed, nullable condition columns (`channel_id`, `sender_pattern`,
+`keyword`, `detected_type`) and closed, nullable action columns
+(`set_legal_entity_id`, `set_document_kind`, `set_partner_id`,
+`set_assignee_id`, `discard_reason`, `auto_route`), a nullable `priority` with
+`unique (organization_id, priority) deferrable initially deferred` so a reorder
+is one statement, `unique (id, organization_id)`, and check
+`(deleted_at IS NULL) = (priority IS NOT NULL)` so a soft-deleted rule frees its
+slot. FORCE RLS; SELECT excludes the channel, INSERT checks `created_by` and
+`app.role_can_write()`, UPDATE needs `app.role_can_write()`, and there is no
+DELETE policy or grant, so the only delete is `deleted_at`. A `BEFORE UPDATE`
+trigger refuses any change to `created_by` other than to
+`current_setting('bap.user_id', true)`, closing adopt-as-someone-else at the
+database. `inbox_rule_maintenance_select TO bap_owner USING (true)` admits
+`app.list_inbox_rules()`, a `SECURITY DEFINER` function owned by `bap_owner`
+that also reads `auth.member` and `auth."user"`. `app.inbox_correction`
+(`organization_id`, `inbox_item_id`, `field`, `suggested_value`, `final_value`,
+`source`, `reason`, `created_by`) is insert-only: SELECT excludes the channel,
+INSERT checks `created_by` and `app.role_can_write()`, and there is no UPDATE or
+DELETE policy, since a correction is a fact about one route.
+`inbox_item_decided_by_rule_fkey (decided_by_rule_id, organization_id) references inbox_rule(id, organization_id) on delete restrict`,
+so a rule that decided an item is never hard-deleted.
+`app.record_inbox_automation_skip(item_id, reason)` is the second
+`SECURITY DEFINER` function, EXECUTE to `bap_api`; its tenant boundary lives in
+the function body rather than a policy, because the runtime's own
+`TO bap_owner WITH CHECK (true)` INSERT policy on `inbox_event` already admits
+`bap_owner` and a same-named policy here would fail the migration. `auth."user"`
+gains `CHECK (id NOT LIKE 'system\_%')` beside `user_id_not_channel_check`,
+reserving the `system_automation` subject; `app.erase_user` refuses that name.
+The eraser gains column grants on `inbox_rule.created_by`,
+`inbox_rule.set_assignee_id` and `inbox_correction.created_by`; `bap_api` gets
+SELECT, INSERT, UPDATE on `inbox_rule` and SELECT, INSERT on `inbox_correction`,
+and `bap_reporting` and `bap_backup` get SELECT on both.
+`inbox_event_reason_check` gains `rule_author_unavailable`.
+`DATABASE_MIGRATION_COMPATIBILITY` in `packages/db/src/access.ts` is now
+`20260917.0005`.
+
 ## Tenant policy contract
 
 Every future tenant table must include:

@@ -1,5 +1,7 @@
 import type { StatusTagType } from '../documents/labels.ts';
 import type {
+  InboxCorrectionField,
+  InboxCorrectionSource,
   InboxDiscardReason,
   InboxItemStatus,
   InboxRoutingAutoPolicy,
@@ -54,6 +56,27 @@ export const inboxRoutingAutoLabelKeys: Readonly<
   above_threshold: 'inboxSettings.autoAboveThreshold',
   always: 'inboxSettings.autoAlways',
   never: 'inboxSettings.autoNever',
+};
+
+export const inboxCorrectionFieldLabelKeys: Readonly<
+  Record<InboxCorrectionField, string>
+> = {
+  currency_code: 'inbox.draftCurrency',
+  document_date: 'inbox.draftDate',
+  kind: 'inbox.draftKind',
+  legal_entity_id: 'inbox.draftEntity',
+  partner_id: 'inbox.draftPartner',
+  reference: 'inbox.draftReference',
+  title: 'inbox.draftTitleField',
+};
+
+export const inboxCorrectionSourceLabelKeys: Readonly<
+  Record<InboxCorrectionSource, string>
+> = {
+  hint: 'inbox.decidedByHint',
+  provider: 'inbox.decidedByProvider',
+  rule: 'inbox.decidedByRule',
+  target_default: 'inbox.decidedByTargetDefault',
 };
 
 export const inboxDecidedByLabelKeys: Readonly<Record<string, string>> = {

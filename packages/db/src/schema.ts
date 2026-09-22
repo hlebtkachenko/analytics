@@ -313,12 +313,55 @@ export type InboxUnprocessableReason =
 export const inboxMaintenanceReasons = ['stalled'] as const;
 export type InboxMaintenanceReason = (typeof inboxMaintenanceReasons)[number];
 
+// The automation's reason: the rule author is no longer a verified owner or admin, so the route was skipped.
+export const inboxAutomationReasons = ['rule_author_unavailable'] as const;
+export type InboxAutomationReason = (typeof inboxAutomationReasons)[number];
+
 export const inboxEventReasons = [
   ...inboxDiscardReasons,
   ...inboxUnprocessableReasons,
   ...inboxMaintenanceReasons,
+  ...inboxAutomationReasons,
 ] as const;
 export type InboxEventReason = (typeof inboxEventReasons)[number];
+
+// The register's kinds, mirrored from document_kind_check; app.document itself has no Drizzle definition yet.
+export const documentKinds = [
+  'issued_invoice',
+  'received_invoice',
+  'credit_note',
+  'advance_request',
+  'receipt',
+  'bank_statement',
+  'contract',
+  'agreement',
+  'hr_document',
+  'payroll',
+  'tax_filing',
+  'other',
+] as const;
+export type DocumentKind = (typeof documentKinds)[number];
+
+// The draft fields the route form edits, so a correction names one of them.
+export const inboxCorrectionFields = [
+  'kind',
+  'legal_entity_id',
+  'partner_id',
+  'document_date',
+  'title',
+  'reference',
+  'currency_code',
+] as const;
+export type InboxCorrectionField = (typeof inboxCorrectionFields)[number];
+
+// Where a suggested value came from, in precedence order.
+export const inboxCorrectionSources = [
+  'hint',
+  'rule',
+  'target_default',
+  'provider',
+] as const;
+export type InboxCorrectionSource = (typeof inboxCorrectionSources)[number];
 
 function sqlList(values: readonly string[]) {
   return sql.raw(values.map((value) => `'${value}'`).join(', '));
@@ -786,6 +829,137 @@ export const organizationInboxSettings = appSchema.table(
   ],
 );
 
+// One routing rule of an organization: closed conditions, closed actions, run as its author; soft deleted only.
+export const inboxRules = appSchema.table(
+  'inbox_rule',
+  {
+    ...organizationSlot,
+    autoRoute: boolean('auto_route').notNull().default(false),
+    channelId: uuid('channel_id'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdBy: text('created_by')
+      .notNull()
+      .default(sql`current_setting('bap.user_id', true)`),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    detectedType: text('detected_type'),
+    discardReason: text('discard_reason', { enum: inboxDiscardReasons }),
+    enabled: boolean('enabled').notNull().default(true),
+    id: uuid('id').primaryKey().defaultRandom(),
+    keyword: text('keyword'),
+    name: text('name').notNull(),
+    priority: integer('priority'),
+    senderPattern: text('sender_pattern'),
+    setAssigneeId: text('set_assignee_id'),
+    setDocumentKind: text('set_document_kind', { enum: documentKinds }),
+    setLegalEntityId: uuid('set_legal_entity_id'),
+    setPartnerId: uuid('set_partner_id'),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      'inbox_rule_name_check',
+      sql`length(${table.name}) between 1 and 120`,
+    ),
+    check(
+      'inbox_rule_priority_deleted_check',
+      sql`(${table.deletedAt} is null) = (${table.priority} is not null)`,
+    ),
+    check(
+      'inbox_rule_sender_pattern_check',
+      sql`${table.senderPattern} is null or (${table.senderPattern} ~ '^(@|[^@[:space:]]+@)[^@[:space:]]+$' and ${table.senderPattern} = lower(${table.senderPattern}) and length(${table.senderPattern}) <= 320)`,
+    ),
+    check(
+      'inbox_rule_keyword_check',
+      sql`${table.keyword} is null or length(${table.keyword}) between 1 and 120`,
+    ),
+    check(
+      'inbox_rule_detected_type_check',
+      sql`${table.detectedType} is null or ${table.detectedType} ~ '^[a-z][a-z0-9_]{0,63}$'`,
+    ),
+    check(
+      'inbox_rule_condition_check',
+      sql`${table.channelId} is not null or ${table.senderPattern} is not null or ${table.keyword} is not null or ${table.detectedType} is not null`,
+    ),
+    check(
+      'inbox_rule_set_document_kind_check',
+      sql`${table.setDocumentKind} is null or ${table.setDocumentKind} in (${sqlList(documentKinds)})`,
+    ),
+    check(
+      'inbox_rule_discard_reason_check',
+      sql`${table.discardReason} is null or ${table.discardReason} in (${sqlList(inboxDiscardReasons)})`,
+    ),
+    check(
+      'inbox_rule_action_check',
+      sql`${table.deletedAt} is not null or ${table.setLegalEntityId} is not null or ${table.setDocumentKind} is not null or ${table.setPartnerId} is not null or ${table.setAssigneeId} is not null or ${table.discardReason} is not null or ${table.autoRoute}`,
+    ),
+    check(
+      'inbox_rule_discard_exclusive_check',
+      sql`${table.discardReason} is null or (${table.setLegalEntityId} is null and ${table.setDocumentKind} is null and ${table.setPartnerId} is null and ${table.setAssigneeId} is null and not ${table.autoRoute})`,
+    ),
+    unique('inbox_rule_organization_priority_key').on(
+      table.organizationId,
+      table.priority,
+    ),
+    unique('inbox_rule_id_organization_key').on(table.id, table.organizationId),
+    foreignKey({
+      columns: [table.channelId, table.organizationId],
+      foreignColumns: [inboxChannels.id, inboxChannels.organizationId],
+      name: 'inbox_rule_channel_fkey',
+    }).onDelete('restrict'),
+    index('inbox_rule_organization_priority_idx')
+      .on(table.organizationId, table.priority)
+      .where(sql`${table.deletedAt} is null and ${table.enabled}`),
+  ],
+);
+
+// A draft field a person changed away from the suggested value when routing one item; never updated or deleted.
+export const inboxCorrections = appSchema.table(
+  'inbox_correction',
+  {
+    ...organizationSlot,
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdBy: text('created_by')
+      .notNull()
+      .default(sql`current_setting('bap.user_id', true)`),
+    field: text('field', { enum: inboxCorrectionFields }).notNull(),
+    finalValue: text('final_value'),
+    id: uuid('id').primaryKey().defaultRandom(),
+    inboxItemId: uuid('inbox_item_id').notNull(),
+    reason: text('reason'),
+    source: text('source', { enum: inboxCorrectionSources }).notNull(),
+    suggestedValue: text('suggested_value'),
+  },
+  (table) => [
+    check(
+      'inbox_correction_field_check',
+      sql`${table.field} in (${sqlList(inboxCorrectionFields)})`,
+    ),
+    check(
+      'inbox_correction_source_check',
+      sql`${table.source} in (${sqlList(inboxCorrectionSources)})`,
+    ),
+    check(
+      'inbox_correction_reason_check',
+      sql`${table.reason} is null or length(${table.reason}) between 1 and 500`,
+    ),
+    foreignKey({
+      columns: [table.inboxItemId, table.organizationId],
+      foreignColumns: [inboxItems.id, inboxItems.organizationId],
+      name: 'inbox_correction_item_fkey',
+    }).onDelete('cascade'),
+    index('inbox_correction_item_idx').on(
+      table.organizationId,
+      table.inboxItemId,
+    ),
+  ],
+);
+
 export type Blob = typeof blobs.$inferSelect;
 export type NewBlob = typeof blobs.$inferInsert;
 export type InboxChannel = typeof inboxChannels.$inferSelect;
@@ -806,17 +980,23 @@ export type OrganizationInboxSetting =
   typeof organizationInboxSettings.$inferSelect;
 export type NewOrganizationInboxSetting =
   typeof organizationInboxSettings.$inferInsert;
+export type InboxRule = typeof inboxRules.$inferSelect;
+export type NewInboxRule = typeof inboxRules.$inferInsert;
+export type InboxCorrection = typeof inboxCorrections.$inferSelect;
+export type NewInboxCorrection = typeof inboxCorrections.$inferInsert;
 
 export const schema = {
   accounts,
   blobs,
   documentFiles,
   inboxChannels,
+  inboxCorrections,
   inboxEvents,
   inboxItemExtractions,
   inboxItemFiles,
   inboxItems,
   inboxRoutingTargets,
+  inboxRules,
   invitations,
   jwks,
   members,

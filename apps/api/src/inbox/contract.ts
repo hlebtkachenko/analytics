@@ -1,7 +1,10 @@
 import {
   blobScanStatuses,
+  inboxAutomationReasons,
   inboxChannelKinds,
   inboxChannelKindsForChannels,
+  inboxCorrectionFields,
+  inboxCorrectionSources,
   inboxDecidedByKinds,
   inboxDiscardReasons,
   inboxEventKinds,
@@ -40,6 +43,9 @@ export const INBOX_UNPROCESSABLE_REASONS = inboxUnprocessableReasons;
 export const INBOX_ROUTING_DESTINATIONS = inboxRoutingDestinations;
 export const INBOX_ROUTING_PARTNER_POLICIES = inboxRoutingPartnerPolicies;
 export const INBOX_ROUTING_AUTO_POLICIES = inboxRoutingAutoPolicies;
+export const INBOX_AUTOMATION_REASONS = inboxAutomationReasons;
+export const INBOX_CORRECTION_FIELDS = inboxCorrectionFields;
+export const INBOX_CORRECTION_SOURCES = inboxCorrectionSources;
 // Where the effective target came from: the platform constant or the organization's own row.
 export const INBOX_ROUTING_TARGET_SOURCES = [
   'platform',
@@ -70,7 +76,22 @@ export const INBOX_ISSUE_CODES = [
   ...inboxUnprocessableReasons,
 ] as const;
 
-export const PROVIDER_STEPS = ['sniff', 'hint', 'manual'] as const;
+export const PROVIDER_STEPS = ['sniff', 'hint', 'rule', 'manual'] as const;
+
+// The events a person writes on an item; the automation counts them as a human touch and yields to them.
+export const HUMAN_TOUCH_EVENT_KINDS = [
+  'hint_added',
+  'assigned',
+  'restored',
+  'reopened',
+  'unrouted',
+] as const satisfies readonly (typeof INBOX_EVENT_KINDS)[number][];
+
+// Intake latency is bounded by the rule count, so an organization keeps at most this many enabled rules.
+export const MAX_ENABLED_INBOX_RULES = 200;
+export const MAX_INBOX_RULE_NAME_LENGTH = 120;
+export const MAX_INBOX_RULE_KEYWORD_LENGTH = 120;
+export const MAX_INBOX_CORRECTION_REASON_LENGTH = 500;
 
 export const MAX_INBOX_PAGE_SIZE = 100;
 export const DEFAULT_INBOX_PAGE_SIZE = 25;
@@ -94,6 +115,7 @@ export const MEDIA_TYPE_PATTERN =
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 export const inboxItemIdentifierSchema = z.string().trim().toLowerCase().uuid();
+export const inboxRuleIdentifierSchema = z.string().trim().toLowerCase().uuid();
 export const blobIdentifierSchema = z.string().trim().toLowerCase().uuid();
 export const inboxChannelIdentifierSchema = z
   .string()
@@ -156,6 +178,7 @@ export const inboxItemSchema = inboxHintsSchema
     createdAt: z.iso.datetime(),
     datasetId: z.string().uuid().nullable(),
     decidedByKind: z.enum(INBOX_DECIDED_BY_KINDS).nullable(),
+    decidedByRuleId: inboxRuleIdentifierSchema.nullable(),
     decidedByUserId: subjectIdentifierSchema.nullable(),
     detectedType: tokenSchema.nullable(),
     documentId: documentIdentifierSchema.nullable(),
@@ -412,12 +435,34 @@ export const inboxUploadResponseSchema = z
 
 export type InboxUploadResponse = z.infer<typeof inboxUploadResponseSchema>;
 
+// One draft field a person changed away from what the platform suggested when routing the item.
+export const inboxCorrectionSchema = z
+  .object({
+    createdAt: z.iso.datetime(),
+    createdBy: subjectIdentifierSchema,
+    field: z.enum(INBOX_CORRECTION_FIELDS),
+    finalValue: z.string().nullable(),
+    id: z.string().uuid(),
+    reason: z
+      .string()
+      .min(1)
+      .max(MAX_INBOX_CORRECTION_REASON_LENGTH)
+      .nullable(),
+    source: z.enum(INBOX_CORRECTION_SOURCES),
+    suggestedValue: z.string().nullable(),
+  })
+  .strict();
+
+export type InboxCorrection = z.infer<typeof inboxCorrectionSchema>;
+
 export const inboxItemDetailSchema = z
   .object({
+    corrections: z.array(inboxCorrectionSchema),
     events: z.array(inboxEventSchema),
     extraction: inboxExtractionSchema.nullable(),
     files: z.array(inboxItemFileSchema),
-    item: inboxItemSchema,
+    // The item plus its sender: shown only on the detail, never in the list.
+    item: inboxItemSchema.extend({ sender: z.string().nullable() }).strict(),
     // The effective target of the item's detected type, so the setting is visible on the item the day it lands.
     routingTarget: inboxRoutingTargetSchema,
   })
@@ -478,8 +523,24 @@ export type UpdateInboxHintsRequest = z.infer<
   typeof updateInboxHintsRequestSchema
 >;
 
+// One line per corrected draft field; a field the person did not change is ignored.
+export const correctionReasonsSchema = z
+  .object(
+    Object.fromEntries(
+      INBOX_CORRECTION_FIELDS.map((field) => [
+        field,
+        z.string().trim().min(1).max(MAX_INBOX_CORRECTION_REASON_LENGTH),
+      ]),
+    ) as Record<(typeof INBOX_CORRECTION_FIELDS)[number], z.ZodString>,
+  )
+  .partial()
+  .strict();
+
+export type CorrectionReasons = z.infer<typeof correctionReasonsSchema>;
+
 export const routeInboxItemToDocumentRequestSchema = z
   .object({
+    correctionReasons: correctionReasonsSchema.optional(),
     document: createDocumentRequestSchema,
     // The item's blobs in the order the document should keep them; every item file must be named once.
     fileBlobIds: z.array(blobIdentifierSchema).min(1).max(MAX_INBOX_FILES),
@@ -658,6 +719,239 @@ export const splitEmailItemJobSchema = z
 
 export type SplitEmailItemJob = z.infer<typeof splitEmailItemJobSchema>;
 
+// The worker job that routes one item automatically: the item, and the rule that asked or null for a target default.
+export const ROUTE_INBOX_ITEM_QUEUE = 'route_inbox_item';
+
+export const routeInboxItemJobSchema = z
+  .object({
+    itemId: inboxItemIdentifierSchema,
+    organizationId: z.string().trim().min(1),
+    ruleId: inboxRuleIdentifierSchema.nullable(),
+  })
+  .strict();
+
+export type RouteInboxItemJob = z.infer<typeof routeInboxItemJobSchema>;
+
+// The worker job that applies a new rule to the untouched items in review, as its creator; the cursor resumes a walk.
+export const RERUN_INBOX_RULE_QUEUE = 'rerun_inbox_rule';
+
+export const rerunInboxRuleCursorSchema = z
+  .object({
+    itemId: inboxItemIdentifierSchema,
+    receivedAt: z.iso.datetime(),
+  })
+  .strict();
+
+export const rerunInboxRuleJobSchema = z
+  .object({
+    cursor: rerunInboxRuleCursorSchema.optional(),
+    organizationId: z.string().trim().min(1),
+    ruleId: inboxRuleIdentifierSchema,
+    userId: subjectIdentifierSchema,
+  })
+  .strict();
+
+export type RerunInboxRuleJob = z.infer<typeof rerunInboxRuleJobSchema>;
+
+// The one provider row the rule pass writes; the typed draft names the rules that matched so a rerun can skip them.
+export const RULE_PROVIDER = 'rule';
+export const RULE_PROVIDER_VERSION = '2026-09-17.1';
+
+export const ruleDraftSchema = z
+  .object({
+    kind: z.string().nullable().default(null),
+    matchedRuleIds: z.array(inboxRuleIdentifierSchema),
+    partnerId: z.string().nullable().default(null),
+  })
+  .passthrough();
+
+export type RuleDraft = z.infer<typeof ruleDraftSchema>;
+
+// A lowercase @domain suffix or a full address; the matcher compares the sender or its suffix from the @.
+export const senderPatternSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(320)
+  .regex(/^(@|[^@\s]+@)[^@\s]+$/);
+
+export const inboxRuleNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(MAX_INBOX_RULE_NAME_LENGTH);
+export const inboxRuleKeywordSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(MAX_INBOX_RULE_KEYWORD_LENGTH);
+
+const ruleConditionFields = {
+  channelId: inboxChannelIdentifierSchema.nullable(),
+  detectedType: tokenSchema.nullable(),
+  keyword: inboxRuleKeywordSchema.nullable(),
+  senderPattern: senderPatternSchema.nullable(),
+};
+
+const ruleActionFields = {
+  autoRoute: z.boolean(),
+  discardReason: inboxDiscardReasonSchema.nullable(),
+  setAssigneeId: subjectIdentifierSchema.nullable(),
+  setDocumentKind: documentKindSchema.nullable(),
+  setLegalEntityId: legalEntityIdentifierSchema.nullable(),
+  setPartnerId: partnerIdentifierSchema.nullable(),
+};
+
+export const inboxRuleSchema = z
+  .object({
+    ...ruleConditionFields,
+    ...ruleActionFields,
+    createdAt: z.iso.datetime(),
+    // The author the rule runs as; only adoption changes it.
+    createdBy: subjectIdentifierSchema,
+    enabled: z.boolean(),
+    id: inboxRuleIdentifierSchema,
+    name: inboxRuleNameSchema,
+    // True when the author is no longer a verified owner or admin, so the matcher skips the rule until it is adopted.
+    paused: z.boolean(),
+    priority: z.number().int().min(1),
+    updatedAt: z.iso.datetime(),
+  })
+  .strict();
+
+export type InboxRule = z.infer<typeof inboxRuleSchema>;
+
+export const inboxRuleListResponseSchema = z
+  .object({ rules: z.array(inboxRuleSchema) })
+  .strict();
+
+export type InboxRuleListResponse = z.infer<typeof inboxRuleListResponseSchema>;
+
+type RuleShape = {
+  autoRoute: boolean;
+  channelId: string | null;
+  detectedType: string | null;
+  discardReason: string | null;
+  keyword: string | null;
+  senderPattern: string | null;
+  setAssigneeId: string | null;
+  setDocumentKind: string | null;
+  setLegalEntityId: string | null;
+  setPartnerId: string | null;
+};
+
+export function hasRuleCondition(rule: RuleShape): boolean {
+  return (
+    rule.channelId !== null ||
+    rule.senderPattern !== null ||
+    rule.keyword !== null ||
+    rule.detectedType !== null
+  );
+}
+
+export function hasRuleAction(rule: RuleShape): boolean {
+  return (
+    rule.setLegalEntityId !== null ||
+    rule.setDocumentKind !== null ||
+    rule.setPartnerId !== null ||
+    rule.setAssigneeId !== null ||
+    rule.discardReason !== null ||
+    rule.autoRoute
+  );
+}
+
+// A discarded item has no fields to set, so a discard rule carries no other action.
+export function isDiscardExclusive(rule: RuleShape): boolean {
+  return (
+    rule.discardReason === null ||
+    (rule.setLegalEntityId === null &&
+      rule.setDocumentKind === null &&
+      rule.setPartnerId === null &&
+      rule.setAssigneeId === null &&
+      !rule.autoRoute)
+  );
+}
+
+// Every condition and action is optional and defaults to unset; the three shape checks mirror the table constraints.
+export const createInboxRuleRequestSchema = z
+  .object({
+    ...ruleConditionFields,
+    ...ruleActionFields,
+    // True re-runs the new rule on the untouched items in review through the rerun job, as the creator.
+    applyToExisting: z.boolean().default(false),
+    enabled: z.boolean().default(true),
+    name: inboxRuleNameSchema,
+  })
+  .partial({
+    autoRoute: true,
+    channelId: true,
+    detectedType: true,
+    discardReason: true,
+    keyword: true,
+    senderPattern: true,
+    setAssigneeId: true,
+    setDocumentKind: true,
+    setLegalEntityId: true,
+    setPartnerId: true,
+  })
+  .strict()
+  .transform((body) => ({
+    ...body,
+    autoRoute: body.autoRoute ?? false,
+    channelId: body.channelId ?? null,
+    detectedType: body.detectedType ?? null,
+    discardReason: body.discardReason ?? null,
+    keyword: body.keyword ?? null,
+    senderPattern: body.senderPattern ?? null,
+    setAssigneeId: body.setAssigneeId ?? null,
+    setDocumentKind: body.setDocumentKind ?? null,
+    setLegalEntityId: body.setLegalEntityId ?? null,
+    setPartnerId: body.setPartnerId ?? null,
+  }))
+  .refine(hasRuleCondition, { message: 'At least one condition must be set.' })
+  .refine(hasRuleAction, { message: 'At least one action must be set.' })
+  .refine(isDiscardExclusive, {
+    message: 'A discard rule carries no other action.',
+    path: ['discardReason'],
+  });
+
+export type CreateInboxRuleRequest = z.infer<
+  typeof createInboxRuleRequestSchema
+>;
+
+// Absence leaves a column alone; null clears it. The shape checks run on the merged row in the database.
+export const updateInboxRuleRequestSchema = z
+  .object({
+    ...ruleConditionFields,
+    ...ruleActionFields,
+    enabled: z.boolean(),
+    name: inboxRuleNameSchema,
+  })
+  .partial()
+  .strict()
+  .refine((body) => Object.keys(body).length > 0, {
+    message: 'At least one field must be given.',
+  });
+
+export type UpdateInboxRuleRequest = z.infer<
+  typeof updateInboxRuleRequestSchema
+>;
+
+// The full ordered id list of the live rules; the first id becomes priority 1. Disabled rules hold slots too.
+export const orderInboxRulesRequestSchema = z
+  .object({
+    ruleIds: z.array(inboxRuleIdentifierSchema).min(1).max(1000),
+  })
+  .strict()
+  .refine((body) => new Set(body.ruleIds).size === body.ruleIds.length, {
+    message: 'ruleIds must not repeat a rule.',
+    path: ['ruleIds'],
+  });
+
+export type OrderInboxRulesRequest = z.infer<
+  typeof orderInboxRulesRequestSchema
+>;
+
 // A display filename for Content-Disposition: ASCII only, no quote, no separator, no control character.
 export function contentDispositionFilename(
   originalFilename: string | null,
@@ -703,6 +997,7 @@ export const inboxItemOpenApiSchema = {
       nullable: true,
       type: 'string',
     },
+    decidedByRuleId: nullable(uuidProperty),
     decidedByUserId: { nullable: true, type: 'string' },
     detectedType: nullable(tokenProperty),
     documentId: nullable(uuidProperty),
@@ -726,6 +1021,7 @@ export const inboxItemOpenApiSchema = {
     'createdAt',
     'datasetId',
     'decidedByKind',
+    'decidedByRuleId',
     'decidedByUserId',
     'detectedType',
     'documentId',
@@ -937,16 +1233,65 @@ export const updateInboxSettingsBodyOpenApiSchema = {
   type: 'object',
 };
 
+export const inboxCorrectionOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    createdAt: dateTimeProperty,
+    createdBy: { type: 'string' },
+    field: { enum: [...INBOX_CORRECTION_FIELDS], type: 'string' },
+    finalValue: { nullable: true, type: 'string' },
+    id: uuidProperty,
+    reason: {
+      maxLength: MAX_INBOX_CORRECTION_REASON_LENGTH,
+      minLength: 1,
+      nullable: true,
+      type: 'string',
+    },
+    source: { enum: [...INBOX_CORRECTION_SOURCES], type: 'string' },
+    suggestedValue: { nullable: true, type: 'string' },
+  },
+  required: [
+    'createdAt',
+    'createdBy',
+    'field',
+    'finalValue',
+    'id',
+    'reason',
+    'source',
+    'suggestedValue',
+  ],
+  type: 'object',
+};
+
+// The item plus its sender: shown only on the detail, never in the list.
+const inboxItemDetailItemOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    ...inboxItemOpenApiSchema.properties,
+    sender: { nullable: true, type: 'string' },
+  },
+  required: [...inboxItemOpenApiSchema.required, 'sender'],
+  type: 'object',
+};
+
 export const inboxItemDetailOpenApiSchema = {
   additionalProperties: false,
   properties: {
+    corrections: { items: inboxCorrectionOpenApiSchema, type: 'array' },
     events: { items: inboxEventOpenApiSchema, type: 'array' },
     extraction: { ...inboxExtractionOpenApiSchema, nullable: true },
     files: { items: inboxItemFileOpenApiSchema, type: 'array' },
-    item: inboxItemOpenApiSchema,
+    item: inboxItemDetailItemOpenApiSchema,
     routingTarget: inboxRoutingTargetOpenApiSchema,
   },
-  required: ['events', 'extraction', 'files', 'item', 'routingTarget'],
+  required: [
+    'corrections',
+    'events',
+    'extraction',
+    'files',
+    'item',
+    'routingTarget',
+  ],
   type: 'object',
 };
 
@@ -992,6 +1337,20 @@ export const updateInboxHintsBodyOpenApiSchema = {
 export const routeInboxItemToDocumentBodyOpenApiSchema = {
   additionalProperties: false,
   properties: {
+    correctionReasons: {
+      additionalProperties: false,
+      properties: Object.fromEntries(
+        INBOX_CORRECTION_FIELDS.map((field) => [
+          field,
+          {
+            maxLength: MAX_INBOX_CORRECTION_REASON_LENGTH,
+            minLength: 1,
+            type: 'string',
+          },
+        ]),
+      ),
+      type: 'object',
+    },
     document: createDocumentBodyOpenApiSchema,
     fileBlobIds: {
       items: uuidProperty,
@@ -1150,5 +1509,128 @@ export const issueInboxChannelCredentialResponseOpenApiSchema = {
     secret: { maxLength: 320, minLength: 1, type: 'string' },
   },
   required: ['credentialId', 'displayPrefix', 'secret'],
+  type: 'object',
+};
+
+const ruleConditionProperties = {
+  channelId: nullable(uuidProperty),
+  detectedType: nullable(tokenProperty),
+  keyword: {
+    maxLength: MAX_INBOX_RULE_KEYWORD_LENGTH,
+    minLength: 1,
+    nullable: true,
+    type: 'string',
+  },
+  senderPattern: {
+    maxLength: 320,
+    minLength: 2,
+    nullable: true,
+    type: 'string',
+  },
+};
+
+const ruleActionProperties = {
+  autoRoute: { type: 'boolean' },
+  discardReason: {
+    enum: [...INBOX_DISCARD_REASONS],
+    nullable: true,
+    type: 'string',
+  },
+  setAssigneeId: { nullable: true, type: 'string' },
+  setDocumentKind: {
+    enum: [...DOCUMENT_KINDS],
+    nullable: true,
+    type: 'string',
+  },
+  setLegalEntityId: nullable(uuidProperty),
+  setPartnerId: nullable(uuidProperty),
+};
+
+const ruleNameProperty = {
+  maxLength: MAX_INBOX_RULE_NAME_LENGTH,
+  minLength: 1,
+  type: 'string',
+};
+
+export const inboxRuleOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    ...ruleConditionProperties,
+    ...ruleActionProperties,
+    createdAt: dateTimeProperty,
+    createdBy: { type: 'string' },
+    enabled: { type: 'boolean' },
+    id: uuidProperty,
+    name: ruleNameProperty,
+    paused: { type: 'boolean' },
+    priority: { minimum: 1, type: 'integer' },
+    updatedAt: dateTimeProperty,
+  },
+  required: [
+    'autoRoute',
+    'channelId',
+    'createdAt',
+    'createdBy',
+    'detectedType',
+    'discardReason',
+    'enabled',
+    'id',
+    'keyword',
+    'name',
+    'paused',
+    'priority',
+    'senderPattern',
+    'setAssigneeId',
+    'setDocumentKind',
+    'setLegalEntityId',
+    'setPartnerId',
+    'updatedAt',
+  ],
+  type: 'object',
+};
+
+export const inboxRuleListOpenApiSchema = {
+  additionalProperties: false,
+  properties: { rules: { items: inboxRuleOpenApiSchema, type: 'array' } },
+  required: ['rules'],
+  type: 'object',
+};
+
+export const createInboxRuleBodyOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    ...ruleConditionProperties,
+    ...ruleActionProperties,
+    applyToExisting: { type: 'boolean' },
+    enabled: { type: 'boolean' },
+    name: ruleNameProperty,
+  },
+  required: ['name'],
+  type: 'object',
+};
+
+export const updateInboxRuleBodyOpenApiSchema = {
+  additionalProperties: false,
+  minProperties: 1,
+  properties: {
+    ...ruleConditionProperties,
+    ...ruleActionProperties,
+    enabled: { type: 'boolean' },
+    name: ruleNameProperty,
+  },
+  type: 'object',
+};
+
+export const orderInboxRulesBodyOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    ruleIds: {
+      items: uuidProperty,
+      maxItems: 1000,
+      minItems: 1,
+      type: 'array',
+    },
+  },
+  required: ['ruleIds'],
   type: 'object',
 };

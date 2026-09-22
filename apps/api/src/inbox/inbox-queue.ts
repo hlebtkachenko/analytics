@@ -6,13 +6,28 @@ import {
   createQueue,
   createQueueClientFromConfiguration,
 } from '../worker/queue.js';
-import { SPLIT_EMAIL_ITEM_QUEUE } from './contract.js';
-import type { SplitEmailItemJob } from './contract.js';
+import {
+  RERUN_INBOX_RULE_QUEUE,
+  ROUTE_INBOX_ITEM_QUEUE,
+  SPLIT_EMAIL_ITEM_QUEUE,
+} from './contract.js';
+import type {
+  RerunInboxRuleJob,
+  RouteInboxItemJob,
+  SplitEmailItemJob,
+} from './contract.js';
 
 // pg-boss options of the split job: three retries a minute apart. The item id is the singleton key, which holds
 // only because the queue is exclusive: at most one job per key across created, retry and active.
 export const SPLIT_EMAIL_ITEM_RETRY_LIMIT = 3;
 export const SPLIT_EMAIL_ITEM_RETRY_DELAY_SECONDS = 60;
+
+// The route and rerun jobs share the split's shape; every inbox queue is exclusive so the singleton key holds.
+export const INBOX_QUEUES = [
+  SPLIT_EMAIL_ITEM_QUEUE,
+  ROUTE_INBOX_ITEM_QUEUE,
+  RERUN_INBOX_RULE_QUEUE,
+] as const;
 
 // The one way a split job is sent, shared by the intake and the maintenance requeue.
 export async function sendSplitEmailItem(
@@ -26,7 +41,40 @@ export async function sendSplitEmailItem(
   });
 }
 
+// One route job per item at a time: the item id is the singleton key.
+export async function sendRouteInboxItem(
+  client: PgBoss,
+  job: RouteInboxItemJob,
+): Promise<void> {
+  await client.send(ROUTE_INBOX_ITEM_QUEUE, job, {
+    retryDelay: SPLIT_EMAIL_ITEM_RETRY_DELAY_SECONDS,
+    retryLimit: SPLIT_EMAIL_ITEM_RETRY_LIMIT,
+    singletonKey: job.itemId,
+  });
+}
+
+// One walk per rule at a time. The exclusive policy would drop a same-key send while the job is still active,
+// so a continuation keys on the cursor it resumes from: each batch sends its own successor exactly once.
+export function rerunInboxRuleSingletonKey(job: RerunInboxRuleJob): string {
+  return job.cursor === undefined
+    ? job.ruleId
+    : `${job.ruleId}:${job.cursor.itemId}`;
+}
+
+export async function sendRerunInboxRule(
+  client: PgBoss,
+  job: RerunInboxRuleJob,
+): Promise<void> {
+  await client.send(RERUN_INBOX_RULE_QUEUE, job, {
+    retryDelay: SPLIT_EMAIL_ITEM_RETRY_DELAY_SECONDS,
+    retryLimit: SPLIT_EMAIL_ITEM_RETRY_LIMIT,
+    singletonKey: rerunInboxRuleSingletonKey(job),
+  });
+}
+
 export abstract class InboxQueue {
+  abstract enqueueRerunInboxRule(job: RerunInboxRuleJob): Promise<void>;
+  abstract enqueueRouteInboxItem(job: RouteInboxItemJob): Promise<void>;
   abstract enqueueSplitEmailItem(job: SplitEmailItemJob): Promise<void>;
 }
 
@@ -34,6 +82,14 @@ export abstract class InboxQueue {
 export class PgBossInboxQueue extends InboxQueue implements OnModuleDestroy {
   private clientPromise: Promise<PgBoss> | undefined;
   private readonly logger = new Logger(PgBossInboxQueue.name);
+
+  async enqueueRerunInboxRule(job: RerunInboxRuleJob): Promise<void> {
+    await sendRerunInboxRule(await this.getClient(), job);
+  }
+
+  async enqueueRouteInboxItem(job: RouteInboxItemJob): Promise<void> {
+    await sendRouteInboxItem(await this.getClient(), job);
+  }
 
   async enqueueSplitEmailItem(job: SplitEmailItemJob): Promise<void> {
     await sendSplitEmailItem(await this.getClient(), job);
@@ -76,12 +132,12 @@ export class PgBossInboxQueue extends InboxQueue implements OnModuleDestroy {
 
     try {
       await client.start();
-      await createQueue(
-        client,
-        SPLIT_EMAIL_ITEM_QUEUE,
-        { policy: 'exclusive' },
-        (message) => this.logger.warn(message),
-      );
+
+      for (const queue of INBOX_QUEUES) {
+        await createQueue(client, queue, { policy: 'exclusive' }, (message) =>
+          this.logger.warn(message),
+        );
+      }
     } catch (error) {
       // A retry builds a new client, so this one must not keep its connection pool open.
       await client.stop({ graceful: false }).catch(() => undefined);

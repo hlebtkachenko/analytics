@@ -260,10 +260,12 @@ boundary in front of the register: everything from outside becomes an
 `app.inbox_item` first and is routed to a destination, documents included, by a
 rule or a person. Routing to Documents calls this same documents service inside
 one tenant transaction, sets `app.document.inbox_item_id` and inserts
-`app.document_file` rows for every item file, and marks the item `routed`. Undo
-reverses that: it clears `inbox_item.document_id`, the `decided_by_*` columns
-and `routed_at`, sets the item back to `needs_review` and appends an
-`inbox_event`, then deletes the document through the same
+`app.document_file` rows for every item file, and marks the item `routed`. An
+automatic route from the `route_inbox_item` worker job creates the document the
+same way, with `created_by` the rule's author or the routing target's editor,
+never a system subject. Undo reverses that: it clears `inbox_item.document_id`,
+the `decided_by_*` columns and `routed_at`, sets the item back to `needs_review`
+and appends an `inbox_event`, then deletes the document through the same
 `DELETE .../documents/:documentId` path below, so a delete started from the
 Documents page also un-routes the item first; `ON DELETE RESTRICT` refuses any
 other delete of a routed document. The item keeps its `legal_entity_id`: a

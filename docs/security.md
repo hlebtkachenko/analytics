@@ -206,6 +206,21 @@ pending jobs, which the requeue task recovers. Metrics carry the queue label
 only; log lines carry counts and ids, never a storage key, filename or
 organization name.
 
+Amended 2026-09-17 (1b-rules): `route_inbox_item` and `rerun_inbox_rule` are two
+more jobs, payload ids only. `route_inbox_item` carries
+`{ organizationId, itemId, ruleId }` (`ruleId` null for a target default),
+`retryLimit: 3`, `retryDelay: 60`, `singletonKey = itemId`; only an
+infrastructure error throws and retries, and every other outcome commits once.
+It locks the item row `FOR UPDATE` before deciding, so a human route serializes
+against it, and it writes at most one `auto_route` extraction row per human
+touch, refusing a second attempt before a new human touch. An invoice-kind item
+is never enqueued at all; the refusal is written directly on the intake
+transaction's `rule` extraction row instead. `rerun_inbox_rule` carries
+`{ organizationId, userId, ruleId }` and runs through `runTenantJob` as its
+creator, so a creator who is gone fails the job before any write; it walks
+untouched `needs_review` items up to a per-job cap of 100, then self-requeues
+with a cursor for the rest.
+
 Better Auth uses opaque cookies for browser identity, `Secure` whenever the
 configured public origin is HTTPS, which is every production deployment, and
 plain on an HTTP origin such as the local demo. Resource JWTs are signed only
@@ -545,6 +560,39 @@ returns ids for a `received` email item past its requeue window. Each raises
 set, the inverse of the `record_blob_scan` guard: every API request and every
 channel job runs inside a tenant transaction, so only the organization-less
 worker tick can reach them.
+
+Amended 2026-09-17 (1b-rules): a rule carries no principal of its own, only its
+author's. A rule runs a synchronous action inside the intake path only when
+`app.list_inbox_rules()` returns it, which happens only while its author is a
+verified owner or admin member, and runs the automatic route in the
+`route_inbox_item` job as that same author after `resolveMembership` re-resolves
+role and entity scope at dequeue. An author who is no longer a verified owner or
+admin, whose scope excludes the item's entity, or who was erased leaves the item
+in review with a `rule_author_unavailable` event, and the rules page shows the
+rule paused with an adopt action. A rule never grants its author anything beyond
+what that author can already do at the moment it runs, checked independently on
+both paths.
+
+The route job opens its read-only transaction as `system_automation`, the
+subject ADR 0016 names in place of the earlier `system_sweep` placeholder:
+`{ role: 'member', userId: 'system_automation' }`, admitted to write nothing
+except through `app.record_inbox_automation_skip`. Its `legalEntityIds` is null
+and the job never calls `readEntityScope` or `app.record_audit` for it, since a
+fake subject's missing-row scope default would be unrestricted and the audit
+insert policy has no role check to stop it. The migration adds
+`CHECK (id NOT LIKE 'system\_%')` on `auth."user"` beside
+`user_id_not_channel_check`, and `app.erase_user` refuses the name, so the
+subject can never collide with a real account.
+
+Two more `SECURITY DEFINER` functions owned by `bap_owner` join the runtime's
+three, EXECUTE to `bap_api`: `app.list_inbox_rules()` reads `auth.member` and
+`auth."user"` to return only the enabled, undeleted rules of the caller's
+organization whose author is currently a verified owner or admin, raising when
+`bap.organization_id` is empty;
+`app.record_inbox_automation_skip(item_id, reason)` inserts one `failed`
+`inbox_event` for a `needs_review` item of the caller's organization, raising
+when the setting is empty and on any reason other than
+`rule_author_unavailable`.
 
 ## Temporary organization action boundary
 
