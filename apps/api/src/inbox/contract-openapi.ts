@@ -336,16 +336,18 @@ export const inboxCorrectionOpenApiSchema = {
   type: 'object',
 };
 
-// The item plus its sender and the sender's DKIM verdict: shown only on the detail, never in the list.
+// The item plus its sender, the sender's DKIM verdict, and the name of the rule that decided it, if any.
 const inboxItemDetailItemOpenApiSchema = {
   additionalProperties: false,
   properties: {
     ...inboxItemOpenApiSchema.properties,
+    decidedByRuleName: { nullable: true, type: 'string' },
     sender: { nullable: true, type: 'string' },
     senderAuthenticated: { type: 'boolean' },
   },
   required: [
     ...inboxItemOpenApiSchema.required,
+    'decidedByRuleName',
     'sender',
     'senderAuthenticated',
   ],
@@ -377,6 +379,7 @@ export const inboxItemListEntryOpenApiSchema = {
   additionalProperties: false,
   properties: {
     ...inboxItemOpenApiSchema.properties,
+    decidedByRuleName: { nullable: true, type: 'string' },
     fileCount: { minimum: 0, type: 'integer' },
     primaryFilename: {
       maxLength: 255,
@@ -384,24 +387,42 @@ export const inboxItemListEntryOpenApiSchema = {
       nullable: true,
       type: 'string',
     },
+    sender: { nullable: true, type: 'string' },
+    senderAuthenticated: { type: 'boolean' },
   },
   required: [
     ...inboxItemOpenApiSchema.required,
+    'decidedByRuleName',
     'fileCount',
     'primaryFilename',
+    'sender',
+    'senderAuthenticated',
   ],
+  type: 'object',
+};
+
+export const inboxItemCountsOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    all: { minimum: 0, type: 'integer' },
+    discarded: { minimum: 0, type: 'integer' },
+    filed: { minimum: 0, type: 'integer' },
+    toReview: { minimum: 0, type: 'integer' },
+  },
+  required: ['all', 'discarded', 'filed', 'toReview'],
   type: 'object',
 };
 
 export const inboxItemListOpenApiSchema = {
   additionalProperties: false,
   properties: {
+    counts: inboxItemCountsOpenApiSchema,
     items: { items: inboxItemListEntryOpenApiSchema, type: 'array' },
     page: { minimum: 1, type: 'integer' },
     pageSize: { maximum: MAX_INBOX_PAGE_SIZE, minimum: 1, type: 'integer' },
     total: { minimum: 0, type: 'integer' },
   },
-  required: ['items', 'page', 'pageSize', 'total'],
+  required: ['counts', 'items', 'page', 'pageSize', 'total'],
   type: 'object',
 };
 

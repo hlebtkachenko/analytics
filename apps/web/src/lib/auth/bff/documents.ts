@@ -26,6 +26,21 @@ import {
 } from './core.ts';
 import type { BffAuth } from './core.ts';
 
+// Repeated legalEntityId params survive as an array, so a several-entity filter is never collapsed to one value.
+function withRepeatedLegalEntityId(
+  searchParams: URLSearchParams,
+): Record<string, string | string[]> {
+  const raw: Record<string, string | string[]> =
+    Object.fromEntries(searchParams);
+  const legalEntityIds = searchParams.getAll('legalEntityId');
+
+  if (legalEntityIds.length > 0) {
+    raw.legalEntityId = legalEntityIds;
+  }
+
+  return raw;
+}
+
 // Rebuilt from validated values only, so no client query string is forwarded verbatim.
 function documentListQuery(
   query: z.infer<typeof documentListQuerySchema>,
@@ -34,7 +49,7 @@ function documentListQuery(
 
   outbound.set('current', query.current);
   if (query.legalEntityId !== undefined) {
-    outbound.set('legalEntityId', query.legalEntityId);
+    outbound.set('legalEntityId', query.legalEntityId.join(','));
   }
   if (query.kind !== undefined) {
     outbound.set('kind', query.kind.join(','));
@@ -69,7 +84,7 @@ export async function getDocuments(
   fetchImplementation: typeof fetch = fetch,
 ): Promise<Response> {
   const query = documentListQuerySchema.safeParse(
-    Object.fromEntries(new URL(request.url).searchParams),
+    withRepeatedLegalEntityId(new URL(request.url).searchParams),
   );
 
   // An unsupported filter, an oversized page, or a window beyond the bound is refused, never clamped.
@@ -104,7 +119,7 @@ export async function getDocumentAnalytics(
   fetchImplementation: typeof fetch = fetch,
 ): Promise<Response> {
   const query = documentAnalyticsQuerySchema.safeParse(
-    Object.fromEntries(new URL(request.url).searchParams),
+    withRepeatedLegalEntityId(new URL(request.url).searchParams),
   );
 
   // A malformed entity filter is refused here, never widened into an unfiltered read.
@@ -118,11 +133,11 @@ export async function getDocumentAnalytics(
     return prepared.failure;
   }
 
-  // Rebuilt from the validated value only, so no client query string is forwarded verbatim.
+  // Rebuilt from the validated values only, so no client query string is forwarded verbatim.
   const filter =
     query.data.legalEntityId === undefined
       ? ''
-      : `?legalEntityId=${encodeURIComponent(query.data.legalEntityId)}`;
+      : `?legalEntityId=${encodeURIComponent(query.data.legalEntityId.join(','))}`;
 
   return await callApplicationJson(
     prepared,

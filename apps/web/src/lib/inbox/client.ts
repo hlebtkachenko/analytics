@@ -9,6 +9,7 @@ import {
   inboxRuleSchema,
   inboxSettingsSchema,
   inboxUploadResponseSchema,
+  organizationMemberListResponseSchema,
 } from './contract.ts';
 import type {
   BulkInboxItemsRequest,
@@ -19,6 +20,7 @@ import type {
   InboxRule,
   InboxRuleRefusalCode,
   InboxSettings,
+  OrganizationMember,
   PutInboxRoutingTargetRequest,
   PutInboxRuleOrderRequest,
   RouteInboxItemToDocumentRequest,
@@ -49,6 +51,24 @@ export function inboxItemPath(organizationId: string, itemId: string): string {
 
 export function inboxItemsBulkPath(organizationId: string): string {
   return `${inboxItemsPath(organizationId)}/bulk`;
+}
+
+export function organizationMembersPath(organizationId: string): string {
+  return `${organizationPath(organizationId)}/members`;
+}
+
+// The organization members the assignee pickers offer; sourced from Better Auth through the BFF.
+export async function listOrganizationMembers(
+  organizationId: string,
+): Promise<OrganizationMember[]> {
+  const response = await fetch(organizationMembersPath(organizationId), {
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    throw new Error('Request failed.');
+  }
+  return organizationMemberListResponseSchema.parse(await response.json())
+    .members;
 }
 
 export type InboxItemAction =

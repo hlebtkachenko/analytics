@@ -562,6 +562,49 @@ describe('document register and derived events against PostgreSQL', () => {
     expect(second.total).toBe(4);
   });
 
+  it('counts the scope by status and open issue, ignoring the status filter', async () => {
+    const all = await listDocuments(apiPool, {
+      ...creator,
+      ...allEntities,
+      query: listQuery(),
+    });
+    // A status filter narrows the page, never the counts, so a tab keeps its number.
+    const filtered = await listDocuments(apiPool, {
+      ...creator,
+      ...allEntities,
+      query: listQuery({ status: 'archived' }),
+    });
+
+    expect(filtered.counts).toEqual(all.counts);
+    expect(all.counts.all).toBe(all.total);
+    const inStatus = (status: string): number =>
+      all.documents.filter((entry) => entry.status === status).length;
+    expect(all.counts.needsReview).toBe(inStatus('needs_review'));
+    expect(all.counts.verified).toBe(inStatus('verified'));
+    expect(all.counts.archived).toBe(inStatus('archived'));
+    // The unattributed invoice carries an open missing-partner warning, so the issue count is not zero.
+    expect(all.counts.withIssues).toBe(
+      all.documents.filter((entry) => entry.openIssueCount > 0).length,
+    );
+    expect(all.counts.withIssues).toBeGreaterThan(0);
+
+    // The entity filter narrows the counts to the named entity, which holds one document.
+    const scoped = await listDocuments(apiPool, {
+      ...creator,
+      ...allEntities,
+      query: listQuery({ legalEntityId: secondEntityId }),
+    });
+    expect(scoped.counts.all).toBe(1);
+
+    // A restricted member counts only the documents of its allowed entity.
+    const scopedReader = await listDocuments(apiPool, {
+      ...reader,
+      legalEntityIds: [secondEntityId],
+      query: listQuery(),
+    });
+    expect(scopedReader.counts.all).toBe(1);
+  });
+
   it('applies every list filter exactly', async () => {
     const byKind = await listDocuments(apiPool, {
       ...creator,

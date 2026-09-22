@@ -123,7 +123,7 @@ const SUMMARY_SELECT = `select d.id,
 // Every list filter is a bound parameter; only the sort column and its direction come from a closed whitelist.
 const LIST_FILTER = `($1::uuid[] is null or d.legal_entity_id = any($1::uuid[]))
        and ($9::boolean is null or d.is_current = $9::boolean)
-       and ($2::uuid is null or d.legal_entity_id = $2::uuid)
+       and ($2::uuid[] is null or d.legal_entity_id = any($2::uuid[]))
        and ($3::text[] is null or d.kind = any($3::text[]))
        and ($4::text[] is null or d.status = any($4::text[]))
        and ($5::uuid is null or d.partner_id = $5::uuid)
@@ -173,7 +173,7 @@ function filterValues(input: ListDocumentsInput): unknown[] {
 
   return [
     entityFilter(input.legalEntityIds),
-    query.legalEntityId ?? null,
+    query.legalEntityId === undefined ? null : [...query.legalEntityId],
     query.kind === undefined ? null : [...query.kind],
     query.status === undefined ? null : [...query.status],
     query.partnerId ?? null,
@@ -192,6 +192,29 @@ export async function listDocuments(
 
   return runInTenantContext(pool, input, async (transaction) => {
     const values = filterValues(input);
+    // The tab counts keep the caller scope, the entity filter and the superseded-version default, and ignore the rest.
+    const counts = await transaction.query<{
+      all_count: number;
+      archived: number;
+      needs_review: number;
+      verified: number;
+      with_issues: number;
+    }>(
+      `select count(*)::int as all_count,
+              count(*) filter (where d.status = 'needs_review')::int as needs_review,
+              count(*) filter (where d.status = 'verified')::int as verified,
+              count(*) filter (where d.status = 'archived')::int as archived,
+              count(*) filter (
+                where exists (select 1
+                                from app.data_issue as i
+                               where i.document_id = d.id and i.resolved_at is null)
+              )::int as with_issues
+         from app.document as d
+        where ($1::uuid[] is null or d.legal_entity_id = any($1::uuid[]))
+          and ($2::uuid[] is null or d.legal_entity_id = any($2::uuid[]))
+          and ($3::boolean is null or d.is_current = $3::boolean)`,
+      [values[0], values[1], values[8]],
+    );
     const totals = await transaction.query<{
       currency_code: string;
       document_count: number;
@@ -216,7 +239,16 @@ export async function listDocuments(
       [...values, query.pageSize, (query.page - 1) * query.pageSize],
     );
 
+    const countRow = counts.rows[0];
+
     return {
+      counts: {
+        all: countRow?.all_count ?? 0,
+        archived: countRow?.archived ?? 0,
+        needsReview: countRow?.needs_review ?? 0,
+        verified: countRow?.verified ?? 0,
+        withIssues: countRow?.with_issues ?? 0,
+      },
       documents: documents.rows.map(toSummary),
       page: query.page,
       pageSize: query.pageSize,

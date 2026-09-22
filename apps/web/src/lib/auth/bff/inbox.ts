@@ -23,6 +23,8 @@ import {
   inboxUploadResponseSchema,
   isInlineMediaType,
   issueInboxChannelCredentialResponseSchema,
+  MAX_ORGANIZATION_MEMBERS,
+  organizationMemberListResponseSchema,
   putInboxRoutingTargetRequestSchema,
   putInboxRuleOrderRequestSchema,
   routeInboxItemToDocumentRequestSchema,
@@ -39,6 +41,7 @@ import {
   applicationPath,
   callApplicationJson,
   jsonResponse,
+  organizationIdSchema,
   parsedIdentifier,
   prepareApplicationCall,
   privateResponseHeaders,
@@ -67,6 +70,9 @@ function inboxItemListQuery(
   }
   if (query.confidence !== undefined) {
     outbound.set('confidence', query.confidence);
+  }
+  if (query.snoozed !== undefined) {
+    outbound.set('snoozed', query.snoozed);
   }
   outbound.set('page', String(query.page));
   outbound.set('pageSize', String(query.pageSize));
@@ -170,6 +176,70 @@ export async function getInboxItems(
     },
     fetchImplementation,
   );
+}
+
+// Members come from Better Auth, which refuses a caller who is not an active member.
+export type BffMembersAuth = Readonly<{
+  getSession: BffAuth['getSession'];
+  listMembers: (
+    input: Readonly<{
+      headers: Headers;
+      query: Readonly<{ limit: number; organizationId: string }>;
+    }>,
+  ) => Promise<
+    Readonly<{
+      members: ReadonlyArray<{
+        user: Readonly<{ email: string; name: string }>;
+        userId: string;
+      }>;
+    }>
+  >;
+}>;
+
+export async function getOrganizationMembers(
+  auth: BffMembersAuth,
+  request: Request,
+  organizationId: string,
+): Promise<Response> {
+  const parsedSelector = organizationIdSchema.safeParse(organizationId);
+
+  if (!parsedSelector.success) {
+    return jsonResponse({ error: 'access_denied' }, 403);
+  }
+
+  const session = await auth.getSession({ headers: request.headers });
+
+  if (!session?.user.emailVerified) {
+    return jsonResponse({ error: 'unauthorized' }, 401);
+  }
+
+  let listed;
+  try {
+    listed = await auth.listMembers({
+      headers: request.headers,
+      query: {
+        limit: MAX_ORGANIZATION_MEMBERS,
+        organizationId: parsedSelector.data,
+      },
+    });
+  } catch {
+    // Not an active member of this organization, so the list is denied and nothing else is revealed.
+    return jsonResponse({ error: 'access_denied' }, 403);
+  }
+
+  const members = organizationMemberListResponseSchema.safeParse({
+    members: listed.members.map((member) => ({
+      email: member.user.email,
+      id: member.userId,
+      name: member.user.name,
+    })),
+  });
+
+  if (!members.success) {
+    return upstreamFailure('getOrganizationMembers', 'unexpected_shape');
+  }
+
+  return jsonResponse(members.data, 200);
 }
 
 export async function getInboxItem(

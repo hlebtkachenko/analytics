@@ -11,15 +11,21 @@ export function documentsPath(
   return `${organizationPath(organizationId)}/documents${search.length === 0 ? '' : `?${search}`}`;
 }
 
+// Each selected entity is appended as its own repeated legalEntityId, so several stay several to the BFF.
 export function documentAnalyticsPath(
   organizationId: string,
-  legalEntityId?: string,
+  legalEntityIds: readonly string[] = [],
 ): string {
-  const filter =
-    legalEntityId === undefined || legalEntityId.length === 0
-      ? ''
-      : `?legalEntityId=${encodeURIComponent(legalEntityId)}`;
-  return `${documentsPath(organizationId)}/analytics${filter}`;
+  const params = new URLSearchParams();
+
+  for (const legalEntityId of legalEntityIds) {
+    if (legalEntityId.length > 0) {
+      params.append('legalEntityId', legalEntityId);
+    }
+  }
+
+  const search = params.toString();
+  return `${documentsPath(organizationId)}/analytics${search.length === 0 ? '' : `?${search}`}`;
 }
 
 export function documentPath(
@@ -48,6 +54,11 @@ export function partnersPath(organizationId: string, q?: string): string {
   const filter =
     q === undefined || q.length === 0 ? '' : `?q=${encodeURIComponent(q)}`;
   return `${organizationPath(organizationId)}/partners${filter}`;
+}
+
+// A blank field is an absent field; the contract trims whatever is actually sent.
+export function optional(value: string): string | undefined {
+  return value.trim().length === 0 ? undefined : value;
 }
 
 // One product link builder, so every page keeps the chosen organization in the URL.
@@ -97,16 +108,4 @@ export async function sendWithoutContent(mutation: Mutation): Promise<void> {
   if (!response.ok) {
     throw new Error('Request failed.');
   }
-}
-
-// The one currency formatter the register uses, so every amount reads the same way.
-export function formatAmount(amount: string, currencyCode: string): string {
-  const value = Number(amount);
-  if (!Number.isFinite(value)) {
-    return amount;
-  }
-  return new Intl.NumberFormat('en-US', {
-    currency: currencyCode,
-    style: 'currency',
-  }).format(value);
 }
