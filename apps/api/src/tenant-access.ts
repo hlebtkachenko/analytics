@@ -3,6 +3,7 @@ import type { TenantContext } from '@bap/db';
 import {
   resolveCapabilities,
   resolveOrganizationAccess,
+  hrAssignmentCapabilities,
   type EntityScope,
   type OrganizationAccessResponse,
   type OrganizationCapabilities,
@@ -50,29 +51,71 @@ export async function resolveTenantAccess(
     throw new ForbiddenException();
   }
 
-  if (
-    input.capability !== undefined &&
-    !resolveCapabilities(membership.role)[input.capability]
-  ) {
-    throw new ForbiddenException();
-  }
-
   const tenant: TenantContext = {
     organizationId: input.organizationId,
     role: membership.role,
     userId: principal.subject,
   };
-  const entityScope = await input.memberships.readEntityScope(tenant);
+  // The persisted resolver already returns all for owners. Preserve that invariant
+  // here too, so a future resolver cannot accidentally narrow an owner's scope.
+  const membershipScope =
+    membership.role === 'owner'
+      ? ({ mode: 'all' } as const)
+      : await input.memberships.readEntityScope(tenant);
+  const baseCapabilities = resolveCapabilities(membership.role);
+  const assignments =
+    membership.role === 'owner' ||
+    input.memberships.readHrAccessAssignments === undefined
+      ? []
+      : await input.memberships.readHrAccessAssignments(tenant);
+  const assignedEntitiesByCapability = new Map<
+    keyof OrganizationCapabilities,
+    Set<string>
+  >();
+  for (const assignment of assignments) {
+    for (const capability of hrAssignmentCapabilities[assignment.accessRole]) {
+      const ids =
+        assignedEntitiesByCapability.get(capability) ?? new Set<string>();
+      ids.add(assignment.legalEntityId);
+      assignedEntitiesByCapability.set(capability, ids);
+    }
+  }
+  const capabilities = { ...baseCapabilities };
+  if (membershipScope.mode === 'restricted')
+    capabilities.createEntities = false;
+  for (const capability of assignedEntitiesByCapability.keys())
+    capabilities[capability] = true;
+  const intersect = (ids: Set<string>): EntityScope => {
+    if (membership.role === 'owner' || membershipScope.mode === 'all')
+      return { legalEntityIds: [...ids].sort(), mode: 'restricted' };
+    return {
+      legalEntityIds: membershipScope.legalEntityIds.filter((id) =>
+        ids.has(id),
+      ),
+      mode: 'restricted',
+    };
+  };
+  // Base membership grants retain their membership scope. Assignment-only grants narrow to their entities.
+  const entityScope =
+    input.capability !== undefined && !baseCapabilities[input.capability]
+      ? intersect(
+          assignedEntitiesByCapability.get(input.capability) ?? new Set(),
+        )
+      : membershipScope;
+  if (input.capability !== undefined && !capabilities[input.capability]) {
+    throw new ForbiddenException();
+  }
   const access = resolveOrganizationAccess(
     'application-api',
     input.organizationId,
     membership,
-    entityScope,
+    membershipScope,
   );
 
   if (access === null) {
     throw new ForbiddenException();
   }
+  Object.assign(access.capabilities, capabilities);
 
   // The scope can only narrow the role capabilities, so the resolved set is the one that decides.
   if (

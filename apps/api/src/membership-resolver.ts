@@ -1,5 +1,9 @@
 import type { TenantContext } from '@bap/db';
-import type { EntityScope, MembershipResolution } from '@bap/security';
+import type {
+  EntityScope,
+  HrAccessRole,
+  MembershipResolution,
+} from '@bap/security';
 
 export abstract class MembershipResolver {
   abstract checkReadiness(): Promise<boolean>;
@@ -14,4 +18,8 @@ export abstract class MembershipResolver {
     subjectId: string,
     organizationId: string,
   ): Promise<MembershipResolution>;
+  // Kept here because assignment resolution belongs to the application API, not @bap/security.
+  readHrAccessAssignments?(
+    tenant: TenantContext,
+  ): Promise<Array<{ accessRole: HrAccessRole; legalEntityId: string }>>;
 }
