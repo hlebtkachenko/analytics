@@ -403,39 +403,53 @@ connector. After 1b the phase plan stops; every connector and every setup
 feature is one small PR on the connections and setup track, added one by one
 after the core is live.
 
-- Phase 0, foundation, delivered (PR #56): ADR 0014 and ADR 0015; `blob`,
-  `inbox_item`, `inbox_item_file`, `inbox_item_extraction`, `inbox_event`;
-  `document_file` and `inbox_item_id` on documents; manual multi-file upload;
-  `sniff` and `manual` providers; hints; exact-hash duplicates; Register as
-  document with a prefilled form; blob routes; `/inbox` page, rail entry,
-  reserved slug. Spec:
+- Phase 0, foundation, delivered (PR #73, superseding the closed #56): ADR 0014
+  and ADR 0015; `blob`, `inbox_item`, `inbox_item_file`,
+  `inbox_item_extraction`, `inbox_event`; `document_file` and `inbox_item_id` on
+  documents; manual multi-file upload; `sniff` and `manual` providers; hints;
+  exact-hash duplicates; Register as document with a prefilled form; blob
+  routes; `/inbox` page, rail entry, reserved slug. Spec:
   [inbox foundation](../../.ai/specs/2026-09-16-inbox-foundation.md).
-- Phase 1a, channels, delivered (PR #65): ADR 0016; the channel principal,
-  `inbox_channel` and the credential table with its definer functions;
-  `resolveChannelAccess` and `receiveIntake`; the channel items route; channel
-  CRUD and credentials for owners; the public intake route with the edge IP
-  bucket; channel settings page for API channels. Spec:
+- Phase 1a, channels, delivered (PR #73, superseding the closed #65): ADR 0016;
+  the channel principal, `inbox_channel` and the credential table with its
+  definer functions; `resolveChannelAccess` and `receiveIntake`; the channel
+  items route; channel CRUD and credentials for owners; the public intake route
+  with the edge IP bucket; channel settings page for API channels. Spec:
   [inbox channels](../../.ai/specs/2026-09-17-inbox-channels.md).
-- Phase 1a-email, delivered (PR #67), stacked on 1a: the Mailgun webhook bound
-  by the recipient token, the `email_address` credential kind, the API email
-  route, the `split_email_item` job, ClamAV and `app.record_blob_scan`,
-  `inbox_item.sender`, email channels in the settings page, the Caddy cap. Spec:
+- Phase 1a-email, delivered (PR #73, superseding the closed #67), stacked on 1a:
+  the Mailgun webhook bound by the recipient token, the `email_address`
+  credential kind, the API email route, the `split_email_item` job, ClamAV and
+  `app.record_blob_scan`, `inbox_item.sender`, email channels in the settings
+  page, the Caddy cap. Spec:
   [inbox email channel](../../.ai/specs/2026-09-17-inbox-email-channel.md).
-- Phase 1b, core, three stacked PRs:
+- Phase 1b, core, delivered (PR #74, superseding the closed #68, #71 and #72):
   - 1b-runtime: `inbox_routing_target` with the `/inbox/settings` page, the
     per-organization blob quota setting, the `inbox_maintenance` job (orphan
     blob sweep, reaper for parents stuck `processing`, requeue for email items
     stuck `received`), discard provenance. Spec:
     [inbox runtime](../../.ai/specs/2026-09-17-inbox-runtime.md).
   - 1b-rules: `inbox_rule`, auto-route running as the rule author,
-    `inbox_correction`, create-a-rule-from-this. Spec pending.
-  - 1b-actions: Split, the document versioning route, fingerprint duplicates,
-    attach-to-existing, bulk approve and assign, `pnpm demo:inbox`. Spec
-    pending.
+    `inbox_correction`, create-a-rule-from-this. Spec:
+    [inbox rules](../../.ai/specs/2026-09-17-inbox-rules.md).
+  - 1b-actions: the document versioning route, fingerprint duplicates,
+    attach-to-existing, the failed-parent re-split, bulk approve and assign,
+    `pnpm demo:inbox`. Manual Split was dropped from 1b-actions on 2026-09-17:
+    intake stays one file per request, and page-range split needs PDF tooling, a
+    later track. Spec:
+    [inbox actions](../../.ai/specs/2026-09-17-inbox-actions.md).
+
+After the core, four more pull requests landed: PR #79 lets only a DKIM-aligned
+sender rule auto-route; PR #80 scans direct upload and API channel blobs before
+they are served; PR #83 splits the inbox repository, OpenAPI literals and the
+BFF by domain (a refactor); PR #75 rebuilds the inbox and documents pages on the
+Ramp and Carbon product patterns. Specs:
+[inbox UX](../../.ai/specs/2026-09-21-inbox-ux.md) and
+[documents UX](../../.ai/specs/2026-09-21-documents-ux.md).
 
 Connections and setup track, each its own PR, added after the core is live. The
 bullets keep the old phase order: Czech structured sources first, then live
 connectors, then wide sources, mirroring the earlier Phase 2, 3 and 4 sequence.
+The first item, the ISDOC and ISDOCX parser, is specified next.
 
 - Czech structured sources: ISDOC and ISDOCX parse; Money S3 XML; Pohoda XML
   file; hardened XML parsing and legal entity resolution by IČO ride with the
