@@ -413,26 +413,45 @@ test.describe.serial('document analytics read from the stored split', () => {
     ).toBeVisible();
     const table = page.getByRole('table', { name: 'Registered documents' });
 
-    // The count the status All tab carries between parentheses, or -1 with none yet.
+    // The All tab carries a count only once the list for the current scope has loaded.
     const allTabCount = async () => {
-      const text = await page.getByRole('tab', { name: /^All \(/ }).innerText();
-      const match = /\((\d+)\)/.exec(text);
-      return match === null ? -1 : Number(match[1]);
+      const text = await page
+        .getByRole('tab', { name: /^All \(\d+\)/ })
+        .innerText();
+      return Number(/\((\d+)\)/.exec(text)![1]);
     };
+    // The list answer for one scope: the seeded entity alone, or every entity.
+    const listLoaded = (scoped: boolean) =>
+      page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        const ids = url.searchParams.getAll('legalEntityId');
+        return (
+          response.request().method() === 'GET' &&
+          url.pathname === documentsPath &&
+          (scoped
+            ? ids.length === 1 && ids[0] === legalEntityId
+            : ids.length === 0)
+        );
+      });
 
     // Scope to the seeded entity, then clear and confirm totals before re-scoping.
+    const scopedLoad = listLoaded(true);
     await selectMultiSelectLegalEntities(page, [entityName]);
-    await expect(table.locator('tbody tr').first()).toBeVisible();
+    await scopedLoad;
     const scopedTabCount = await allTabCount();
     expect(scopedTabCount).toBeGreaterThanOrEqual(1);
 
+    const clearedLoad = listLoaded(false);
     await clearLegalEntities(page);
+    await clearedLoad;
     // Every entity in scope is a superset of the seeded one, so the total never drops.
-    await expect.poll(allTabCount).toBeGreaterThanOrEqual(scopedTabCount);
+    expect(await allTabCount()).toBeGreaterThanOrEqual(scopedTabCount);
 
     // Re-scope so the tiles, tabs and the opened row below belong to this run.
+    const rescopedLoad = listLoaded(true);
     await selectMultiSelectLegalEntities(page, [entityName]);
-    await expect.poll(allTabCount).toBe(scopedTabCount);
+    await rescopedLoad;
+    expect(await allTabCount()).toBe(scopedTabCount);
 
     await test.step('the four stat tiles show numbers', async () => {
       const stats = page.getByRole('region', { name: 'Document statistics' });
