@@ -119,6 +119,7 @@ const detail: InboxItemDetail = {
     senderAuthenticated: false,
   },
   parsed: null,
+  routeSuggestion: { kind: null, legalEntityId: null, partnerId: null },
   routingTarget: routingTargetFor('pdf'),
 };
 

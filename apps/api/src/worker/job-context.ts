@@ -31,7 +31,7 @@ export const channelJobPayloadSchema = z
     channelId: z.string().uuid(),
     itemId: z.string().uuid().optional(),
     organizationId: organizationIdentifierSchema,
-    // The scan and parse jobs of a channel item carry the route its intake deferred; every other channel job omits it.
+    // Only the scan job of a channel item carries the route its intake deferred; every other channel job omits it.
     routeRuleId: z.string().uuid().nullable().optional(),
   })
   .strict();

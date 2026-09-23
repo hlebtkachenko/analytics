@@ -29,6 +29,10 @@ const CENTRAL_LENGTH = 46;
 const LOCAL_LENGTH = 30;
 // The EOCD record plus the longest comment it may carry.
 const EOCD_SEARCH_BYTES = EOCD_LENGTH + 0xffff;
+// End records tried before the archive is refused, so crafted signatures cannot multiply the directory walks.
+const MAX_EOCD_CANDIDATES = 4;
+// A central header plus the longest name, extra field and comment it may declare.
+const MAX_CENTRAL_ENTRY_BYTES = CENTRAL_LENGTH + 3 * 0xffff;
 const U16_MARKER = 0xffff;
 const U32_MARKER = 0xffffffff;
 
@@ -75,7 +79,8 @@ function walkCentral(
   let offset = end.centralOffset;
   const limit = end.centralOffset + end.centralSize;
 
-  while (offset < limit) {
+  // Never more headers than the end record declares, which the caller already capped.
+  while (offset < limit && entries.length < end.entries) {
     if (
       offset + CENTRAL_LENGTH > limit ||
       bytes.readUInt32LE(offset) !== CENTRAL_SIGNATURE
@@ -123,17 +128,24 @@ function walkCentral(
     offset = next;
   }
 
-  return entries.length === end.entries ? entries : null;
+  return offset === limit && entries.length === end.entries ? entries : null;
 }
 
 // The last EOCD signature whose directory fits before it and holds its entry count, so a signature inside a
 // comment or a stored entry cannot redirect the reader.
 function readCentral(bytes: Buffer): CentralEntry[] {
   const floor = Math.max(0, bytes.length - EOCD_SEARCH_BYTES);
+  let candidates = 0;
 
   for (let offset = bytes.length - EOCD_LENGTH; offset >= floor; offset -= 1) {
     if (bytes.readUInt32LE(offset) !== EOCD_SIGNATURE) {
       continue;
+    }
+
+    candidates += 1;
+
+    if (candidates > MAX_EOCD_CANDIDATES) {
+      break;
     }
 
     const disk = bytes.readUInt16LE(offset + 4);
@@ -152,6 +164,17 @@ function readCentral(bytes: Buffer): CentralEntry[] {
         bytes.readUInt32LE(offset - 20) === ZIP64_LOCATOR_SIGNATURE)
     ) {
       refuse('unsupported_type', 'The archive uses ZIP64.');
+    }
+
+    // Bounded before the walk: the entry cap, and a size no declared entry count could fill.
+    if (
+      entries > MAX_ISDOCX_ENTRIES ||
+      centralSize > entries * MAX_CENTRAL_ENTRY_BYTES
+    ) {
+      refuse(
+        'too_large',
+        `The archive declares more than ${MAX_ISDOCX_ENTRIES} entries or an impossible directory size.`,
+      );
     }
 
     const central = walkCentral(
@@ -187,13 +210,6 @@ function hasUnsafeName(name: Buffer): boolean {
 
 // Every rule refuses the whole archive; the caps run on central-directory values before anything is inflated.
 function checkEntries(bytes: Buffer, entries: CentralEntry[]): LocatedEntry[] {
-  if (entries.length > MAX_ISDOCX_ENTRIES) {
-    refuse(
-      'too_large',
-      `The archive holds more than ${MAX_ISDOCX_ENTRIES} entries.`,
-    );
-  }
-
   let declared = 0;
   const names = new Set<string>();
 

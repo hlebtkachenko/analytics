@@ -2,6 +2,11 @@
 
 **Date:** 2026-09-23
 
+**Correction (2026-09-23):** Review found that sender authentication alone
+could file attacker-supplied email invoices. Parsed email children now require
+an authenticated sender and a matched live sender-bound auto-route rule; the
+route job checks again under the item lock.
+
 ## Problem
 
 An ISDOC invoice lands as `isdoc_invoice` with an empty draft, a person retypes
@@ -299,12 +304,14 @@ asks and all hold:
   (`routing-targets.ts:40-44`) supplying a direction the file never stated;
 - the parse resolved the partner, any hint or rule partner equals it (else
   blocked with a reason), and it has a `default_line_category`;
-- an email child has `sender_authenticated`, whoever asks; today only
-  sender-pattern rules check it (`inbox/rules.ts:169-174`).
+- an email child with a parsed layer has `sender_authenticated` and a matched
+  live auto-route rule with a sender pattern. A target default alone, or a rule
+  without a sender pattern, cannot auto-route that child, whatever its kind.
 
 Type 5 never auto-routes, with the VAT claim reason. Otherwise the item stays in
 review with the reason. The parse job recomputes the decision from the stored
-rule matches, because no rule condition reads a parsed field.
+rule matches, because no rule condition reads a parsed field. The route job
+rechecks the parsed content and the live rule after locking the item.
 
 Duplicates: exact stays sha256 at Arrive. The parse job runs no
 `findDuplicateCandidates`: as `system_automation` it would read organization

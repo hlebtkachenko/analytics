@@ -8,12 +8,10 @@ import type { BlobStore } from '../blobs/blob-store.js';
 import {
   PARSE_INBOX_ITEM_QUEUE,
   parseInboxItemJobSchema,
+  parsedIsdocDraftSchema,
+  providerOutputSchema,
 } from '../inbox/contract.js';
-import type {
-  InboxExtraction,
-  ProviderOutput,
-  RouteInboxItemJob,
-} from '../inbox/contract.js';
+import type { ProviderOutput, RouteInboxItemJob } from '../inbox/contract.js';
 import {
   insertExtraction,
   loadItem,
@@ -23,6 +21,7 @@ import {
 import {
   decideParsedAutoRoute,
   loadMatchedLiveRules,
+  loadSenderFacts,
 } from '../inbox/inbox-rule-repository.js';
 import {
   ISDOC_DETECTED_TYPE,
@@ -102,6 +101,16 @@ export function parseIsdocBytes(bytes: Buffer): IsdocParseResult {
 
   const archive = readIsdocx(bytes);
   return archive.ok ? parseIsdoc(archive.xml) : archive;
+}
+
+// An output that breaks the stored contract is kept as an unreadable failure, never as a row the detail cannot read.
+export function storableOutput(output: ProviderOutput): ProviderOutput {
+  return providerOutputSchema.safeParse(output).success
+    ? output
+    : failureOutput({
+        code: 'unreadable',
+        message: 'The parsed file does not fit the stored output.',
+      });
 }
 
 async function loadSource(
@@ -215,25 +224,23 @@ async function recordParse(
   let routeJob: RouteInboxItemJob | null = null;
 
   if (parse.ok) {
-    const pending: InboxExtraction = {
-      confidence: output.confidence,
-      createdAt: new Date().toISOString(),
-      detectedType: output.detectedType,
-      draft: output.draft,
-      fieldConfidences: output.fieldConfidences,
-      id: '00000000-0000-4000-8000-000000000000',
-      issues: output.issues,
-      legalEntityId: output.legalEntityId ?? null,
-      provider: ISDOC_PROVIDER,
-      providerVersion: ISDOC_PROVIDER_VERSION,
-      reasons: output.reasons,
-    };
-    const decision = await decideParsedAutoRoute(transaction, {
+    const decision = decideParsedAutoRoute({
       ...tenant,
+      facts: {
+        ...(await loadSenderFacts(transaction, item.id)),
+        issuesSinceParsed: output.issues.length > 0,
+        latestIssueCount: output.issues.length,
+        parsed: {
+          draft: parsedIsdocDraftSchema.parse(output.draft),
+          legalEntityId: output.legalEntityId ?? null,
+        },
+      },
       item,
       lineCategory: resolution.lineCategory,
-      pending,
+      output,
       primaryFilename: files[0]?.originalFilename ?? null,
+      rules,
+      target,
     });
     routeJob = decision.routeJob;
 
@@ -248,20 +255,22 @@ async function recordParse(
     }
   }
 
+  const stored = storableOutput(output);
+
   // The parsed entity stays on this row; inbox_item.legal_entity_id is never written by the parse.
   await insertExtraction(
     transaction,
     tenant,
     item.id,
     {
-      output,
+      output: stored,
       provider: ISDOC_PROVIDER,
       providerVersion: ISDOC_PROVIDER_VERSION,
     },
     'extracted',
   );
 
-  return { output, routeJob };
+  return { output: stored, routeJob: stored === output ? routeJob : null };
 }
 
 export async function parseInboxItem(

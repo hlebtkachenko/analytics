@@ -21,11 +21,14 @@ export const MAX_XML_BYTES = 5 * 1024 * 1024;
 export const MAX_XML_DEPTH = 32;
 export const MAX_XML_ELEMENTS = 20_000;
 export const MAX_XML_TEXT = 4_000;
+// Text inside a skipped subtree (ds:Signature, XAdES, Extensions) is only counted, never stored.
+export const MAX_SKIPPED_TEXT = MAX_XML_BYTES;
 
 const VERSION_PATTERN = /^6\.0(\.\d+)?$/;
 const AMOUNT_PATTERN = /^[+-]?\d{1,15}(\.\d{1,6})?$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const VARIABLE_SYMBOL_PATTERN = /^[0-9]{1,10}$/;
+const CURRENCY_CODE_PATTERN = /^[A-Za-z]{3}$/;
 const MICRO = 1_000_000n;
 const CENT = 10_000n;
 const MAX_REFERENCE_LENGTH = 64;
@@ -191,12 +194,13 @@ export function readXml(
     }
 
     textLengths[index] = (textLengths[index] ?? 0) + text.length;
+    const current = stack.at(-1);
+    // A skipped node's text is never kept, so a signature's long base64 meets the byte cap, not the element cap.
+    const cap = current === null ? MAX_SKIPPED_TEXT : MAX_XML_TEXT;
 
-    if ((textLengths[index] ?? 0) > MAX_XML_TEXT) {
+    if ((textLengths[index] ?? 0) > cap) {
       throw new IsdocReadError('too_large', 'An element exceeds the text cap.');
     }
-
-    const current = stack.at(-1);
 
     if (current !== null && current !== undefined) {
       current.text += text;
@@ -639,7 +643,9 @@ function crossCheck(
         issues.push({
           code: 'vat_mismatch',
           field: totalsField('lines'),
-          message: `The lines use ${rate} % but no TaxTotal/TaxSubTotal names that rate.`,
+          message: evidence(
+            `The lines use ${rate} % but no TaxTotal/TaxSubTotal names that rate.`,
+          ),
         });
       }
     }
@@ -800,7 +806,14 @@ export function parseIsdoc(bytes: Uint8Array): IsdocParseResult {
   const foreign = text(invoice, 'ForeignCurrencyCode');
   let fxRate: string | undefined;
 
-  if (foreign !== null) {
+  // An ISO 4217 code or nothing: any other text is an issue and never reaches an attribute or a reason.
+  if (foreign !== null && !CURRENCY_CODE_PATTERN.test(foreign)) {
+    issues.push({
+      code: 'unsupported_type',
+      field: 'attributes.foreign_currency_code',
+      message: 'Invoice/ForeignCurrencyCode is not a three-letter currency code.',
+    });
+  } else if (foreign !== null) {
     attributes.foreign_currency_code = foreign.toUpperCase();
     const payable = amountText(text(totals, 'PayableAmountCurr'));
 
@@ -815,7 +828,9 @@ export function parseIsdoc(bytes: Uint8Array): IsdocParseResult {
       // CZK per one foreign unit: CurrRate CZK buy RefCurrRate foreign units.
       fxRate = formatMicro(divideRounded(rate * MICRO, referenceRate));
       reasons.push({
-        evidence: `fxRate ${fxRate} is CZK per one ${attributes.foreign_currency_code} (CurrRate / RefCurrRate).`,
+        evidence: evidence(
+          `fxRate ${fxRate} is CZK per one ${attributes.foreign_currency_code} (CurrRate / RefCurrRate).`,
+        ),
         step: 'parse',
         weight: 1,
       });
@@ -864,18 +879,21 @@ export function parseIsdoc(bytes: Uint8Array): IsdocParseResult {
       fieldConfidences[`${path}.vatMode`] = 0.9;
     }
 
-    for (const [field, value] of [
-      ['baseAmount', base],
-      ['vatAmount', vat],
-    ] as const) {
-      const parsed = micro(value);
+    // Only invoice content keeps lines; a credit note or an advance request states its own signs.
+    if (invoiceType) {
+      for (const [field, value] of [
+        ['baseAmount', base],
+        ['vatAmount', vat],
+      ] as const) {
+        const parsed = micro(value);
 
-      if (parsed !== null && parsed < 0n) {
-        issues.push({
-          code: 'amount_mismatch',
-          field: `${path}.${field}`,
-          message: `InvoiceLine[${index + 1}] carries a negative amount, which an invoice line cannot hold.`,
-        });
+        if (parsed !== null && parsed < 0n) {
+          issues.push({
+            code: 'amount_mismatch',
+            field: `${path}.${field}`,
+            message: `InvoiceLine[${index + 1}] carries a negative amount, which an invoice line cannot hold.`,
+          });
+        }
       }
     }
 

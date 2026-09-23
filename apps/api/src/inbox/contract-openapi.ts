@@ -364,6 +364,16 @@ export const inboxItemDetailOpenApiSchema = {
     files: { items: inboxItemFileOpenApiSchema, type: 'array' },
     item: inboxItemDetailItemOpenApiSchema,
     parsed: { ...inboxExtractionOpenApiSchema, nullable: true },
+    routeSuggestion: {
+      additionalProperties: false,
+      properties: {
+        kind: { enum: [...DOCUMENT_KINDS], nullable: true, type: 'string' },
+        legalEntityId: nullable(uuidProperty),
+        partnerId: nullable(uuidProperty),
+      },
+      required: ['kind', 'legalEntityId', 'partnerId'],
+      type: 'object',
+    },
     routingTarget: inboxRoutingTargetOpenApiSchema,
   },
   required: [
@@ -373,6 +383,7 @@ export const inboxItemDetailOpenApiSchema = {
     'files',
     'item',
     'parsed',
+    'routeSuggestion',
     'routingTarget',
   ],
   type: 'object',

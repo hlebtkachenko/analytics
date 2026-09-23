@@ -776,9 +776,6 @@ async function createChildren(
         channelId: payload.channelId,
         itemId: child.itemId,
         organizationId: payload.organizationId,
-        ...(child.routeJob === null
-          ? {}
-          : { routeRuleId: child.routeJob.ruleId }),
       });
     } else if (child?.routeJob) {
       await options.enqueueRouteInboxItem(child.routeJob);

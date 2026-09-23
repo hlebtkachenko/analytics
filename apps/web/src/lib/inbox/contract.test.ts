@@ -716,6 +716,11 @@ describe('inbox list counts, sender and deciding rule name', () => {
         senderAuthenticated: false,
       },
       parsed: null,
+      routeSuggestion: {
+        kind: 'other',
+        legalEntityId: null,
+        partnerId: null,
+      },
       routingTarget: {
         auto: 'never',
         autoThreshold: null,

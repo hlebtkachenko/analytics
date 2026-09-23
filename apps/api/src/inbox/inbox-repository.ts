@@ -45,6 +45,7 @@ import type {
   InboxChannel,
   InboxCorrection,
   InboxEvent,
+  InboxExtraction,
   InboxItem,
   InboxItemDetail,
   InboxItemFile,
@@ -63,6 +64,7 @@ import type {
 import {
   CORRECTION_FIELD_BY_DRAFT_KEY,
   composeDocumentDraft,
+  parsedContent,
   toCreateDocumentBody,
   withLineCategory,
   type ComposedDocument,
@@ -98,14 +100,16 @@ import {
   type ItemFileRecord,
   type ItemRow,
 } from './inbox-repository-support.js';
+import { loadParsedDraft } from './parsed-draft.js';
 import {
   adoptRule,
   applyInboxRules,
   createRule,
   deleteRule,
   listRules,
-  loadMatchedRuleIds,
-  loadRulesById,
+  invoiceRouteBlocker,
+  loadMatchedLiveRules,
+  loadSenderFacts,
   orderRules,
   readPartnerLineCategory,
   readRule,
@@ -132,7 +136,6 @@ import {
   MANUAL_PROVIDER_VERSION,
   manualProvider,
 } from './providers/manual.js';
-import { ISDOC_PROVIDER } from './providers/isdoc.js';
 import { routingTargetFor } from './routing-targets.js';
 
 // The repository contract keeps one import site for its callers.
@@ -378,9 +381,45 @@ async function loadCorrections(
   }));
 }
 
+// A parsed entity outside the reader's scope is masked, so the reader never learns the organization owns it.
+function scopedEntity(
+  legalEntityId: string | null,
+  legalEntityIds: readonly string[] | null,
+): string | null {
+  return legalEntityIds === null ||
+    legalEntityId === null ||
+    legalEntityIds.includes(legalEntityId)
+    ? legalEntityId
+    : null;
+}
+
+function scopedExtraction(
+  extraction: InboxExtraction | null,
+  legalEntityIds: readonly string[] | null,
+): InboxExtraction | null {
+  if (extraction === null) {
+    return null;
+  }
+
+  const draftEntity = extraction.draft.legalEntityId;
+
+  return {
+    ...extraction,
+    draft:
+      typeof draftEntity === 'string'
+        ? {
+            ...extraction.draft,
+            legalEntityId: scopedEntity(draftEntity, legalEntityIds),
+          }
+        : extraction.draft,
+    legalEntityId: scopedEntity(extraction.legalEntityId, legalEntityIds),
+  };
+}
+
 async function loadDetail(
   transaction: PoolClient,
   item: InboxItem,
+  legalEntityIds: readonly string[] | null,
 ): Promise<InboxItemDetail> {
   // The sender, its DKIM verdict, and the name of the rule that decided the item, in one read; a deleted rule still resolves.
   const meta = await transaction.query<{
@@ -396,17 +435,34 @@ async function loadDetail(
     [item.id],
   );
 
+  const files = await loadItemFiles(transaction, item.id);
+  const suggestion = await loadRouteSuggestion(transaction, item, files);
+
   return {
     corrections: await loadCorrections(transaction, item.id),
     events: await loadEvents(transaction, item.id),
-    extraction: await loadLatestExtraction(transaction, item.id),
-    files: (await loadItemFiles(transaction, item.id)).map(publicFile),
-    parsed: await loadLatestExtraction(transaction, item.id, ISDOC_PROVIDER),
+    extraction: scopedExtraction(
+      await loadLatestExtraction(transaction, item.id),
+      legalEntityIds,
+    ),
+    files: files.map(publicFile),
+    parsed: scopedExtraction(
+      await loadParsedDraft(transaction, item.id),
+      legalEntityIds,
+    ),
     item: {
       ...item,
       decidedByRuleName: meta.rows[0]?.decided_by_rule_name ?? null,
       sender: meta.rows[0]?.sender ?? null,
       senderAuthenticated: meta.rows[0]?.sender_authenticated ?? false,
+    },
+    routeSuggestion: {
+      kind: suggestion.draft.kind,
+      legalEntityId: scopedEntity(
+        suggestion.draft.legalEntityId,
+        legalEntityIds,
+      ),
+      partnerId: suggestion.draft.partnerId,
     },
     routingTarget: routingTargetFor(
       item.detectedType,
@@ -784,7 +840,9 @@ export async function readItem(
       input.itemId,
       input.legalEntityIds,
     );
-    return item === null ? null : loadDetail(transaction, item);
+    return item === null
+      ? null
+      : loadDetail(transaction, item, input.legalEntityIds);
   });
 }
 
@@ -889,7 +947,9 @@ export async function recordExtraction(
     }
 
     const after = await loadItem(transaction, before.id, input.legalEntityIds);
-    return after === null ? null : loadDetail(transaction, after);
+    return after === null
+      ? null
+      : loadDetail(transaction, after, input.legalEntityIds);
   });
 }
 
@@ -943,7 +1003,9 @@ export async function updateHints(
     await appendEvent(transaction, input, before.id, 'hint_added');
 
     const after = await loadItem(transaction, before.id, input.legalEntityIds);
-    return after === null ? null : loadDetail(transaction, after);
+    return after === null
+      ? null
+      : loadDetail(transaction, after, input.legalEntityIds);
   });
 }
 
@@ -1228,6 +1290,30 @@ export function approveItem(
       );
     }
 
+    // Parsed invoice content is filed in bulk only when the parse is clean and names the same entity, kind and
+    // partner; the parse's own issues count, a later failed auto-route row does not.
+    if (composed.content.invoice !== null) {
+      const newest = await loadParsedDraft(transaction, before.id);
+      const blocked = invoiceRouteBlocker({
+        asker: { kind: 'person' },
+        composed,
+        facts: {
+          ...(await loadSenderFacts(transaction, before.id)),
+          issuesSinceParsed: (newest?.issues.length ?? 0) > 0,
+          latestIssueCount: newest?.issues.length ?? 0,
+          parsed:
+            newest === null
+              ? null
+              : { draft: newest.draft, legalEntityId: newest.legalEntityId },
+        },
+        lineCategory: composed.lineCategory,
+      });
+
+      if (blocked !== null) {
+        throw new BadRequestException();
+      }
+    }
+
     const { document, output } = manualProvider(parsed.data);
 
     return routeInTransaction(
@@ -1311,27 +1397,27 @@ async function routeInTransaction(
   );
 
   const after = await loadItem(transaction, before.id, input.legalEntityIds);
-  return after === null ? null : loadDetail(transaction, after);
+  return after === null
+    ? null
+    : loadDetail(transaction, after, input.legalEntityIds);
 }
 
-// The draft a route suggests: the hints, the rules the newest rule extraction named, the newest isdoc row and the
-// effective target; parsed item lines take the partner's default category.
+// The composed draft plus the partner default its parsed item lines took; null when no line took one.
+export type RouteSuggestion = ComposedDocument & {
+  lineCategory: string | null;
+};
+
+// The draft a route suggests: the hints, the live rules the newest rule extraction named (the set the parse used),
+// the newest isdoc row and the effective target; parsed item lines take the partner's default category.
 export async function loadRouteSuggestion(
   transaction: PoolClient,
   item: InboxItem,
   files: readonly ItemFileRecord[],
-): Promise<ComposedDocument> {
-  const parsed = await loadLatestExtraction(
-    transaction,
-    item.id,
-    ISDOC_PROVIDER,
-  );
+): Promise<RouteSuggestion> {
+  const parsed = await loadParsedDraft(transaction, item.id);
   const composed = composeDocumentDraft(
     { ...item, primaryFilename: files[0]?.originalFilename ?? null },
-    await loadRulesById(
-      transaction,
-      await loadMatchedRuleIds(transaction, item.id),
-    ),
+    await loadMatchedLiveRules(transaction, item.id),
     routingTargetFor(
       item.detectedType,
       await loadRoutingTargetOverrides(transaction),
@@ -1346,11 +1432,11 @@ export async function loadRouteSuggestion(
       : await readPartnerLineCategory(transaction, composed.draft.partnerId);
 
   return category === null
-    ? composed
+    ? { ...composed, lineCategory: null }
     : {
         ...composed,
         content: withLineCategory(composed.content, category),
-        lineCategorySource: 'partner_default',
+        lineCategory: category,
       };
 }
 
@@ -1361,18 +1447,10 @@ async function withParsedContent(
   input: RouteToDocumentInput,
   item: InboxItem,
 ): Promise<RouteToDocumentInput> {
-  const newest = await loadLatestExtraction(
-    transaction,
-    item.id,
-    ISDOC_PROVIDER,
-  );
+  const newest = await loadParsedDraft(transaction, item.id);
 
   if (input.parsedExtractionId === undefined) {
-    if (
-      input.document.invoice !== undefined &&
-      typeof newest?.draft.invoice === 'object' &&
-      newest.draft.invoice !== null
-    ) {
+    if (input.document.invoice !== undefined && newest?.draft.invoice != null) {
       throw new UnprocessableEntityException('parsed_invoice_only');
     }
 
@@ -1383,12 +1461,7 @@ async function withParsedContent(
     throw new UnprocessableEntityException('parsed_extraction_stale');
   }
 
-  const { content } = composeDocumentDraft(
-    { ...item, hintKind: input.document.kind, primaryFilename: null },
-    [],
-    routingTargetFor(item.detectedType),
-    { draft: newest.draft, legalEntityId: newest.legalEntityId },
-  );
+  const content = parsedContent(newest.draft, input.document.kind);
   const category =
     input.lineCategory ??
     (await readPartnerLineCategory(
@@ -1555,7 +1628,9 @@ export async function attachItem(
     );
 
     const after = await loadItem(transaction, before.id, input.legalEntityIds);
-    return after === null ? null : loadDetail(transaction, after);
+    return after === null
+      ? null
+      : loadDetail(transaction, after, input.legalEntityIds);
   });
 }
 
@@ -1599,7 +1674,7 @@ export async function reopenEmailItem(
     return after === null
       ? null
       : {
-          detail: await loadDetail(transaction, after),
+          detail: await loadDetail(transaction, after, input.legalEntityIds),
           job: {
             channelId: before.channelId,
             itemId: before.id,
@@ -1730,7 +1805,9 @@ export async function undoRoute(
     );
 
     const after = await loadItem(transaction, before.id, input.legalEntityIds);
-    return after === null ? null : loadDetail(transaction, after);
+    return after === null
+      ? null
+      : loadDetail(transaction, after, input.legalEntityIds);
   });
 }
 
@@ -1781,7 +1858,9 @@ async function transition(
     );
 
     const after = await loadItem(transaction, before.id, input.legalEntityIds);
-    return after === null ? null : loadDetail(transaction, after);
+    return after === null
+      ? null
+      : loadDetail(transaction, after, input.legalEntityIds);
   });
 }
 
@@ -1848,7 +1927,9 @@ export async function assignItem(
     await appendEvent(transaction, input, before.id, 'assigned');
 
     const after = await loadItem(transaction, before.id, input.legalEntityIds);
-    return after === null ? null : loadDetail(transaction, after);
+    return after === null
+      ? null
+      : loadDetail(transaction, after, input.legalEntityIds);
   });
 }
 
@@ -1882,7 +1963,9 @@ export async function snoozeItem(
     }
 
     const after = await loadItem(transaction, before.id, input.legalEntityIds);
-    return after === null ? null : loadDetail(transaction, after);
+    return after === null
+      ? null
+      : loadDetail(transaction, after, input.legalEntityIds);
   });
 }
 

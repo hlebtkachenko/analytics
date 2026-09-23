@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { createDocumentRequestSchema } from '../documents/contract.js';
+import type { ParsedIsdocDraft } from './contract.js';
 import {
   composeDocumentDraft,
   toCreateDocumentBody,
   withLineCategory,
   type DraftSourceItem,
+  type ParsedLayer,
 } from './draft-composer.js';
 import { routingTargetFor } from './routing-targets.js';
 import type { InboxRuleDefinition } from './rules.js';
@@ -159,7 +161,7 @@ describe('composeDocumentDraft with a parsed ISDOC row', () => {
   const PARSED_ENTITY_ID = '9d1e2f30-4a5b-4c6d-8e7f-901a2b3c4d5e';
   const PARSED_PARTNER_ID = '1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b';
   const invoiceTarget = routingTargetFor('isdoc_invoice');
-  const invoice = {
+  const invoice: NonNullable<ParsedIsdocDraft['invoice']> = {
     lines: [
       {
         baseAmount: '100.00',
@@ -180,7 +182,7 @@ describe('composeDocumentDraft with a parsed ISDOC row', () => {
     ],
     roundingAmount: '0',
   };
-  const parsed = {
+  const parsed: ParsedLayer = {
     draft: {
       attributes: { isdoc_document_type: '1' },
       currencyCode: 'CZK',

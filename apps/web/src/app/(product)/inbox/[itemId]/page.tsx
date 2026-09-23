@@ -152,18 +152,8 @@ function asKind(value: string): DocumentKind {
   return parsed.success ? parsed.data : 'other';
 }
 
-// The draft kind: the extraction's, else the kind hint, else the effective routing target's, else other.
 function draftKind(detail: InboxItemDetail): DocumentKind {
-  const draft = detail.extraction?.draft ?? {};
-  const parsedDraft = documentKindSchema.safeParse(draft['kind']);
-  if (parsedDraft.success) {
-    return parsedDraft.data;
-  }
-  const parsedHint = documentKindSchema.safeParse(detail.item.hintKind);
-  if (parsedHint.success) {
-    return parsedHint.data;
-  }
-  return detail.routingTarget.documentKind ?? 'other';
+  return detail.routeSuggestion.kind ?? 'other';
 }
 
 function asDiscardReason(value: string): InboxDiscardReason {
@@ -194,18 +184,12 @@ function draftFields(
   fallbackEntityId: string,
 ): DraftFields {
   const draft = detail.extraction?.draft ?? {};
-  const entity =
-    draftString(draft, 'legalEntityId') ||
-    detail.item.hintLegalEntityId ||
-    detail.item.legalEntityId ||
-    fallbackEntityId;
   return {
     currencyCode: draftString(draft, 'currencyCode') || 'CZK',
     documentDate: draftString(draft, 'documentDate'),
     kind: draftKind(detail),
-    legalEntityId: entity,
-    partnerId:
-      draftString(draft, 'partnerId') || (detail.item.hintPartnerId ?? ''),
+    legalEntityId: detail.routeSuggestion.legalEntityId ?? fallbackEntityId,
+    partnerId: detail.routeSuggestion.partnerId ?? '',
     reference: draftString(draft, 'reference'),
     title: draftString(draft, 'title'),
   };

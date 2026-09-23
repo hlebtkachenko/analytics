@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { storableOutput } from '../../worker/parse-inbox-item.js';
+import { providerOutputSchema } from '../contract.js';
 import {
   CUSTOMER_ICO,
   DEFAULT_LINES,
@@ -239,6 +241,44 @@ describe('parseIsdoc', () => {
     ]);
   });
 
+  it('raises an issue for a foreign currency code that is not three letters and never embeds it', () => {
+    for (const code of ['Q'.repeat(1000), 'EU1']) {
+      const result = parsed(
+        isdocInvoice({
+          foreign: { code, rate: '25', ref: '1' },
+          lines: [{ base: '2500.00', rate: '21', vat: '525.00' }],
+        }),
+      );
+      const output = resolveIsdoc(result, receiving).output;
+
+      expect(result.issues).toContainEqual(
+        expect.objectContaining({
+          code: 'unsupported_type',
+          field: 'attributes.foreign_currency_code',
+        }),
+      );
+      expect(result.content.attributes).not.toHaveProperty(
+        'foreign_currency_code',
+      );
+      expect(JSON.stringify(output)).not.toContain(code);
+      expect(providerOutputSchema.safeParse(output).success).toBe(true);
+    }
+  });
+
+  it('keeps an oversized tax rate out of the issue messages', () => {
+    const bytes = isdocInvoice()
+      .toString()
+      .replace(
+        '<Percent>21</Percent><VATCalculationMethod>',
+        `<Percent>${'X'.repeat(1000)}</Percent><VATCalculationMethod>`,
+      );
+    const result = parsed(Buffer.from(bytes));
+    const output = resolveIsdoc(result, receiving).output;
+
+    expect(codes(result)).toContain('vat_mismatch');
+    expect(providerOutputSchema.safeParse(output).success).toBe(true);
+  });
+
   it('divides CurrRate by RefCurrRate to six places', () => {
     const result = parsed(
       isdocInvoice({
@@ -424,6 +464,18 @@ describe('parseIsdoc', () => {
         field: 'invoice.lines[1].baseAmount',
       }),
     );
+  });
+
+  it('raises no negative-line issue on a credit note, which carries no invoice lines', () => {
+    const result = parsed(
+      isdocInvoice({
+        documentType: '2',
+        lines: [{ base: '-100.00', rate: '21', vat: '-21.00' }],
+      }),
+    );
+
+    expect(result.content.invoice).toBeUndefined();
+    expect(result.issues).toEqual([]);
   });
 
   it('derives the VAT mode from the header and the line tax category', () => {
@@ -629,6 +681,25 @@ describe('parseIsdoc', () => {
         body.replace(
           '<IssuingSystem>',
           `<Extensions>${'<x:a xmlns:x="urn:x"/>'.repeat(20_001)}</Extensions><IssuingSystem>`,
+        ),
+      ),
+    ).toBe('too_large');
+  });
+
+  it('reads a signed ISDOC whose signature carries long base64 values, and still caps an ISDOC element', () => {
+    const base64 = 'QUJD'.repeat(5_000);
+    const signature = `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignedInfo/><ds:SignatureValue>${base64}</ds:SignatureValue><ds:Object><xades:QualifyingProperties xmlns:xades="http://uri.etsi.org/01903/v1.3.2#"><xades:EncapsulatedTimeStamp>${base64}</xades:EncapsulatedTimeStamp></xades:QualifyingProperties></ds:Object></ds:Signature>`;
+    const body = isdocInvoice().toString();
+
+    expect(
+      parsed(Buffer.from(body.replace('</Invoice>', `${signature}</Invoice>`)))
+        .issues,
+    ).toEqual([]);
+    expect(
+      refusal(
+        body.replace(
+          '<IssuingSystem>Placeholder',
+          `<IssuingSystem>${base64}`,
         ),
       ),
     ).toBe('too_large');
@@ -853,5 +924,21 @@ describe('resolveIsdoc', () => {
       'received_invoice',
     ]);
     expect(DEFAULT_LINES).toHaveLength(2);
+  });
+});
+
+describe('storableOutput', () => {
+  it('stores a valid output and turns one that breaks the contract into an unreadable failure', () => {
+    const output = resolveIsdoc(parsed(isdocInvoice()), receiving).output;
+    const broken = {
+      ...output,
+      reasons: [{ evidence: 'x'.repeat(501), step: 'parse' as const, weight: 1 }],
+    };
+
+    expect(storableOutput(output)).toBe(output);
+    expect(storableOutput(broken)).toMatchObject({
+      draft: {},
+      issues: [{ code: 'unreadable' }],
+    });
   });
 });

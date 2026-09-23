@@ -17,7 +17,6 @@ import {
 } from '../inbox/contract.js';
 import type { InboxItem, ProviderIssue } from '../inbox/contract.js';
 import { toCreateDocumentBody } from '../inbox/draft-composer.js';
-import type { ComposedDocument } from '../inbox/draft-composer.js';
 import {
   insertExtraction,
   loadItem,
@@ -29,7 +28,14 @@ import {
   finishRouteInTransaction,
   loadRouteSuggestion,
 } from '../inbox/inbox-repository.js';
-import type { RouteDecision } from '../inbox/inbox-repository.js';
+import type {
+  RouteDecision,
+  RouteSuggestion,
+} from '../inbox/inbox-repository.js';
+import {
+  invoiceRouteBlocker,
+  loadAutoRouteFacts,
+} from '../inbox/inbox-rule-repository.js';
 import { knownDetectedType } from '../inbox/routing-targets.js';
 import { routeInboxItemJobPayloadSchema } from './job-context.js';
 import type { RouteInboxItemJobPayload } from './job-context.js';
@@ -101,6 +107,19 @@ async function readRuleAuthor(
     [ruleId],
   );
   return rule.rows[0]?.created_by ?? null;
+}
+
+// The sender binding of the rule that asked, while it is live; null once it was disabled or deleted.
+async function readLiveRule(
+  transaction: PoolClient,
+  ruleId: string,
+): Promise<{ senderPattern: string | null } | null> {
+  const rule = await transaction.query<{ sender_pattern: string | null }>(
+    'select sender_pattern from app.inbox_rule where id = $1 and enabled and deleted_at is null',
+    [ruleId],
+  );
+  const row = rule.rows[0];
+  return row === undefined ? null : { senderPattern: row.sender_pattern };
 }
 
 // The editor of the organization's target row, through the same definer as the pass; a platform default has none.
@@ -184,20 +203,17 @@ async function recordAttempt(
   transaction: PoolClient,
   tenant: TenantContext,
   item: InboxItem,
-  composed: ComposedDocument,
+  composed: RouteSuggestion,
   issues: ProviderIssue[],
 ): Promise<void> {
   const latest = await loadLatestExtraction(transaction, item.id);
   const { draft } = composed;
   const lines = composed.content.invoice?.lines;
   // Per parsed line, where its category came from: the partner default on an item line, none on a deduction.
-  const lineCategorySources = Array.isArray(lines)
-    ? lines.map((line: unknown) =>
-        composed.lineCategorySource !== null &&
-        typeof line === 'object' &&
-        line !== null &&
-        (line as { lineKind?: unknown }).lineKind === 'item'
-          ? composed.lineCategorySource
+  const lineCategorySources = lines
+    ? lines.map((line) =>
+        composed.lineCategory !== null && line.lineKind === 'item'
+          ? 'partner_default'
           : null,
       )
     : null;
@@ -254,6 +270,30 @@ async function routeAsAuthor(
   // The scope check comes first: an author outside the entity leaves no attempt row behind.
   if (legalEntityId !== null && !scopeAdmits(scope, legalEntityId)) {
     return { kind: 'author_unavailable' };
+  }
+
+  // The parsed-content guard again, on the locked row: a hint changed since the enqueue cannot misfile the content.
+  const blocked = invoiceRouteBlocker({
+    asker: {
+      kind: 'automation',
+      rule:
+        payload.ruleId === null
+          ? null
+          : await readLiveRule(transaction, payload.ruleId),
+    },
+    composed,
+    facts: await loadAutoRouteFacts(transaction, item.id),
+    lineCategory: composed.lineCategory,
+  });
+
+  if (blocked !== null) {
+    await recordAttempt(transaction, tenant, item, composed, [
+      {
+        code: 'policy_rejected',
+        message: `The automatic route stopped: ${blocked}`,
+      },
+    ]);
+    return { field: null, issue: 'policy_rejected', kind: 'failed' };
   }
 
   const missing = composed.missing[0] ?? null;

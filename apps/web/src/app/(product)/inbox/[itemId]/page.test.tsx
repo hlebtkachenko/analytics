@@ -329,10 +329,18 @@ function respondWith(
   answers: RouteAnswers = {},
 ) {
   const conflicts = [...(answers.conflicts ?? [])];
+  const draft =
+    (given['extraction'] as { draft?: Record<string, unknown> } | undefined)
+      ?.draft ?? {};
   // The detail item always carries the sender's DKIM verdict; the list entries never do.
   const detail: Record<string, unknown> = {
     corrections: [],
     parsed: null,
+    routeSuggestion: {
+      kind: draft['kind'] ?? routingTarget.documentKind,
+      legalEntityId: draft['legalEntityId'] ?? LEGAL_ENTITY_ID,
+      partnerId: draft['partnerId'] ?? null,
+    },
     routingTarget,
     ...given,
     item: { senderAuthenticated: false, ...(given['item'] as object) },
@@ -1464,6 +1472,43 @@ describe('InboxItemPage with a parsed ISDOC invoice', () => {
       fileBlobIds: [BLOB_ID],
       parsedExtractionId: PARSED_ID,
     });
+  });
+
+  it('uses the server entity suggestion when the parsed file names another entity', async () => {
+    const otherEntityId = '00000000-0000-4000-8000-000000000099';
+    const conflicting = {
+      ...parsedRow,
+      draft: { ...parsedRow.draft, legalEntityId: otherEntityId },
+      legalEntityId: otherEntityId,
+      issues: [
+        {
+          code: 'entity_conflict',
+          field: 'legalEntityId',
+          message: 'The customer differs from the selected entity.',
+        },
+      ],
+    };
+    const fetchMock = respondWithParsed([partner('services')], {
+      extraction: conflicting,
+      parsed: conflicting,
+      routeSuggestion: {
+        kind: 'received_invoice',
+        legalEntityId: LEGAL_ENTITY_ID,
+        partnerId: PARTNER_ID,
+      },
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderItemPage();
+
+    expect(await screen.findByLabelText('Legal entity')).toHaveValue(
+      LEGAL_ENTITY_ID,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'File as document' }));
+    await waitFor(() => expect(routeBodies(fetchMock)).toHaveLength(1));
+    expect(routeBodies(fetchMock)[0].document.legalEntityId).toBe(
+      LEGAL_ENTITY_ID,
+    );
   });
 
   it('sends the chosen line category with the route', async () => {

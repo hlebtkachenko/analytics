@@ -1,7 +1,11 @@
 import type { InboxCorrectionField, InboxCorrectionSource } from '@bap/db';
 
 import { DOCUMENT_KINDS, INVOICE_KINDS } from '../documents/contract.js';
-import type { InboxItem, InboxRoutingTarget } from './contract.js';
+import type {
+  InboxItem,
+  InboxRoutingTarget,
+  ParsedIsdocDraft,
+} from './contract.js';
 import type { InboxRuleDefinition } from './rules.js';
 
 export const DEFAULT_DRAFT_CURRENCY = 'CZK';
@@ -30,16 +34,16 @@ export interface ComposedDocumentDraft {
   title: string;
 }
 
-// The newest isdoc row as the composer reads it; its draft is the stored JSON, narrowed field by field.
+// The newest ISDOC row as the composer reads it; the schema checks the stored draft.
 export interface ParsedLayer {
-  draft: Record<string, unknown>;
+  draft: ParsedIsdocDraft;
   legalEntityId: string | null;
 }
 
 // The content a parsed file carries beyond the correctable header fields; copied, never edited in the Inbox.
 export interface DraftContent {
   attributes: Record<string, string> | null;
-  invoice: Record<string, unknown> | null;
+  invoice: NonNullable<ParsedIsdocDraft['invoice']> | null;
   totalAmount: string | null;
 }
 
@@ -52,8 +56,6 @@ const NO_CONTENT: DraftContent = {
 export interface ComposedDocument {
   content: DraftContent;
   draft: ComposedDocumentDraft;
-  // Where parsed item lines got their category; null when no line took one.
-  lineCategorySource: 'partner_default' | null;
   // The required fields the draft leaves empty: the destination's own plus the target's requiredFields.
   missing: string[];
   // Where each suggested value came from, so a correction can name it; null when nothing was suggested.
@@ -78,18 +80,20 @@ export const CORRECTION_FIELD_BY_DRAFT_KEY: Record<
   title: 'title',
 };
 
-function stringOf(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
-function recordOf(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 export function isInvoiceKind(kind: string | null): boolean {
   return INVOICE_KINDS.some((invoiceKind) => invoiceKind === kind);
+}
+
+// Parsed content stays attached to a parsed route; a different kind drops only its invoice block.
+export function parsedContent(
+  draft: ParsedIsdocDraft,
+  kind: string | null,
+): DraftContent {
+  return {
+    attributes: draft.attributes ?? null,
+    invoice: isInvoiceKind(kind) ? (draft.invoice ?? null) : null,
+    totalAmount: draft.totalAmount || null,
+  };
 }
 
 // Precedence for kind and entity is hint, rule, parse, target default: the parsed kind is a fact from the file,
@@ -100,9 +104,9 @@ export function composeDocumentDraft(
   effectiveTarget: InboxRoutingTarget,
   parsed: ParsedLayer | null = null,
 ): ComposedDocument {
-  const parsedDraft = parsed?.draft ?? {};
-  const parsedKind = documentKindOf(stringOf(parsedDraft.kind));
-  const parsedPartner = stringOf(parsedDraft.partnerId);
+  const parsedDraft = parsed?.draft ?? null;
+  const parsedKind = parsedDraft?.kind ?? null;
+  const parsedPartner = parsedDraft?.partnerId ?? null;
   const rules = [...matchedRules].sort((a, b) => a.priority - b.priority);
   const ruleKind = rules.find((rule) => rule.setDocumentKind !== null);
   const ruleEntity = rules.find((rule) => rule.setLegalEntityId !== null);
@@ -157,48 +161,30 @@ export function composeDocumentDraft(
     sources.partner_id = 'provider';
   }
 
-  const reference = stringOf(parsedDraft.reference);
+  const reference = parsedDraft?.reference || null;
 
   if (reference !== null) {
     sources.reference = 'provider';
   }
 
   const title = (
-    stringOf(parsedDraft.title) ??
-    item.primaryFilename ??
+    (parsedDraft?.title || item.primaryFilename) ??
     item.detectedType ??
     'unknown'
   )
     .trim()
     .slice(0, MAX_TITLE_LENGTH);
   const draft: ComposedDocumentDraft = {
-    currencyCode: stringOf(parsedDraft.currencyCode) ?? DEFAULT_DRAFT_CURRENCY,
-    documentDate:
-      stringOf(parsedDraft.documentDate) ?? item.receivedAt.slice(0, 10),
+    currencyCode: parsedDraft?.currencyCode || DEFAULT_DRAFT_CURRENCY,
+    documentDate: parsedDraft?.documentDate || item.receivedAt.slice(0, 10),
     kind,
     legalEntityId,
     partnerId,
     reference,
     title: title.length > 0 ? title : 'unknown',
   };
-  // A hint or rule kind that is not an invoice kind drops the invoice block; the rest of the content stays.
-  const invoice = recordOf(parsedDraft.invoice);
-  const attributes = recordOf(parsedDraft.attributes);
-  const content: DraftContent =
-    parsed === null
-      ? NO_CONTENT
-      : {
-          attributes:
-            attributes === null
-              ? null
-              : (Object.fromEntries(
-                  Object.entries(attributes).filter(
-                    ([, value]) => typeof value === 'string',
-                  ),
-                ) as Record<string, string>),
-          invoice: isInvoiceKind(kind) ? invoice : null,
-          totalAmount: stringOf(parsedDraft.totalAmount),
-        };
+  const content =
+    parsedDraft === null ? NO_CONTENT : parsedContent(parsedDraft, kind);
   const missing: string[] = [];
 
   if (draft.kind === null) {
@@ -219,7 +205,7 @@ export function composeDocumentDraft(
     }
   }
 
-  return { content, draft, lineCategorySource: null, missing, sources };
+  return { content, draft, missing, sources };
 }
 
 // The composed draft as the create body the documents contract parses; a null field is left out, not sent.
@@ -250,9 +236,7 @@ export function withLineCategory(
   content: DraftContent,
   category: string | null,
 ): DraftContent {
-  const lines = content.invoice?.lines;
-
-  if (category === null || content.invoice === null || !Array.isArray(lines)) {
+  if (category === null || content.invoice === null) {
     return content;
   }
 
@@ -260,11 +244,8 @@ export function withLineCategory(
     ...content,
     invoice: {
       ...content.invoice,
-      lines: lines.map((line: unknown) => {
-        const record = recordOf(line);
-        return record !== null && record.lineKind === 'item'
-          ? { ...record, category }
-          : line;
+      lines: content.invoice.lines.map((line) => {
+        return line.lineKind === 'item' ? { ...line, category } : line;
       }),
     },
   };

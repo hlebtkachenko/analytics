@@ -20,6 +20,7 @@ import { legalEntityIdentifierSchema } from '@bap/security';
 import { z } from 'zod';
 
 import {
+  INVOICE_KINDS,
   checkDocumentBody,
   createDocumentBodySchema,
   documentIdentifierSchema,
@@ -296,6 +297,51 @@ const jsonValueSchema: z.ZodType<unknown> = z.lazy(() =>
 export const draftSchema = z.record(z.string(), jsonValueSchema);
 export const fieldConfidencesSchema = z.record(z.string(), confidenceSchema);
 
+// Stored ISDOC content is shaped here, without invoice-create refinements: a flagged parse remains readable.
+export const parsedIsdocLineSchema = z
+  .object({
+    baseAmount: z.string(),
+    description: z.string(),
+    lineKind: z.enum(['item', 'advance_deduction']).default('item'),
+    quantity: z.string().optional(),
+    unit: z.string().optional(),
+    unitPrice: z.string().optional(),
+    vatAmount: z.string().default('0'),
+    vatMode: z
+      .enum(['exempt', 'outside_scope', 'reverse_charge', 'standard'])
+      .optional(),
+    vatRate: z.string().optional(),
+  })
+  .passthrough();
+
+export const parsedIsdocInvoiceSchema = z
+  .object({
+    dueDate: z.string().optional(),
+    fxRate: z.string().optional(),
+    lines: z.array(parsedIsdocLineSchema),
+    roundingAmount: z.string().default('0'),
+    taxPointDate: z.string().optional(),
+    variableSymbol: z.string().optional(),
+  })
+  .passthrough();
+
+export const parsedIsdocDraftSchema = z
+  .object({
+    attributes: z.record(z.string(), z.string()).optional(),
+    currencyCode: z.string().optional(),
+    documentDate: z.string().optional(),
+    invoice: parsedIsdocInvoiceSchema.nullish(),
+    kind: documentKindSchema.nullable().optional(),
+    legalEntityId: legalEntityIdentifierSchema.nullable().optional(),
+    partnerId: partnerIdentifierSchema.nullable().optional(),
+    reference: z.string().optional(),
+    title: z.string().optional(),
+    totalAmount: z.string().optional(),
+  })
+  .passthrough();
+
+export type ParsedIsdocDraft = z.infer<typeof parsedIsdocDraftSchema>;
+
 export const providerOutputSchema = z
   .object({
     confidence: confidenceSchema,
@@ -519,6 +565,15 @@ export const inboxItemDetailSchema = z
         senderAuthenticated: z.boolean(),
       })
       .strict(),
+    // The kind, entity and partner the server composes for a route, which the route form pre-fills; an entity outside
+    // the reader's scope is null.
+    routeSuggestion: z
+      .object({
+        kind: documentKindSchema.nullable(),
+        legalEntityId: legalEntityIdentifierSchema.nullable(),
+        partnerId: partnerIdentifierSchema.nullable(),
+      })
+      .strict(),
     // The effective target of the item's detected type, so the setting is visible on the item the day it lands.
     routingTarget: inboxRoutingTargetSchema,
   })
@@ -644,12 +699,21 @@ export const routeInboxItemToDocumentRequestSchema = z
       path: ['fileBlobIds'],
     },
   )
-  .superRefine((body, context) =>
-    checkDocumentBody(body.document, context, {
-      invoiceFromParsedRow: body.parsedExtractionId !== undefined,
-      path: ['document'],
-    }),
-  )
+  .superRefine((body, context) => {
+    checkDocumentBody(body.document, context, { path: ['document'] });
+
+    if (
+      body.document.invoice === undefined &&
+      body.parsedExtractionId === undefined &&
+      INVOICE_KINDS.includes(body.document.kind)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'An invoice kind requires invoice content.',
+        path: ['document', 'invoice'],
+      });
+    }
+  })
   .refine(
     (body) =>
       body.parsedExtractionId === undefined ||
@@ -939,12 +1003,28 @@ export const scanInboxItemJobSchema = z.union([
 
 export type ScanInboxItemJob = z.infer<typeof scanInboxItemJobSchema>;
 
-// The worker job that parses an ISDOC or ISDOCX item after a clean verdict: the scan job's own payload union.
+// The worker job that parses an ISDOC or ISDOCX item after a clean verdict: the scan job's principals, no route,
+// because the parse decides the route again from the stored rule matches.
 export const PARSE_INBOX_ITEM_QUEUE = 'parse_inbox_item';
 
-export const parseInboxItemJobSchema = scanInboxItemJobSchema;
+export const parseInboxItemJobSchema = z.union([
+  z
+    .object({
+      itemId: inboxItemIdentifierSchema,
+      organizationId: z.string().trim().min(1),
+      userId: subjectIdentifierSchema,
+    })
+    .strict(),
+  z
+    .object({
+      channelId: inboxChannelIdentifierSchema,
+      itemId: inboxItemIdentifierSchema,
+      organizationId: z.string().trim().min(1),
+    })
+    .strict(),
+]);
 
-export type ParseInboxItemJob = ScanInboxItemJob;
+export type ParseInboxItemJob = z.infer<typeof parseInboxItemJobSchema>;
 
 // The worker job that routes one item automatically: the item, and the rule that asked or null for a target default.
 export const ROUTE_INBOX_ITEM_QUEUE = 'route_inbox_item';

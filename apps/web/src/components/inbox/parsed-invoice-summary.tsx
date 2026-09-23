@@ -4,44 +4,27 @@ import { DataGrid } from '@bap/design-system/blocks';
 import type { GridColumn, GridRow } from '@bap/design-system/blocks';
 import { Stack, Tag } from '@bap/design-system/react';
 import { useTranslation } from 'react-i18next';
-import { z } from 'zod';
 
 import {
   decimalUnits,
   formatDecimalUnits,
 } from '../../lib/documents/contract.ts';
 import { formatDate, formatMoney } from '../../lib/format.ts';
+import { parsedIsdocDraftSchema } from '../../lib/inbox/contract.ts';
 import type { InboxExtraction } from '../../lib/inbox/contract.ts';
 import { inboxIssueCodeLabelKeys } from '../../lib/inbox/labels.ts';
 import styles from './parsed-invoice-summary.module.scss';
 
-// Lenient on purpose: the parser leaves item lines without a category and may keep a negative amount it flagged.
-const parsedLineSchema = z.object({
-  baseAmount: z.string(),
-  description: z.string(),
-  lineKind: z.enum(['item', 'advance_deduction']).default('item'),
-  quantity: z.string().optional(),
-  unit: z.string().optional(),
-  unitPrice: z.string().optional(),
-  vatAmount: z.string().default('0'),
-});
-
-const parsedInvoiceSchema = z.object({
-  dueDate: z.string().optional(),
-  lines: z.array(parsedLineSchema),
-  roundingAmount: z.string().default('0'),
-  taxPointDate: z.string().optional(),
-  variableSymbol: z.string().optional(),
-});
-
-export type ParsedInvoice = z.infer<typeof parsedInvoiceSchema>;
+export type ParsedInvoice = NonNullable<
+  ReturnType<typeof parsedIsdocDraftSchema.parse>['invoice']
+>;
 
 // The invoice block of a parsed row, or undefined when the row carries none, as for a credit note.
 export function parsedInvoiceOf(
   parsed: InboxExtraction | null,
 ): ParsedInvoice | undefined {
-  const result = parsedInvoiceSchema.safeParse(parsed?.draft['invoice']);
-  return result.success ? result.data : undefined;
+  const result = parsedIsdocDraftSchema.safeParse(parsed?.draft);
+  return result.success ? (result.data.invoice ?? undefined) : undefined;
 }
 
 const units = (value: string): bigint => decimalUnits(value) ?? 0n;

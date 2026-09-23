@@ -8,9 +8,52 @@ import {
   documentKindSchema,
   identifierSchema,
   invoiceLineCategorySchema,
+  isInvoiceKind,
 } from '../documents/contract.ts';
 
 // Mirrors apps/api inbox contract, which apps/web must not import.
+
+export const parsedIsdocLineSchema = z
+  .object({
+    baseAmount: z.string(),
+    description: z.string(),
+    lineKind: z.enum(['item', 'advance_deduction']).default('item'),
+    quantity: z.string().optional(),
+    unit: z.string().optional(),
+    unitPrice: z.string().optional(),
+    vatAmount: z.string().default('0'),
+    vatMode: z
+      .enum(['exempt', 'outside_scope', 'reverse_charge', 'standard'])
+      .optional(),
+    vatRate: z.string().optional(),
+  })
+  .passthrough();
+
+export const parsedIsdocInvoiceSchema = z
+  .object({
+    dueDate: z.string().optional(),
+    fxRate: z.string().optional(),
+    lines: z.array(parsedIsdocLineSchema),
+    roundingAmount: z.string().default('0'),
+    taxPointDate: z.string().optional(),
+    variableSymbol: z.string().optional(),
+  })
+  .passthrough();
+
+export const parsedIsdocDraftSchema = z
+  .object({
+    attributes: z.record(z.string(), z.string()).optional(),
+    currencyCode: z.string().optional(),
+    documentDate: z.string().optional(),
+    invoice: parsedIsdocInvoiceSchema.nullish(),
+    kind: documentKindSchema.nullable().optional(),
+    legalEntityId: identifierSchema.nullable().optional(),
+    partnerId: identifierSchema.nullable().optional(),
+    reference: z.string().optional(),
+    title: z.string().optional(),
+    totalAmount: z.string().optional(),
+  })
+  .passthrough();
 
 export const MAX_INBOX_PAGE_SIZE = 100;
 export const DEFAULT_INBOX_PAGE_SIZE = 25;
@@ -429,6 +472,14 @@ export const inboxItemDetailSchema = z
         senderAuthenticated: z.boolean(),
       })
       .strict(),
+    // The kind, entity and partner the server composes for a route; the route form pre-fills these, never the raw file.
+    routeSuggestion: z
+      .object({
+        kind: documentKindSchema.nullable(),
+        legalEntityId: identifierSchema.nullable(),
+        partnerId: identifierSchema.nullable(),
+      })
+      .strict(),
     // The effective target of the item's detected type, so the setting is visible on the item the day it lands.
     routingTarget: inboxRoutingTargetSchema,
   })
@@ -551,12 +602,21 @@ export const routeInboxItemToDocumentRequestSchema = z
   })
   .strict()
   .refine((body) => new Set(body.fileBlobIds).size === body.fileBlobIds.length)
-  .superRefine((body, context) =>
-    checkDocumentBody(body.document, context, {
-      invoiceFromParsedRow: body.parsedExtractionId !== undefined,
-      path: ['document'],
-    }),
-  )
+  .superRefine((body, context) => {
+    checkDocumentBody(body.document, context, { path: ['document'] });
+
+    if (
+      body.document.invoice === undefined &&
+      body.parsedExtractionId === undefined &&
+      isInvoiceKind(body.document.kind)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Invoice content is required for invoice kinds only.',
+        path: ['document', 'invoice'],
+      });
+    }
+  })
   .refine(
     (body) =>
       body.parsedExtractionId === undefined ||

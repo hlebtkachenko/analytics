@@ -449,13 +449,15 @@ describe('parse_inbox_item', () => {
       'invoice.isdoc',
     );
     const itemId = uploaded.item.id;
-    // The scan hands an ISDOC to the parse, with the uploader payload unchanged, and never routes it directly.
+    // The scan hands an ISDOC to the parse under the uploader, and never routes it directly.
     const job = parseJobFor(itemId);
     expect(job).toMatchObject({
       itemId,
       organizationId: 'org-1',
       userId: owner.userId,
     });
+    // Only the scan carries the deferred route; the parse decides it again.
+    expect(job).not.toHaveProperty('routeRuleId');
 
     const outcome = await runParse(job);
     expect(outcome).toEqual({ issues: [], kind: 'parsed', routed: true });

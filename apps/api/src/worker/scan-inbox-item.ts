@@ -28,7 +28,7 @@ const SETTLED_STATUSES = ['discarded', 'failed'];
 export interface ScanInboxItemOptions {
   blobs: BlobStore;
   data: unknown;
-  // Sent instead of the route after a clean verdict when the sniff named an ISDOC, with the same payload.
+  // Sent instead of the route after a clean verdict when the sniff named an ISDOC, under the same principal.
   enqueueParseInboxItem: (job: ParseInboxItemJob) => Promise<void>;
   // Sent after the last blob came back clean, carrying the route decision the intake already took.
   enqueueRouteInboxItem: (job: RouteInboxItemJob) => Promise<void>;
@@ -201,13 +201,25 @@ export async function scanInboxItem(
       }
     }
 
-    // Every blob is clean: an ISDOC is parsed first, with the same payload; the parse decides the route itself.
+    // Every blob is clean: an ISDOC is parsed first, under the same principal; the parse decides the route itself.
     if (
       !routed &&
       pending.sniffedType === ISDOC_DETECTED_TYPE &&
       !pending.parsed
     ) {
-      await options.enqueueParseInboxItem(payload);
+      await options.enqueueParseInboxItem(
+        'userId' in payload
+          ? {
+              itemId: payload.itemId,
+              organizationId: payload.organizationId,
+              userId: payload.userId,
+            }
+          : {
+              channelId: payload.channelId,
+              itemId: payload.itemId,
+              organizationId: payload.organizationId,
+            },
+      );
     } else if (!routed && payload.routeRuleId !== undefined) {
       // The route the intake deferred is sent; a routed item and a swept one carry none.
       await options.enqueueRouteInboxItem({

@@ -637,15 +637,11 @@ export const createDocumentBodySchema = z
 export function checkDocumentBody(
   body: z.infer<typeof createDocumentBodySchema>,
   context: z.RefinementCtx,
-  options: { invoiceFromParsedRow?: boolean; path?: string[] } = {},
+  options: { path?: string[] } = {},
 ): void {
   const path = options.path ?? [];
-  const invoiceExpected =
-    isInvoiceKind(body.kind) && options.invoiceFromParsedRow !== true;
   // Invoice content belongs to the two invoice kinds and to no other kind.
-  if (
-    body.invoice === undefined ? invoiceExpected : !isInvoiceKind(body.kind)
-  ) {
+  if (body.invoice !== undefined && !isInvoiceKind(body.kind)) {
     context.addIssue({
       code: 'custom',
       message: 'Invoice content is required for invoice kinds only.',
@@ -667,7 +663,17 @@ export function checkDocumentBody(
 }
 
 export const createDocumentRequestSchema = createDocumentBodySchema.superRefine(
-  (body, context) => checkDocumentBody(body, context),
+  (body, context) => {
+    checkDocumentBody(body, context);
+
+    if (isInvoiceKind(body.kind) && body.invoice === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Invoice content is required for invoice kinds only.',
+        path: ['invoice'],
+      });
+    }
+  },
 );
 
 export const updateDocumentRequestSchema = z

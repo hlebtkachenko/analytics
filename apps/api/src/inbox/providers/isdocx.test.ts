@@ -130,6 +130,40 @@ describe('readIsdocx', () => {
     ).toBe('ok');
   });
 
+  it('bounds the directory walk across many end records, so a crafted archive finishes fast', () => {
+    const headers = 20_000;
+    const directory = Buffer.alloc(headers * 46);
+
+    for (let index = 0; index < headers; index += 1) {
+      directory.writeUInt32LE(0x02014b50, index * 46);
+    }
+
+    // Each end record claims the whole directory; the first declares more than the cap, the second 50 entries.
+    const endRecords = (entries: number): Buffer =>
+      Buffer.concat(
+        Array.from({ length: 2_900 }, () => {
+          const end = Buffer.alloc(22);
+          end.writeUInt32LE(0x06054b50, 0);
+          end.writeUInt16LE(entries, 8);
+          end.writeUInt16LE(entries, 10);
+          end.writeUInt32LE(directory.length, 12);
+          return end;
+        }),
+      );
+
+    for (const [entries, code] of [
+      [headers, 'too_large'],
+      [50, 'unreadable'],
+    ] as const) {
+      const bytes = Buffer.concat([directory, endRecords(entries)]);
+      const started = performance.now();
+      const result = readIsdocx(bytes);
+
+      expect(performance.now() - started).toBeLessThan(250);
+      expect(!result.ok && result.failure.code).toBe(code);
+    }
+  });
+
   it('refuses a file with no end record', () => {
     expect(readIsdocx(Buffer.from('PK\x03\x04 not an archive')).ok).toBe(false);
     const result = readIsdocx(Buffer.from('PK\x03\x04 not an archive'));

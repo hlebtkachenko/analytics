@@ -5,8 +5,10 @@ import { composeDocumentDraft } from './draft-composer.js';
 import type { DraftSourceItem } from './draft-composer.js';
 import {
   decideAutoRoute,
+  invoiceRouteBlocker,
   type AutoRouteFacts,
 } from './inbox-rule-repository.js';
+import type { InboxRuleDefinition } from './rules.js';
 import { routingTargetFor } from './routing-targets.js';
 
 const ENTITY_ID = '9d1e2f30-4a5b-4c6d-8e7f-901a2b3c4d5e';
@@ -69,8 +71,26 @@ function facts(overrides: Partial<AutoRouteFacts> = {}): AutoRouteFacts {
   };
 }
 
+function autoRule(senderPattern: string | null): InboxRuleDefinition {
+  return {
+    autoRoute: true,
+    channelId: null,
+    detectedType: 'isdoc_invoice',
+    discardReason: null,
+    id: '00000000-0000-4000-8000-0000000000dd',
+    keyword: null,
+    priority: 1,
+    senderPattern,
+    setAssigneeId: null,
+    setDocumentKind: null,
+    setLegalEntityId: null,
+    setPartnerId: null,
+  };
+}
+
 function decide(
   input: {
+    autoRouteRule?: InboxRuleDefinition | null;
     facts?: AutoRouteFacts;
     item?: Partial<DraftSourceItem>;
     lineCategory?: string | null;
@@ -91,7 +111,7 @@ function decide(
   );
 
   return decideAutoRoute({
-    autoRouteRuleId: null,
+    autoRouteRule: input.autoRouteRule ?? null,
     composed,
     confidence: 0.95,
     facts: known,
@@ -156,13 +176,60 @@ describe('decideAutoRoute', () => {
     );
   });
 
-  it('waits for an unauthenticated email child, whoever asks', () => {
-    expect(decide({ facts: facts({ emailChild: true }) }).reason).toContain(
-      'not authenticated',
+  // Only a sender-bound rule with an authenticated sender routes a parsed email child, whatever its kind.
+  it.each([
+    ['an invoice', {}],
+    [
+      'a credit note',
+      {
+        attributes: { isdoc_document_type: '2' },
+        invoice: undefined,
+        kind: 'credit_note',
+        totalAmount: '121',
+      },
+    ],
+  ])('routes %s from an email only through a sender-bound rule', (_kind, draft) => {
+    const parsed = parsedRow(draft);
+    const email = (senderAuthenticated: boolean) =>
+      facts({ emailChild: true, parsed, senderAuthenticated });
+    const neverTarget = { ...target, auto: 'never' as const };
+
+    // Target-only auto, an authenticated sender or not.
+    expect(decide({ facts: email(true) }).reason).toContain(
+      'sender-bound rule',
     );
+    expect(decide({ facts: email(false) }).reason).toContain(
+      'sender-bound rule',
+    );
+    // A rule with no sender pattern.
     expect(
-      decide({ facts: facts({ emailChild: true, senderAuthenticated: true }) }),
+      decide({
+        autoRouteRule: autoRule(null),
+        facts: email(true),
+        target: neverTarget,
+      }).reason,
+    ).toContain('sender-bound rule');
+    // A sender-bound rule with an unauthenticated sender.
+    expect(
+      decide({
+        autoRouteRule: autoRule('@supplier.test'),
+        facts: email(false),
+        target: neverTarget,
+      }).reason,
+    ).toContain('sender-bound rule');
+    // A sender-bound rule with an authenticated sender is the one way through.
+    expect(
+      decide({
+        autoRouteRule: autoRule('@supplier.test'),
+        facts: email(true),
+        target: neverTarget,
+      }),
     ).toEqual({ job: 'route', reason: null });
+    // Uploads and API items keep the target default guard.
+    expect(decide({ facts: facts({ parsed }) })).toEqual({
+      job: 'route',
+      reason: null,
+    });
   });
 
   it('never routes an advance tax document', () => {
@@ -188,5 +255,53 @@ describe('decideAutoRoute', () => {
         target: { ...routingTargetFor('pdf'), auto: 'always' },
       }).reason,
     ).toContain('missing legalEntityId');
+  });
+});
+
+describe('invoiceRouteBlocker', () => {
+  function block(
+    input: {
+      facts?: AutoRouteFacts;
+      item?: Partial<DraftSourceItem>;
+    } = {},
+  ) {
+    const known = input.facts ?? facts();
+    const composed = composeDocumentDraft(
+      { ...item, ...input.item },
+      [],
+      target,
+      known.parsed === null
+        ? null
+        : {
+            draft: known.parsed.draft,
+            legalEntityId: known.parsed.legalEntityId,
+          },
+    );
+
+    return invoiceRouteBlocker({
+      asker: { kind: 'person' },
+      composed,
+      facts: known,
+      lineCategory: 'services',
+    });
+  }
+
+  it('lets a person file a clean parse, but not one with issues or another entity or partner', () => {
+    expect(block()).toBeNull();
+    expect(block({ facts: facts({ issuesSinceParsed: true }) })).toContain(
+      'clean ISDOC parse',
+    );
+    expect(block({ item: { hintLegalEntityId: OTHER_ENTITY_ID } })).toContain(
+      'legal entity',
+    );
+    expect(block({ item: { hintPartnerId: OTHER_PARTNER_ID } })).toContain(
+      'partner differs',
+    );
+  });
+
+  it('never asks a person for a sender binding', () => {
+    expect(
+      block({ facts: facts({ emailChild: true, senderAuthenticated: false }) }),
+    ).toBeNull();
   });
 });

@@ -700,23 +700,10 @@ export const createDocumentBodySchema = z
 export function checkDocumentBody(
   body: z.infer<typeof createDocumentBodySchema>,
   context: z.RefinementCtx,
-  // A parsed inbox route carries no invoice of its own; the path prefix places issues under its document field.
-  options: { invoiceFromParsedRow?: boolean; path?: string[] } = {},
+  options: { path?: string[] } = {},
 ): void {
   const needsInvoice = INVOICE_KINDS.includes(body.kind);
   const path = options.path ?? [];
-
-  if (
-    needsInvoice &&
-    body.invoice === undefined &&
-    options.invoiceFromParsedRow !== true
-  ) {
-    context.addIssue({
-      code: 'custom',
-      message: 'An invoice kind requires invoice content.',
-      path: [...path, 'invoice'],
-    });
-  }
 
   if (!needsInvoice && body.invoice !== undefined) {
     context.addIssue({
@@ -740,7 +727,17 @@ export function checkDocumentBody(
 }
 
 export const createDocumentRequestSchema = createDocumentBodySchema.superRefine(
-  (body, context) => checkDocumentBody(body, context),
+  (body, context) => {
+    checkDocumentBody(body, context);
+
+    if (INVOICE_KINDS.includes(body.kind) && body.invoice === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'An invoice kind requires invoice content.',
+        path: ['invoice'],
+      });
+    }
+  },
 );
 
 export type CreateDocumentRequest = z.infer<typeof createDocumentRequestSchema>;
