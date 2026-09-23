@@ -36,5 +36,10 @@
   { "slug": "audit", "valid": false },
   { "slug": "workspaces", "valid": false },
   { "slug": "notifications", "valid": false },
-  { "slug": "inbox", "valid": false }
+  { "slug": "inbox", "valid": false },
+  { "slug": "employees", "valid": false },
+  { "slug": "payroll", "valid": false },
+  { "slug": "hr-settings", "valid": false },
+  { "slug": "time", "valid": false },
+  { "slug": "my-hr", "valid": false }
 ]

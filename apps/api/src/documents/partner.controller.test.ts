@@ -300,7 +300,7 @@ describe('application partner routes', () => {
 
     entityScope = { legalEntityIds: [ENTITY_ID], mode: 'restricted' };
     await request(application.getHttpServer())
-      .post('/v1/organizations/organization_1/partners')
+      .post('/v1/organizations/organization_2/partners')
       .set('Authorization', 'Bearer caller')
       .send({ legalEntityId: ENTITY_ID, name: 'Placeholder Partner' })
       .expect(201);

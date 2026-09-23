@@ -55,9 +55,16 @@ export const accessResponseSchema = z
         deleteEntities: z.boolean(),
         manageDocuments: z.boolean(),
         manageEntityAccess: z.boolean(),
+        manageHr: z.boolean(),
         manageMembers: z.boolean(),
         manageOrganization: z.boolean(),
+        managePayroll: z.boolean(),
+        manageSensitiveHr: z.boolean(),
+        approvePayroll: z.boolean(),
         readDocuments: z.boolean(),
+        readHr: z.boolean(),
+        readPayroll: z.boolean(),
+        readSensitiveHr: z.boolean(),
         updateEntities: z.boolean(),
         uploadData: z.boolean(),
         useAi: z.boolean(),
@@ -273,6 +280,7 @@ export type OrganizationAccess = z.infer<typeof accessResponseSchema>;
 type ApplicationJsonCall = Readonly<{
   body?: unknown;
   errorCode: string;
+  headers?: Readonly<Record<string, string>>;
   // A problem code from this closed list is passed through beside the error code; nothing else of the body is.
   passthroughCodes?: z.ZodEnum<Record<string, string>>;
   // A 409 body of this closed shape is passed through whole, since the page acts on the ids it names.
@@ -282,7 +290,7 @@ type ApplicationJsonCall = Readonly<{
   path: string;
   // A null schema means the contract answers with no content at all.
   schema: z.ZodType | null;
-  successStatus: number;
+  successStatus: number | readonly number[];
 }>;
 
 // One outbound JSON call under the shared timeout, private headers and failure vocabulary.
@@ -295,6 +303,7 @@ export async function callApplicationJson(
     authorization: `Bearer ${prepared.token}`,
     'x-bap-request-id': prepared.requestId,
   };
+  Object.assign(outboundHeaders, call.headers);
 
   if (call.body !== undefined) {
     outboundHeaders['content-type'] = 'application/json';
@@ -340,13 +349,20 @@ export async function callApplicationJson(
     );
   }
 
+  const expectedStatuses = Array.isArray(call.successStatus)
+    ? call.successStatus
+    : [call.successStatus];
+  if (!expectedStatuses.includes(response.status)) {
+    return upstreamFailure(call.operation, 'unexpected_shape');
+  }
+
   if (call.schema === null) {
     return new Response(null, {
       headers: {
         ...privateResponseHeaders,
         'x-request-id': prepared.requestId,
       },
-      status: call.successStatus,
+      status: response.status,
     });
   }
 
@@ -362,7 +378,7 @@ export async function callApplicationJson(
     return upstreamFailure(call.operation, 'unexpected_shape');
   }
 
-  return jsonResponse(payload.data, call.successStatus, {
+  return jsonResponse(payload.data, response.status, {
     'x-request-id': prepared.requestId,
   });
 }

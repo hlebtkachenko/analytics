@@ -25,4 +25,9 @@ export const reservedOrganizationSlugs = [
   'workspaces',
   'notifications',
   'inbox',
+  'employees',
+  'payroll',
+  'hr-settings',
+  'time',
+  'my-hr',
 ] as const;

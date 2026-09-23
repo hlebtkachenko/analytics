@@ -20,6 +20,33 @@ import {
   PartnerRepository,
 } from './documents/partner-repository.js';
 import { HealthController } from './health.controller.js';
+import { HrController } from './hr/hr.controller.js';
+import { HrTimeController } from './hr-time/hr-time.controller.js';
+import { HrSelfServiceController } from './hr-self-service/hr-self-service.controller.js';
+import {
+  DatabaseHrSelfServiceRepository,
+  HrSelfServiceRepository,
+} from './hr-self-service/hr-self-service-repository.js';
+import {
+  DatabaseHrTimeRepository,
+  HrTimeRepository,
+} from './hr-time/hr-time-repository.js';
+import { PayrollController } from './payroll/payroll.controller.js';
+import {
+  DatabasePayrollRepository,
+  PayrollRepository,
+} from './payroll/payroll-repository.js';
+import { HrAccessController } from './hr/access.controller.js';
+import {
+  DatabaseHrAccessRepository,
+  HrAccessRepository,
+} from './hr/access-repository.js';
+import { DatabaseHrRepository, HrRepository } from './hr/hr-repository.js';
+import { ReferenceController } from './hr/reference.controller.js';
+import {
+  DatabaseReferenceRepository,
+  ReferenceRepository,
+} from './hr/reference-repository.js';
 import {
   IngestionQueue,
   PgBossIngestionQueue,
@@ -39,6 +66,15 @@ import {
   INTAKE_DOMAIN,
   InboxService,
 } from './inbox/inbox.service.js';
+import { PayrollImportController } from './payroll-import/payroll-import.controller.js';
+import {
+  DatabasePayrollImportRepository,
+  PayrollImportRepository,
+} from './payroll-import/payroll-import-repository.js';
+import {
+  PayrollImportQueue,
+  PgBossPayrollImportQueue,
+} from './payroll-import/payroll-import-queue.js';
 import { EntityScopeController } from './legal-entities/entity-scope.controller.js';
 import { LegalEntityController } from './legal-entities/legal-entity.controller.js';
 import {
@@ -73,22 +109,61 @@ import {
     InboxController,
     InboxRulesController,
     InboxSettingsController,
+    HrController,
+    HrTimeController,
+    HrSelfServiceController,
+    PayrollController,
+    HrAccessController,
+    ReferenceController,
     LegalEntityController,
     MetricsController,
     PartnerController,
     ReadyController,
     UploadController,
+    PayrollImportController,
   ],
   providers: [
     DatabaseDatasetRepository,
     DatabaseDocumentRepository,
     DatabaseInboxRepository,
     DatabaseLegalEntityRepository,
+    DatabaseHrRepository,
+    DatabaseHrTimeRepository,
+    DatabaseHrSelfServiceRepository,
+    DatabasePayrollRepository,
+    DatabaseHrAccessRepository,
+    DatabaseReferenceRepository,
     DatabaseMembershipResolver,
     DatabasePartnerRepository,
     DatabaseUploadRepository,
     PgBossInboxQueue,
+    DatabasePayrollImportRepository,
+    PgBossPayrollImportQueue,
     PgBossIngestionQueue,
+    {
+      provide: HrRepository,
+      useExisting: DatabaseHrRepository,
+    },
+    {
+      provide: HrTimeRepository,
+      useExisting: DatabaseHrTimeRepository,
+    },
+    {
+      provide: HrSelfServiceRepository,
+      useExisting: DatabaseHrSelfServiceRepository,
+    },
+    {
+      provide: PayrollRepository,
+      useExisting: DatabasePayrollRepository,
+    },
+    {
+      provide: HrAccessRepository,
+      useExisting: DatabaseHrAccessRepository,
+    },
+    {
+      provide: ReferenceRepository,
+      useExisting: DatabaseReferenceRepository,
+    },
     {
       provide: DatasetRepository,
       useExisting: DatabaseDatasetRepository,
@@ -125,6 +200,11 @@ import {
       provide: UploadRepository,
       useExisting: DatabaseUploadRepository,
     },
+    {
+      provide: PayrollImportRepository,
+      useExisting: DatabasePayrollImportRepository,
+    },
+    { provide: PayrollImportQueue, useExisting: PgBossPayrollImportQueue },
     {
       inject: [MembershipResolver],
       provide: ServiceMetrics,

@@ -67,6 +67,7 @@ let entityId = '';
 let partnerId = '';
 let documentId = '';
 let entityScope: EntityScope = { mode: 'all' };
+let membershipRole: 'owner' | 'member' = 'owner';
 
 // The owner of the one organization the scenario uses.
 const creator: TenantContext = {
@@ -355,7 +356,7 @@ beforeAll(async () => {
     readEntityScope: vi.fn(async () => entityScope),
     resolve: vi.fn(async () => ({
       emailVerified: true,
-      role: 'owner' as const,
+      role: membershipRole,
     })),
   };
   const module = await Test.createTestingModule({
@@ -840,6 +841,7 @@ describe('a five month invoice with mixed VAT, a deducted advance and rounding',
   });
 
   it('answers a member scoped to another entity with empty aggregates', async () => {
+    membershipRole = 'member';
     entityScope = {
       legalEntityIds: [OUT_OF_SCOPE_ENTITY_ID],
       mode: 'restricted',
@@ -869,6 +871,7 @@ describe('a five month invoice with mixed VAT, a deducted advance and rounding',
       });
     } finally {
       entityScope = { mode: 'all' };
+      membershipRole = 'owner';
     }
   });
 

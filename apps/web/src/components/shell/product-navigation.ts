@@ -1,4 +1,11 @@
-import { DataSet, Document, Email, UserAvatar } from '@bap/design-system/icons';
+import {
+  DataSet,
+  Document,
+  Email,
+  Settings,
+  UserAvatar,
+  UserMultiple,
+} from '@bap/design-system/icons';
 import type { ComponentType } from 'react';
 
 // Carbon icon components accept a Carbon artboard size and nothing the rail sets.
@@ -30,6 +37,31 @@ export const railDestinations: readonly RailDestination[] = [
     icon: Document,
     labelKey: 'shell.nav.documents',
     route: 'documents',
+  },
+  {
+    href: '/employees',
+    icon: UserMultiple,
+    labelKey: 'shell.nav.employees',
+    route: 'employees',
+  },
+  { href: '/time', icon: DataSet, labelKey: 'shell.nav.time', route: 'time' },
+  {
+    href: '/my-hr',
+    icon: UserAvatar,
+    labelKey: 'shell.nav.myHr',
+    route: 'my-hr',
+  },
+  {
+    href: '/payroll',
+    icon: DataSet,
+    labelKey: 'shell.nav.payroll',
+    route: 'payroll',
+  },
+  {
+    href: '/hr-settings/structure',
+    icon: Settings,
+    labelKey: 'shell.nav.hrSettings',
+    route: 'hr-settings',
   },
   {
     href: '/account',

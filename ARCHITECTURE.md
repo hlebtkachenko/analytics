@@ -417,6 +417,14 @@ has no provider credential, persistent volume, or production service. Bootstrap
 omits the overlay, and production mail continues through Resend on
 `internet-egress`.
 
+The Wave 0 HR boundary records employee, employment, employee-document, payroll
+run, and payroll result facts inside the same organization and legal-entity RLS
+model. Owner/admin capabilities are enforced at the API and database boundary;
+payroll runs are immutable and versioned, and their validated totals derive into
+the existing economic-event path. Payroll calculation, statutory exports,
+sensitive records, time and leave, self-service, and HR analytics are planned or
+gated work, not operational services in this architecture.
+
 ## Operational map
 
 | Process           | Internal port | Public surface            | Private readiness |

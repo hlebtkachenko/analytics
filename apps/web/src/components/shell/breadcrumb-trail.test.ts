@@ -16,6 +16,10 @@ const navigationLabels: Readonly<Record<string, string>> = {
   'shell.nav.inboxChannels': 'Sources',
   'shell.nav.inboxItem': 'Item',
   'shell.nav.inboxRules': 'Rules',
+  'shell.nav.myHr': 'My HR',
+  'shell.nav.payslips': 'Payslips',
+  'shell.nav.leave': 'Leave',
+  'shell.nav.time': 'Time',
   'shell.nav.notifications': 'Notifications',
   'shell.nav.settings': 'Settings',
   'shell.nav.singleDocument': 'Document',
@@ -28,6 +32,17 @@ function translate(key: string): string {
 }
 
 describe('buildTrail', () => {
+  it('labels the My HR module and every contracted child without exposing route segments', () => {
+    expect(buildTrail(['my-hr'], undefined, translate).at(-1)?.label).toBe(
+      'My HR',
+    );
+    for (const child of ['documents', 'payslips', 'time', 'leave'])
+      expect(
+        buildTrail(['my-hr', child], undefined, translate).at(-1)?.label,
+      ).toBe(
+        child === 'time' ? 'Time' : child[0]!.toUpperCase() + child.slice(1),
+      );
+  });
   it('drops route group segments and labels a known module', () => {
     expect(
       buildTrail(['(product)', 'documents'], undefined, translate),

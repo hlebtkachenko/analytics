@@ -12,6 +12,8 @@
     "compose:verify": "node scripts/verify-compose-models.mjs",
     "demo:documents": "bash scripts/demo-documents.sh",
     "demo:documents:down": "bash scripts/demo-documents.sh --down",
+    "demo:hr": "bash scripts/demo-hr.sh",
+    "demo:hr:down": "bash scripts/demo-hr.sh --down",
     "demo:inbox": "bash scripts/demo-inbox.sh",
     "demo:inbox:down": "bash scripts/demo-inbox.sh --down",
     "demo:tenancy": "bash scripts/demo-tenancy.sh",

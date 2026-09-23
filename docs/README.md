@@ -12,9 +12,13 @@ scoped to all entities or an explicit subset, and datasets and uploads each
 belong to exactly one legal entity. The platform can ingest, list, view, export,
 summarize, embed, and chat about domain-free datasets while preserving
 organization and per-user data isolation. The documents register and its derived
-economic events are the first business-domain schema; broader analytics
-semantics, production rollout, and owner-dependent infrastructure remain
-deliberately deferred.
+economic events are the first business-domain schema. The Wave 0 HR and payroll
+recorded-facts slice is also implemented: employee and payroll facts are
+tenant-pinned, RLS-protected, permissioned, and derived into the existing
+accounting event path. Payroll calculation, statutory exports, sensitive data,
+time and leave, self-service, HR analytics, and Waves 1-7 remain planned or
+gated; production rollout and owner-dependent infrastructure remain deliberately
+deferred.
 
 ## Documentation map
 
@@ -29,6 +33,8 @@ deliberately deferred.
 - [Application and HTTP routes](application-routes.md)
 - [Adding a product page](product-pages.md)
 - [Documents](documents.md)
+- [HR and payroll](hr-payroll.md)
+- [HR and payroll plan](planning/hr-payroll.md)
 - [Database ownership and tenant isolation](database-isolation.md)
 - [Backup and restore proof](backup-and-restore.md)
 - [Phase 5 SaaS foundation report](reports/phase-5-saas-foundation.md)
@@ -67,6 +73,7 @@ deliberately deferred.
 - [ADR 0014: durable blob storage](adr/0014-durable-blob-storage.md)
 - [ADR 0015: inbox intake model](adr/0015-inbox-intake-model.md)
 - [ADR 0016: channel principal](adr/0016-channel-principal.md)
+- [ADR 0017: HR and payroll as recorded facts](adr/0017-hr-payroll-recorded-facts.md)
 
 Documentation must stay synchronized with commands, runtime behavior, and
 architecture decisions in the same change.

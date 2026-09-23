@@ -97,7 +97,7 @@ demo_create_accounts() {
   printf '== 4/6 Creating the owner, admin, and member accounts\n'
   bootstrap_compose build bootstrap-owner
 
-  local owner_input owner_result owner_user_id member_input member_user_id role role_email role_name
+  local owner_input owner_result owner_user_id member_input member_result member_user_id role role_email role_name
   owner_input=$(jq -cn \
     --arg email "$BAP_OPERATIONAL_EMAIL" \
     --arg name 'Operational Owner' \
@@ -126,11 +126,19 @@ demo_create_accounts() {
       --arg organization_slug "$organization_slug" \
       --arg role "$role" \
       '{email: $email, password: env.BAP_OPERATIONAL_PASSWORD, name: $name, organizationSlug: $organization_slug, role: $role}')
-    member_user_id=$(create_account "$member_input" |
+    member_result=$(create_account "$member_input")
+    member_user_id=$(printf '%s' "$member_result" |
       jq -er 'select(.status == "created") | .userId | select(type == "string" and test("^[A-Za-z0-9_-]{1,128}$"))')
     # Entity access is granted, never assumed, so a directly seeded member now needs an explicit
     # all-entities scope to keep the demo usable; the accounts are synthetic and local only.
     demo_grant_all_entity_scope "$BAP_OPERATIONAL_ORGANIZATION_ID" "$member_user_id" "$owner_user_id"
+    if [[ $role == admin ]]; then
+      BAP_OPERATIONAL_ADMIN_USER_ID=$member_user_id
+      export BAP_OPERATIONAL_ADMIN_USER_ID
+    else
+      BAP_OPERATIONAL_MEMBER_USER_ID=$member_user_id
+      export BAP_OPERATIONAL_MEMBER_USER_ID
+    fi
     printf 'Added %s as %s.\n' "$role_email" "$role"
   done
 }

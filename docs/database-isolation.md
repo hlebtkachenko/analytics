@@ -6,15 +6,15 @@ connection URLs are not accepted.
 
 ## Roles
 
-| Role            | Purpose                                  | Owner membership | RLS bypass |
-| --------------- | ---------------------------------------- | ---------------- | ---------- |
-| `bap_owner`     | Own schemas and reviewed objects         | Not a login      | No         |
-| `bap_eraser`    | Anonymize 8 approved subject columns     | SET from owner   | Yes        |
-| `bap_migrator`  | Run reviewed migrations after `SET ROLE` | SET only         | No         |
-| `bap_auth`      | Better Auth tables and rate limits       | None             | No         |
-| `bap_api`       | Application membership resolver          | None             | No         |
-| `bap_reporting` | Reporting membership resolver            | None             | No         |
-| `bap_backup`    | Full read-only logical dump              | None             | Yes        |
+| Role            | Purpose                                        | Owner membership | RLS bypass |
+| --------------- | ---------------------------------------------- | ---------------- | ---------- |
+| `bap_owner`     | Own schemas and reviewed objects               | Not a login      | No         |
+| `bap_eraser`    | Anonymize approved subject-attribution columns | SET from owner   | Yes        |
+| `bap_migrator`  | Run reviewed migrations after `SET ROLE`       | SET only         | No         |
+| `bap_auth`      | Better Auth tables and rate limits             | None             | No         |
+| `bap_api`       | Application membership resolver                | None             | No         |
+| `bap_reporting` | Reporting membership resolver                  | None             | No         |
+| `bap_backup`    | Full read-only logical dump                    | None             | Yes        |
 
 Every login role is `NOINHERIT`, `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`,
 and `NOREPLICATION`. Runtime roles cannot select auth base tables. The backup
@@ -151,6 +151,11 @@ owner to lock and validate the pending request, sets eraser for the app
 function, returns to owner to consume the request, and commits once. A live or
 unrequested id is refused before eraser role entry. `bap_auth` retains zero
 access to schema `app`, and `bap_api` retains no UPDATE on `app.audit_log`.
+
+The same generated tombstone is applied to every matching attribution in one
+erasure transaction. This covers old platform rows, HR-only rows, and mixed
+subjects together; rows created by other subjects are unchanged. The function
+does not retain a raw-id mapping.
 
 The public sign-up edge limiter also stays behind `@bap/db`. One statement
 inserts or atomically advances a hashed, namespaced `auth.rate_limit` key before
@@ -538,6 +543,29 @@ already covers the column; writing it needs `app.role_can_write()` through
 `partner_update`. `DATABASE_MIGRATION_COMPATIBILITY` is now `20260923.0001` in
 `packages/db/src/access.ts`.
 
+## Wave 0 HR isolation
+
+Migration `20260918.0001_hr_payroll.sql` adds five tables: `app.employee`,
+`app.employment_relationship`, `app.employee_document`, `app.payroll_run`, and
+`app.payroll_result`. Each carries `organization_id`; employee and payroll-run
+rows also carry `legal_entity_id` pinned by a composite foreign key to
+`app.legal_entity(id, organization_id)`. Child foreign keys retain the same
+organization pinning. All five tables enable and force row level security.
+
+Reads are organization-scoped. `bap_api` has only the required employee,
+relationship, and employee-document update-capable grants and SELECT/INSERT on
+payroll tables; `bap_reporting` and `bap_backup` have SELECT only. Write
+policies require the existing `app.role_can_write()` boundary, and authorship
+checks bind inserts to the tenant subject where the table records `created_by`.
+
+Payroll runs and results have no update or delete grant or policy. A run is
+versioned and may supersede an earlier run. The payroll-result
+tenant-consistency trigger verifies that the result employee and run belong to
+the same tenant and legal entity before insert or update. `app.erase_user`
+includes employee, relationship, employee-document, and payroll-run attribution
+in the same opaque tombstone transaction as the existing platform attributions,
+covering mixed subjects without changing another subject's rows.
+
 ## Tenant policy contract
 
 Every future tenant table must include:
@@ -600,9 +628,8 @@ Account-lifecycle coverage additionally asserts exact eraser attributes,
 membership options, CONNECT denial, request-table ACLs, both function owners and
 search paths, and the column privileges needed by the erasure function. It
 proves sole-owned and co-owned counts, all identity cascades, live and
-unrequested refusal, one opaque tombstone across the 2 remaining app columns now
-that `app.data_grants` is dropped, request consumption, and idempotent stored
-state.
+unrequested refusal, one opaque tombstone across every approved platform and HR
+attribution column, request consumption, and idempotent stored state.
 
 Organization-creation coverage asserts the exact quota columns, named checks,
 foreign-key delete actions, trigger and function catalog state, direct table ACL

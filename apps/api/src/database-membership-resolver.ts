@@ -5,7 +5,7 @@ import { checkMigrationCompatibility, resolveMembership } from '@bap/db/access';
 import { loadDatabaseConfiguration } from '@bap/db/config';
 import { createDatabasePool } from '@bap/db/pool';
 import type { DatabasePool } from '@bap/db/pool';
-import type { EntityScope } from '@bap/security';
+import type { EntityScope, HrAccessRole } from '@bap/security';
 
 import { MembershipResolver } from './membership-resolver.js';
 
@@ -61,6 +61,25 @@ export class DatabaseMembershipResolver
       subjectId,
     });
     return membership ?? { emailVerified: false, role: null };
+  }
+
+  override async readHrAccessAssignments(tenant: TenantContext) {
+    if (tenant.role === 'owner') return [];
+    return runInTenantContext(await this.getPool(), tenant, async (tx) => {
+      const result = await tx.query<{
+        access_role: HrAccessRole;
+        legal_entity_id: string;
+      }>(
+        `select access_role, legal_entity_id from app.hr_access_assignment
+         where organization_id=$1 and user_id=$2
+         order by legal_entity_id asc, access_role asc`,
+        [tenant.organizationId, tenant.userId],
+      );
+      return result.rows.map((row) => ({
+        accessRole: row.access_role,
+        legalEntityId: row.legal_entity_id,
+      }));
+    });
   }
 
   private getPool(): Promise<DatabasePool> {

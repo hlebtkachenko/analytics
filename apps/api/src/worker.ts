@@ -27,6 +27,8 @@ import {
   sendSplitEmailItem,
 } from './inbox/inbox-queue.js';
 import { INGEST_DATASET_QUEUE } from './ingestion/contract.js';
+import { PAYROLL_IMPORT_QUEUE } from './payroll-import/contract.js';
+import { validatePayrollImport } from './payroll-import/validate-payroll-import.js';
 import {
   createStagingDirectory,
   loadStagingDirectory,
@@ -105,6 +107,7 @@ async function bootstrap(): Promise<void> {
   const stagingDirectory = loadStagingDirectory(process.env);
   await createStagingDirectory(stagingDirectory);
   await createQueue(queue, INGEST_DATASET_QUEUE);
+  await createQueue(queue, PAYROLL_IMPORT_QUEUE);
   await createQueue(queue, BACKFILL_EMBEDDINGS_QUEUE);
   await createQueue(queue, SUMMARIZE_DATASET_QUEUE);
   // Keyed queues: the item id and the tick name are singleton keys, which pg-boss honours only under exclusive.
@@ -181,6 +184,12 @@ async function bootstrap(): Promise<void> {
         }
       });
     }
+  });
+  await queue.work<unknown, void>(PAYROLL_IMPORT_QUEUE, async (jobs) => {
+    for (const job of jobs)
+      await runJob(() =>
+        validatePayrollImport({ data: job.data, pool, stagingDirectory }),
+      );
   });
 
   await queue.work<unknown, void>(BACKFILL_EMBEDDINGS_QUEUE, async (jobs) => {
