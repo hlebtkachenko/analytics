@@ -689,6 +689,8 @@ export const partnerSchema = z
   .object({
     countryCode: z.string().nullable(),
     createdAt: z.iso.datetime(),
+    // The category a parsed invoice's item lines take; null leaves them for a person.
+    defaultLineCategory: invoiceLineCategorySchema.nullable(),
     id: identifierSchema,
     legalEntityId: identifierSchema.nullable(),
     name: z.string(),
@@ -719,6 +721,7 @@ const countryCodeSchema = z
 export const createPartnerRequestSchema = z
   .object({
     countryCode: countryCodeSchema.optional(),
+    defaultLineCategory: invoiceLineCategorySchema.optional(),
     legalEntityId: identifierSchema.optional(),
     name: partnerNameSchema,
     registrationNumber: partnerRegistrationNumberSchema.optional(),
@@ -729,6 +732,7 @@ export const createPartnerRequestSchema = z
 export const updatePartnerRequestSchema = z
   .object({
     countryCode: countryCodeSchema.nullable().optional(),
+    defaultLineCategory: invoiceLineCategorySchema.nullable().optional(),
     legalEntityId: identifierSchema.nullable().optional(),
     name: partnerNameSchema.optional(),
     registrationNumber: partnerRegistrationNumberSchema.nullable().optional(),

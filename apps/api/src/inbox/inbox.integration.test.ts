@@ -1089,6 +1089,7 @@ describe('inbox actions', () => {
 
   beforeAll(async () => {
     const partner = await createPartner(apiPool, {
+      defaultLineCategory: null,
       ...creator,
       ...allEntities,
       countryCode: 'CZ',
@@ -1275,6 +1276,7 @@ describe('inbox actions', () => {
 
     // A partner that exists but belongs to another organization, invisible to this tenant context.
     const foreignPartner = await createPartner(apiPool, {
+      defaultLineCategory: null,
       ...stranger,
       ...allEntities,
       countryCode: 'CZ',

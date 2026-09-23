@@ -248,6 +248,7 @@ beforeAll(async () => {
   });
 
   const partner = await createPartner(apiPool, {
+    defaultLineCategory: null,
     ...creator,
     countryCode: 'CZ',
     legalEntityId: null,

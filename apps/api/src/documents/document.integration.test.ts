@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import {
   bootstrapDatabaseRoles,
   createDatabasePool,
+  runInTenantContext,
   runMigrations,
   withTenantContext,
 } from '@bap/db';
@@ -220,6 +221,7 @@ beforeAll(async () => {
   foreignEntityId = await createLegalEntity(stranger, 'Placeholder Foreign');
 
   const partner = await createPartner(apiPool, {
+    defaultLineCategory: null,
     ...creator,
     ...allEntities,
     countryCode: 'CZ',
@@ -709,6 +711,7 @@ describe('document register and derived events against PostgreSQL', () => {
 
     try {
       await createPartner(apiPool, {
+        defaultLineCategory: null,
         ...creator,
         ...allEntities,
         countryCode: null,
@@ -725,6 +728,7 @@ describe('document register and derived events against PostgreSQL', () => {
 
     // The index is partial, so any number of unidentified partners coexist.
     const unidentified = await createPartner(apiPool, {
+      defaultLineCategory: null,
       ...creator,
       ...allEntities,
       countryCode: null,
@@ -737,6 +741,7 @@ describe('document register and derived events against PostgreSQL', () => {
     expect(unidentified).not.toBeNull();
     // The same number in another organization is a different partner, because the index leads with the tenant.
     const foreign = await createPartner(apiPool, {
+      defaultLineCategory: null,
       ...stranger,
       ...allEntities,
       countryCode: null,
@@ -981,8 +986,62 @@ describe('document register and derived events against PostgreSQL', () => {
     ).toEqual([]);
   });
 
+  it('stores, clears and bounds the partner default line category', async () => {
+    const created = await createPartner(apiPool, {
+      ...creator,
+      ...allEntities,
+      countryCode: null,
+      defaultLineCategory: 'services',
+      legalEntityId: null,
+      name: 'Placeholder Category Partner',
+      registrationNumber: null,
+      vatNumber: null,
+    });
+    expect(created?.defaultLineCategory).toBe('services');
+
+    const kept = await updatePartner(apiPool, {
+      ...creator,
+      ...allEntities,
+      countryCode: undefined,
+      defaultLineCategory: undefined,
+      legalEntityId: undefined,
+      name: 'Placeholder Category Renamed',
+      partnerId: created?.id ?? '',
+      registrationNumber: undefined,
+      vatNumber: undefined,
+    });
+    expect(kept?.defaultLineCategory).toBe('services');
+
+    const cleared = await updatePartner(apiPool, {
+      ...creator,
+      ...allEntities,
+      countryCode: undefined,
+      defaultLineCategory: null,
+      legalEntityId: undefined,
+      name: undefined,
+      partnerId: created?.id ?? '',
+      registrationNumber: undefined,
+      vatNumber: undefined,
+    });
+    expect(cleared?.defaultLineCategory).toBeNull();
+
+    // A value outside the invoice line list never reaches the column, even past the API boundary.
+    await expect(
+      runInTenantContext(apiPool, creator, (transaction) =>
+        transaction.query(
+          "update app.partner set default_line_category = 'freight' where id = $1",
+          [created?.id],
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'partner_default_line_category_check',
+    });
+  });
+
   it('masks an intercompany entity the reader may not see and keeps the partner', async () => {
     const intercompany = await createPartner(apiPool, {
+      defaultLineCategory: null,
       ...creator,
       ...allEntities,
       countryCode: null,
@@ -1009,6 +1068,7 @@ describe('document register and derived events against PostgreSQL', () => {
 
   it('keeps a hidden intercompany link out of a restricted patch answer and refuses to change it', async () => {
     const intercompany = await createPartner(apiPool, {
+      defaultLineCategory: null,
       ...creator,
       ...allEntities,
       countryCode: null,
@@ -1024,6 +1084,7 @@ describe('document register and derived events against PostgreSQL', () => {
     };
     const untouched = {
       countryCode: undefined,
+      defaultLineCategory: undefined,
       legalEntityId: undefined,
       registrationNumber: undefined,
       vatNumber: undefined,

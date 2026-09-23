@@ -83,6 +83,7 @@ const partners = {
     {
       countryCode: 'CZ',
       createdAt: '2026-01-01T00:00:00.000Z',
+      defaultLineCategory: null,
       id: PARTNER_ID,
       legalEntityId: null,
       name: 'Placeholder Supplier',

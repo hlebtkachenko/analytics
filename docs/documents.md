@@ -41,6 +41,11 @@ counterparty through `partner.legal_entity_id`. `app.directive_account` carries
 no `organization_id` and no row level security at all, because the Czech
 synthetic chart of accounts is identical for every tenant.
 
+`partner.default_line_category` is nullable and takes a value from the invoice
+line category list. The item lines of a parsed ISDOC invoice take it, because
+ISDOC names no category of its own; null leaves the lines for a person. It is
+set and cleared through `PATCH .../partners/:partnerId`.
+
 Every partner answer masks `legal_entity_id` to null when the intercompany
 entity is outside the caller's scope, and a patch that would clear or overwrite
 a stored link the caller cannot see is answered as 404 instead, so a narrow

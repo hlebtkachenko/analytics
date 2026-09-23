@@ -12,7 +12,9 @@ import {
   documentListResponseSchema,
   economicEventLineSchema,
   invoiceSchema,
+  partnerSchema,
   updateDocumentRequestSchema,
+  updatePartnerRequestSchema,
 } from './contract.ts';
 
 const LEGAL_ENTITY_ID = '9b7d1c30-6a4b-4d1f-9c2e-7a5f0e3b8d21';
@@ -644,5 +646,42 @@ describe('documentAnalyticsQuerySchema', () => {
       LEGAL_ENTITY_ID,
       OTHER_LEGAL_ENTITY_ID,
     ]);
+  });
+});
+
+describe('partner default line category', () => {
+  const partner = {
+    countryCode: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    defaultLineCategory: 'services',
+    id: '00000000-0000-4000-8000-000000000030',
+    legalEntityId: null,
+    name: 'Placeholder Partner',
+    registrationNumber: '00000000',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    vatNumber: null,
+  };
+
+  it('mirrors the API partner with a nullable line category from the invoice list', () => {
+    expect(partnerSchema.safeParse(partner).success).toBe(true);
+    expect(
+      partnerSchema.safeParse({ ...partner, defaultLineCategory: null })
+        .success,
+    ).toBe(true);
+    expect(
+      partnerSchema.safeParse({ ...partner, defaultLineCategory: 'freight' })
+        .success,
+    ).toBe(false);
+  });
+
+  it('sets or clears the category through the partner patch', () => {
+    expect(
+      updatePartnerRequestSchema.safeParse({ defaultLineCategory: 'goods' })
+        .success,
+    ).toBe(true);
+    expect(
+      updatePartnerRequestSchema.safeParse({ defaultLineCategory: null })
+        .success,
+    ).toBe(true);
   });
 });

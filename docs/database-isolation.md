@@ -527,7 +527,15 @@ status is neither `discarded` nor `failed`, so the worker tick can resend their
 `scan_inbox_item` job. It also adds `inbox_item_file_maintenance_select`, a
 SELECT-only policy admitting `bap_owner` to the item to blob link, which the
 definer needs under `FORCE` row level security and which no earlier maintenance
-policy covered. `DATABASE_MIGRATION_COMPATIBILITY` is now `20260922.0009` in
+policy covered. `DATABASE_MIGRATION_COMPATIBILITY` was `20260922.0009` after
+this migration.
+
+Migration `20260923.0001` adds the nullable `app.partner.default_line_category`,
+checked by `partner_default_line_category_check` against the same list as
+`invoice_line_category_check`: the category the item lines of a parsed ISDOC
+invoice take from their partner. It is the same table, so every existing policy
+already covers the column; writing it needs `app.role_can_write()` through
+`partner_update`. `DATABASE_MIGRATION_COMPATIBILITY` is now `20260923.0001` in
 `packages/db/src/access.ts`.
 
 ## Tenant policy contract

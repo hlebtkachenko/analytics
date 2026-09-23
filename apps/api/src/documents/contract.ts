@@ -1,4 +1,8 @@
-import { inboxChannelKinds, inboxItemStatuses } from '@bap/db';
+import {
+  inboxChannelKinds,
+  inboxItemStatuses,
+  invoiceLineCategories,
+} from '@bap/db';
 import { legalEntityIdentifierSchema } from '@bap/security';
 import { z } from 'zod';
 
@@ -38,15 +42,8 @@ export const DOCUMENT_STATUSES = [
 
 export const DOCUMENT_SOURCES = ['manual', 'upload', 'import', 'api'] as const;
 
-export const INVOICE_LINE_CATEGORIES = [
-  'goods',
-  'material',
-  'services',
-  'labour',
-  'transport',
-  'asset',
-  'other',
-] as const;
+// Re-exported from @bap/db so the line and the partner default checks cannot drift from Zod.
+export const INVOICE_LINE_CATEGORIES = invoiceLineCategories;
 
 // An advance deduction is a line kind, because the paper itemises the deducted advance by VAT rate.
 export const INVOICE_LINE_KINDS = ['item', 'advance_deduction'] as const;
@@ -780,6 +777,8 @@ export const partnerSchema = z
     createdAt: z.iso.datetime(),
     id: partnerIdentifierSchema,
     legalEntityId: legalEntityIdentifierSchema.nullable(),
+    // The category a parsed invoice's item lines take; null leaves them for a person.
+    defaultLineCategory: invoiceLineCategorySchema.nullable(),
     name: partnerNameSchema,
     registrationNumber: partnerRegistrationNumberSchema.nullable(),
     updatedAt: z.iso.datetime(),
@@ -804,6 +803,7 @@ export type PartnerListQuery = z.infer<typeof partnerListQuerySchema>;
 export const createPartnerRequestSchema = z
   .object({
     countryCode: countryCodeSchema.optional(),
+    defaultLineCategory: invoiceLineCategorySchema.optional(),
     legalEntityId: legalEntityIdentifierSchema.optional(),
     name: partnerNameSchema,
     registrationNumber: partnerRegistrationNumberSchema.optional(),
@@ -816,6 +816,7 @@ export type CreatePartnerRequest = z.infer<typeof createPartnerRequestSchema>;
 export const updatePartnerRequestSchema = z
   .object({
     countryCode: countryCodeSchema.nullish(),
+    defaultLineCategory: invoiceLineCategorySchema.nullish(),
     legalEntityId: legalEntityIdentifierSchema.nullish(),
     name: partnerNameSchema.optional(),
     registrationNumber: partnerRegistrationNumberSchema.nullish(),
@@ -1432,6 +1433,11 @@ export const partnerOpenApiSchema = {
   properties: {
     countryCode: { nullable: true, pattern: '^[A-Z]{2}$', type: 'string' },
     createdAt: dateTimeProperty,
+    defaultLineCategory: {
+      enum: [...INVOICE_LINE_CATEGORIES],
+      nullable: true,
+      type: 'string',
+    },
     id: uuidProperty,
     legalEntityId: { ...uuidProperty, nullable: true },
     name: { maxLength: 200, minLength: 1, type: 'string' },
@@ -1452,6 +1458,7 @@ export const partnerOpenApiSchema = {
   required: [
     'countryCode',
     'createdAt',
+    'defaultLineCategory',
     'id',
     'legalEntityId',
     'name',
@@ -1466,6 +1473,7 @@ export const partnerBodyOpenApiSchema = {
   additionalProperties: false,
   properties: {
     countryCode: { pattern: '^[A-Z]{2}$', type: 'string' },
+    defaultLineCategory: { enum: [...INVOICE_LINE_CATEGORIES], type: 'string' },
     legalEntityId: uuidProperty,
     name: { maxLength: 200, minLength: 1, type: 'string' },
     registrationNumber: {
