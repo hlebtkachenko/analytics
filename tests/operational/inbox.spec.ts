@@ -822,19 +822,35 @@ test.describe
     test.setTimeout(240_000);
 
     await test.step('the pdf target gets the demo entity as its default', async () => {
-      await page.goto(withOrganization('/inbox/settings'));
-      await page.getByRole('button', { name: 'Edit pdf' }).click();
-      const dialog = page.getByRole('dialog', {
-        name: 'Routing target for pdf',
-      });
+      await page.goto(withOrganization('/inbox/rules'));
+      // The pdf row is a platform default on a fresh stack, so the collapsed Defaults open first.
+      await page.getByRole('button', { name: /^Defaults \(\d+\)$/ }).click();
+      await page
+        .getByRole('button', { name: 'Change what happens to a PDF' })
+        .click();
+      const dialog = page.getByRole('dialog', { name: 'Edit default' });
       await dialog
-        .getByLabel('Default entity', { exact: true })
+        .getByLabel('Legal entity', { exact: true })
         .selectOption(legalEntityId);
       await dialog.getByRole('button', { name: 'Save' }).click();
       await expect(dialog).toBeHidden();
       await expect(
-        page.getByRole('row').filter({ hasText: 'pdf' }).first(),
-      ).toContainText(entityName);
+        page.getByRole('list', { name: 'Changed defaults' }),
+      ).toContainText(
+        `A PDF goes to Documents as Other for ${entityName}; a person confirms every one.`,
+      );
+    });
+
+    await test.step('the old settings route lands on the rules page and the quota lives in organization settings', async () => {
+      await page.goto(withOrganization('/inbox/settings'));
+      await expect(page).toHaveURL(
+        new RegExp(`/inbox/rules\\?organization=${organizationSlug}$`),
+      );
+      await page.goto(`/${encodeURIComponent(organizationSlug)}/settings`);
+      await expect(
+        page.getByRole('heading', { name: 'Inbox storage' }),
+      ).toBeVisible();
+      await expect(page.getByText(/In use [\d.,]+ MB\./)).toBeVisible();
     });
 
     await test.step('a rule on the pdf type sets the entity and the kind and routes automatically', async () => {

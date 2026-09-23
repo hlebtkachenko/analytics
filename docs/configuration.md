@@ -40,9 +40,10 @@ the platform default and cap. The application API refuses an upload that would
 take the sum of an organization's `app.blob.byte_size` above the effective
 quota, before any byte is committed
 ([ADR 0014](adr/0014-durable-blob-storage.md)). An owner can only tighten the
-quota per organization, on `/inbox/settings`; the effective quota is the lesser
-of the organization setting and this variable. No new environment variable backs
-the per-organization setting; it is stored in `app.organization_inbox_setting`.
+quota per organization, in the Inbox storage section of `/[orgSlug]/settings`;
+the effective quota is the lesser of the organization setting and this variable.
+No new environment variable backs the per-organization setting; it is stored in
+`app.organization_inbox_setting`.
 
 `BAP_INTAKE_DOMAIN` is the bare DNS name (no scheme, no `@`) whose MX records
 point at Mailgun EU; every email channel address is `in-<token>@<domain>`. The

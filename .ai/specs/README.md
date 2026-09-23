@@ -2,6 +2,7 @@
 
 ## Delivered and historical records
 
+- [Inbox settings fold into the Rules page](2026-09-23-inbox-settings-fold.md)
 - [Inbox scan of direct uploads and API-channel blobs](2026-09-22-inbox-scan-uploads.md)
 - [Inbox sender authentication](2026-09-22-inbox-sender-authentication.md)
 - [Create workspace wizard](2026-09-21-create-workspace-wizard.md)
