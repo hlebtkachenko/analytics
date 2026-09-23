@@ -4,8 +4,10 @@ Carbon Design System is the sole BAP design system. The repository integrates
 the official Carbon React library, its Sass foundation, IBM Plex font families,
 Carbon icons and pictograms, Carbon Charts, and Carbon accessibility guidance.
 It includes a generic product slice for dataset upload, listing, row browsing,
-CSV/XLSX export, chat, and chart rendering. Domain-specific analytics,
-dashboards, analytical metrics, and business workflows remain deferred.
+CSV/XLSX export, chat, and chart rendering, and the documents analytics page,
+whose revenue and expense, VAT balance, and partner charts render Carbon Charts
+beside their table views. Other domain-specific analytics, dashboards,
+analytical metrics, and business workflows remain deferred.
 
 The implementation lives in `@bap/design-system`. Product code must consume its
 public entrypoints and semantic Carbon tokens instead of copying Carbon source,

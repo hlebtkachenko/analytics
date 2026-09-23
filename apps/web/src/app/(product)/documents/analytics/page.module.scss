@@ -26,6 +26,20 @@
   margin-block-start: spacing.$spacing-05;
 }
 
+// The mixed-currency warning and the chart grid sit between the stat tiles and the grids.
+.charts {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-05;
+  margin-block-start: spacing.$spacing-06;
+}
+
+// Charts stack in one column below xlg, so each slot keeps its own spacing.
+.chart {
+  margin-block-end: spacing.$spacing-07;
+  min-inline-size: 0;
+}
+
 .tables {
   display: flex;
   flex-direction: column;

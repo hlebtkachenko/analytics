@@ -34,13 +34,17 @@ export function formatMoney(amount: string, currencyCode?: string): string {
   return currencyCode === undefined ? text : `${text} ${currencyCode}`;
 }
 
-// A month key is its first day, shown as "June 2026" in the UI language.
-export function formatMonth(month: string, language: string): string {
+// A month key is its first day, shown as "June 2026" in the UI language, or "Jun 2026" where space is short.
+export function formatMonth(
+  month: string,
+  language: string,
+  width: 'long' | 'short' = 'long',
+): string {
   const date = localDay(month);
   return date === undefined
     ? month
     : new Intl.DateTimeFormat(language, {
-        month: 'long',
+        month: width,
         year: 'numeric',
       }).format(date);
 }

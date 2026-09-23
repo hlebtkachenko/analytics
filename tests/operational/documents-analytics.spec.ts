@@ -359,6 +359,51 @@ test.describe.serial('document analytics read from the stored split', () => {
     }
     await expect(stats).toContainText(/\d/);
 
+    // Each chart draws a Carbon SVG titled like its heading, beside a table view of the same numbers.
+    const chartTitles = [
+      ['analytics-chart-month', 'Revenue and expenses, last 12 months'],
+      [
+        'analytics-chart-vat',
+        'VAT balance by tax point month (output minus input)',
+      ],
+      ['analytics-chart-partners', 'Largest partners, all dates'],
+    ] as const;
+    for (const [testId, title] of chartTitles) {
+      await expect(
+        page
+          .getByTestId(testId)
+          .locator(`svg.layout-svg-wrapper[aria-label="${title}"]`)
+          .first(),
+      ).toBeVisible();
+      await expect(page.getByTestId(testId).locator('table')).toBeVisible();
+    }
+
+    // The seed's newest month is June 2026, so the chart window runs July 2025 to June 2026.
+    const monthChartRows = page
+      .getByTestId('analytics-chart-month')
+      .locator('table tbody tr');
+    await expect(monthChartRows).toHaveCount(12);
+    await expect(monthChartRows.first()).toContainText('July 2025');
+    await expect(monthChartRows.last()).toContainText('June 2026');
+    for (const month of [
+      'January 2026',
+      'February 2026',
+      'March 2026',
+      'April 2026',
+      'May 2026',
+    ]) {
+      await expect(
+        monthChartRows.filter({ hasText: month }).first(),
+      ).toBeVisible();
+    }
+    const partnerChartRows = page
+      .getByTestId('analytics-chart-partners')
+      .locator('table tbody tr');
+    await expect(partnerChartRows.filter({ hasText: partnerName })).toHaveCount(
+      1,
+    );
+    const scopedPartnerCount = await partnerChartRows.count();
+
     // The scope field's right edge matches the stat tiles' page edge.
     const analyticsBox = async (locator: Locator) => {
       const rect = await locator.boundingBox();
@@ -385,6 +430,15 @@ test.describe.serial('document analytics read from the stored split', () => {
       .poll(async () => rows.count())
       .toBeGreaterThanOrEqual(scopedRowCount);
     await expect(fiveMonthRow).toHaveCount(1);
+
+    // Every entity is a superset of the seeded one: the window stays full and the seeded partner stays listed.
+    await expect(monthChartRows).toHaveCount(12);
+    await expect
+      .poll(async () => partnerChartRows.count())
+      .toBeGreaterThanOrEqual(scopedPartnerCount);
+    await expect(partnerChartRows.filter({ hasText: partnerName })).toHaveCount(
+      1,
+    );
 
     // No query statistics leak anywhere on the page.
     const analyticsText = await page.locator('main').innerText();
