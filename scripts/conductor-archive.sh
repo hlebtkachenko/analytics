@@ -30,6 +30,7 @@ if [[ -z ${CONDUCTOR_WORKSPACE_ID:-} ]]; then
 fi
 
 # Both profiles own volumes of their own, and down removes only the volumes its configuration declares.
+# --rmi local removes the images this project built, which have no custom tag and would otherwise leak.
 docker compose \
   --profile bootstrap \
   --profile operations \
@@ -37,4 +38,4 @@ docker compose \
   --file compose.development.yaml \
   --file compose.mailpit.yaml \
   --project-name "bap-$CONDUCTOR_WORKSPACE_ID" \
-  down --volumes --remove-orphans || true
+  down --volumes --rmi local --remove-orphans || true

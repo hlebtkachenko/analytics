@@ -114,9 +114,11 @@ Archiving a workspace deletes its directory and nothing outside it, so
 `stack` run script created. It is the one sanctioned use of `down --volumes`,
 because the workspace those volumes belong to is being destroyed in the same
 step. It names both the bootstrap and operations profiles, because `down`
-removes only the volumes its configuration declares. A missing Docker binary, a
-stopped daemon, and an unknown workspace identifier each report and exit
-successfully, so archiving is never blocked.
+removes only the volumes its configuration declares. `--rmi local` also removes
+the images the project built, so archived workspaces leave no images behind.
+Pulled images such as PostgreSQL and Caddy stay for reuse. A missing Docker
+binary, a stopped daemon, and an unknown workspace identifier each report and
+exit successfully, so archiving is never blocked.
 
 The workbench Chromium runtime is deliberately not part of setup. Its cache is
 machine-global, so downloading it per workspace would spend network on something
