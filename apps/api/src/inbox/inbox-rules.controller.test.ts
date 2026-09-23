@@ -307,26 +307,25 @@ describe('application inbox rules routes', () => {
     expect(calls.createRule).toBeUndefined();
   });
 
-  it('answers 422 past the enabled rule cap and for an invoice kind that auto-routes', async () => {
+  it('answers 422 past the enabled rule cap and accepts an invoice kind that auto-routes', async () => {
     enabledRules = 200;
     await as('post', '/inbox/rules').send(createBody).expect(422);
     enabledRules = 0;
 
-    const invoice = await as('post', '/inbox/rules')
+    // The guard lives once in the auto-route decision now, so an invoice rule is stored like any other.
+    await as('post', '/inbox/rules')
       .send({
         ...createBody,
         autoRoute: true,
         setDocumentKind: 'received_invoice',
       })
-      .expect(422);
-    expect(invoice.body).toMatchObject({ code: 'not_available', status: 422 });
-    expect(calls.createRule).toHaveLength(1);
+      .expect(201);
+    expect(calls.createRule).toHaveLength(2);
 
-    const patched = await as('patch', `/inbox/rules/${RULE_ID}`)
+    await as('patch', `/inbox/rules/${RULE_ID}`)
       .send({ autoRoute: true, setDocumentKind: 'issued_invoice' })
-      .expect(422);
-    expect(patched.body).toMatchObject({ code: 'not_available', status: 422 });
-    expect(calls.updateRule).toBeUndefined();
+      .expect(200);
+    expect(calls.updateRule).toHaveLength(1);
   });
 
   it('answers 404 for an entity the caller cannot see on create and patch', async () => {

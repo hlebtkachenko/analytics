@@ -612,7 +612,8 @@ export function isInvoiceKind(kind: string): boolean {
   return (invoiceDocumentKinds as readonly string[]).includes(kind);
 }
 
-export const createDocumentRequestSchema = z
+// The create body before its cross-field checks, which a parsed inbox route completes from the stored row.
+export const createDocumentBodySchema = z
   .object({
     attributes: z
       .record(attributeKeySchema, attributeValueSchema)
@@ -631,29 +632,43 @@ export const createDocumentRequestSchema = z
     validFrom: documentDateSchema.optional(),
     validTo: documentDateSchema.optional(),
   })
-  .strict()
-  .superRefine((body, context) => {
-    // Invoice content belongs to the two invoice kinds and to no other kind.
-    if (isInvoiceKind(body.kind) !== (body.invoice !== undefined)) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Invoice content is required for invoice kinds only.',
-        path: ['invoice'],
-      });
-    }
-    // A validity window that ends before it starts is refused rather than stored.
-    if (
-      body.validFrom !== undefined &&
-      body.validTo !== undefined &&
-      body.validFrom > body.validTo
-    ) {
-      context.addIssue({
-        code: 'custom',
-        message: 'validFrom must not be later than validTo.',
-        path: ['validTo'],
-      });
-    }
-  });
+  .strict();
+
+export function checkDocumentBody(
+  body: z.infer<typeof createDocumentBodySchema>,
+  context: z.RefinementCtx,
+  options: { invoiceFromParsedRow?: boolean; path?: string[] } = {},
+): void {
+  const path = options.path ?? [];
+  const invoiceExpected =
+    isInvoiceKind(body.kind) && options.invoiceFromParsedRow !== true;
+  // Invoice content belongs to the two invoice kinds and to no other kind.
+  if (
+    body.invoice === undefined ? invoiceExpected : !isInvoiceKind(body.kind)
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Invoice content is required for invoice kinds only.',
+      path: [...path, 'invoice'],
+    });
+  }
+  // A validity window that ends before it starts is refused rather than stored.
+  if (
+    body.validFrom !== undefined &&
+    body.validTo !== undefined &&
+    body.validFrom > body.validTo
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'validFrom must not be later than validTo.',
+      path: [...path, 'validTo'],
+    });
+  }
+}
+
+export const createDocumentRequestSchema = createDocumentBodySchema.superRefine(
+  (body, context) => checkDocumentBody(body, context),
+);
 
 export const updateDocumentRequestSchema = z
   .object({

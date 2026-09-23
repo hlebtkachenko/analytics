@@ -33,6 +33,7 @@
     "pino": "catalog:",
     "reflect-metadata": "catalog:",
     "rxjs": "catalog:",
+    "saxes": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

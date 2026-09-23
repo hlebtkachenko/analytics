@@ -82,6 +82,18 @@ describe('inbox contract enums', () => {
     expect(providerStepSchema.options).toContain('rule');
   });
 
+  it('names the parse step and the ISDOC issues', () => {
+    expect(providerStepSchema.options).toContain('parse');
+    expect(inboxIssueCodeSchema.options).toEqual(
+      expect.arrayContaining([
+        'amount_mismatch',
+        'vat_mismatch',
+        'unknown_partner',
+        'entity_conflict',
+      ]),
+    );
+  });
+
   it('names the attached event and the probable duplicate issue', () => {
     expect(inboxEventKindSchema.options).toContain('attached');
     expect(inboxIssueCodeSchema.options).toContain('duplicate_probable');
@@ -447,6 +459,50 @@ describe('inbox correction contract', () => {
       }).success,
     ).toBe(false);
   });
+
+  it('names the parsed row and never carries a client invoice beside it', () => {
+    const parsed = {
+      document: {
+        currencyCode: 'CZK',
+        documentDate: '2026-09-01',
+        kind: 'received_invoice',
+        legalEntityId: ENTITY_ID,
+        title: 'Placeholder supplier invoice',
+      },
+      fileBlobIds: [BLOB_ID],
+      lineCategory: 'services',
+      parsedExtractionId: ENTITY_ID,
+    };
+    expect(
+      routeInboxItemToDocumentRequestSchema.safeParse(parsed).success,
+    ).toBe(true);
+    expect(
+      routeInboxItemToDocumentRequestSchema.safeParse({
+        ...parsed,
+        document: {
+          ...parsed.document,
+          invoice: {
+            lines: [
+              {
+                baseAmount: '100',
+                category: 'services',
+                description: 'Placeholder line',
+                vatMode: 'standard',
+                vatRate: '21',
+                vatAmount: '21',
+              },
+            ],
+          },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      routeInboxItemToDocumentRequestSchema.safeParse({
+        ...parsed,
+        parsedExtractionId: undefined,
+      }).success,
+    ).toBe(false);
+  });
 });
 
 // The two 409 bodies a route can answer, the bulk body, and the three list filters.
@@ -659,6 +715,7 @@ describe('inbox list counts, sender and deciding rule name', () => {
         sender: null,
         senderAuthenticated: false,
       },
+      parsed: null,
       routingTarget: {
         auto: 'never',
         autoThreshold: null,

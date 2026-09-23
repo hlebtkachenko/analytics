@@ -33,6 +33,7 @@ import { inboxUploadResponseSchema } from './contract.js';
 import type {
   InboxItem,
   InboxItemDetail,
+  ParseInboxItemJob,
   ProviderInput,
   ScanInboxItemJob,
   SplitEmailItemJob,
@@ -117,6 +118,7 @@ const detail: InboxItemDetail = {
     sender: null,
     senderAuthenticated: false,
   },
+  parsed: null,
   routingTarget: routingTargetFor('pdf'),
 };
 
@@ -140,10 +142,14 @@ describe('InboxService', () => {
   const routed: RouteToDocumentInput[] = [];
   const enqueued: SplitEmailItemJob[] = [];
   const scanned: ScanInboxItemJob[] = [];
+  const parsedJobs: ParseInboxItemJob[] = [];
   const settingsUpdates: UpdateInboxSettingsInput[] = [];
   let enqueueFails = false;
   let providerItem: Partial<typeof item> = {};
   const queue = {
+    enqueueParseInboxItem: vi.fn(async (job: ParseInboxItemJob) => {
+      parsedJobs.push(job);
+    }),
     enqueueRerunInboxRule: vi.fn(async () => undefined),
     enqueueRouteInboxItem: vi.fn(async () => undefined),
     enqueueScanInboxItem: vi.fn(async (job: ScanInboxItemJob) => {
@@ -586,6 +592,52 @@ describe('InboxService', () => {
     expect(JSON.stringify(output)).not.toContain('placeholder note');
 
     expect(await service.process({ ...tenant, itemId: 'unknown' })).toBeNull();
+  });
+
+  it('refuses to process bytes without a clean verdict and hands an ISDOC to the parse job', async () => {
+    const previous = storedFile;
+    const bytes = fixtures.isdoc();
+    const key = 'org/organization_1/isdoc-placeholder';
+    await store.put({ key, temporaryPath: await stage(bytes, 'isdoc-1') });
+    const isdocFile: ItemFileRecord = {
+      blobId: BLOB_ID,
+      byteSize: bytes.length,
+      mediaType: 'application/xml',
+      originalFilename: 'invoice.isdoc',
+      position: 1,
+      scanStatus: 'not_scanned',
+      sha256: 'b'.repeat(64),
+      storageKey: key,
+    };
+    const extracted = extractions.length;
+    parsedJobs.length = 0;
+
+    storedFile = isdocFile;
+    await expect(
+      service.process({ ...tenant, itemId: ITEM_ID }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({ message: 'blob_scan_pending' }),
+    });
+    storedFile = { ...isdocFile, scanStatus: 'infected' };
+    await expect(
+      service.process({ ...tenant, itemId: ITEM_ID }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(extractions).toHaveLength(extracted);
+    expect(parsedJobs).toEqual([]);
+
+    storedFile = { ...isdocFile, scanStatus: 'clean' };
+    await service.process({ ...tenant, itemId: ITEM_ID });
+
+    expect(extractions).toHaveLength(extracted + 1);
+    // Under the person pressing process, identifiers only; nothing is parsed inside the request.
+    expect(parsedJobs).toEqual([
+      {
+        itemId: ITEM_ID,
+        organizationId: tenant.organizationId,
+        userId: tenant.userId,
+      },
+    ]);
+    storedFile = previous;
   });
 
   it('keeps the sniff verdict when no hint is set', () => {

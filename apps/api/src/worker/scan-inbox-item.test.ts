@@ -99,6 +99,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
             ? { routeRuleId: options.routeRuleId }
             : {}),
         },
+        enqueueParseInboxItem: async () => undefined,
         enqueueRouteInboxItem: async (job) => {
           routed.push(job);
         },

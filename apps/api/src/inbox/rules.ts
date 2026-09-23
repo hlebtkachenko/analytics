@@ -1,22 +1,6 @@
 import type { InboxDiscardReason } from '@bap/db';
 
-import { INVOICE_KINDS } from '../documents/contract.js';
 import type { ProviderReason } from './contract.js';
-
-// createDocumentRequestSchema refuses an invoice kind without invoice content no 1b provider supplies,
-// so a rule that auto-routes into an invoice kind is not available yet.
-export function isInvoiceAutoRoute(rule: {
-  autoRoute: boolean;
-  setDocumentKind: string | null;
-}): boolean {
-  return (
-    rule.autoRoute &&
-    rule.setDocumentKind !== null &&
-    INVOICE_KINDS.includes(
-      rule.setDocumentKind as (typeof INVOICE_KINDS)[number],
-    )
-  );
-}
 
 // The columns app.list_inbox_rules() returns: conditions, actions, id and priority, nothing else.
 export interface InboxRuleDefinition {

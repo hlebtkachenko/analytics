@@ -677,7 +677,8 @@ export const INVOICE_KINDS: readonly (typeof DOCUMENT_KINDS)[number][] = [
   'received_invoice',
 ];
 
-export const createDocumentRequestSchema = z
+// The create body before its cross-field checks, so a parsed inbox route can take its invoice from the stored row.
+export const createDocumentBodySchema = z
   .object({
     attributes: documentAttributesSchema.optional(),
     currencyCode: currencyCodeSchema.default('CZK'),
@@ -693,38 +694,54 @@ export const createDocumentRequestSchema = z
     validFrom: z.iso.date().optional(),
     validTo: z.iso.date().optional(),
   })
-  .strict()
-  .superRefine((body, context) => {
-    const needsInvoice = INVOICE_KINDS.includes(body.kind);
+  .strict();
 
-    if (needsInvoice && body.invoice === undefined) {
-      context.addIssue({
-        code: 'custom',
-        message: 'An invoice kind requires invoice content.',
-        path: ['invoice'],
-      });
-    }
+// The cross-field checks of a create body: invoice content exactly on an invoice kind, and ordered validity.
+export function checkDocumentBody(
+  body: z.infer<typeof createDocumentBodySchema>,
+  context: z.RefinementCtx,
+  // A parsed inbox route carries no invoice of its own; the path prefix places issues under its document field.
+  options: { invoiceFromParsedRow?: boolean; path?: string[] } = {},
+): void {
+  const needsInvoice = INVOICE_KINDS.includes(body.kind);
+  const path = options.path ?? [];
 
-    if (!needsInvoice && body.invoice !== undefined) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Only an invoice kind accepts invoice content.',
-        path: ['invoice'],
-      });
-    }
+  if (
+    needsInvoice &&
+    body.invoice === undefined &&
+    options.invoiceFromParsedRow !== true
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'An invoice kind requires invoice content.',
+      path: [...path, 'invoice'],
+    });
+  }
 
-    if (
-      body.validFrom !== undefined &&
-      body.validTo !== undefined &&
-      body.validFrom > body.validTo
-    ) {
-      context.addIssue({
-        code: 'custom',
-        message: 'validFrom must not be later than validTo.',
-        path: ['validFrom'],
-      });
-    }
-  });
+  if (!needsInvoice && body.invoice !== undefined) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Only an invoice kind accepts invoice content.',
+      path: [...path, 'invoice'],
+    });
+  }
+
+  if (
+    body.validFrom !== undefined &&
+    body.validTo !== undefined &&
+    body.validFrom > body.validTo
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'validFrom must not be later than validTo.',
+      path: [...path, 'validFrom'],
+    });
+  }
+}
+
+export const createDocumentRequestSchema = createDocumentBodySchema.superRefine(
+  (body, context) => checkDocumentBody(body, context),
+);
 
 export type CreateDocumentRequest = z.infer<typeof createDocumentRequestSchema>;
 

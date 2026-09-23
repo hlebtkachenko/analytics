@@ -12,7 +12,11 @@ export interface ManualDraft {
 
 // A person filled the draft, so every field carries the confidence a person implies: 1.
 export function manualProvider(draft: unknown): ManualDraft {
-  const document = createDocumentRequestSchema.parse(draft);
+  return manualDraft(createDocumentRequestSchema.parse(draft));
+}
+
+// The verdict for a document already validated, or one a parsed route completes from the stored row.
+export function manualDraft(document: CreateDocumentRequest): ManualDraft {
   const fieldConfidences = Object.fromEntries(
     Object.keys(document).map((key) => [key, 1]),
   );

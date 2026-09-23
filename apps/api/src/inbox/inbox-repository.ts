@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
   type OnModuleDestroy,
 } from '@nestjs/common';
 import { runInTenantContext } from '@bap/db';
@@ -21,7 +22,10 @@ import type { PoolClient } from 'pg';
 import type { ChannelPrincipalReader } from '../channel-access.js';
 import type { EntityScopeSelector } from '../datasets/dataset-repository.js';
 import { createDocumentRequestSchema } from '../documents/contract.js';
-import type { CreateDocumentRequest } from '../documents/contract.js';
+import type {
+  CreateDocumentRequest,
+  InvoiceLineCategory,
+} from '../documents/contract.js';
 import {
   createDocumentInTransaction,
   deleteDocumentInTransaction,
@@ -60,6 +64,8 @@ import {
   CORRECTION_FIELD_BY_DRAFT_KEY,
   composeDocumentDraft,
   toCreateDocumentBody,
+  withLineCategory,
+  type ComposedDocument,
   type ComposedDocumentDraft,
 } from './draft-composer.js';
 import {
@@ -101,6 +107,7 @@ import {
   loadMatchedRuleIds,
   loadRulesById,
   orderRules,
+  readPartnerLineCategory,
   readRule,
   updateRule,
   type AdoptRuleInput,
@@ -125,6 +132,7 @@ import {
   MANUAL_PROVIDER_VERSION,
   manualProvider,
 } from './providers/manual.js';
+import { ISDOC_PROVIDER } from './providers/isdoc.js';
 import { routingTargetFor } from './routing-targets.js';
 
 // The repository contract keeps one import site for its callers.
@@ -211,6 +219,10 @@ export interface RouteToDocumentInput extends ReadItemInput {
   // The manual provider's verdict, stored so the decision keeps its provenance.
   extraction: ExtractionRecord;
   fileBlobIds: readonly string[];
+  // The category every parsed item line takes; absent falls back to the partner's default.
+  lineCategory?: InvoiceLineCategory;
+  // The item's newest isdoc row, whose invoice, total and attributes replace anything the body carried.
+  parsedExtractionId?: string;
   // The current document of a reference_conflict refusal; the new one becomes its next version.
   supersedesDocumentId?: string;
 }
@@ -389,6 +401,7 @@ async function loadDetail(
     events: await loadEvents(transaction, item.id),
     extraction: await loadLatestExtraction(transaction, item.id),
     files: (await loadItemFiles(transaction, item.id)).map(publicFile),
+    parsed: await loadLatestExtraction(transaction, item.id, ISDOC_PROVIDER),
     item: {
       ...item,
       decidedByRuleName: meta.rows[0]?.decided_by_rule_name ?? null,
@@ -1163,7 +1176,12 @@ export function routeToDocument(
       throw new BadRequestException();
     }
 
-    return routeInTransaction(transaction, input, before, files);
+    return routeInTransaction(
+      transaction,
+      await withParsedContent(transaction, input, before),
+      before,
+      files,
+    );
   });
 }
 
@@ -1193,7 +1211,7 @@ export function approveItem(
     const parsed =
       composed.missing.length === 0
         ? createDocumentRequestSchema.safeParse(
-            toCreateDocumentBody(composed.draft),
+            toCreateDocumentBody(composed.draft, composed.content),
           )
         : null;
     const field =
@@ -1296,13 +1314,19 @@ async function routeInTransaction(
   return after === null ? null : loadDetail(transaction, after);
 }
 
-// The draft a route suggests: the hints, the rules the newest rule extraction named, and the effective target.
+// The draft a route suggests: the hints, the rules the newest rule extraction named, the newest isdoc row and the
+// effective target; parsed item lines take the partner's default category.
 export async function loadRouteSuggestion(
   transaction: PoolClient,
   item: InboxItem,
   files: readonly ItemFileRecord[],
-): Promise<ReturnType<typeof composeDocumentDraft>> {
-  return composeDocumentDraft(
+): Promise<ComposedDocument> {
+  const parsed = await loadLatestExtraction(
+    transaction,
+    item.id,
+    ISDOC_PROVIDER,
+  );
+  const composed = composeDocumentDraft(
     { ...item, primaryFilename: files[0]?.originalFilename ?? null },
     await loadRulesById(
       transaction,
@@ -1312,7 +1336,84 @@ export async function loadRouteSuggestion(
       item.detectedType,
       await loadRoutingTargetOverrides(transaction),
     ),
+    parsed === null
+      ? null
+      : { draft: parsed.draft, legalEntityId: parsed.legalEntityId },
   );
+  const category =
+    composed.content.invoice === null
+      ? null
+      : await readPartnerLineCategory(transaction, composed.draft.partnerId);
+
+  return category === null
+    ? composed
+    : {
+        ...composed,
+        content: withLineCategory(composed.content, category),
+        lineCategorySource: 'partner_default',
+      };
+}
+
+// A parsed route copies the invoice, total and attributes from the stored row the body names, never the body's own;
+// a client invoice beside a parsed invoice is refused, and a stale row id is refused too.
+async function withParsedContent(
+  transaction: PoolClient,
+  input: RouteToDocumentInput,
+  item: InboxItem,
+): Promise<RouteToDocumentInput> {
+  const newest = await loadLatestExtraction(
+    transaction,
+    item.id,
+    ISDOC_PROVIDER,
+  );
+
+  if (input.parsedExtractionId === undefined) {
+    if (
+      input.document.invoice !== undefined &&
+      typeof newest?.draft.invoice === 'object' &&
+      newest.draft.invoice !== null
+    ) {
+      throw new UnprocessableEntityException('parsed_invoice_only');
+    }
+
+    return input;
+  }
+
+  if (newest === null || newest.id !== input.parsedExtractionId) {
+    throw new UnprocessableEntityException('parsed_extraction_stale');
+  }
+
+  const { content } = composeDocumentDraft(
+    { ...item, hintKind: input.document.kind, primaryFilename: null },
+    [],
+    routingTargetFor(item.detectedType),
+    { draft: newest.draft, legalEntityId: newest.legalEntityId },
+  );
+  const category =
+    input.lineCategory ??
+    (await readPartnerLineCategory(
+      transaction,
+      input.document.partnerId ?? null,
+    ));
+  const filled = withLineCategory(content, category);
+  const merged = createDocumentRequestSchema.safeParse({
+    ...input.document,
+    ...(filled.attributes === null ? {} : { attributes: filled.attributes }),
+    ...(filled.invoice === null ? {} : { invoice: filled.invoice }),
+    ...(filled.totalAmount === null ? {} : { totalAmount: filled.totalAmount }),
+  });
+
+  if (!merged.success) {
+    throw new UnprocessableEntityException(
+      filled.invoice !== null && category === null
+        ? 'line_category_required'
+        : 'parsed_content_invalid',
+    );
+  }
+
+  const { document, output } = manualProvider(merged.data);
+
+  return { ...input, document, extraction: { ...input.extraction, output } };
 }
 
 // The rows every route writes once the document exists: its files, the item's decision, the event and the audit entry.
@@ -1513,7 +1614,7 @@ async function insertCorrections(
   transaction: PoolClient,
   input: RouteToDocumentInput,
   itemId: string,
-  suggested: ReturnType<typeof composeDocumentDraft>,
+  suggested: ComposedDocument,
   final: ComposedDocumentDraft,
 ): Promise<void> {
   for (const key of Object.keys(

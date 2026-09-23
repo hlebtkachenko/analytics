@@ -1681,6 +1681,7 @@ const inboxDetail = {
     sender: null,
     senderAuthenticated: false,
   },
+  parsed: null,
   routingTarget: {
     auto: 'never',
     autoThreshold: null,

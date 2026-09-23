@@ -20,9 +20,11 @@ import { legalEntityIdentifierSchema } from '@bap/security';
 import { z } from 'zod';
 
 import {
-  createDocumentRequestSchema,
+  checkDocumentBody,
+  createDocumentBodySchema,
   documentIdentifierSchema,
   documentKindSchema,
+  invoiceLineCategorySchema,
   partnerIdentifierSchema,
   repeatedOrCsv,
 } from '../documents/contract.js';
@@ -65,13 +67,17 @@ export const DETECTED_TYPES = [
   'unknown',
 ] as const;
 
-// Issues a provider may raise in Phase 0: the taxonomy is stored whole, only these are produced.
+// Issues a provider may raise: the taxonomy is stored whole in jsonb, only these are produced.
 export const INBOX_ISSUE_CODES = [
   'duplicate_exact',
   'duplicate_probable',
   'entity_unresolved',
   'missing_required_field',
   'reference_conflict',
+  'amount_mismatch',
+  'vat_mismatch',
+  'unknown_partner',
+  'entity_conflict',
   ...inboxUnprocessableReasons,
 ] as const;
 
@@ -110,7 +116,13 @@ export const INBOX_BULK_REFUSAL_CODES = [
   'missing_required_field',
 ] as const;
 
-export const PROVIDER_STEPS = ['sniff', 'hint', 'rule', 'manual'] as const;
+export const PROVIDER_STEPS = [
+  'sniff',
+  'parse',
+  'hint',
+  'rule',
+  'manual',
+] as const;
 
 // The events a person writes on an item; the automation counts them as a human touch and yields to them.
 export const HUMAN_TOUCH_EVENT_KINDS = [
@@ -497,6 +509,8 @@ export const inboxItemDetailSchema = z
     events: z.array(inboxEventSchema),
     extraction: inboxExtractionSchema.nullable(),
     files: z.array(inboxItemFileSchema),
+    // The newest isdoc row: the parsed draft a manual route names by id, whatever provider wrote last.
+    parsed: inboxExtractionSchema.nullable(),
     // The item plus its sender, the sender's DKIM verdict, and the name of the rule that decided it, if any.
     item: inboxItemSchema
       .extend({
@@ -612,9 +626,13 @@ export const routeInboxItemToDocumentRequestSchema = z
     // The candidate the person saw in the duplicate_probable refusal and chose to route past.
     acknowledgeDuplicateOf: documentIdentifierSchema.optional(),
     correctionReasons: correctionReasonsSchema.optional(),
-    document: createDocumentRequestSchema,
+    document: createDocumentBodySchema,
     // The item's blobs in the order the document should keep them; every item file must be named once.
     fileBlobIds: z.array(blobIdentifierSchema).min(1).max(MAX_INBOX_FILES),
+    // The category every parsed item line takes; absent falls back to the partner's default.
+    lineCategory: invoiceLineCategorySchema.optional(),
+    // The item's newest isdoc row: its invoice, total and attributes are copied from the stored row, never the body.
+    parsedExtractionId: z.string().trim().toLowerCase().uuid().optional(),
     // The current document of the reference_conflict refusal; the new document becomes its next version.
     supersedesDocumentId: documentIdentifierSchema.optional(),
   })
@@ -624,6 +642,29 @@ export const routeInboxItemToDocumentRequestSchema = z
     {
       message: 'fileBlobIds must not repeat a blob.',
       path: ['fileBlobIds'],
+    },
+  )
+  .superRefine((body, context) =>
+    checkDocumentBody(body.document, context, {
+      invoiceFromParsedRow: body.parsedExtractionId !== undefined,
+      path: ['document'],
+    }),
+  )
+  .refine(
+    (body) =>
+      body.parsedExtractionId === undefined ||
+      body.document.invoice === undefined,
+    {
+      message: 'A parsed route takes its invoice from the stored row only.',
+      path: ['document', 'invoice'],
+    },
+  )
+  .refine(
+    (body) =>
+      body.lineCategory === undefined || body.parsedExtractionId !== undefined,
+    {
+      message: 'lineCategory needs parsedExtractionId.',
+      path: ['lineCategory'],
     },
   );
 
@@ -897,6 +938,13 @@ export const scanInboxItemJobSchema = z.union([
 ]);
 
 export type ScanInboxItemJob = z.infer<typeof scanInboxItemJobSchema>;
+
+// The worker job that parses an ISDOC or ISDOCX item after a clean verdict: the scan job's own payload union.
+export const PARSE_INBOX_ITEM_QUEUE = 'parse_inbox_item';
+
+export const parseInboxItemJobSchema = scanInboxItemJobSchema;
+
+export type ParseInboxItemJob = ScanInboxItemJob;
 
 // The worker job that routes one item automatically: the item, and the rule that asked or null for a target default.
 export const ROUTE_INBOX_ITEM_QUEUE = 'route_inbox_item';

@@ -5,7 +5,6 @@ import type { DatabasePool } from '@bap/db/pool';
 import type { PoolClient } from 'pg';
 
 import type { EntityScopeSelector } from '../datasets/dataset-repository.js';
-import { INVOICE_KINDS } from '../documents/contract.js';
 import { entityFilter } from '../documents/sql.js';
 import {
   MAX_ENABLED_INBOX_RULES,
@@ -15,13 +14,19 @@ import {
 } from './contract.js';
 import type {
   CreateInboxRuleRequest,
+  InboxExtraction,
+  InboxItem,
   InboxRoutingTarget,
   InboxRule,
   RouteInboxItemJob,
   RuleDraft,
   UpdateInboxRuleRequest,
 } from './contract.js';
-import { composeDocumentDraft } from './draft-composer.js';
+import {
+  composeDocumentDraft,
+  isInvoiceKind,
+  type ComposedDocument,
+} from './draft-composer.js';
 import {
   appendEvent,
   insertExtraction,
@@ -31,6 +36,10 @@ import {
   loadLatestExtraction,
   loadRoutingTargetOverrides,
 } from './inbox-repository-support.js';
+import {
+  ADVANCE_TAX_DOCUMENT_TYPE,
+  ISDOC_PROVIDER,
+} from './providers/isdoc.js';
 import {
   evaluateRules,
   ruleReasons,
@@ -193,16 +202,109 @@ export async function loadMatchedRuleIds(
   return (await loadPreviousRuleDraft(transaction, itemId)).matchedRuleIds;
 }
 
-// The auto-route decision of the spec, conditions (a) to (e), taken inside the same transaction as the matcher.
-function decideAutoRoute(input: {
-  autoRouteRuleId: string | null;
-  confidence: number;
+// The rules the newest rule row matched that are still live, through the matcher's definer, which a channel may call.
+export async function loadMatchedLiveRules(
+  transaction: PoolClient,
+  itemId: string,
+): Promise<InboxRuleDefinition[]> {
+  const matchedRuleIds = await loadMatchedRuleIds(transaction, itemId);
+  return (await loadLiveRules(transaction)).filter((rule) =>
+    matchedRuleIds.includes(rule.id),
+  );
+}
+
+// What the auto-route guard reads beyond the draft: the newest isdoc row and the rows written since, and the sender.
+export interface AutoRouteFacts {
+  // An email child routes an invoice kind only when its sender is DKIM-aligned, whoever asks.
+  emailChild: boolean;
+  // Some extraction row created at or after the newest isdoc row carries an issue, the isdoc row included.
+  issuesSinceParsed: boolean;
   latestIssueCount: number;
-  missing: readonly string[];
-  resolvedKind: string | null;
+  parsed: InboxExtraction | null;
+  senderAuthenticated: boolean;
+}
+
+// The one loader the rule pass and the parse job share; the parse job passes the row it is about to write.
+export async function loadAutoRouteFacts(
+  transaction: PoolClient,
+  itemId: string,
+  pending: InboxExtraction | null = null,
+): Promise<AutoRouteFacts> {
+  const latest = await loadLatestExtraction(transaction, itemId);
+  const parsed =
+    pending ??
+    (await loadLatestExtraction(transaction, itemId, ISDOC_PROVIDER));
+  const facts = await transaction.query<{
+    channel_kind: string;
+    issues_since: boolean;
+    payload_kind: string;
+    sender_authenticated: boolean;
+  }>(
+    `select i.channel_kind, i.payload_kind, i.sender_authenticated,
+            exists (select 1 from app.inbox_item_extraction as x
+                     where x.item_id = i.id and $2::timestamptz is not null and x.created_at >= $2::timestamptz
+                       and jsonb_array_length(x.issues) > 0) as issues_since
+       from app.inbox_item as i
+      where i.id = $1`,
+    [itemId, pending === null ? (parsed?.createdAt ?? null) : null],
+  );
+  const row = facts.rows[0];
+
+  return {
+    emailChild: row?.channel_kind === 'email' && row.payload_kind !== 'email',
+    issuesSinceParsed:
+      pending === null
+        ? (row?.issues_since ?? false)
+        : pending.issues.length > 0,
+    latestIssueCount:
+      pending === null ? (latest?.issues.length ?? 0) : pending.issues.length,
+    parsed,
+    senderAuthenticated: row?.sender_authenticated ?? false,
+  };
+}
+
+// The category the parsed partner gives item lines; a channel reads no partner, so it gets null and the item waits.
+export async function readPartnerLineCategory(
+  transaction: PoolClient,
+  partnerId: string | null,
+): Promise<string | null> {
+  if (partnerId === null) {
+    return null;
+  }
+
+  const result = await transaction.query<{
+    default_line_category: string | null;
+  }>('select default_line_category from app.partner where id = $1', [
+    partnerId,
+  ]);
+  return result.rows[0]?.default_line_category ?? null;
+}
+
+function parsedString(
+  parsed: InboxExtraction | null,
+  key: string,
+): string | null {
+  const value = parsed?.draft[key];
+  return typeof value === 'string' ? value : null;
+}
+
+function waits(reason: string): { job: null; reason: string } {
+  return { job: null, reason: `Auto-route waits: ${reason}` };
+}
+
+// The auto-route decision, taken inside the same transaction as the matcher or the parse. An invoice kind needs a
+// clean parse, the parsed entity, kind and partner, a partner line category, and an authenticated email sender.
+export function decideAutoRoute(input: {
+  autoRouteRuleId: string | null;
+  composed: ComposedDocument;
+  confidence: number;
+  facts: AutoRouteFacts;
+  lineCategory: string | null;
   target: InboxRoutingTarget;
 }): { job: 'route' | null; reason: string | null } {
-  const { target } = input;
+  const { composed, facts, target } = input;
+  const { parsed } = facts;
+  const resolvedKind = composed.draft.kind;
   const asked =
     input.autoRouteRuleId !== null ||
     target.auto === 'always' ||
@@ -215,39 +317,129 @@ function decideAutoRoute(input: {
   }
 
   if (target.destination !== 'documents') {
-    return {
-      job: null,
-      reason:
-        'Auto-route waits: only the documents destination routes automatically.',
-    };
+    return waits('only the documents destination routes automatically.');
+  }
+
+  const attributes = parsed?.draft.attributes;
+
+  if (
+    typeof attributes === 'object' &&
+    attributes !== null &&
+    (attributes as Record<string, unknown>).isdoc_document_type ===
+      ADVANCE_TAX_DOCUMENT_TYPE
+  ) {
+    return waits(
+      'an advance tax document carries a VAT claim that is not derived.',
+    );
+  }
+
+  if (isInvoiceKind(resolvedKind)) {
+    const invoice = parsed?.draft.invoice;
+
+    if (
+      parsed === null ||
+      typeof invoice !== 'object' ||
+      invoice === null ||
+      facts.issuesSinceParsed
+    ) {
+      return waits('an invoice kind needs a clean ISDOC parse.');
+    }
+
+    if (
+      parsed.legalEntityId === null ||
+      composed.draft.legalEntityId !== parsed.legalEntityId
+    ) {
+      return waits('the legal entity is not the one the file names.');
+    }
+
+    if (parsedString(parsed, 'kind') !== resolvedKind) {
+      return waits('the kind is not the one the file states.');
+    }
+
+    const parsedPartner = parsedString(parsed, 'partnerId');
+
+    if (parsedPartner === null) {
+      return waits('the parse resolved no partner.');
+    }
+
+    if (composed.draft.partnerId !== parsedPartner) {
+      return waits('the hint or rule partner differs from the parsed partner.');
+    }
+
+    if (input.lineCategory === null) {
+      return waits('the partner has no default line category.');
+    }
+
+    if (facts.emailChild && !facts.senderAuthenticated) {
+      return waits('the email sender is not authenticated.');
+    }
+  }
+
+  if (composed.missing.length > 0) {
+    return waits(`the draft is missing ${composed.missing.join(', ')}.`);
   }
 
   if (
-    input.resolvedKind !== null &&
-    INVOICE_KINDS.includes(input.resolvedKind as (typeof INVOICE_KINDS)[number])
+    facts.latestIssueCount > 0 ||
+    (parsed !== null && facts.issuesSinceParsed)
   ) {
-    return {
-      job: null,
-      reason:
-        'Auto-route waits: an invoice kind needs the ISDOC parser on the connections track.',
-    };
-  }
-
-  if (input.missing.length > 0) {
-    return {
-      job: null,
-      reason: `Auto-route waits: the draft is missing ${input.missing.join(', ')}.`,
-    };
-  }
-
-  if (input.latestIssueCount > 0) {
-    return {
-      job: null,
-      reason: 'Auto-route waits: the newest extraction raised an issue.',
-    };
+    return waits('the newest extraction raised an issue.');
   }
 
   return { job: 'route', reason: null };
+}
+
+// The parse job's decision from the stored rule matches, read through the same definer as the matcher.
+export async function decideParsedAutoRoute(
+  transaction: PoolClient,
+  input: TenantContext & {
+    item: InboxItem;
+    lineCategory: string | null;
+    pending: InboxExtraction;
+    primaryFilename: string | null;
+  },
+): Promise<{ reason: string | null; routeJob: RouteInboxItemJob | null }> {
+  const matched = await loadMatchedLiveRules(transaction, input.item.id);
+  const facts = await loadAutoRouteFacts(
+    transaction,
+    input.item.id,
+    input.pending,
+  );
+  const autoRouteRule = matched.find(
+    (rule) =>
+      rule.autoRoute &&
+      (rule.senderPattern === null || facts.senderAuthenticated),
+  );
+  const target = routingTargetFor(
+    input.pending.detectedType,
+    await loadRoutingTargetOverrides(transaction),
+  );
+  const composed = composeDocumentDraft(
+    { ...input.item, primaryFilename: input.primaryFilename },
+    matched,
+    target,
+    { draft: input.pending.draft, legalEntityId: input.pending.legalEntityId },
+  );
+  const decision = decideAutoRoute({
+    autoRouteRuleId: autoRouteRule?.id ?? null,
+    composed,
+    confidence: input.pending.confidence,
+    facts,
+    lineCategory: input.lineCategory,
+    target,
+  });
+
+  return {
+    reason: decision.reason,
+    routeJob:
+      decision.job === null
+        ? null
+        : {
+            itemId: input.item.id,
+            organizationId: input.organizationId,
+            ruleId: autoRouteRule?.id ?? null,
+          },
+  };
 }
 
 // The rule pass: reads the live rules through the definer, applies the actions under hint precedence, writes one
@@ -295,7 +487,7 @@ export async function applyInboxRules(
     transaction,
     previous.matchedRuleIds,
   );
-  const latest = await loadLatestExtraction(transaction, item.id);
+  const facts = await loadAutoRouteFacts(transaction, item.id);
   const target = routingTargetFor(
     item.detectedType,
     await loadRoutingTargetOverrides(transaction),
@@ -306,15 +498,24 @@ export async function applyInboxRules(
       ? [...previousRules, ...evaluation.matched]
       : [],
     target,
+    facts.parsed === null
+      ? null
+      : {
+          draft: facts.parsed.draft,
+          legalEntityId: facts.parsed.legalEntityId,
+        },
   );
   const decision =
     evaluation.discard === null
       ? decideAutoRoute({
           autoRouteRuleId: evaluation.autoRouteRuleId,
+          composed,
           confidence: item.confidence ?? 0,
-          latestIssueCount: latest?.issues.length ?? 0,
-          missing: composed.missing,
-          resolvedKind: composed.draft.kind,
+          facts,
+          lineCategory: await readPartnerLineCategory(
+            transaction,
+            parsedString(facts.parsed, 'partnerId'),
+          ),
           target,
         })
       : { job: null, reason: null };

@@ -131,6 +131,7 @@ function run(
   return scanInboxItem({
     blobs: store,
     data: { ...route, itemId, organizationId: 'org-1', userId: 'user-1' },
+    enqueueParseInboxItem: async () => undefined,
     enqueueRouteInboxItem: async (job) => {
       routeJobs.push(job);
     },

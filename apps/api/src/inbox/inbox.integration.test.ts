@@ -298,6 +298,7 @@ beforeAll(async () => {
     updateInboxSettings: (input) => updateInboxSettings(apiPool, input),
   };
   service = new InboxService(repository, store, QUOTA, 'intake.invalid', {
+    enqueueParseInboxItem: async () => undefined,
     enqueueRerunInboxRule: async () => undefined,
     enqueueRouteInboxItem: async (job) => {
       routeJobs.push(job);
@@ -528,6 +529,17 @@ describe('inbox intake', () => {
       hintKind: 'payroll_sheet',
       hintLegalEntityId: ownedEntityId,
     });
+
+    // An unscanned blob is never read again; process answers 409 until the scan job records its verdict.
+    await expect(
+      service.process({ ...creator, ...allEntities, itemId: firstItemId }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    await asTenant(creator, (transaction) =>
+      transaction.query('select app.record_blob_scan($1, $2)', [
+        firstBlobId,
+        'clean',
+      ]),
+    );
 
     const processed = await service.process({
       ...creator,

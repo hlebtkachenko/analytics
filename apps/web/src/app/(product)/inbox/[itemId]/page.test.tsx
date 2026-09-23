@@ -222,6 +222,7 @@ function respondWith(
   // The detail item always carries the sender's DKIM verdict; the list entries never do.
   const detail: Record<string, unknown> = {
     corrections: [],
+    parsed: null,
     routingTarget,
     ...given,
     item: { senderAuthenticated: false, ...(given['item'] as object) },

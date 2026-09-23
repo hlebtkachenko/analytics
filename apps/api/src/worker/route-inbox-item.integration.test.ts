@@ -212,6 +212,7 @@ async function runScan(itemId: string): Promise<void> {
   await scanInboxItem({
     blobs: store,
     data,
+    enqueueParseInboxItem: async () => undefined,
     enqueueRouteInboxItem: (job) => sendRouteInboxItem(boss, job),
     metrics: new WorkerMetrics(),
     pool: apiPool,
@@ -374,6 +375,7 @@ beforeAll(async () => {
     updateRule: (input) => updateRule(apiPool, input),
   };
   service = new InboxService(repository, store, QUOTA, 'intake.invalid', {
+    enqueueParseInboxItem: async () => undefined,
     enqueueRerunInboxRule: (job: RerunInboxRuleJob) =>
       sendRerunInboxRule(boss, job),
     enqueueRouteInboxItem: (job: RouteInboxItemJob) =>

@@ -6,8 +6,17 @@ import {
   SCAN_INBOX_ITEM_QUEUE,
   scanInboxItemJobSchema,
 } from '../inbox/contract.js';
-import type { RouteInboxItemJob, ScanInboxItemJob } from '../inbox/contract.js';
+import type {
+  ParseInboxItemJob,
+  RouteInboxItemJob,
+  ScanInboxItemJob,
+} from '../inbox/contract.js';
 import { appendEvent } from '../inbox/inbox-repository-support.js';
+import {
+  ISDOC_DETECTED_TYPE,
+  ISDOC_PROVIDER,
+} from '../inbox/providers/isdoc.js';
+import { SNIFF_PROVIDER } from '../inbox/providers/sniff.js';
 import type { BlobScanner } from '../scanning/clamd-client.js';
 import { recordScan, setItemStatus } from './blob-scan.js';
 import { runTenantJob } from './job-context.js';
@@ -19,6 +28,8 @@ const SETTLED_STATUSES = ['discarded', 'failed'];
 export interface ScanInboxItemOptions {
   blobs: BlobStore;
   data: unknown;
+  // Sent instead of the route after a clean verdict when the sniff named an ISDOC, with the same payload.
+  enqueueParseInboxItem: (job: ParseInboxItemJob) => Promise<void>;
   // Sent after the last blob came back clean, carrying the route decision the intake already took.
   enqueueRouteInboxItem: (job: RouteInboxItemJob) => Promise<void>;
   metrics: WorkerMetrics;
@@ -46,6 +57,9 @@ interface PendingBlob {
 
 interface PendingItem {
   blobs: PendingBlob[];
+  // The newest sniff verdict and whether a parse row already exists, so a resend never parses twice.
+  parsed: boolean;
+  sniffedType: string | null;
   status: string;
 }
 
@@ -57,16 +71,23 @@ async function loadPending(
   const result = await transaction.query<{
     blob_id: string | null;
     byte_size: string | null;
+    parsed: boolean;
+    sniffed_type: string | null;
     status: string;
     storage_key: string | null;
   }>(
-    `select i.status, b.id as blob_id, b.byte_size::text as byte_size, b.storage_key
+    `select i.status, b.id as blob_id, b.byte_size::text as byte_size, b.storage_key,
+            (select x.detected_type from app.inbox_item_extraction as x
+              where x.item_id = i.id and x.provider = $2
+              order by x.created_at desc, x.id desc limit 1) as sniffed_type,
+            exists (select 1 from app.inbox_item_extraction as x
+                     where x.item_id = i.id and x.provider = $3) as parsed
        from app.inbox_item as i
        left join app.inbox_item_file as f on f.item_id = i.id
        left join app.blob as b on b.id = f.blob_id and b.scan_status = 'not_scanned'
       where i.id = $1
       order by f.position`,
-    [itemId],
+    [itemId, SNIFF_PROVIDER, ISDOC_PROVIDER],
   );
   const status = result.rows[0]?.status;
 
@@ -86,6 +107,8 @@ async function loadPending(
             },
           ],
     ),
+    parsed: result.rows[0]?.parsed ?? false,
+    sniffedType: result.rows[0]?.sniffed_type ?? null,
     status,
   };
 }
@@ -178,8 +201,15 @@ export async function scanInboxItem(
       }
     }
 
-    // Every blob is clean, so the route the intake deferred is sent; a routed item and a swept one carry none.
-    if (!routed && payload.routeRuleId !== undefined) {
+    // Every blob is clean: an ISDOC is parsed first, with the same payload; the parse decides the route itself.
+    if (
+      !routed &&
+      pending.sniffedType === ISDOC_DETECTED_TYPE &&
+      !pending.parsed
+    ) {
+      await options.enqueueParseInboxItem(payload);
+    } else if (!routed && payload.routeRuleId !== undefined) {
+      // The route the intake deferred is sent; a routed item and a swept one carry none.
       await options.enqueueRouteInboxItem({
         itemId: payload.itemId,
         organizationId: payload.organizationId,

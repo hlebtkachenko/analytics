@@ -42,6 +42,7 @@ import {
   withOrganization,
 } from '../../../../lib/documents/client';
 import {
+  createDocumentBodySchema,
   createDocumentRequestSchema,
   documentKindSchema,
   documentListResponseSchema,
@@ -398,7 +399,7 @@ export default function InboxItemPage() {
     // Only the keys the document request accepts pass through; a provider's own keys, such as a rule's matchedRuleIds, never do.
     const passthrough = Object.fromEntries(
       Object.entries(detail.extraction?.draft ?? {}).filter(
-        ([key]) => key in createDocumentRequestSchema.shape,
+        ([key]) => key in createDocumentBodySchema.shape,
       ),
     );
     const parsed = createDocumentRequestSchema.safeParse({

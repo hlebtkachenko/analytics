@@ -3,6 +3,7 @@ import { inboxChannelKindsForChannels } from '@bap/db';
 import {
   createDocumentBodyOpenApiSchema,
   DOCUMENT_KINDS,
+  INVOICE_LINE_CATEGORIES,
 } from '../documents/contract.js';
 import {
   BLOB_SCAN_STATUSES,
@@ -362,6 +363,7 @@ export const inboxItemDetailOpenApiSchema = {
     extraction: { ...inboxExtractionOpenApiSchema, nullable: true },
     files: { items: inboxItemFileOpenApiSchema, type: 'array' },
     item: inboxItemDetailItemOpenApiSchema,
+    parsed: { ...inboxExtractionOpenApiSchema, nullable: true },
     routingTarget: inboxRoutingTargetOpenApiSchema,
   },
   required: [
@@ -370,6 +372,7 @@ export const inboxItemDetailOpenApiSchema = {
     'extraction',
     'files',
     'item',
+    'parsed',
     'routingTarget',
   ],
   type: 'object',
@@ -458,6 +461,8 @@ export const routeInboxItemToDocumentBodyOpenApiSchema = {
       minItems: 1,
       type: 'array',
     },
+    lineCategory: { enum: [...INVOICE_LINE_CATEGORIES], type: 'string' },
+    parsedExtractionId: uuidProperty,
     supersedesDocumentId: uuidProperty,
   },
   required: ['document', 'fileBlobIds'],

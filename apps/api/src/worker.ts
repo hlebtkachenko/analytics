@@ -13,12 +13,14 @@ import {
 import { FilesystemBlobStore } from './blobs/blob-store.js';
 import {
   INBOX_MAINTENANCE_QUEUE,
+  PARSE_INBOX_ITEM_QUEUE,
   RERUN_INBOX_RULE_QUEUE,
   ROUTE_INBOX_ITEM_QUEUE,
   SCAN_INBOX_ITEM_QUEUE,
   SPLIT_EMAIL_ITEM_QUEUE,
 } from './inbox/contract.js';
 import {
+  sendParseInboxItem,
   sendRerunInboxRule,
   sendRouteInboxItem,
   sendScanInboxItem,
@@ -38,6 +40,7 @@ import {
   scheduleInboxMaintenance,
 } from './worker/inbox-maintenance.js';
 import { ingestDataset } from './worker/ingest-dataset.js';
+import { parseInboxItem } from './worker/parse-inbox-item.js';
 import { curateJobFailure } from './worker/job-failure.js';
 import { rerunInboxRule } from './worker/rerun-inbox-rule.js';
 import { routeInboxItem } from './worker/route-inbox-item.js';
@@ -137,6 +140,12 @@ async function bootstrap(): Promise<void> {
     { policy: 'exclusive' },
     warnQueue,
   );
+  await createQueue(
+    queue,
+    PARSE_INBOX_ITEM_QUEUE,
+    { policy: 'exclusive' },
+    warnQueue,
+  );
   // The real error is logged here; only the curated one reaches pgboss.job.output.
   const runJob = async (work: () => Promise<void>): Promise<void> => {
     try {
@@ -219,6 +228,7 @@ async function bootstrap(): Promise<void> {
           splitEmailItem({
             blobs,
             data: job.data,
+            enqueueParseInboxItem: (parse) => sendParseInboxItem(queue, parse),
             enqueueRouteInboxItem: (route) => sendRouteInboxItem(queue, route),
             metrics,
             pool,
@@ -245,6 +255,7 @@ async function bootstrap(): Promise<void> {
           scanInboxItem({
             blobs,
             data: job.data,
+            enqueueParseInboxItem: (parse) => sendParseInboxItem(queue, parse),
             enqueueRouteInboxItem: (route) => sendRouteInboxItem(queue, route),
             metrics,
             pool,
@@ -300,6 +311,26 @@ async function bootstrap(): Promise<void> {
             blobs,
             data: job.data,
             enqueueRerunInboxRule: (rerun) => sendRerunInboxRule(queue, rerun),
+            enqueueRouteInboxItem: (route) => sendRouteInboxItem(queue, route),
+            logger,
+            metrics,
+            pool,
+          });
+        });
+      }
+    },
+  );
+
+  // The parse reads hostile XML and zip bytes in-process, so one at a time per worker, like the split.
+  await queue.work<unknown, void, { localConcurrency: 1 }>(
+    PARSE_INBOX_ITEM_QUEUE,
+    { localConcurrency: 1 },
+    async (jobs) => {
+      for (const job of jobs) {
+        await runJob(async () => {
+          await parseInboxItem({
+            blobs,
+            data: job.data,
             enqueueRouteInboxItem: (route) => sendRouteInboxItem(queue, route),
             logger,
             metrics,

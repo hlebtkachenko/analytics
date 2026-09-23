@@ -189,12 +189,27 @@ async function recordAttempt(
 ): Promise<void> {
   const latest = await loadLatestExtraction(transaction, item.id);
   const { draft } = composed;
+  const lines = composed.content.invoice?.lines;
+  // Per parsed line, where its category came from: the partner default on an item line, none on a deduction.
+  const lineCategorySources = Array.isArray(lines)
+    ? lines.map((line: unknown) =>
+        composed.lineCategorySource !== null &&
+        typeof line === 'object' &&
+        line !== null &&
+        (line as { lineKind?: unknown }).lineKind === 'item'
+          ? composed.lineCategorySource
+          : null,
+      )
+    : null;
 
   await insertExtraction(transaction, tenant, item.id, {
     output: {
       confidence: item.confidence ?? 0,
       detectedType: item.hintKind ?? item.detectedType ?? 'unknown',
-      draft: { ...draft },
+      draft: {
+        ...draft,
+        ...(lineCategorySources === null ? {} : { lineCategorySources }),
+      },
       fieldConfidences: {},
       issues,
       ...(draft.legalEntityId === null
@@ -255,7 +270,7 @@ async function routeAsAuthor(
   }
 
   const parsed = createDocumentRequestSchema.safeParse(
-    toCreateDocumentBody(composed.draft),
+    toCreateDocumentBody(composed.draft, composed.content),
   );
 
   if (!parsed.success) {

@@ -728,11 +728,14 @@ export const resources = {
           invoiceBody:
             'Invoices are filed after the ISDOC parser lands. Attach this to an existing document in the meantime.',
           invoiceTitle: 'Waiting for the invoice parser',
+          issueAmountMismatch: 'The invoice amounts do not add up.',
           issueDecorativeImage: 'This image carries no readable document.',
           issueDuplicateExact: 'Exact copy of an earlier item.',
           issueDuplicateProbable: 'Probable duplicate, review or acknowledge.',
           issueEmpty: 'This file is empty.',
           issueEncrypted: 'This file is encrypted.',
+          issueEntityConflict:
+            'The legal entity in the file disagrees with the one chosen for this item.',
           issueMissingField: 'A required field is missing: {{field}}',
           issueMissingRequiredField: 'A required field is missing.',
           issuePasswordProtected: 'This file is password protected.',
@@ -740,8 +743,10 @@ export const resources = {
           issueReferenceConflict:
             'Reference {{reference}} already exists, file as a new version or change it.',
           issueTooLarge: 'This file is too large.',
+          issueUnknownPartner: 'The partner in the file is not registered.',
           issueUnreadable: 'This file could not be read.',
           issueUnsupportedType: 'This file type is not supported.',
+          issueVatMismatch: 'The invoice VAT amounts do not add up.',
           missingEntity: 'Choose the legal entity.',
           moreActions: 'More actions',
           needsInputTitle: 'Needs your input',

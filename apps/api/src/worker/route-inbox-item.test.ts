@@ -103,6 +103,7 @@ function composed(
   missing: string[] = [],
 ): ComposedDocument {
   return {
+    content: { attributes: null, invoice: null, totalAmount: null },
     draft: {
       currencyCode: 'CZK',
       documentDate: '2026-09-17',
@@ -113,6 +114,7 @@ function composed(
       title: 'scan.pdf',
       ...overrides,
     },
+    lineCategorySource: null,
     missing,
     sources: {
       currency_code: 'provider',

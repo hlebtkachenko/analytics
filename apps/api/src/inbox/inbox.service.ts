@@ -74,9 +74,11 @@ import {
 import {
   MANUAL_PROVIDER,
   MANUAL_PROVIDER_VERSION,
+  manualDraft,
   manualProvider,
 } from './providers/manual.js';
 import { InboxQueue } from './inbox-queue.js';
+import { ISDOC_DETECTED_TYPE } from './providers/isdoc.js';
 import {
   SNIFF_PROVIDER,
   SNIFF_PROVIDER_VERSION,
@@ -85,7 +87,6 @@ import {
   toProviderOutput,
   type SniffResult,
 } from './providers/sniff.js';
-import { isInvoiceAutoRoute } from './rules.js';
 
 export const BLOB_QUOTA_BYTES = Symbol('BLOB_QUOTA_BYTES');
 export const INTAKE_DOMAIN = Symbol('INTAKE_DOMAIN');
@@ -747,6 +748,17 @@ export class InboxService {
       throw new BadRequestException();
     }
 
+    // Only scanned, clean bytes are read again: an unanswered blob waits and a flagged one is quarantined.
+    const unclean = loaded.files.find((file) => file.scanStatus !== 'clean');
+
+    if (unclean !== undefined) {
+      throw new ConflictException(
+        unclean.scanStatus === 'not_scanned'
+          ? 'blob_scan_pending'
+          : 'blob_quarantined',
+      );
+    }
+
     const range = windows(first.byteSize);
     const sniffed = sniffBytes({
       byteSize: first.byteSize,
@@ -764,7 +776,7 @@ export class InboxService {
       ),
     });
 
-    return this.inbox.recordExtraction({
+    const detail = await this.inbox.recordExtraction({
       ...input,
       extraction: {
         output: applyHints(toProviderOutput(sniffed), loaded.input.hints),
@@ -772,10 +784,31 @@ export class InboxService {
         providerVersion: SNIFF_PROVIDER_VERSION,
       },
     });
+
+    // An ISDOC is parsed in the worker under the person pressing process, never inside this request.
+    if (detail !== null && sniffed.detectedType === ISDOC_DETECTED_TYPE) {
+      try {
+        await this.queue.enqueueParseInboxItem({
+          itemId: detail.item.id,
+          organizationId: input.organizationId,
+          userId: input.userId,
+        });
+      } catch {
+        this.logger.error(
+          `Enqueue of parse_inbox_item failed for item ${detail.item.id}.`,
+        );
+      }
+    }
+
+    return detail;
   }
 
   async routeToDocument(input: RouteInput): Promise<InboxItemDetail | null> {
-    const { document, output } = manualProvider(input.body.document);
+    // A parsed route is completed and re-validated from the stored row inside the route transaction.
+    const { document, output } =
+      input.body.parsedExtractionId === undefined
+        ? manualProvider(input.body.document)
+        : manualDraft(input.body.document);
 
     return this.inbox.routeToDocument({
       ...input,
@@ -790,6 +823,12 @@ export class InboxService {
         providerVersion: MANUAL_PROVIDER_VERSION,
       },
       fileBlobIds: input.body.fileBlobIds,
+      ...(input.body.lineCategory === undefined
+        ? {}
+        : { lineCategory: input.body.lineCategory }),
+      ...(input.body.parsedExtractionId === undefined
+        ? {}
+        : { parsedExtractionId: input.body.parsedExtractionId }),
       ...(input.body.supersedesDocumentId === undefined
         ? {}
         : { supersedesDocumentId: input.body.supersedesDocumentId }),
@@ -855,7 +894,7 @@ export class InboxService {
     return this.inbox.readRule(input);
   }
 
-  // The enabled cap and the invoice refusal are the controller's answers; the rerun is queued after the commit.
+  // The enabled cap is the controller's answer; the rerun is queued after the commit.
   async createRule(input: CreateRuleInput): Promise<InboxRule | null> {
     const created = await this.inbox.createRule(input);
 
@@ -877,26 +916,7 @@ export class InboxService {
     return created;
   }
 
-  // The invoice refusal needs the merged row: the stored rule plus the patch.
-  async updateRule(input: UpdateRuleInput): Promise<InboxRule | null> {
-    const current = await this.inbox.readRule(input);
-
-    if (current === null) {
-      return null;
-    }
-
-    if (
-      isInvoiceAutoRoute({
-        autoRoute: input.body.autoRoute ?? current.autoRoute,
-        setDocumentKind:
-          input.body.setDocumentKind === undefined
-            ? current.setDocumentKind
-            : input.body.setDocumentKind,
-      })
-    ) {
-      throw new UnprocessableEntityException('not_available');
-    }
-
+  updateRule(input: UpdateRuleInput): Promise<InboxRule | null> {
     return this.inbox.updateRule(input);
   }
 
