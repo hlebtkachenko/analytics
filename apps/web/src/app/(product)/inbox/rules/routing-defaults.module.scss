@@ -1,0 +1,18 @@
+@use '@bap/design-system/tokens/spacing.scss' as spacing;
+@use '@bap/design-system/tokens/type.scss' as type;
+
+.defaults {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-05;
+}
+
+.heading {
+  @include type.type-style('heading-03');
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-02;
+}

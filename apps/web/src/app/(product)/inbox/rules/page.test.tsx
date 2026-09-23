@@ -108,14 +108,66 @@ const rules = [
   },
 ];
 
-function capabilities(manageDocuments: boolean) {
+const platformTarget = {
+  auto: 'never',
+  autoThreshold: null,
+  defaultAssigneeId: null,
+  defaultLegalEntityId: null,
+  destination: 'documents',
+  detectedType: 'pdf',
+  documentKind: 'other',
+  partnerPolicy: 'match_only',
+  requiredFields: [],
+  source: 'platform',
+};
+
+// The pdf row is changed; the other nine are platform defaults, sent out of order.
+const targets = [
+  ...['text', 'image'].map((detectedType) => ({
+    ...platformTarget,
+    detectedType,
+  })),
+  {
+    ...platformTarget,
+    auto: 'above_threshold',
+    autoThreshold: 0.29,
+    defaultAssigneeId: 'user_2',
+    defaultLegalEntityId: LEGAL_ENTITY_ID,
+    requiredFields: ['title'],
+    source: 'organization',
+  },
+  {
+    ...platformTarget,
+    detectedType: 'isdoc_invoice',
+    documentKind: 'received_invoice',
+  },
+  ...['money_s3_export', 'pohoda_export', 'unknown'].map((detectedType) => ({
+    ...platformTarget,
+    destination: null,
+    detectedType,
+    documentKind: null,
+  })),
+  ...['camt_statement', 'gpc_statement'].map((detectedType) => ({
+    ...platformTarget,
+    detectedType,
+    documentKind: 'bank_statement',
+  })),
+  {
+    ...platformTarget,
+    destination: 'datasets',
+    detectedType: 'tabular',
+    documentKind: null,
+  },
+];
+
+function capabilities(manageDocuments: boolean, manageOrganization: boolean) {
   return {
     createEntities: false,
     deleteEntities: false,
     manageDocuments,
     manageEntityAccess: false,
     manageMembers: false,
-    manageOrganization: false,
+    manageOrganization,
     readDocuments: true,
     updateEntities: false,
     uploadData: false,
@@ -124,7 +176,13 @@ function capabilities(manageDocuments: boolean) {
 }
 
 // One router per test, so every request is answered by the shape its route promises.
-function respondWith(manageDocuments = true, channelsStatus = 200) {
+function respondWith(
+  manageDocuments = true,
+  channelsStatus = 200,
+  manageOrganization = manageDocuments,
+  targetsStatus = 200,
+  targetPutStatus = 200,
+) {
   return vi.fn(async (input: string, init?: RequestInit) => {
     if (input === '/api/auth/organization/list') {
       return Response.json([
@@ -137,7 +195,7 @@ function respondWith(manageDocuments = true, channelsStatus = 200) {
     }
     if (input.endsWith('/access')) {
       return Response.json({
-        capabilities: capabilities(manageDocuments),
+        capabilities: capabilities(manageDocuments, manageOrganization),
         organizationId: 'organization_1',
       });
     }
@@ -148,6 +206,28 @@ function respondWith(manageDocuments = true, channelsStatus = 200) {
       return channelsStatus === 200
         ? Response.json(channels)
         : Response.json({ error: 'access_denied' }, { status: channelsStatus });
+    }
+    if (input.endsWith('/inbox/routing-targets')) {
+      return targetsStatus === 200
+        ? Response.json({ targets })
+        : Response.json({ error: 'failed' }, { status: targetsStatus });
+    }
+    if (input.includes('/inbox/routing-targets/') && init?.method === 'PUT') {
+      if (targetPutStatus !== 200) {
+        return Response.json({ error: 'failed' }, { status: targetPutStatus });
+      }
+      return Response.json({
+        ...platformTarget,
+        ...JSON.parse(String(init.body)),
+        detectedType: input.slice(input.lastIndexOf('/') + 1),
+        source: 'organization',
+      });
+    }
+    if (
+      input.includes('/inbox/routing-targets/') &&
+      init?.method === 'DELETE'
+    ) {
+      return new Response(null, { status: 204 });
     }
     if (input.endsWith('/inbox/rules/order') && init?.method === 'PUT') {
       const { ruleIds } = JSON.parse(String(init.body)) as {
@@ -488,5 +568,221 @@ describe('InboxRulesPage', () => {
         ],
       ]);
     });
+  });
+
+  it('states the changed defaults before the collapsed platform defaults, with Change and Reset for an owner', async () => {
+    vi.stubGlobal('fetch', respondWith());
+
+    renderPage();
+
+    expect(
+      await screen.findByRole('heading', {
+        level: 2,
+        name: 'Defaults by file type',
+      }),
+    ).toBeVisible();
+    expect(screen.getByText(/Your rules above and a source's/)).toBeVisible();
+    const changed = await screen.findByRole('list', {
+      name: 'Changed defaults',
+    });
+    expect(within(changed).getAllByRole('listitem')).toHaveLength(1);
+    expect(changed).toHaveTextContent(
+      'A PDF goes to Documents as Other for Placeholder Holding; it is filed without review from 29% confidence, otherwise a person confirms it.',
+    );
+    const toggle = screen.getByRole('button', { name: 'Defaults (9)' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(
+      changed.compareDocumentPosition(toggle) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // The platform rows keep the detected-type order, whatever order the API sent.
+    const platform = screen.getByRole('list', { name: 'Platform defaults' });
+    expect(
+      within(platform)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual([
+      'An ISDOC invoice goes to Documents as Received invoice; a person confirms every one.Change',
+      'A Money S3 export waits in the inbox for a person to decide.Change',
+      'A Pohoda export waits in the inbox for a person to decide.Change',
+      'A CAMT bank statement goes to Documents as Bank statement; a person confirms every one.Change',
+      'A GPC bank statement goes to Documents as Bank statement; a person confirms every one.Change',
+      'A spreadsheet or CSV file goes to Datasets; a person confirms every one.Change',
+      'An image goes to Documents as Other; a person confirms every one.Change',
+      'A text file goes to Documents as Other; a person confirms every one.Change',
+      'Any other file waits in the inbox for a person to decide.Change',
+    ]);
+    expect(
+      screen.getByRole('button', { name: 'Change what happens to a PDF' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Reset to default for a PDF' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Reset to default for an image' }),
+    ).toBeNull();
+    expect(
+      screen.queryByText('Only an owner can change the defaults.'),
+    ).toBeNull();
+  });
+
+  it('shows the defaults read only to an admin', async () => {
+    vi.stubGlobal('fetch', respondWith(true, 403, false));
+
+    renderPage();
+
+    expect(
+      await screen.findByText('Only an owner can change the defaults.'),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('list', { name: 'Changed defaults' }),
+    ).toHaveTextContent('A PDF goes to Documents as Other');
+    expect(screen.queryByRole('button', { name: /^Change what/ })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /^Reset to default/ }),
+    ).toBeNull();
+    // Rule controls stay with manageDocuments.
+    expect(screen.getByRole('button', { name: 'Create rule' })).toBeVisible();
+  });
+
+  it('prefills a whole-percent confidence, previews the form and puts the whole target', async () => {
+    const fetchMock = respondWith();
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Change what happens to a PDF',
+      }),
+    );
+
+    const dialog = screen.getByRole('dialog', { name: 'Edit default' });
+    expect(within(dialog).getByLabelText('Confidence (%)')).toHaveValue('29');
+    expect(within(dialog).getByLabelText('Legal entity')).toHaveValue(
+      LEGAL_ENTITY_ID,
+    );
+    expect(
+      within(dialog).getByText(
+        'A PDF goes to Documents as Other for Placeholder Holding; it is filed without review from 29% confidence, otherwise a person confirms it.',
+      ),
+    ).toBeVisible();
+    expect(within(dialog).queryByLabelText(/assignee/i)).toBeNull();
+
+    fireEvent.change(within(dialog).getByLabelText('Confidence (%)'), {
+      target: { value: '90' },
+    });
+    expect(
+      within(dialog).getByText(/filed without review from 90% confidence/),
+    ).toBeVisible();
+    fireEvent.change(within(dialog).getByLabelText('Legal entity'), {
+      target: { value: '' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('Document kind'), {
+      target: { value: 'received_invoice' },
+    });
+    expect(
+      within(dialog).getByText(
+        'A PDF goes to Documents as Received invoice; a person confirms every one until the ISDOC parser lands.',
+      ),
+    ).toBeVisible();
+    fireEvent.change(within(dialog).getByLabelText('Document kind'), {
+      target: { value: 'contract' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await vi.waitFor(() => {
+      expect(calls(fetchMock, 'PUT')).toEqual([
+        [
+          '/api/bff/application/organizations/organization_1/inbox/routing-targets/pdf',
+          {
+            auto: 'above_threshold',
+            autoThreshold: 0.9,
+            defaultAssigneeId: 'user_2',
+            defaultLegalEntityId: null,
+            destination: 'documents',
+            documentKind: 'contract',
+            partnerPolicy: 'match_only',
+            requiredFields: ['title'],
+          },
+        ],
+      ]);
+    });
+  });
+
+  it('refuses a confidence outside 0 to 100 before sending', async () => {
+    const fetchMock = respondWith();
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Change what happens to a PDF',
+      }),
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Edit default' });
+    fireEvent.change(within(dialog).getByLabelText('Confidence (%)'), {
+      target: { value: '150' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    expect(within(dialog).getByText(/The default is incomplete/)).toBeVisible();
+    expect(calls(fetchMock, 'PUT')).toEqual([]);
+  });
+
+  it('shows a failed save inside the still open dialog, and clears it when Change opens it again', async () => {
+    vi.stubGlobal('fetch', respondWith(true, 200, true, 200, 500));
+
+    renderPage();
+    const change = await screen.findByRole('button', {
+      name: 'Change what happens to a PDF',
+    });
+    fireEvent.click(change);
+    const dialog = screen.getByRole('dialog', { name: 'Edit default' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    expect(
+      await within(dialog).findByText('The default could not be saved.'),
+    ).toBeVisible();
+    expect(screen.getAllByText('The default could not be saved.')).toHaveLength(
+      1,
+    );
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(await enabledButton('Change what happens to a PDF'));
+    expect(screen.queryByText('The default could not be saved.')).toBeNull();
+  });
+
+  it('resets a changed default through the target route', async () => {
+    const fetchMock = respondWith();
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Reset to default for a PDF' }),
+    );
+
+    await vi.waitFor(() => {
+      expect(calls(fetchMock, 'DELETE')).toEqual([
+        [
+          '/api/bff/application/organizations/organization_1/inbox/routing-targets/pdf',
+          undefined,
+        ],
+      ]);
+    });
+  });
+
+  it('keeps the rules grid when the defaults read fails', async () => {
+    vi.stubGlobal('fetch', respondWith(true, 200, true, 500));
+
+    renderPage();
+
+    expect(
+      await screen.findByText('The defaults could not be loaded.'),
+    ).toBeVisible();
+    expect(screen.getByText('Supplier mail')).toBeVisible();
+    expect(
+      screen.queryByText('The inbox rules could not be loaded.'),
+    ).toBeNull();
+    expect(screen.queryByText('You have not changed any default.')).toBeNull();
   });
 });

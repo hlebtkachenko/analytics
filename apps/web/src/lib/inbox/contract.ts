@@ -29,6 +29,22 @@ export function isInlineMediaType(mediaType: string): boolean {
   return (INLINE_MEDIA_TYPES as readonly string[]).includes(mediaType);
 }
 
+// Mirrors DETECTED_TYPES of apps/api inbox contract, in its order.
+export const INBOX_DETECTED_TYPES = [
+  'isdoc_invoice',
+  'money_s3_export',
+  'pohoda_export',
+  'camt_statement',
+  'gpc_statement',
+  'tabular',
+  'pdf',
+  'image',
+  'text',
+  'unknown',
+] as const;
+
+export type InboxDetectedType = (typeof INBOX_DETECTED_TYPES)[number];
+
 const TOKEN_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const MEDIA_TYPE_PATTERN =
   /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/;

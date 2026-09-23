@@ -52,21 +52,21 @@ export const inboxDiscardReasonLabelKeys: Readonly<
 export const inboxRoutingDestinationLabelKeys: Readonly<
   Record<InboxRoutingDestination, string>
 > = {
-  datasets: 'inboxSettings.destinationDatasets',
-  discard: 'inboxSettings.destinationDiscard',
-  documents: 'inboxSettings.destinationDocuments',
+  datasets: 'inboxRules.defaults.destinationDatasets',
+  discard: 'inboxRules.defaults.destinationDiscard',
+  documents: 'inboxRules.defaults.destinationDocuments',
 };
 
 // The platform default for some detected types names no destination yet.
 export const inboxRoutingDestinationNoneLabelKey =
-  'inboxSettings.destinationNone';
+  'inboxRules.defaults.destinationNone';
 
 export const inboxRoutingAutoLabelKeys: Readonly<
   Record<InboxRoutingAutoPolicy, string>
 > = {
-  above_threshold: 'inboxSettings.autoAboveThreshold',
-  always: 'inboxSettings.autoAlways',
-  never: 'inboxSettings.autoNever',
+  above_threshold: 'inboxRules.defaults.autoAboveThreshold',
+  always: 'inboxRules.defaults.autoAlways',
+  never: 'inboxRules.defaults.autoNever',
 };
 
 export const inboxCorrectionFieldLabelKeys: Readonly<

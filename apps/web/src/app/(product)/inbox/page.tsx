@@ -65,6 +65,7 @@ import type {
   BulkInboxItemsResponse,
   InboxBulkAction,
   InboxConfidenceBand,
+  InboxDetectedType,
   InboxDiscardReason,
   InboxIssueCode,
   InboxItemCounts,
@@ -121,7 +122,7 @@ const detectedTypeIcons: Readonly<Record<string, typeof Document>> = {
   tabular: DataTable,
   text: Txt,
   unknown: DocumentUnknown,
-};
+} satisfies Record<InboxDetectedType, typeof Document>;
 
 // Fallback icon per payload kind when the detected type is missing or unmapped.
 const payloadIcons: Readonly<Record<string, typeof Document>> = {

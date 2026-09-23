@@ -189,7 +189,9 @@ describe('InboxSettingsPage', () => {
     expect(within(table).getByText('Placeholder Holding')).toBeVisible();
     expect(within(table).getByText('Contract')).toBeVisible();
     expect(within(table).getByText('Received invoice')).toBeVisible();
-    expect(within(table).getByText('Above threshold')).toBeVisible();
+    expect(
+      within(table).getByText('Without review above a confidence'),
+    ).toBeVisible();
     expect(within(table).getByText('Takes effect with rules.')).toBeVisible();
     expect(within(table).getByText('0.85')).toBeVisible();
     expect(within(table).getByText('user_2')).toBeVisible();

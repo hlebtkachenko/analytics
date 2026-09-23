@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
-import { inboxTabQuery, inboxTabs, isInboxTab } from './labels.ts';
+import { resources } from '../../i18n/resources';
+import {
+  inboxRoutingDestinationLabelKeys,
+  inboxRoutingDestinationNoneLabelKey,
+  inboxTabQuery,
+  inboxTabs,
+  isInboxTab,
+} from './labels.ts';
+
+function translation(key: string): unknown {
+  return key
+    .split('.')
+    .reduce<unknown>(
+      (node, segment) => (node as Record<string, unknown>)[segment],
+      resources['en-US'].translation,
+    );
+}
 
 describe('inbox tabs', () => {
   it('maps each tab to its status filter and hides snoozed items on To review only', () => {
@@ -16,5 +32,16 @@ describe('inbox tabs', () => {
     expect(inboxTabs.every((tab) => isInboxTab(tab))).toBe(true);
     expect(isInboxTab('routed')).toBe(false);
     expect(isInboxTab(null)).toBe(false);
+  });
+});
+
+describe('routing destination labels', () => {
+  it('keep the words the item page routing sentence renders', () => {
+    expect(
+      Object.values(inboxRoutingDestinationLabelKeys).map(translation),
+    ).toEqual(['Datasets', 'Discard', 'Documents']);
+    expect(translation(inboxRoutingDestinationNoneLabelKey)).toBe(
+      'No destination',
+    );
   });
 });
