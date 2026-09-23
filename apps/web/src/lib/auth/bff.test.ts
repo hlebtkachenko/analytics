@@ -1963,6 +1963,69 @@ describe('inbox item reads and writes', () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(1);
   });
 
+  it('forwards a parsed route by row id and refuses a client invoice beside it', async () => {
+    const parsedBody = {
+      document: {
+        currencyCode: 'CZK',
+        documentDate: '2026-09-01',
+        kind: 'received_invoice',
+        legalEntityId: LEGAL_ENTITY_ID,
+        title: 'Placeholder supplier invoice',
+      },
+      fileBlobIds: [BLOB_ID],
+      lineCategory: 'services',
+      parsedExtractionId: DATASET_ID,
+    };
+    const fetchImplementation = vi.fn<typeof fetch>(async (_input, init) => {
+      expect(JSON.parse(String(init?.body))).toEqual(parsedBody);
+      return Response.json(inboxDetail);
+    });
+
+    const routed = await writeInboxItem(
+      auth,
+      inboxRequest(`items/${INBOX_ITEM_ID}/route/document`, {
+        body: JSON.stringify(parsedBody),
+        method: 'POST',
+      }),
+      'org_1',
+      INBOX_ITEM_ID,
+      'routeDocument',
+      fetchImplementation,
+    );
+    const refused = await writeInboxItem(
+      auth,
+      inboxRequest(`items/${INBOX_ITEM_ID}/route/document`, {
+        body: JSON.stringify({
+          ...parsedBody,
+          document: {
+            ...parsedBody.document,
+            invoice: {
+              lines: [
+                {
+                  baseAmount: '100',
+                  category: 'services',
+                  description: 'Placeholder line',
+                  vatAmount: '21',
+                  vatMode: 'standard',
+                  vatRate: '21',
+                },
+              ],
+            },
+          },
+        }),
+        method: 'POST',
+      }),
+      'org_1',
+      INBOX_ITEM_ID,
+      'routeDocument',
+      fetchImplementation,
+    );
+
+    expect(routed.status).toBe(200);
+    expect(refused.status).toBe(400);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+
   it('forwards the two 409 route bodies by code and hides any other conflict body', async () => {
     let posts = 0;
     const fetchImplementation = vi.fn<typeof fetch>(async (_input, init) => {

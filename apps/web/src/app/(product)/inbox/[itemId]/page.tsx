@@ -31,6 +31,9 @@ import { useTranslation } from 'react-i18next';
 
 import OriginalPreview from '../../../../components/documents/original-preview';
 import PartnerPicker from '../../../../components/documents/partner-picker';
+import ParsedInvoiceSummary, {
+  parsedInvoiceOf,
+} from '../../../../components/inbox/parsed-invoice-summary';
 import PageContainer from '../../../../components/page-container';
 import { useToast } from '../../../../components/shell/toast';
 import { StatusIndicator } from '../../../../components/status-indicator';
@@ -38,21 +41,28 @@ import { getJson, isAbortError } from '../../../../lib/datasets/client';
 import {
   documentsPath,
   optional,
+  partnersPath,
   sendJson,
   withOrganization,
 } from '../../../../lib/documents/client';
 import {
   createDocumentBodySchema,
-  createDocumentRequestSchema,
   documentKindSchema,
   documentListResponseSchema,
+  invoiceLineCategorySchema,
   isInvoiceKind,
+  partnerSchema,
 } from '../../../../lib/documents/contract.ts';
 import type {
   DocumentKind,
   DocumentSummary,
+  InvoiceLineCategory,
+  Partner,
 } from '../../../../lib/documents/contract.ts';
-import { documentKindLabelKeys } from '../../../../lib/documents/labels.ts';
+import {
+  documentKindLabelKeys,
+  invoiceLineCategoryLabelKeys,
+} from '../../../../lib/documents/labels.ts';
 import {
   attachInboxItem,
   inboxBlobDownloadPath,
@@ -68,6 +78,7 @@ import {
   inboxItemListResponseSchema,
   isBlobQuarantined,
   isBlobScanPending,
+  routeInboxItemToDocumentRequestSchema,
 } from '../../../../lib/inbox/contract.ts';
 import type {
   InboxCorrectionField,
@@ -221,6 +232,12 @@ export default function InboxItemPage() {
   const [writeFailed, setWriteFailed] = useState(false);
   const [draftInvalid, setDraftInvalid] = useState(false);
   const [draft, setDraft] = useState<DraftFields>();
+  // The category every parsed supply line takes; blank leaves it to the partner default.
+  const [lineCategory, setLineCategory] = useState('');
+  // The default line category of each partner the picker loaded, so the page knows what blank means.
+  const [partnerCategories, setPartnerCategories] = useState<
+    Readonly<Record<string, InvoiceLineCategory | null>>
+  >({});
   const [reasons, setReasons] = useState<
     Partial<Record<InboxCorrectionField, string>>
   >({});
@@ -267,6 +284,7 @@ export default function InboxItemPage() {
         setSnoozedUntil(payload.item.snoozedUntil?.slice(0, 16) ?? '');
         setSelectedBlobId(payload.files[0]?.blobId ?? '');
         setDraft(undefined);
+        setLineCategory('');
         setReasons({});
       })
       .catch((error: unknown) => {
@@ -361,6 +379,59 @@ export default function InboxItemPage() {
     }
   }
 
+  const rememberPartners = useCallback((partners: readonly Partner[]) => {
+    setPartnerCategories((current) => ({
+      ...current,
+      ...Object.fromEntries(
+        partners.map((partner) => [partner.id, partner.defaultLineCategory]),
+      ),
+    }));
+  }, []);
+
+  const parsed = detail?.parsed ?? null;
+  const parsedInvoice = parsedInvoiceOf(parsed);
+  const invoice = fields !== undefined && isInvoiceKind(fields.kind);
+  // The Inbox has no line editor, so an invoice kind files only with the parsed invoice content.
+  const invoiceBlocked = invoice && parsedInvoice === undefined;
+  const needsCategory =
+    invoice &&
+    parsedInvoice !== undefined &&
+    parsedInvoice.lines.some((line) => line.lineKind === 'item');
+  // Undefined while the partner is not loaded; null when it has no default.
+  const partnerDefault =
+    fields === undefined || fields.partnerId.length === 0
+      ? null
+      : partnerCategories[fields.partnerId];
+  const categoryMissing =
+    needsCategory && lineCategory.length === 0 && partnerDefault === null;
+
+  async function savePartnerCategory(
+    partnerId: string,
+    value: string,
+  ): Promise<void> {
+    const category = invoiceLineCategorySchema.safeParse(value);
+    setBusy(true);
+    setWriteFailed(false);
+    try {
+      const partner = await sendJson(
+        {
+          body: {
+            defaultLineCategory: category.success ? category.data : null,
+          },
+          method: 'PATCH',
+          path: `${partnersPath(organizationId)}/${encodeURIComponent(partnerId)}`,
+        },
+        partnerSchema,
+      );
+      rememberPartners([partner]);
+      notify({ kind: 'success', title: t('inbox.item.partnerCategorySaved') });
+    } catch {
+      setWriteFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // Every action answers with the refreshed detail, so the page rereads it rather than trusting the answer.
   const write = useCallback(
     async (
@@ -396,27 +467,16 @@ export default function InboxItemPage() {
     if (detail === undefined || fields === undefined) {
       return;
     }
+    // A parsed row is named by id and the server copies its invoice, total and attributes, so the body never carries them.
+    const serverOwned =
+      detail.parsed === null ? [] : ['attributes', 'invoice', 'totalAmount'];
     // Only the keys the document request accepts pass through; a provider's own keys, such as a rule's matchedRuleIds, never do.
     const passthrough = Object.fromEntries(
       Object.entries(detail.extraction?.draft ?? {}).filter(
-        ([key]) => key in createDocumentBodySchema.shape,
+        ([key]) =>
+          key in createDocumentBodySchema.shape && !serverOwned.includes(key),
       ),
     );
-    const parsed = createDocumentRequestSchema.safeParse({
-      ...passthrough,
-      currencyCode: fields.currencyCode,
-      documentDate: fields.documentDate,
-      kind: fields.kind,
-      legalEntityId: fields.legalEntityId,
-      partnerId: optional(fields.partnerId),
-      reference: optional(fields.reference),
-      title: fields.title,
-    });
-    if (!parsed.success) {
-      setDraftInvalid(true);
-      return;
-    }
-    setDraftInvalid(false);
     const correctionReasons: Partial<Record<InboxCorrectionField, string>> = {};
     for (const key of changedFields) {
       const reason = reasons[correctionFields[key]]?.trim() ?? '';
@@ -424,13 +484,32 @@ export default function InboxItemPage() {
         correctionReasons[correctionFields[key]] = reason;
       }
     }
-    await submitRoute({
+    const body = routeInboxItemToDocumentRequestSchema.safeParse({
       ...(Object.keys(correctionReasons).length === 0
         ? {}
         : { correctionReasons }),
-      document: parsed.data,
+      document: {
+        ...passthrough,
+        currencyCode: fields.currencyCode,
+        documentDate: fields.documentDate,
+        kind: fields.kind,
+        legalEntityId: fields.legalEntityId,
+        partnerId: optional(fields.partnerId),
+        reference: optional(fields.reference),
+        title: fields.title,
+      },
       fileBlobIds: detail.files.map((file) => file.blobId),
+      ...(needsCategory && lineCategory.length > 0 ? { lineCategory } : {}),
+      ...(detail.parsed === null
+        ? {}
+        : { parsedExtractionId: detail.parsed.id }),
     });
+    if (!body.success || categoryMissing) {
+      setDraftInvalid(true);
+      return;
+    }
+    setDraftInvalid(false);
+    await submitRoute(body.data);
   }
 
   // A 409 names a conflict the person resolves here; every other answer is a route or a failure.
@@ -599,9 +678,7 @@ export default function InboxItemPage() {
     };
   });
 
-  const invoice = fields !== undefined && isInvoiceKind(fields.kind);
-
-  // The one primary verb by status; an invoice waits for the parser, so its File button is disabled.
+  // The one primary verb by status; an invoice without parsed content cannot be filed here, so its File button is disabled.
   function primaryButton(): ReactElement | null {
     if (item === undefined) {
       return null;
@@ -651,7 +728,7 @@ export default function InboxItemPage() {
     }
     return (
       <Button
-        disabled={busy || invoice}
+        disabled={busy || invoiceBlocked}
         onClick={() => {
           void routeToDocument();
         }}
@@ -787,6 +864,9 @@ export default function InboxItemPage() {
     if (fields.documentDate.trim().length === 0) {
       list.push(t('inbox.item.addDate'));
     }
+    if (categoryMissing) {
+      list.push(t('inbox.item.chooseLineCategory'));
+    }
     if (item?.duplicateOfItemId != null) {
       list.push(t('inbox.item.issueDuplicateExact'));
     }
@@ -866,7 +946,7 @@ export default function InboxItemPage() {
         title: t('inbox.item.discardedTitle'),
       };
     }
-    if (invoice) {
+    if (invoiceBlocked) {
       return {
         lines: [t('inbox.item.invoiceBody')],
         tone: 'info',
@@ -1227,7 +1307,7 @@ export default function InboxItemPage() {
                           </div>
                         </Stack>
                       ) : null}
-                      {invoice && open ? (
+                      {invoiceBlocked && open ? (
                         <div className={styles.actions!}>
                           <Button
                             kind="secondary"
@@ -1361,6 +1441,7 @@ export default function InboxItemPage() {
                           <PartnerPicker
                             disabled={!canManage || !open}
                             idPrefix="inbox-document"
+                            onPartnersLoaded={rememberPartners}
                             onSelect={(partnerId) => {
                               updateDraft({ partnerId });
                             }}
@@ -1370,6 +1451,101 @@ export default function InboxItemPage() {
                           {reasonInput('partnerId')}
                         </Stack>
                       </section>
+
+                      {parsed === null ? null : (
+                        <section aria-labelledby="inbox-parsed-heading">
+                          <Stack gap={4}>
+                            <h2
+                              className={styles.sectionHeading!}
+                              id="inbox-parsed-heading"
+                            >
+                              {t('inbox.item.parsedTitle')}
+                            </h2>
+                            <ParsedInvoiceSummary
+                              currencyCode={fields.currencyCode}
+                              parsed={parsed}
+                            />
+                            {needsCategory ? (
+                              <Select
+                                disabled={!canManage || !open}
+                                helperText={t('inbox.item.lineCategoryHelp')}
+                                id="inbox-parsed-line-category"
+                                labelText={t('inbox.item.lineCategory')}
+                                onChange={(event) => {
+                                  setLineCategory(event.target.value);
+                                }}
+                                // Keep Carbon from titling the control with its value as a native tooltip.
+                                title={t('inbox.item.lineCategory')}
+                                value={lineCategory}
+                              >
+                                <SelectItem
+                                  text={
+                                    partnerDefault === null ||
+                                    partnerDefault === undefined
+                                      ? t('inbox.item.lineCategoryChoose')
+                                      : t('inbox.item.lineCategoryPartner', {
+                                          category: t(
+                                            invoiceLineCategoryLabelKeys[
+                                              partnerDefault
+                                            ],
+                                          ),
+                                        })
+                                  }
+                                  value=""
+                                />
+                                {invoiceLineCategorySchema.options.map(
+                                  (category) => (
+                                    <SelectItem
+                                      key={category}
+                                      text={t(
+                                        invoiceLineCategoryLabelKeys[category],
+                                      )}
+                                      value={category}
+                                    />
+                                  ),
+                                )}
+                              </Select>
+                            ) : null}
+                            {needsCategory &&
+                            canManage &&
+                            open &&
+                            fields.partnerId.length > 0 &&
+                            partnerDefault !== undefined ? (
+                              <Select
+                                disabled={busy}
+                                helperText={t('inbox.item.partnerCategoryHelp')}
+                                id="inbox-parsed-partner-category"
+                                labelText={t('inbox.item.partnerCategory')}
+                                onChange={(event) => {
+                                  void savePartnerCategory(
+                                    fields.partnerId,
+                                    event.target.value,
+                                  );
+                                }}
+                                // Keep Carbon from titling the control with its value as a native tooltip.
+                                title={t('inbox.item.partnerCategory')}
+                                value={partnerDefault ?? ''}
+                              >
+                                <SelectItem
+                                  text={t('inbox.item.partnerCategoryNone')}
+                                  value=""
+                                />
+                                {invoiceLineCategorySchema.options.map(
+                                  (category) => (
+                                    <SelectItem
+                                      key={category}
+                                      text={t(
+                                        invoiceLineCategoryLabelKeys[category],
+                                      )}
+                                      value={category}
+                                    />
+                                  ),
+                                )}
+                              </Select>
+                            ) : null}
+                          </Stack>
+                        </section>
+                      )}
                     </Stack>
                   </TabPanel>
                   <TabPanel>

@@ -463,7 +463,7 @@ describe('InboxRulesPage', () => {
       target: { value: 'received_invoice' },
     });
     expect(
-      within(dialog).getByText(/waits for the ISDOC parser/),
+      within(dialog).getByText(/only from a parsed ISDOC file/),
     ).toBeVisible();
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));

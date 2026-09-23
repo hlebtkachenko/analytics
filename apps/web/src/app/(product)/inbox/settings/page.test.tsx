@@ -305,7 +305,7 @@ describe('InboxSettingsPage', () => {
       name: 'Routing target for isdoc_invoice',
     });
     expect(
-      within(dialog).getByText(/waits for the ISDOC parser/),
+      within(dialog).getByText(/only from a parsed ISDOC file/),
     ).toBeVisible();
     expect(within(dialog).getByLabelText('Auto policy')).toBeEnabled();
 

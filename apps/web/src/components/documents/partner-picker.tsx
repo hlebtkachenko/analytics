@@ -31,12 +31,15 @@ function subscribeNoop(): () => void {
 export default function PartnerPicker({
   disabled = false,
   idPrefix,
+  onPartnersLoaded,
   onSelect,
   organizationId,
   selectedPartnerId,
 }: Readonly<{
   disabled?: boolean;
   idPrefix: string;
+  // Hands every loaded or created partner to the host; pass a stable callback, since a new one refetches.
+  onPartnersLoaded?: (partners: readonly Partner[]) => void;
   onSelect: (partnerId: string) => void;
   organizationId: string;
   selectedPartnerId: string;
@@ -69,6 +72,7 @@ export default function PartnerPicker({
       .then((payload) => partnerListSchema.parse(payload))
       .then((payload) => {
         setPartners(payload.partners);
+        onPartnersLoaded?.(payload.partners);
       })
       .catch((error: unknown) => {
         if (!isAbortError(error)) {
@@ -78,7 +82,7 @@ export default function PartnerPicker({
     return () => {
       controller.abort();
     };
-  }, [organizationId, query]);
+  }, [onPartnersLoaded, organizationId, query]);
 
   async function createPartner(): Promise<void> {
     const parsed = createPartnerRequestSchema.safeParse({
@@ -101,6 +105,7 @@ export default function PartnerPicker({
         partnerSchema,
       );
       setPartners((current) => [partner, ...current]);
+      onPartnersLoaded?.([partner]);
       onSelect(partner.id);
       setModalOpen(false);
       setFailed(false);
