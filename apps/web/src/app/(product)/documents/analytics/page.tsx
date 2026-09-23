@@ -3,15 +3,34 @@
 import { DataGrid } from '@bap/design-system/blocks';
 import type { GridColumn, GridRow } from '@bap/design-system/blocks';
 import {
+  ChartFrame,
+  GroupedBarChart,
+  ScaleTypes,
+  SimpleBarChart,
+  StackedBarChart,
+  TruncationTypes,
+} from '@bap/design-system/charts';
+import type {
+  BarChartOptions,
+  ChartTable,
+  ChartTheme,
+} from '@bap/design-system/charts';
+import {
   Button,
+  Column,
   DataTableSkeleton,
+  Grid,
+  Heading,
   InlineNotification,
+  Section,
   Tile,
 } from '@bap/design-system/react';
 import { DocumentAdd } from '@bap/design-system/icons';
+import { useThemeMode } from '@bap/design-system/theme';
 import type { Route } from 'next';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import EntityMultiSelect from '../../../../components/documents/entity-multiselect';
@@ -34,6 +53,14 @@ import {
   invoiceLineKindLabelKeys,
   vatModeLabelKeys,
 } from '../../../../lib/documents/labels.ts';
+import {
+  amountUnit,
+  monthTotalsSeries,
+  partnerSeries,
+  tooltipValue,
+  vatBalanceSeries,
+} from '../../../../lib/documents/analytics-series.ts';
+import type { ChartSeries } from '../../../../lib/documents/analytics-series.ts';
 import { documentKindIcon } from '../../../../lib/documents/kind-icon.ts';
 import { storedEntities } from '../../../../lib/documents/list.ts';
 import {
@@ -55,9 +82,114 @@ type AnalyticsResult = Readonly<{
 }>;
 
 const countFormat = new Intl.NumberFormat('cs-CZ');
+// Axis ticks read "1,2 mil."; tooltips and tables keep the full Czech amount.
+const compactFormat = new Intl.NumberFormat('cs-CZ', { notation: 'compact' });
+
+type BarOptionsInput = Readonly<{
+  amountTitle: string;
+  height: string;
+  // Partners read top to bottom, so their names sit on the left axis.
+  horizontal?: boolean;
+  language: string;
+  legend: boolean;
+  pairingOption: number;
+  stacked?: boolean;
+  theme: ChartTheme;
+  title: string;
+}>;
+
+// The table sits in ChartFrame, so no toolbar; months tick short and tooltip long, both in the UI language.
+function barOptions(input: BarOptionsInput): BarChartOptions {
+  const valueAxis = {
+    includeZero: true,
+    mapsTo: 'value',
+    scaleType: ScaleTypes.LINEAR,
+    stacked: input.stacked ?? false,
+    ticks: {
+      formatter: (tick: number | Date) => compactFormat.format(Number(tick)),
+    },
+    title: input.amountTitle,
+  };
+  const keyAxis = {
+    mapsTo: 'key',
+    scaleType: ScaleTypes.LABELS,
+    // Partner names draw in full: a name past the threshold would otherwise reach the label hover tooltip as raw HTML.
+    ...(input.horizontal
+      ? {
+          truncation: {
+            threshold: Number.MAX_SAFE_INTEGER,
+            type: TruncationTypes.NONE,
+          },
+        }
+      : {
+          ticks: {
+            formatter: (tick: number | Date) =>
+              formatMonth(String(tick), input.language, 'short'),
+          },
+        }),
+  };
+
+  return {
+    accessibility: { svgAriaLabel: input.title },
+    animations: false,
+    axes: input.horizontal
+      ? { bottom: valueAxis, left: keyAxis }
+      : { bottom: keyAxis, left: valueAxis },
+    color: { pairing: { option: input.pairingOption } },
+    height: input.height,
+    legend: { enabled: input.legend },
+    resizable: true,
+    theme: input.theme,
+    toolbar: { enabled: false },
+    tooltip: {
+      valueFormatter: (value: unknown) => tooltipValue(value, input.language),
+    },
+  };
+}
+
+type AnalyticsChartProps = Readonly<{
+  children: ReactNode;
+  description?: string;
+  emptyText: string;
+  series: ChartSeries;
+  table: Omit<ChartTable, 'rows'>;
+  testId: string;
+  title: string;
+}>;
+
+// One chart slot: the chart with its table, or one sentence when there is nothing to draw.
+function AnalyticsChart({
+  children,
+  description,
+  emptyText,
+  series,
+  table,
+  testId,
+  title,
+}: AnalyticsChartProps) {
+  return (
+    <Section className={styles.chart!} data-testid={testId}>
+      {series.empty ? (
+        <>
+          <Heading>{title}</Heading>
+          <p>{emptyText}</p>
+        </>
+      ) : (
+        <ChartFrame
+          {...(description === undefined ? {} : { description })}
+          table={{ ...table, rows: series.rows }}
+          title={title}
+        >
+          {children}
+        </ChartFrame>
+      )}
+    </Section>
+  );
+}
 
 export default function DocumentAnalyticsPage() {
   const { t, i18n } = useTranslation();
+  const { resolvedTheme } = useThemeMode();
   const searchParams = useSearchParams();
   const organization = useOrganizationSelection();
   const organizationId = organization.organizationId;
@@ -138,6 +270,8 @@ export default function DocumentAnalyticsPage() {
   const failed =
     organization.state === 'error' || (allowed && analyticsState === 'error');
   const documents = analytics?.documents ?? [];
+  const showResults =
+    !loading && analytics !== undefined && documents.length > 0;
 
   // Advance and rounding live on the Lines tab; fixed widths keep amounts whole and text truncating.
   const documentColumns: readonly GridColumn[] = [
@@ -280,6 +414,35 @@ export default function DocumentAnalyticsPage() {
     }),
   );
 
+  const language = i18n.language;
+  const currencyCodes = analytics?.currencyCodes ?? [];
+  const unit = amountUnit(currencyCodes);
+  const amountTitle =
+    unit === undefined
+      ? t('documents.analyticsChartAmount')
+      : t('documents.analyticsChartAmountIn', { currency: unit });
+  const theme = resolvedTheme as ChartTheme;
+  const monthTitle = t('documents.analyticsChartMonthTitle');
+  const vatTitle = t('documents.analyticsChartVatTitle');
+  const partnersTitle = t('documents.analyticsChartPartnersTitle');
+  const monthSeries = monthTotalsSeries(
+    analytics?.byMonthTotals ?? [],
+    {
+      expense: t('documents.analyticsChartExpenses'),
+      revenue: t('documents.analyticsChartRevenue'),
+    },
+    language,
+  );
+  const vatSeries = vatBalanceSeries(
+    analytics?.byMonthTotals ?? [],
+    t('documents.analyticsChartVatBalance'),
+    language,
+  );
+  const partnersSeries = partnerSeries(analytics?.byPartner ?? [], {
+    issued: t('documents.analyticsChartIssued'),
+    received: t('documents.analyticsChartReceived'),
+  });
+
   return (
     <PageContainer>
       <div className={styles.headingRow!}>
@@ -372,7 +535,138 @@ export default function DocumentAnalyticsPage() {
           </div>
         </Tile>
       ) : null}
-      {!loading && analytics !== undefined && documents.length > 0 ? (
+      {showResults ? (
+        <div className={styles.charts!}>
+          {currencyCodes.length > 1 ? (
+            <InlineNotification
+              hideCloseButton
+              kind="warning"
+              lowContrast
+              title={t('documents.analyticsChartMixedCurrency', {
+                currencies: new Intl.ListFormat(language, {
+                  type: 'conjunction',
+                }).format(currencyCodes),
+              })}
+            />
+          ) : null}
+          <Grid>
+            <Column sm={4} md={8} lg={16}>
+              <AnalyticsChart
+                emptyText={t('documents.analyticsChartMonthEmpty')}
+                series={monthSeries}
+                table={{
+                  columns: [
+                    {
+                      key: 'month',
+                      label: t('documents.analyticsColumnMonth'),
+                    },
+                    {
+                      key: 'revenue',
+                      label: t('documents.analyticsChartRevenue'),
+                    },
+                    {
+                      key: 'expense',
+                      label: t('documents.analyticsChartExpenses'),
+                    },
+                  ],
+                  label: t('documents.analyticsChartMonthTable'),
+                }}
+                testId="analytics-chart-month"
+                title={monthTitle}
+              >
+                <GroupedBarChart
+                  data={[...monthSeries.data]}
+                  options={barOptions({
+                    amountTitle,
+                    height: '320px',
+                    language,
+                    legend: true,
+                    pairingOption: 1,
+                    theme,
+                    title: monthTitle,
+                  })}
+                />
+              </AnalyticsChart>
+            </Column>
+            <Column sm={4} md={8} lg={16} xlg={8}>
+              <AnalyticsChart
+                description={t('documents.analyticsChartVatDescription')}
+                emptyText={t('documents.analyticsChartVatEmpty')}
+                series={vatSeries}
+                table={{
+                  columns: [
+                    {
+                      key: 'month',
+                      label: t('documents.analyticsColumnMonth'),
+                    },
+                    {
+                      key: 'vatBalance',
+                      label: t('documents.analyticsChartVatBalance'),
+                    },
+                  ],
+                  label: t('documents.analyticsChartVatTable'),
+                }}
+                testId="analytics-chart-vat"
+                title={vatTitle}
+              >
+                <SimpleBarChart
+                  data={[...vatSeries.data]}
+                  options={barOptions({
+                    amountTitle,
+                    height: '320px',
+                    language,
+                    legend: false,
+                    pairingOption: 3,
+                    theme,
+                    title: vatTitle,
+                  })}
+                />
+              </AnalyticsChart>
+            </Column>
+            <Column sm={4} md={8} lg={16} xlg={8}>
+              <AnalyticsChart
+                emptyText={t('documents.analyticsChartPartnersEmpty')}
+                series={partnersSeries}
+                table={{
+                  columns: [
+                    {
+                      key: 'partner',
+                      label: t('documents.analyticsChartPartner'),
+                    },
+                    {
+                      key: 'issued',
+                      label: t('documents.analyticsChartIssued'),
+                    },
+                    {
+                      key: 'received',
+                      label: t('documents.analyticsChartReceived'),
+                    },
+                  ],
+                  label: t('documents.analyticsChartPartnersTable'),
+                }}
+                testId="analytics-chart-partners"
+                title={partnersTitle}
+              >
+                <StackedBarChart
+                  data={[...partnersSeries.data]}
+                  options={barOptions({
+                    amountTitle,
+                    height: '360px',
+                    horizontal: true,
+                    language,
+                    legend: true,
+                    pairingOption: 1,
+                    stacked: true,
+                    theme,
+                    title: partnersTitle,
+                  })}
+                />
+              </AnalyticsChart>
+            </Column>
+          </Grid>
+        </div>
+      ) : null}
+      {showResults ? (
         <div className={styles.tables!}>
           <div data-testid="analytics-documents">
             <DataGrid
