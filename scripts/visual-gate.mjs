@@ -241,7 +241,7 @@ async function capture(page, name, url, viewport, rail, waitSelector, prepare) {
   await page.screenshot({ path: file, fullPage: false });
   const data = await measure(page);
   reportTable(`${name} @ ${suffix}`, data);
-  // Pace the run so 21 navigations never trip the API rate limit.
+  // Pace the run so 22 navigations never trip the API rate limit.
   await page.waitForTimeout(400);
 }
 
@@ -331,6 +331,16 @@ async function main() {
   );
   // The upload modal is a state the page loop never reaches, so it is shot on its own.
   await captureInboxUploadModal(page, `/inbox${q}`);
+  // The demo owner's theme is system, so a dark OS preference proves the charts follow the g100 theme.
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await capture(
+    page,
+    'documents-analytics-dark',
+    `/documents/analytics${q}`,
+    wide,
+    false,
+  );
+  await page.emulateMedia({ colorScheme: 'light' });
   // Rail-expanded pass: pin the rail by cookie and reshoot at 1440.
   await context.addCookies([
     { name: 'bap_rail', value: 'pinned', url: baseURL },

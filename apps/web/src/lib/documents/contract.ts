@@ -769,8 +769,10 @@ export const directiveAccountListSchema = z
 
 // The analytics read answers from stored columns only, so the mirror bounds its document list too.
 export const MAX_ANALYTICS_DOCUMENTS = 50;
+export const MAX_ANALYTICS_PARTNERS = 10;
+export const ANALYTICS_CHART_MONTHS = 12;
 
-// The analytics read: the invoices in scope plus four aggregates read straight from stored columns.
+// The analytics read: the invoices in scope plus the aggregates read straight from stored columns.
 const analyticsDocumentSchema = z
   .object({
     advanceTotal: decimalStringSchema,
@@ -828,6 +830,25 @@ const analyticsByAccountSchema = z
   })
   .strict();
 
+// One month of the chart window; the nets are signed, so a month of reclaimable VAT reads negative.
+const analyticsByMonthTotalSchema = z
+  .object({
+    expense: decimalStringSchema,
+    month: documentDateSchema,
+    revenue: decimalStringSchema,
+    vatBalance: decimalStringSchema,
+  })
+  .strict();
+
+const analyticsByPartnerSchema = z
+  .object({
+    issued: decimalStringSchema,
+    partnerId: identifierSchema,
+    partnerName: z.string(),
+    received: decimalStringSchema,
+  })
+  .strict();
+
 // The page states its own cost from these counters, so no reader has to trust the docs.
 const analyticsStatsSchema = z
   .object({
@@ -844,7 +865,12 @@ export const documentAnalyticsResponseSchema = z
     byAccount: z.array(analyticsByAccountSchema),
     byActivity: z.array(analyticsByActivitySchema),
     byMonth: z.array(analyticsByMonthSchema),
+    byMonthTotals: z
+      .array(analyticsByMonthTotalSchema)
+      .max(ANALYTICS_CHART_MONTHS),
+    byPartner: z.array(analyticsByPartnerSchema).max(MAX_ANALYTICS_PARTNERS),
     byVatRegime: z.array(analyticsByVatRegimeSchema),
+    currencyCodes: z.array(currencyCodeSchema),
     documents: z.array(analyticsDocumentSchema).max(MAX_ANALYTICS_DOCUMENTS),
     stats: analyticsStatsSchema,
   })
