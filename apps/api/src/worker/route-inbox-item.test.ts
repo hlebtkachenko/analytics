@@ -2,6 +2,7 @@ import type { DatabasePool } from '@bap/db/pool';
 import type { PoolClient } from 'pg';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { BlobStore } from '../blobs/blob-store.js';
 import type { InboxItem } from '../inbox/contract.js';
 import type { RouteSuggestion } from '../inbox/inbox-repository.js';
 import {
@@ -30,6 +31,18 @@ const repository = vi.hoisted(() => ({
   ),
   loadMatchedRuleIds: vi.fn(async () => []),
   loadRouteSuggestion: vi.fn(),
+  loadRoutingTargetOverrides: vi.fn(async () => ({
+    pdf: {
+      auto: 'always',
+      autoThreshold: null,
+      defaultAssigneeId: null,
+      defaultLegalEntityId: null,
+      destination: 'documents',
+      documentKind: 'other',
+      partnerPolicy: 'match_only',
+      requiredFields: [],
+    },
+  })),
 }));
 const documents = vi.hoisted(() => ({
   createDocumentInTransaction: vi.fn(),
@@ -58,6 +71,7 @@ interface FixtureOptions {
   authorRow?: Record<string, unknown>[];
   attempt?: { last_attempt: Date | null; last_touch: Date | null };
   membership?: Record<string, unknown>[];
+  ruleRow?: Record<string, unknown>[];
   scope?: { granted: string[]; mode: string };
   // The skip definer raises: the item left review between the two transactions.
   skipRefused?: boolean;
@@ -158,6 +172,40 @@ function fixture(options: FixtureOptions = {}): Fixture {
       }
 
       if (
+        text.includes('from app.inbox_item_extraction') &&
+        text.includes('select draft')
+      ) {
+        return {
+          rows: [
+            {
+              draft: { kind: null, matchedRuleIds: [RULE_ID], partnerId: null },
+            },
+          ],
+        };
+      }
+
+      if (text.includes('from app.list_inbox_rules()')) {
+        return {
+          rows: options.ruleRow ?? [
+            {
+              auto_route: true,
+              channel_id: null,
+              detected_type: 'pdf',
+              discard_reason: null,
+              id: RULE_ID,
+              keyword: null,
+              priority: 1,
+              sender_pattern: null,
+              set_assignee_id: null,
+              set_document_kind: 'other',
+              set_legal_entity_id: ENTITY_ID,
+              set_partner_id: null,
+            },
+          ],
+        };
+      }
+
+      if (
         options.skipRefused === true &&
         text.includes('app.record_inbox_automation_skip')
       ) {
@@ -215,6 +263,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
     queries,
     run: (ruleId: string | null = RULE_ID) =>
       routeInboxItem({
+        blobs: {} as BlobStore,
         data: { itemId: ITEM_ID, organizationId: ORGANIZATION, ruleId },
         logger: { log: () => undefined },
         metrics,
@@ -635,6 +684,7 @@ describe('routeInboxItem failure modes', () => {
   it('refuses a payload that names no item', async () => {
     await expect(
       routeInboxItem({
+        blobs: {} as BlobStore,
         data: { organizationId: ORGANIZATION, ruleId: RULE_ID },
         logger: { log: () => undefined },
         metrics: new WorkerMetrics(),

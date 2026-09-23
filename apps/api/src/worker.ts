@@ -296,7 +296,13 @@ async function bootstrap(): Promise<void> {
     async (jobs) => {
       for (const job of jobs) {
         await runJob(async () => {
-          await routeInboxItem({ data: job.data, logger, metrics, pool });
+          await routeInboxItem({
+            blobs,
+            data: job.data,
+            logger,
+            metrics,
+            pool,
+          });
         });
       }
     },

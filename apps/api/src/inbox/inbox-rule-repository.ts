@@ -338,6 +338,10 @@ export function invoiceRouteBlocker(input: {
     return 'an email document auto-routes only through a sender-bound rule and an authenticated sender.';
   }
 
+  if (parsedDraft?.invoice != null && !isInvoiceKind(resolvedKind)) {
+    return 'a parsed invoice cannot change to a non-invoice kind.';
+  }
+
   if (!isInvoiceKind(resolvedKind)) {
     return null;
   }

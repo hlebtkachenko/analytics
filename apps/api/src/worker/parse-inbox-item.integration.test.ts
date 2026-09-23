@@ -233,6 +233,7 @@ async function enqueuedRouteJob(itemId: string): Promise<RouteInboxItemJob> {
 // Runs the handler exactly as the worker would, on the job the intake enqueued or on an explicit payload.
 function runRoute(data: RouteInboxItemJob): Promise<RouteInboxItemOutcome> {
   return routeInboxItem({
+    blobs: store,
     data,
     logger,
     metrics: new WorkerMetrics(),
@@ -692,6 +693,15 @@ describe('parse_inbox_item', () => {
         document,
         parsedExtractionId: '00000000-0000-4000-8000-000000000999',
       }),
+    ).rejects.toMatchObject({ status: 422 });
+    await expect(
+      route({
+        document: { ...document, kind: 'credit_note' },
+        parsedExtractionId: parsedId,
+      }),
+    ).rejects.toMatchObject({ status: 422 });
+    await expect(
+      route({ document: { ...document, kind: 'credit_note' } }),
     ).rejects.toMatchObject({ status: 422 });
 
     const routed = await route({

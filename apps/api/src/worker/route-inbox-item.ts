@@ -1,9 +1,12 @@
+import { text as readText } from 'node:stream/consumers';
+
 import { readEntityScope, withTenantContext } from '@bap/db';
 import type { EntityScope, TenantContext } from '@bap/db';
 import { resolveMembership } from '@bap/db/access';
 import type { DatabasePool } from '@bap/db/pool';
 import type { PoolClient } from 'pg';
 
+import type { BlobStore } from '../blobs/blob-store.js';
 import { createDocumentRequestSchema } from '../documents/contract.js';
 import type { CreateDocumentRequest } from '../documents/contract.js';
 import {
@@ -22,6 +25,7 @@ import {
   loadItem,
   loadItemFiles,
   loadLatestExtraction,
+  loadRoutingTargetOverrides,
 } from '../inbox/inbox-repository-support.js';
 import {
   findDuplicateCandidates,
@@ -35,8 +39,13 @@ import type {
 import {
   invoiceRouteBlocker,
   loadAutoRouteFacts,
+  loadMatchedLiveRules,
 } from '../inbox/inbox-rule-repository.js';
-import { knownDetectedType } from '../inbox/routing-targets.js';
+import { ruleMatches } from '../inbox/rules.js';
+import {
+  knownDetectedType,
+  routingTargetFor,
+} from '../inbox/routing-targets.js';
 import { routeInboxItemJobPayloadSchema } from './job-context.js';
 import type { RouteInboxItemJobPayload } from './job-context.js';
 import type { WorkerMetrics } from './worker-metrics.js';
@@ -53,6 +62,7 @@ export interface RouteJobLogger {
 }
 
 export interface RouteInboxItemOptions {
+  blobs: BlobStore;
   data: unknown;
   logger: RouteJobLogger;
   metrics: WorkerMetrics;
@@ -107,19 +117,6 @@ async function readRuleAuthor(
     [ruleId],
   );
   return rule.rows[0]?.created_by ?? null;
-}
-
-// The sender binding of the rule that asked, while it is live; null once it was disabled or deleted.
-async function readLiveRule(
-  transaction: PoolClient,
-  ruleId: string,
-): Promise<{ senderPattern: string | null } | null> {
-  const rule = await transaction.query<{ sender_pattern: string | null }>(
-    'select sender_pattern from app.inbox_rule where id = $1 and enabled and deleted_at is null',
-    [ruleId],
-  );
-  const row = rule.rows[0];
-  return row === undefined ? null : { senderPattern: row.sender_pattern };
 }
 
 // The editor of the organization's target row, through the same definer as the pass; a platform default has none.
@@ -244,6 +241,7 @@ async function routeAsAuthor(
   transaction: PoolClient,
   tenant: TenantContext,
   payload: RouteInboxItemJobPayload,
+  blobs: BlobStore,
 ): Promise<RouteInboxItemOutcome> {
   const item = await loadItem(transaction, payload.itemId, null, true);
 
@@ -263,7 +261,82 @@ async function routeAsAuthor(
 
   // The hints are re-read from the locked row and win per field inside the composer.
   const files = await loadItemFiles(transaction, item.id);
-  const composed = await loadRouteSuggestion(transaction, item, files);
+  if (payload.ruleId !== null) {
+    const locked = await transaction.query<{ created_by: string }>(
+      'select created_by from app.inbox_rule where id = $1 and enabled and deleted_at is null for share',
+      [payload.ruleId],
+    );
+    if (locked.rows.length === 0) {
+      return { kind: 'refused', reason: 'rule_unavailable' };
+    }
+    if (locked.rows[0]?.created_by !== tenant.userId) {
+      return { kind: 'author_unavailable' };
+    }
+  }
+
+  await transaction.query(
+    'select detected_type from app.inbox_routing_target where detected_type = $1 for share',
+    [knownDetectedType(item.detectedType)],
+  );
+  if (
+    payload.ruleId === null &&
+    (await readTargetEditor(transaction, item)) !== tenant.userId
+  ) {
+    return { kind: 'author_unavailable' };
+  }
+  const target = routingTargetFor(
+    item.detectedType,
+    await loadRoutingTargetOverrides(transaction),
+  );
+  const targetAsks =
+    target.auto === 'always' ||
+    (target.auto === 'above_threshold' &&
+      target.autoThreshold !== null &&
+      (item.confidence ?? 0) >= target.autoThreshold);
+  if (
+    target.destination !== 'documents' ||
+    (payload.ruleId === null && !targetAsks)
+  ) {
+    return { kind: 'refused', reason: 'destination_refused' };
+  }
+
+  const sender = await transaction.query<{ sender: string | null }>(
+    'select sender from app.inbox_item where id = $1',
+    [item.id],
+  );
+  const facts = await loadAutoRouteFacts(transaction, item.id);
+  const text =
+    item.payloadKind === 'text' && files[0] !== undefined
+      ? await readText(blobs.open(files[0].storageKey))
+      : null;
+  const matchedRules = (
+    await loadMatchedLiveRules(transaction, item.id)
+  ).filter((rule) =>
+    ruleMatches(rule, {
+      channelId: item.channelId,
+      detectedType: item.detectedType,
+      filename: files[0]?.originalFilename ?? null,
+      hintText: item.hintText,
+      sender: sender.rows[0]?.sender ?? null,
+      senderAuthenticated: facts.senderAuthenticated,
+      text,
+    }),
+  );
+  const liveRule = matchedRules.find((rule) => rule.id === payload.ruleId);
+  if (
+    payload.ruleId !== null &&
+    (!liveRule?.autoRoute ||
+      (liveRule.senderPattern !== null && !facts.senderAuthenticated))
+  ) {
+    return { kind: 'refused', reason: 'rule_unavailable' };
+  }
+
+  const composed = await loadRouteSuggestion(
+    transaction,
+    item,
+    files,
+    matchedRules,
+  );
   const scope = await readEntityScope(transaction, tenant);
   const legalEntityId = composed.draft.legalEntityId;
 
@@ -276,13 +349,10 @@ async function routeAsAuthor(
   const blocked = invoiceRouteBlocker({
     asker: {
       kind: 'automation',
-      rule:
-        payload.ruleId === null
-          ? null
-          : await readLiveRule(transaction, payload.ruleId),
+      rule: liveRule ?? null,
     },
     composed,
-    facts: await loadAutoRouteFacts(transaction, item.id),
+    facts,
     lineCategory: composed.lineCategory,
   });
 
@@ -471,6 +541,7 @@ export async function routeInboxItem(
                 transaction,
                 { organizationId: payload.organizationId, ...author },
                 payload,
+                options.blobs,
               ),
           );
 

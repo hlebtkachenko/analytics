@@ -307,4 +307,10 @@ describe('invoiceRouteBlocker', () => {
       block({ facts: facts({ emailChild: true, senderAuthenticated: false }) }),
     ).toBeNull();
   });
+
+  it('keeps a parsed invoice from losing its amount under a non-invoice kind', () => {
+    expect(block({ item: { hintKind: 'credit_note' } })).toContain(
+      'cannot change to a non-invoice kind',
+    );
+  });
 });

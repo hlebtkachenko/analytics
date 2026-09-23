@@ -64,6 +64,7 @@ import type {
 import {
   CORRECTION_FIELD_BY_DRAFT_KEY,
   composeDocumentDraft,
+  isInvoiceKind,
   parsedContent,
   toCreateDocumentBody,
   withLineCategory,
@@ -137,6 +138,7 @@ import {
   manualProvider,
 } from './providers/manual.js';
 import { routingTargetFor } from './routing-targets.js';
+import type { InboxRuleDefinition } from './rules.js';
 
 // The repository contract keeps one import site for its callers.
 export type {
@@ -1413,11 +1415,12 @@ export async function loadRouteSuggestion(
   transaction: PoolClient,
   item: InboxItem,
   files: readonly ItemFileRecord[],
+  matchedRules?: readonly InboxRuleDefinition[],
 ): Promise<RouteSuggestion> {
   const parsed = await loadParsedDraft(transaction, item.id);
   const composed = composeDocumentDraft(
     { ...item, primaryFilename: files[0]?.originalFilename ?? null },
-    await loadMatchedLiveRules(transaction, item.id),
+    matchedRules ?? (await loadMatchedLiveRules(transaction, item.id)),
     routingTargetFor(
       item.detectedType,
       await loadRoutingTargetOverrides(transaction),
@@ -1448,6 +1451,10 @@ async function withParsedContent(
   item: InboxItem,
 ): Promise<RouteToDocumentInput> {
   const newest = await loadParsedDraft(transaction, item.id);
+
+  if (newest?.draft.invoice != null && !isInvoiceKind(input.document.kind)) {
+    throw new UnprocessableEntityException('parsed_kind_mismatch');
+  }
 
   if (input.parsedExtractionId === undefined) {
     if (input.document.invoice !== undefined && newest?.draft.invoice != null) {
