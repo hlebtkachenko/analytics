@@ -228,6 +228,33 @@ describe('InboxPage', () => {
     );
   });
 
+  it('names the tabs without a count until the counts load, never a fake zero', async () => {
+    const base = respondWith([inboxItem]);
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string, init?: RequestInit) => {
+        if (input.includes('/inbox/items?')) {
+          await held;
+        }
+        return base(input, init);
+      }),
+    );
+
+    renderInboxPage();
+
+    expect(await screen.findByRole('tab', { name: 'To review' })).toBeVisible();
+    expect(screen.queryByRole('tab', { name: /\(/ })).toBeNull();
+
+    release();
+    expect(
+      await screen.findByRole('tab', { name: 'To review (3)' }),
+    ).toBeVisible();
+  });
+
   it('links each row to the item with the current tab and reads Review on To review', async () => {
     vi.stubGlobal('fetch', respondWith([inboxItem]));
     renderInboxPage();
