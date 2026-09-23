@@ -405,8 +405,22 @@ export const documentDetailSchema = z
 
 export type DocumentDetail = z.infer<typeof documentDetailSchema>;
 
+// The tab counts of the list, on the caller scope and the entity filter, ignoring every other filter.
+export const documentCountsSchema = z
+  .object({
+    all: z.number().int().min(0),
+    archived: z.number().int().min(0),
+    needsReview: z.number().int().min(0),
+    verified: z.number().int().min(0),
+    withIssues: z.number().int().min(0),
+  })
+  .strict();
+
+export type DocumentCounts = z.infer<typeof documentCountsSchema>;
+
 export const documentListResponseSchema = z
   .object({
+    counts: documentCountsSchema,
     documents: z.array(documentSummarySchema),
     page: z.number().int().min(1),
     pageSize: z.number().int().min(1).max(MAX_DOCUMENT_PAGE_SIZE),
@@ -438,6 +452,23 @@ export function repeatedOrCsv<Values extends readonly [string, ...string[]]>(
     .pipe(z.array(z.enum(values)).min(1).max(values.length));
 }
 
+// The most legal entities one filter may name, the same bound the entity scope carries.
+export const MAX_FILTER_LEGAL_ENTITIES = 200;
+
+// An id filter arrives either repeated or comma separated; both collapse to the same validated id list.
+export function repeatedOrCsvIds(
+  schema: z.ZodType<string, string>,
+): z.ZodType<string[]> {
+  return z
+    .union([z.string(), z.array(z.string())])
+    .transform((value) =>
+      (Array.isArray(value) ? value : value.split(','))
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0),
+    )
+    .pipe(z.array(schema).min(1).max(MAX_FILTER_LEGAL_ENTITIES));
+}
+
 export const DOCUMENT_CURRENT_FILTERS = ['true', 'false', 'all'] as const;
 
 export const documentListQuerySchema = z
@@ -447,7 +478,8 @@ export const documentListQuerySchema = z
     dateFrom: z.iso.date().optional(),
     dateTo: z.iso.date().optional(),
     kind: repeatedOrCsv(DOCUMENT_KINDS).optional(),
-    legalEntityId: legalEntityIdentifierSchema.optional(),
+    // Several entities may be selected at once; none selected leaves the whole caller scope in view.
+    legalEntityId: repeatedOrCsvIds(legalEntityIdentifierSchema).optional(),
     order: z.enum(SORT_ORDERS).default('desc'),
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce
@@ -821,7 +853,10 @@ export type DirectiveAccountListResponse = z.infer<
 export const MAX_ANALYTICS_DOCUMENTS = 50;
 
 export const documentAnalyticsQuerySchema = z
-  .object({ legalEntityId: legalEntityIdentifierSchema.optional() })
+  .object({
+    // Several entities may be selected at once; none selected leaves the whole caller scope in view.
+    legalEntityId: repeatedOrCsvIds(legalEntityIdentifierSchema).optional(),
+  })
   .strict();
 
 export type DocumentAnalyticsQuery = z.infer<
@@ -891,6 +926,7 @@ export const analyticsAccountRowSchema = z
 // What the route read and what it cost, so the page can state its own cost instead of implying a free answer.
 export const analyticsStatsSchema = z
   .object({
+    documentCount: z.number().int().min(0),
     elapsedMs: z.number().int().min(0),
     eventLineCount: z.number().int().min(0),
     invoiceLineCount: z.number().int().min(0),
@@ -1242,9 +1278,23 @@ export const documentDetailOpenApiSchema = {
   type: 'object',
 };
 
+export const documentCountsOpenApiSchema = {
+  additionalProperties: false,
+  properties: {
+    all: { minimum: 0, type: 'integer' },
+    archived: { minimum: 0, type: 'integer' },
+    needsReview: { minimum: 0, type: 'integer' },
+    verified: { minimum: 0, type: 'integer' },
+    withIssues: { minimum: 0, type: 'integer' },
+  },
+  required: ['all', 'archived', 'needsReview', 'verified', 'withIssues'],
+  type: 'object',
+};
+
 export const documentListOpenApiSchema = {
   additionalProperties: false,
   properties: {
+    counts: documentCountsOpenApiSchema,
     documents: { items: documentSummaryOpenApiSchema, type: 'array' },
     page: { minimum: 1, type: 'integer' },
     pageSize: { maximum: MAX_DOCUMENT_PAGE_SIZE, minimum: 1, type: 'integer' },
@@ -1262,7 +1312,14 @@ export const documentListOpenApiSchema = {
       type: 'array',
     },
   },
-  required: ['documents', 'page', 'pageSize', 'total', 'totalsByCurrency'],
+  required: [
+    'counts',
+    'documents',
+    'page',
+    'pageSize',
+    'total',
+    'totalsByCurrency',
+  ],
   type: 'object',
 };
 
@@ -1582,12 +1639,14 @@ export const documentAnalyticsOpenApiSchema = {
       description:
         'What the route read and what it cost: the six queries it ran, the rows behind them and their wall clock time.',
       properties: {
+        documentCount: lineCountProperty,
         elapsedMs: lineCountProperty,
         eventLineCount: lineCountProperty,
         invoiceLineCount: lineCountProperty,
         queryCount: { minimum: 1, type: 'integer' },
       },
       required: [
+        'documentCount',
         'elapsedMs',
         'eventLineCount',
         'invoiceLineCount',

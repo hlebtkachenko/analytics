@@ -210,6 +210,7 @@ const analytics: DocumentAnalyticsResponse = {
     },
   ],
   stats: {
+    documentCount: 1,
     elapsedMs: 3,
     eventLineCount: 2,
     invoiceLineCount: 1,
@@ -338,6 +339,13 @@ describe('application document routes', () => {
     listDocuments: vi.fn(async (input) => {
       listCalls.push(input);
       return {
+        counts: {
+          all: 1,
+          archived: 0,
+          needsReview: 0,
+          verified: 0,
+          withIssues: 0,
+        },
         documents: [detail.document],
         page: input.query.page,
         pageSize: input.query.pageSize,
@@ -396,6 +404,13 @@ describe('application document routes', () => {
       .expect(200);
 
     expect(response.body).toEqual({
+      counts: {
+        all: 1,
+        archived: 0,
+        needsReview: 0,
+        verified: 0,
+        withIssues: 0,
+      },
       documents: [detail.document],
       page: 1,
       pageSize: 25,
@@ -443,7 +458,7 @@ describe('application document routes', () => {
       dateFrom: '2026-01-01',
       dateTo: '2026-12-31',
       kind: ['issued_invoice', 'received_invoice'],
-      legalEntityId: ENTITY_ID,
+      legalEntityId: [ENTITY_ID],
       order: 'asc',
       page: 2,
       pageSize: 50,
@@ -798,6 +813,57 @@ describe('application document routes', () => {
     expect(listCalls[1]?.legalEntityIds).toEqual([ENTITY_ID]);
   });
 
+  it('accepts several legal entities repeated or comma separated', async () => {
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_1/documents')
+      .query(`legalEntityId=${ENTITY_ID}&legalEntityId=${OTHER_ENTITY_ID}`)
+      .set('Authorization', 'Bearer caller')
+      .expect(200);
+
+    expect(listCalls[0]?.query.legalEntityId).toEqual([
+      ENTITY_ID,
+      OTHER_ENTITY_ID,
+    ]);
+
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_1/documents')
+      .query({ legalEntityId: `${ENTITY_ID},${OTHER_ENTITY_ID}` })
+      .set('Authorization', 'Bearer caller')
+      .expect(200);
+
+    expect(listCalls[1]?.query.legalEntityId).toEqual([
+      ENTITY_ID,
+      OTHER_ENTITY_ID,
+    ]);
+  });
+
+  it('keeps a several-entity list only when every entity is in the scope', async () => {
+    entityScope = {
+      legalEntityIds: [ENTITY_ID, OTHER_ENTITY_ID],
+      mode: 'restricted',
+    };
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_3/documents')
+      .query(`legalEntityId=${ENTITY_ID}&legalEntityId=${OTHER_ENTITY_ID}`)
+      .set('Authorization', 'Bearer caller')
+      .expect(200);
+
+    expect(listCalls[0]?.legalEntityIds).toEqual([ENTITY_ID, OTHER_ENTITY_ID]);
+    expect(listCalls[0]?.query.legalEntityId).toEqual([
+      ENTITY_ID,
+      OTHER_ENTITY_ID,
+    ]);
+
+    // One entity outside the scope narrows the whole read to nothing, the same as a single stranger.
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_3/documents')
+      .query(`legalEntityId=${ENTITY_ID}&legalEntityId=${UNKNOWN_DOCUMENT_ID}`)
+      .set('Authorization', 'Bearer caller')
+      .expect(200);
+
+    expect(listCalls[1]?.legalEntityIds).toEqual([]);
+  });
+
   it('hides a legal entity outside the scope behind a not found answer', async () => {
     await request(application.getHttpServer())
       .post('/v1/organizations/organization_1/documents')
@@ -984,6 +1050,32 @@ describe('application document routes', () => {
     expect(analyticsCalls[2]?.legalEntityIds).toEqual([]);
   });
 
+  it('reads analytics for several requested entities inside the scope', async () => {
+    entityScope = {
+      legalEntityIds: [ENTITY_ID, OTHER_ENTITY_ID],
+      mode: 'restricted',
+    };
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_3/documents/analytics')
+      .query(`legalEntityId=${ENTITY_ID}&legalEntityId=${OTHER_ENTITY_ID}`)
+      .set('Authorization', 'Bearer caller')
+      .expect(200);
+
+    expect(analyticsCalls[0]?.legalEntityIds).toEqual([
+      ENTITY_ID,
+      OTHER_ENTITY_ID,
+    ]);
+
+    // One entity outside the scope narrows the whole read to nothing.
+    await request(application.getHttpServer())
+      .get('/v1/organizations/organization_3/documents/analytics')
+      .query(`legalEntityId=${ENTITY_ID}&legalEntityId=${UNKNOWN_DOCUMENT_ID}`)
+      .set('Authorization', 'Bearer caller')
+      .expect(200);
+
+    expect(analyticsCalls[1]?.legalEntityIds).toEqual([]);
+  });
+
   it('refuses an analytics query outside the fixed contract', async () => {
     for (const query of [
       { legalEntityId: 'not-a-uuid' },
@@ -1045,8 +1137,9 @@ describe('application document routes', () => {
       content: Record<string, { schema: { required: string[] } }>;
     };
 
-    // The published list contract must carry the paging and the per-currency totals, or the BFF mirrors a lie.
+    // The published list contract must carry the counts, the paging and the per-currency totals, or the BFF mirrors a lie.
     expect(list.content['application/json']?.schema.required).toEqual([
+      'counts',
       'documents',
       'page',
       'pageSize',

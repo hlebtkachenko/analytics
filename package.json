@@ -33,7 +33,8 @@
     "test:integration": "turbo run test:integration",
     "test:coverage": "turbo run test:coverage",
     "test:watch": "turbo run test:watch",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "visual-gate": "node scripts/visual-gate.mjs"
   },
   "devDependencies": {
     "@playwright/test": "catalog:",

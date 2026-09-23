@@ -33,6 +33,7 @@ import {
   INBOX_ASSIGNEE_NONE,
   INBOX_CONFIDENCE_HIGH_FROM,
   INBOX_CONFIDENCE_MEDIUM_FROM,
+  INBOX_TO_REVIEW_STATUSES,
 } from './contract.js';
 import type {
   CorrectionReasons,
@@ -283,15 +284,21 @@ export interface BlobRecord {
 }
 
 interface ListRow extends ItemRow {
+  decided_by_rule_name: string | null;
   file_count: number;
   primary_filename: string | null;
+  sender: string | null;
+  sender_authenticated: boolean;
 }
 
 function toListEntry(row: ListRow): InboxItemListEntry {
   return {
     ...toItem(row),
+    decidedByRuleName: row.decided_by_rule_name,
     fileCount: row.file_count,
     primaryFilename: row.primary_filename,
+    sender: row.sender,
+    senderAuthenticated: row.sender_authenticated,
   };
 }
 
@@ -363,12 +370,19 @@ async function loadDetail(
   transaction: PoolClient,
   item: InboxItem,
 ): Promise<InboxItemDetail> {
-  const sender = await transaction.query<{
+  // The sender, its DKIM verdict, and the name of the rule that decided the item, in one read; a deleted rule still resolves.
+  const meta = await transaction.query<{
+    decided_by_rule_name: string | null;
     sender: string | null;
     sender_authenticated: boolean;
-  }>('select sender, sender_authenticated from app.inbox_item where id = $1', [
-    item.id,
-  ]);
+  }>(
+    `select i.sender, i.sender_authenticated, rule.name as decided_by_rule_name
+       from app.inbox_item as i
+       left join app.inbox_rule as rule
+         on rule.id = i.decided_by_rule_id and rule.organization_id = i.organization_id
+      where i.id = $1`,
+    [item.id],
+  );
 
   return {
     corrections: await loadCorrections(transaction, item.id),
@@ -377,8 +391,9 @@ async function loadDetail(
     files: (await loadItemFiles(transaction, item.id)).map(publicFile),
     item: {
       ...item,
-      sender: sender.rows[0]?.sender ?? null,
-      senderAuthenticated: sender.rows[0]?.sender_authenticated ?? false,
+      decidedByRuleName: meta.rows[0]?.decided_by_rule_name ?? null,
+      sender: meta.rows[0]?.sender ?? null,
+      senderAuthenticated: meta.rows[0]?.sender_authenticated ?? false,
     },
     routingTarget: routingTargetFor(
       item.detectedType,
@@ -664,6 +679,7 @@ export async function listItems(
       query.confidence ?? null,
       INBOX_CONFIDENCE_MEDIUM_FROM,
       INBOX_CONFIDENCE_HIGH_FROM,
+      query.snoozed === 'exclude',
     ];
     const filter = `${SCOPE_FILTER}
        and ($2::text[] is null or i.status = any($2::text[]))
@@ -682,7 +698,26 @@ export async function listItems(
                                      when 'unknown' then i.confidence is null
                                      when 'low' then i.confidence < $7::numeric
                                      when 'medium' then i.confidence >= $7::numeric and i.confidence < $8::numeric
-                                     else i.confidence >= $8::numeric end)`;
+                                     else i.confidence >= $8::numeric end)
+       and (not $9::boolean or i.snoozed_until is null or i.snoozed_until <= now())`;
+    // The counts ignore every status, issue, assignee and snooze filter but keep the caller's scope.
+    const counts = await transaction.query<{
+      all_count: number;
+      discarded_count: number;
+      filed_count: number;
+      to_review: number;
+    }>(
+      `select count(*)::int as all_count,
+              count(*) filter (where i.status = 'routed')::int as filed_count,
+              count(*) filter (where i.status = 'discarded')::int as discarded_count,
+              count(*) filter (
+                where i.status = any($2::text[])
+                  and (i.snoozed_until is null or i.snoozed_until <= now())
+              )::int as to_review
+         from app.inbox_item as i
+        where ${SCOPE_FILTER}`,
+      [values[0], [...INBOX_TO_REVIEW_STATUSES]],
+    );
     const total = await transaction.query<{ total: number }>(
       `select count(*)::int as total from app.inbox_item as i where ${filter}`,
       values,
@@ -690,11 +725,14 @@ export async function listItems(
     // The page is cut first so the file summary only runs for the rows it returns.
     const items = await transaction.query<ListRow>(
       `select p.*, files.file_count, files.primary_filename
-         from (select ${ITEM_COLUMNS}, i.organization_id
+         from (select ${ITEM_COLUMNS}, i.organization_id, i.sender,
+                      i.sender_authenticated, rule.name as decided_by_rule_name
                  from app.inbox_item as i
+                 left join app.inbox_rule as rule
+                   on rule.id = i.decided_by_rule_id and rule.organization_id = i.organization_id
                 where ${filter}
                 order by i.received_at desc, i.id desc
-                limit $9 offset $10) as p
+                limit $10 offset $11) as p
         cross join lateral (
           select count(*)::int as file_count,
                  max(b.original_filename) filter (where f.position = 1) as primary_filename
@@ -706,8 +744,15 @@ export async function listItems(
         order by p.received_at desc, p.id desc`,
       [...values, query.pageSize, (query.page - 1) * query.pageSize],
     );
+    const countRow = counts.rows[0];
 
     return {
+      counts: {
+        all: countRow?.all_count ?? 0,
+        discarded: countRow?.discarded_count ?? 0,
+        filed: countRow?.filed_count ?? 0,
+        toReview: countRow?.to_review ?? 0,
+      },
       items: items.rows.map(toListEntry),
       page: query.page,
       pageSize: query.pageSize,

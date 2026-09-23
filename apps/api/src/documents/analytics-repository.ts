@@ -1,4 +1,4 @@
-// The analytics read: five statements over the stored split, no arithmetic in TypeScript beyond the row counts and the elapsed time.
+// The analytics read: six statements over the stored split, no arithmetic in TypeScript beyond the row counts and the elapsed time.
 
 import { runInTenantContext } from '@bap/db';
 import type { DatabasePool } from '@bap/db/pool';
@@ -58,6 +58,14 @@ const DOCUMENTS_QUERY = `select d.id,
       and ($2::uuid[] is null or d.legal_entity_id = any($2::uuid[]))
     order by d.document_date desc, d.id desc
     limit $3`;
+
+// Only an invoice derives an event and a superseded version loses its own, so this counts the invoices the aggregates read.
+const DOCUMENT_COUNT_QUERY = `select count(*)::int as document_count
+     from app.economic_event as e
+     join app.invoice as i
+       on i.document_id = e.document_id and i.organization_id = e.organization_id
+    where e.organization_id = $1
+      and ($2::uuid[] is null or e.legal_entity_id = any($2::uuid[]))`;
 
 const BY_MONTH_QUERY = `select date_trunc('month', l.effective_date)::date::text as month,
           l.account_code,
@@ -122,6 +130,10 @@ interface DocumentRow {
   title: string;
 }
 
+interface DocumentCountRow {
+  document_count: number;
+}
+
 interface MonthRow {
   account_code: string;
   account_name: string;
@@ -176,6 +188,10 @@ export async function readDocumentAnalytics(
       ...values,
       MAX_ANALYTICS_DOCUMENTS,
     ]);
+    const documentCount = await run<DocumentCountRow>(
+      DOCUMENT_COUNT_QUERY,
+      values,
+    );
     const byMonth = await run<MonthRow>(BY_MONTH_QUERY, values);
     const byActivity = await run<ActivityRow>(BY_ACTIVITY_QUERY, values);
     const byVatRegime = await run<VatRegimeRow>(BY_VAT_REGIME_QUERY, values);
@@ -226,6 +242,7 @@ export async function readDocumentAnalytics(
         title: row.title,
       })),
       stats: {
+        documentCount: documentCount.rows[0]?.document_count ?? 0,
         elapsedMs,
         eventLineCount: byAccount.rows.reduce(
           (total, row) => total + row.line_count,

@@ -290,8 +290,8 @@ export class DocumentController {
     const legalEntityIds =
       requested === undefined
         ? allowedEntityIds(entityScope)
-        : legalEntityInScope(entityScope, requested)
-          ? [requested]
+        : requested.every((id) => legalEntityInScope(entityScope, id))
+          ? [...requested]
           : [];
     const analytics = await this.documents.readAnalytics({
       ...tenant,
@@ -378,7 +378,7 @@ export class DocumentController {
     // A requested entity outside the scope narrows the list to nothing instead of widening it.
     const legalEntityIds =
       query.legalEntityId === undefined ||
-      legalEntityInScope(entityScope, query.legalEntityId)
+      query.legalEntityId.every((id) => legalEntityInScope(entityScope, id))
         ? allowedEntityIds(entityScope)
         : [];
     const page = await this.documents.listDocuments({

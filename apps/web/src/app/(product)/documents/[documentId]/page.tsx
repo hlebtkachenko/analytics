@@ -1,34 +1,41 @@
 'use client';
 
+import { DataGrid } from '@bap/design-system/blocks';
+import type {
+  GridColumn,
+  GridRow,
+  RowAction,
+  ToolbarAction,
+} from '@bap/design-system/blocks';
 import {
   Button,
   ComboBox,
+  ContainedList,
+  ContainedListItem,
   InlineNotification,
   Link,
   ListItem,
+  Modal,
+  OverflowMenu,
+  OverflowMenuItem,
   Select,
   SelectItem,
   Stack,
-  StructuredListBody,
-  StructuredListCell,
-  StructuredListHead,
-  StructuredListRow,
-  StructuredListWrapper,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Tab,
+  TabList,
+  TabPanel,
+  TabPanels,
+  Tabs,
   Tag,
   Tile,
   UnorderedList,
 } from '@bap/design-system/react';
 import { useParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
+import { createElement, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import OriginalPreview from '../../../../components/documents/original-preview';
 import PageContainer from '../../../../components/page-container';
 import { useToast } from '../../../../components/shell/toast';
 import { StatusIndicator } from '../../../../components/status-indicator';
@@ -38,16 +45,18 @@ import {
   documentLinksPath,
   documentPath,
   documentsPath,
-  formatAmount,
   sendJson,
   sendWithoutContent,
   withOrganization,
 } from '../../../../lib/documents/client';
 import {
+  decimalUnits,
   documentDetailSchema,
   documentLinkKindSchema,
   documentLinkSchema,
   documentListResponseSchema,
+  formatDecimalUnits,
+  isInvoiceKind,
 } from '../../../../lib/documents/contract.ts';
 import type {
   DocumentDetail,
@@ -55,18 +64,19 @@ import type {
   DocumentStatus,
   DocumentSummary,
 } from '../../../../lib/documents/contract.ts';
+import { documentSourceLabelKeys } from '../../../../lib/documents/detail-labels.ts';
+import { documentKindIcon } from '../../../../lib/documents/kind-icon.ts';
 import {
   dataIssueLabelKeys,
   documentKindLabelKeys,
   documentLinkKindLabelKeys,
   documentStatusLabelKeys,
   documentStatusSeverity,
-  invoiceLineCategoryLabelKeys,
-  invoiceLineKindLabelKeys,
   vatModeLabelKeys,
 } from '../../../../lib/documents/labels.ts';
+import { formatDate, formatMoney } from '../../../../lib/format.ts';
 import { inboxBlobDownloadPath } from '../../../../lib/inbox/client';
-import { inboxStatusLabelKeys } from '../../../../lib/inbox/labels.ts';
+import { useLegalEntities } from '../../../../lib/organizations/use-legal-entities';
 import { useOrganizationAccess } from '../../../../lib/organizations/use-organization-access';
 import { useOrganizationSelection } from '../../../../lib/organizations/use-organization-selection';
 import styles from './page.module.scss';
@@ -83,6 +93,17 @@ const statusActions: readonly Readonly<{
   { labelKey: 'documents.archive', status: 'archived' },
 ];
 
+// The one primary status verb by the current status; archived offers none.
+function primaryStatusFor(status: DocumentStatus): DocumentStatus | null {
+  if (status === 'registered' || status === 'needs_review') {
+    return 'verified';
+  }
+  if (status === 'verified') {
+    return 'archived';
+  }
+  return null;
+}
+
 export default function DocumentDetailPage() {
   const { t } = useTranslation();
   const { notify } = useToast();
@@ -92,9 +113,11 @@ export default function DocumentDetailPage() {
   const organizationId = organization.organizationId;
   const { access } = useOrganizationAccess(organizationId);
   const canManage = access?.capabilities.manageDocuments ?? false;
+  const legalEntities = useLegalEntities(organizationId);
   const [result, setResult] = useState<DetailResult>();
   const [statusFailed, setStatusFailed] = useState(false);
   const [linkFailed, setLinkFailed] = useState(false);
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [linkKind, setLinkKind] = useState<DocumentLinkKind>('relates');
   const [linkQuery, setLinkQuery] = useState('');
   const [linkTargetId, setLinkTargetId] = useState('');
@@ -208,6 +231,7 @@ export default function DocumentDetailPage() {
       );
       setLinkFailed(false);
       setLinkTargetId('');
+      setLinkModalOpen(false);
       replaceLinks((links) => [...links, link]);
       notify({ kind: 'success', title: t('documents.linkAdded') });
     } catch {
@@ -229,6 +253,20 @@ export default function DocumentDetailPage() {
     }
   }
 
+  function inboxHref(id: string): string {
+    return withOrganization(
+      `/inbox/${encodeURIComponent(id)}`,
+      organization.slug,
+    );
+  }
+
+  function documentHref(id: string): string {
+    return withOrganization(
+      `/documents/${encodeURIComponent(id)}`,
+      organization.slug,
+    );
+  }
+
   if (state === 'error') {
     return (
       <PageContainer>
@@ -239,9 +277,6 @@ export default function DocumentDetailPage() {
           role="alert"
           title={t('documents.detailError')}
         />
-        <Button href="/documents" kind="tertiary">
-          {t('documents.back')}
-        </Button>
       </PageContainer>
     );
   }
@@ -256,12 +291,475 @@ export default function DocumentDetailPage() {
   }
 
   const document = detail.document;
+  const currency = document.currencyCode;
+  const empty = t('documents.detail.emptyValue');
+  const invoiceKind = isInvoiceKind(document.kind);
   const attributes = Object.entries(detail.attributes);
   const openIssues = detail.issues.filter((issue) => issue.resolvedAt === null);
+  const files = detail.files;
+  const inboxItems = detail.inboxItems;
+  const kindLabel = t(documentKindLabelKeys[document.kind]);
+
+  // createElement keeps the kind glyph from reading as a component built during render.
+  const kindGlyph = (className: string, size: number): ReactNode =>
+    createElement(documentKindIcon(document.kind), {
+      className,
+      size,
+      title: kindLabel,
+    });
+
+  // The title stands in for a filename with the reference, so a scan never reads as its blob name.
+  const titleIsFilename = files.some(
+    (file) => file.filename !== null && file.filename === document.title,
+  );
+  const displayTitle =
+    titleIsFilename && document.reference !== null
+      ? document.reference
+      : document.title;
+
+  // The one-line summary of what the document is, by labels and never by a code.
+  const metaParts = [t(documentKindLabelKeys[document.kind])];
+  if (document.reference !== null) {
+    metaParts.push(document.reference);
+  }
+  metaParts.push(formatDate(document.documentDate));
+  if (document.partnerName !== null) {
+    metaParts.push(document.partnerName);
+  }
+  const metaLine = metaParts.join(' · ');
+
+  const primaryStatus = primaryStatusFor(document.status);
+  const primaryLabelKey =
+    primaryStatus === 'verified'
+      ? 'documents.markVerified'
+      : primaryStatus === 'archived'
+        ? 'documents.archive'
+        : null;
+  const overflowStatuses = statusActions.filter(
+    (action) =>
+      action.status !== document.status && action.status !== primaryStatus,
+  );
+
+  // The summary tile holds a fixed sixteen pairs; a missing value prints an em dash.
+  const entityName = legalEntities.find(
+    (entity) => entity.id === document.legalEntityId,
+  )?.name;
+  const itemVatModes = new Set(
+    (detail.invoice?.lines ?? [])
+      .filter((line) => line.lineKind === 'item')
+      .map((line) => line.vatMode),
+  );
+  const vatModeValue =
+    itemVatModes.size === 1
+      ? t(vatModeLabelKeys[[...itemVatModes][0]!])
+      : empty;
+  const summaryItems: Readonly<{ label: string; value: ReactNode }>[] = [
+    {
+      label: t('documents.fieldReference'),
+      value: document.reference ?? empty,
+    },
+    {
+      label: t('documents.fieldDate'),
+      value: formatDate(document.documentDate),
+    },
+    {
+      label: t('documents.fieldDueDate'),
+      value:
+        detail.invoice?.dueDate == null
+          ? empty
+          : formatDate(detail.invoice.dueDate),
+    },
+    {
+      label: t('documents.fieldPartner'),
+      value: document.partnerName ?? empty,
+    },
+    { label: t('documents.entity'), value: entityName ?? empty },
+    {
+      label: t('documents.fieldKind'),
+      value: (
+        <span className={styles.kindValue!}>
+          {kindGlyph(styles.kindIcon!, 16)}
+          {kindLabel}
+        </span>
+      ),
+    },
+    { label: t('documents.fieldCurrency'), value: currency },
+    {
+      label: t('documents.columnTotal'),
+      value:
+        document.totalAmount === null
+          ? empty
+          : formatMoney(document.totalAmount, currency),
+    },
+    {
+      label: t('documents.totalAmountDue'),
+      value:
+        detail.invoice === null
+          ? empty
+          : formatMoney(detail.invoice.amountDue, currency),
+    },
+    { label: t('documents.lineVatMode'), value: vatModeValue },
+    {
+      label: t('documents.detail.fieldSource'),
+      value: t(documentSourceLabelKeys[document.source]),
+    },
+    {
+      label: t('documents.detail.fieldVersion'),
+      value: String(document.version),
+    },
+    {
+      label: t('documents.columnStatus'),
+      value: (
+        <StatusIndicator
+          label={t(documentStatusLabelKeys[document.status])}
+          severity={documentStatusSeverity[document.status]}
+        />
+      ),
+    },
+    {
+      label: t('documents.columnIssues'),
+      value:
+        document.openIssueCount > 0 ? (
+          <Tag size="sm" type="red">
+            {t('documents.detail.issuesCount', {
+              count: document.openIssueCount,
+            })}
+          </Tag>
+        ) : (
+          t('documents.detail.noIssues')
+        ),
+    },
+    {
+      label: t('documents.detail.fieldFiledFromInbox'),
+      value:
+        inboxItems.length === 0 ? empty : formatDate(inboxItems[0]!.receivedAt),
+    },
+    {
+      label: t('documents.detail.fieldFiles'),
+      value: files.length === 0 ? empty : String(files.length),
+    },
+  ];
+
+  // The invoice lines plus a rounding row when it carries a value; the amount due is the totals row.
+  const lineColumns: GridColumn[] = [
+    {
+      header: t('documents.lineDescription'),
+      key: 'description',
+      renderCell: (row) => (
+        <span className={styles.lineCell!}>
+          <span>{row['description']}</span>
+          {row['marker'] === 'advance' ? (
+            <Tag size="sm" type="gray">
+              {t('documents.lineKindAdvanceDeduction')}
+            </Tag>
+          ) : null}
+        </span>
+      ),
+    },
+    { align: 'end', header: t('documents.lineQuantity'), key: 'quantity' },
+    { align: 'end', header: t('documents.lineUnitPrice'), key: 'unitPrice' },
+    { align: 'end', header: t('documents.detail.vatColumn'), key: 'vat' },
+    { align: 'end', header: t('documents.columnTotal'), key: 'total' },
+  ];
+  const lineRows: GridRow[] = (detail.invoice?.lines ?? []).map((line) => {
+    // A deduction is stored non negative, so it is shown negated to sum to the amount due.
+    const sign = line.lineKind === 'advance_deduction' ? -1n : 1n;
+    const vatUnits = decimalUnits(line.vatAmount) ?? 0n;
+    const totalUnits = (decimalUnits(line.baseAmount) ?? 0n) + vatUnits;
+    return {
+      description: line.description,
+      id: line.id,
+      marker: sign < 0n ? 'advance' : '',
+      quantity: line.quantity ?? empty,
+      total: formatMoney(formatDecimalUnits(sign * totalUnits), currency),
+      unitPrice:
+        line.unitPrice === null ? empty : formatMoney(line.unitPrice, currency),
+      vat: formatMoney(formatDecimalUnits(sign * vatUnits), currency),
+    };
+  });
+  if (
+    detail.invoice !== null &&
+    (decimalUnits(detail.invoice.roundingAmount) ?? 0n) !== 0n
+  ) {
+    lineRows.push({
+      description: t('documents.totalRounding'),
+      id: 'rounding',
+      marker: '',
+      quantity: '',
+      total: formatMoney(detail.invoice.roundingAmount, currency),
+      unitPrice: '',
+      vat: '',
+    });
+  }
+  const linesTotalsRow: Readonly<Record<string, ReactNode>> | undefined =
+    detail.invoice === null
+      ? undefined
+      : {
+          description: t('documents.totalAmountDue'),
+          total: formatMoney(detail.invoice.amountDue, currency),
+        };
+
+  // The derived double entry with the balance as its totals row.
+  const eventColumns: GridColumn[] = [
+    { header: t('documents.eventColumnAccount'), key: 'account' },
+    { align: 'end', header: t('documents.eventColumnDebit'), key: 'debit' },
+    { align: 'end', header: t('documents.eventColumnCredit'), key: 'credit' },
+  ];
+  const eventRows: GridRow[] = (detail.event?.lines ?? []).map((line) => ({
+    account: `${line.accountCode} ${line.accountName}`,
+    credit: line.side === 'credit' ? formatMoney(line.amount, currency) : '',
+    debit: line.side === 'debit' ? formatMoney(line.amount, currency) : '',
+    id: String(line.lineNo),
+  }));
+  const eventTotalsRow: Readonly<Record<string, ReactNode>> | undefined =
+    detail.event === null
+      ? undefined
+      : {
+          account: t('documents.detail.eventBalance'),
+          credit: formatMoney(detail.event.creditTotal, currency),
+          debit: formatMoney(detail.event.debitTotal, currency),
+        };
+
+  // The linked documents, each opened by a labelled link, never by its identifier.
+  const linkColumns: GridColumn[] = [
+    { header: t('documents.linkKind'), key: 'relationship' },
+    {
+      header: t('documents.detail.linkDocument'),
+      key: 'document',
+      renderCell: (row) => (
+        <Link href={String(row['href'])}>
+          {t('documents.detail.openDocument')}
+        </Link>
+      ),
+    },
+    { header: t('documents.detail.dateColumn'), key: 'date' },
+  ];
+  const linkRows: GridRow[] = detail.links.map((link) => ({
+    date: formatDate(link.createdAt),
+    document: '',
+    href: documentHref(
+      link.fromDocumentId === document.id
+        ? link.toDocumentId
+        : link.fromDocumentId,
+    ),
+    id: link.id,
+    relationship: t(documentLinkKindLabelKeys[link.kind]),
+  }));
+  const linkToolbarActions: ToolbarAction[] = canManage
+    ? [
+        {
+          id: 'link',
+          label: t('documents.detail.linkAction'),
+          onClick: () => {
+            setLinkModalOpen(true);
+          },
+        },
+      ]
+    : [];
+  const linkRowActions = canManage
+    ? (row: GridRow): RowAction[] => [
+        {
+          id: 'remove',
+          isDelete: true,
+          label: t('documents.removeLink'),
+          onClick: () => {
+            void removeLink(row.id);
+          },
+        },
+      ]
+    : undefined;
+
+  // The activity, newest first, from what the detail exposes and nothing invented.
+  type ActivityEntry = Readonly<{ href?: string; id: string; text: string }>;
+  const activityEntries: ActivityEntry[] = [];
+  if (detail.supersededByDocumentId !== null) {
+    activityEntries.push({
+      href: documentHref(detail.supersededByDocumentId),
+      id: 'superseded-by',
+      text: t('documents.supersededByLink'),
+    });
+  }
+  for (const item of inboxItems) {
+    activityEntries.push({
+      href: inboxHref(item.id),
+      id: `filed-${item.id}`,
+      text: t('documents.detail.filedFromInbox', {
+        date: formatDate(item.receivedAt),
+      }),
+    });
+  }
+  if (detail.supersedesDocumentId !== null) {
+    activityEntries.push({
+      href: documentHref(detail.supersedesDocumentId),
+      id: 'supersedes',
+      text: t('documents.supersedesLink'),
+    });
+  }
+  activityEntries.push({
+    id: 'registered',
+    text: t('documents.detail.activityRegistered', {
+      date: formatDate(document.createdAt),
+    }),
+  });
+
+  const originalPanel = (
+    <div className={styles.originalLayout!}>
+      {files[0] === undefined ? (
+        <p>{t('documents.detail.noOriginal')}</p>
+      ) : (
+        <OriginalPreview
+          file={{
+            blobId: files[0].blobId,
+            byteSize: files[0].byteSize,
+            mediaType: files[0].mediaType,
+            name: files[0].filename,
+          }}
+          frameTitle={t('documents.detail.previewFrame')}
+          noPreviewLabel={t('documents.detail.noPreview')}
+          organizationId={organizationId}
+        />
+      )}
+      <Stack gap={5}>
+        {files.length === 0 ? null : (
+          <ContainedList
+            kind="on-page"
+            label={t('documents.originalsTitle')}
+            size="sm"
+          >
+            {files.map((file) => {
+              const name =
+                file.filename ??
+                t('documents.originalFile', {
+                  position: String(file.position),
+                });
+              return (
+                <ContainedListItem
+                  action={
+                    // A short link keeps the action slot narrow; the file name is its accessible name.
+                    <Link
+                      aria-label={t('documents.detail.downloadNamed', { name })}
+                      href={inboxBlobDownloadPath(organizationId, file.blobId)}
+                    >
+                      {t('documents.detail.download')}
+                    </Link>
+                  }
+                  key={file.blobId}
+                >
+                  <span className={styles.fileName!} title={name}>
+                    {name}
+                  </span>
+                </ContainedListItem>
+              );
+            })}
+          </ContainedList>
+        )}
+        {inboxItems.map((item) => (
+          <Link href={inboxHref(item.id)} key={item.id}>
+            {t('documents.detail.filedFromInbox', {
+              date: formatDate(item.receivedAt),
+            })}
+          </Link>
+        ))}
+      </Stack>
+    </div>
+  );
+
+  const linesPanel = (
+    <DataGrid
+      ariaLabel={t('documents.invoiceLines')}
+      columns={lineColumns}
+      fitContainer
+      rows={lineRows}
+      {...(linesTotalsRow === undefined ? {} : { totalsRow: linesTotalsRow })}
+    />
+  );
+
+  const eventPanel = (
+    <Stack gap={5}>
+      {detail.event !== null && !detail.event.isBalanced ? (
+        <InlineNotification
+          kind="error"
+          lowContrast
+          role="alert"
+          title={t('documents.eventUnbalanced')}
+        />
+      ) : null}
+      <DataGrid
+        ariaLabel={t('documents.eventTitle')}
+        columns={eventColumns}
+        fitContainer
+        rows={eventRows}
+        {...(eventTotalsRow === undefined ? {} : { totalsRow: eventTotalsRow })}
+      />
+    </Stack>
+  );
+
+  const linksPanel = (
+    <DataGrid
+      ariaLabel={t('documents.linksTitle')}
+      columns={linkColumns}
+      emptyLabel={t('documents.linksNone')}
+      fitContainer
+      rows={linkRows}
+      toolbarActions={linkToolbarActions}
+      {...(linkRowActions === undefined ? {} : { rowActions: linkRowActions })}
+    />
+  );
+
+  const activityPanel = (
+    <UnorderedList aria-label={t('documents.detail.activityLabel')}>
+      {activityEntries.map((entry) => (
+        <ListItem key={entry.id}>
+          {entry.href === undefined ? (
+            entry.text
+          ) : (
+            <Link href={entry.href}>{entry.text}</Link>
+          )}
+        </ListItem>
+      ))}
+    </UnorderedList>
+  );
+
+  const tabs: Readonly<{ key: string; label: string; panel: ReactNode }>[] = [
+    {
+      key: 'original',
+      label: t('documents.detail.tabOriginal'),
+      panel: originalPanel,
+    },
+  ];
+  if (invoiceKind && detail.invoice !== null) {
+    tabs.push({
+      key: 'lines',
+      label: t('documents.detail.tabLines', {
+        count: detail.invoice.lines.length,
+      }),
+      panel: linesPanel,
+    });
+  }
+  if (detail.event !== null) {
+    tabs.push({
+      key: 'event',
+      label: t('documents.detail.tabEvent'),
+      panel: eventPanel,
+    });
+  }
+  tabs.push({
+    key: 'links',
+    label: t('documents.detail.tabLinks', { count: detail.links.length }),
+    panel: linksPanel,
+  });
+  tabs.push({
+    key: 'activity',
+    label: t('documents.detail.tabActivity'),
+    panel: activityPanel,
+  });
+
+  // Invoices open on their lines; every other kind opens on the original.
+  const linesIndex = tabs.findIndex((tab) => tab.key === 'lines');
+  const defaultTabIndex = linesIndex === -1 ? 0 : linesIndex;
 
   return (
     <PageContainer>
-      <h1>{document.title}</h1>
       {statusFailed ? (
         <InlineNotification
           kind="error"
@@ -278,507 +776,179 @@ export default function DocumentDetailPage() {
           title={t('documents.linkFailed')}
         />
       ) : null}
-      <section aria-labelledby="document-overview-heading">
-        <Stack gap={5}>
-          <h2 id="document-overview-heading">{t('documents.overviewTitle')}</h2>
-          <p>
+
+      <div className={styles.header!}>
+        <div className={styles.headerText!}>
+          <div className={styles.titleRow!}>
+            {kindGlyph(styles.titleIcon!, 20)}
+            <h1 className={styles.title!}>{displayTitle}</h1>
+          </div>
+          <p className={styles.meta!}>{metaLine}</p>
+          <div className={styles.tags!}>
             <StatusIndicator
               label={t(documentStatusLabelKeys[document.status])}
               severity={documentStatusSeverity[document.status]}
             />
-            <Tag size="md" type="outline">
-              {t(documentKindLabelKeys[document.kind])}
-            </Tag>
-          </p>
-          <StructuredListWrapper
-            aria-label={t('documents.overviewTitle')}
-            isCondensed
-          >
-            <StructuredListBody>
-              <StructuredListRow>
-                <StructuredListCell>
-                  {t('documents.fieldReference')}
-                </StructuredListCell>
-                <StructuredListCell>
-                  {document.reference ?? t('documents.notAvailable')}
-                </StructuredListCell>
-              </StructuredListRow>
-              <StructuredListRow>
-                <StructuredListCell>
-                  {t('documents.fieldDate')}
-                </StructuredListCell>
-                <StructuredListCell>{document.documentDate}</StructuredListCell>
-              </StructuredListRow>
-              <StructuredListRow>
-                <StructuredListCell>
-                  {t('documents.fieldPartner')}
-                </StructuredListCell>
-                <StructuredListCell>
-                  {document.partnerName ?? t('documents.notAvailable')}
-                </StructuredListCell>
-              </StructuredListRow>
-              <StructuredListRow>
-                <StructuredListCell>
-                  {t('documents.columnTotal')}
-                </StructuredListCell>
-                <StructuredListCell className={styles.amount!}>
-                  {document.totalAmount === null
-                    ? t('documents.notAvailable')
-                    : formatAmount(document.totalAmount, document.currencyCode)}
-                </StructuredListCell>
-              </StructuredListRow>
-            </StructuredListBody>
-          </StructuredListWrapper>
-          {canManage ? (
-            <div className={styles.actions!}>
-              {statusActions.map((action) => (
-                <Button
-                  disabled={document.status === action.status}
-                  key={action.status}
-                  kind="tertiary"
-                  onClick={() => {
-                    void changeStatus(action.status);
-                  }}
-                  size="md"
-                  type="button"
-                >
-                  {t(action.labelKey)}
-                </Button>
-              ))}
-            </div>
-          ) : null}
-        </Stack>
-      </section>
-      {openIssues.length > 0 ? (
-        <section aria-labelledby="document-issues-heading">
-          <Stack gap={5}>
-            <h2 id="document-issues-heading">{t('documents.issuesTitle')}</h2>
-            {openIssues.map((issue) => (
-              <InlineNotification
-                key={issue.id}
-                kind={issue.severity === 'error' ? 'error' : 'warning'}
-                lowContrast
-                subtitle={issue.detail ?? ''}
-                title={t(dataIssueLabelKeys[issue.code])}
-              />
-            ))}
-          </Stack>
-        </section>
-      ) : null}
-      {detail.invoice === null ? null : (
-        <>
-          <TableContainer
-            className={styles.tableContainer!}
-            title={t('documents.invoiceLines')}
-          >
-            <Table aria-label={t('documents.invoiceLines')} size="sm">
-              <TableHead>
-                <TableRow>
-                  <TableHeader scope="col">
-                    {t('documents.lineNumber')}
-                  </TableHeader>
-                  <TableHeader scope="col">
-                    {t('documents.lineDescription')}
-                  </TableHeader>
-                  <TableHeader scope="col">
-                    {t('documents.lineKind')}
-                  </TableHeader>
-                  <TableHeader scope="col">
-                    {t('documents.lineCategory')}
-                  </TableHeader>
-                  <TableHeader scope="col">
-                    {t('documents.linePeriod')}
-                  </TableHeader>
-                  <TableHeader scope="col">
-                    {t('documents.lineTaxPointDate')}
-                  </TableHeader>
-                  <TableHeader scope="col">
-                    {t('documents.lineActivity')}
-                  </TableHeader>
-                  <TableHeader scope="col">
-                    {t('documents.lineBaseAmount')}
-                  </TableHeader>
-                  <TableHeader scope="col">
-                    {t('documents.lineVatMode')}
-                  </TableHeader>
-                  <TableHeader scope="col">
-                    {t('documents.lineVatAmount')}
-                  </TableHeader>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {detail.invoice.lines.map((line) => (
-                  <TableRow key={line.id}>
-                    <TableCell>{line.lineNo}</TableCell>
-                    <TableCell>{line.description}</TableCell>
-                    <TableCell>
-                      {t(invoiceLineKindLabelKeys[line.lineKind])}
-                    </TableCell>
-                    <TableCell>
-                      {line.category === null
-                        ? t('documents.notAvailable')
-                        : t(invoiceLineCategoryLabelKeys[line.category])}
-                    </TableCell>
-                    <TableCell>
-                      {line.periodStart === null && line.periodEnd === null
-                        ? t('documents.notAvailable')
-                        : t('documents.linePeriodRange', {
-                            end: line.periodEnd ?? t('documents.notAvailable'),
-                            start:
-                              line.periodStart ?? t('documents.notAvailable'),
-                          })}
-                    </TableCell>
-                    <TableCell>
-                      {line.taxPointDate ?? t('documents.notAvailable')}
-                    </TableCell>
-                    <TableCell>
-                      {line.activityCode ?? t('documents.notAvailable')}
-                    </TableCell>
-                    <TableCell className={styles.amount!}>
-                      {formatAmount(line.baseAmount, document.currencyCode)}
-                    </TableCell>
-                    <TableCell>{t(vatModeLabelKeys[line.vatMode])}</TableCell>
-                    <TableCell className={styles.amount!}>
-                      {formatAmount(line.vatAmount, document.currencyCode)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-          <StructuredListWrapper
-            aria-label={t('documents.totalsInvoice')}
-            isCondensed
-          >
-            <StructuredListBody>
-              <StructuredListRow>
-                <StructuredListCell>
-                  {t('documents.totalGross')}
-                </StructuredListCell>
-                <StructuredListCell className={styles.amount!}>
-                  {formatAmount(
-                    detail.invoice.grossTotal,
-                    document.currencyCode,
-                  )}
-                </StructuredListCell>
-              </StructuredListRow>
-              <StructuredListRow>
-                <StructuredListCell>
-                  {t('documents.totalRounding')}
-                </StructuredListCell>
-                <StructuredListCell className={styles.amount!}>
-                  {formatAmount(
-                    detail.invoice.roundingAmount,
-                    document.currencyCode,
-                  )}
-                </StructuredListCell>
-              </StructuredListRow>
-              <StructuredListRow>
-                <StructuredListCell>
-                  {t('documents.totalAdvance')}
-                </StructuredListCell>
-                <StructuredListCell className={styles.amount!}>
-                  {formatAmount(
-                    detail.invoice.advanceTotal,
-                    document.currencyCode,
-                  )}
-                </StructuredListCell>
-              </StructuredListRow>
-              <StructuredListRow>
-                <StructuredListCell>
-                  {t('documents.totalAmountDue')}
-                </StructuredListCell>
-                <StructuredListCell className={styles.amount!}>
-                  {formatAmount(
-                    detail.invoice.amountDue,
-                    document.currencyCode,
-                  )}
-                </StructuredListCell>
-              </StructuredListRow>
-            </StructuredListBody>
-          </StructuredListWrapper>
-        </>
-      )}
-      <section aria-labelledby="document-event-heading">
-        <Stack gap={5}>
-          <h2 id="document-event-heading">{t('documents.eventTitle')}</h2>
-          {detail.event === null ? (
-            <p>{t('documents.eventNone')}</p>
-          ) : (
-            <>
-              {detail.event.isBalanced ? null : (
-                <InlineNotification
-                  kind="error"
-                  lowContrast
-                  role="alert"
-                  title={t('documents.eventUnbalanced')}
-                />
-              )}
-              <p>
-                {t('documents.eventTotals', {
-                  credit: formatAmount(
-                    detail.event.creditTotal,
-                    document.currencyCode,
-                  ),
-                  debit: formatAmount(
-                    detail.event.debitTotal,
-                    document.currencyCode,
-                  ),
+            {document.version > 1 ? (
+              <Tag size="sm" type="outline">
+                {t('documents.detail.versionTag', {
+                  version: document.version,
                 })}
-              </p>
-              <TableContainer
-                className={styles.tableContainer!}
-                title={t('documents.eventTitle')}
-              >
-                <Table aria-label={t('documents.eventTitle')} size="sm">
-                  <TableHead>
-                    <TableRow>
-                      <TableHeader scope="col">
-                        {t('documents.eventColumnLine')}
-                      </TableHeader>
-                      <TableHeader scope="col">
-                        {t('documents.eventColumnAccount')}
-                      </TableHeader>
-                      <TableHeader scope="col">
-                        {t('documents.eventColumnEffectiveDate')}
-                      </TableHeader>
-                      <TableHeader scope="col">
-                        {t('documents.eventColumnActivity')}
-                      </TableHeader>
-                      <TableHeader scope="col">
-                        {t('documents.eventColumnDebit')}
-                      </TableHeader>
-                      <TableHeader scope="col">
-                        {t('documents.eventColumnCredit')}
-                      </TableHeader>
-                      <TableHeader scope="col">
-                        {t('documents.eventColumnDescription')}
-                      </TableHeader>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {detail.event.lines.map((line) => (
-                      <TableRow key={line.lineNo}>
-                        <TableCell>{line.lineNo}</TableCell>
-                        <TableCell>
-                          {line.accountCode} {line.accountName}
-                        </TableCell>
-                        <TableCell>{line.effectiveDate}</TableCell>
-                        <TableCell>
-                          {line.activityCode ?? t('documents.notAvailable')}
-                        </TableCell>
-                        <TableCell className={styles.amount!}>
-                          {line.side === 'debit'
-                            ? formatAmount(line.amount, document.currencyCode)
-                            : ''}
-                        </TableCell>
-                        <TableCell className={styles.amount!}>
-                          {line.side === 'credit'
-                            ? formatAmount(line.amount, document.currencyCode)
-                            : ''}
-                        </TableCell>
-                        <TableCell>
-                          {line.description ?? t('documents.notAvailable')}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </>
-          )}
-        </Stack>
-      </section>
-      <Tile>
-        <section aria-labelledby="document-originals-heading">
-          <Stack gap={5}>
-            <h2
-              className={styles.sectionHeading!}
-              id="document-originals-heading"
-            >
-              {t('documents.originalsTitle')}
-            </h2>
-            {detail.supersedesDocumentId === null &&
-            detail.supersededByDocumentId === null ? null : (
-              <>
-                <InlineNotification
-                  hideCloseButton
-                  kind="info"
-                  lowContrast
-                  subtitle={t('documents.versionBanner')}
-                />
-                <Stack gap={3}>
-                  {detail.supersedesDocumentId === null ? null : (
-                    <Link
-                      href={documentPath(
-                        organizationId,
-                        detail.supersedesDocumentId,
-                      )}
-                    >
-                      {t('documents.supersedesLink')}
-                    </Link>
-                  )}
-                  {detail.supersededByDocumentId === null ? null : (
-                    <Link
-                      href={documentPath(
-                        organizationId,
-                        detail.supersededByDocumentId,
-                      )}
-                    >
-                      {t('documents.supersededByLink')}
-                    </Link>
-                  )}
-                </Stack>
-              </>
-            )}
-            {detail.files.length === 0 ? (
-              <p>{t('documents.originalsNone')}</p>
-            ) : (
-              <UnorderedList aria-label={t('documents.originalsTitle')}>
-                {detail.files.map((file) => (
-                  <ListItem key={file.blobId}>
-                    <Link
-                      href={inboxBlobDownloadPath(organizationId, file.blobId)}
-                    >
-                      {file.filename ??
-                        t('documents.originalFile', {
-                          position: String(file.position),
-                        })}
-                    </Link>
-                  </ListItem>
-                ))}
-              </UnorderedList>
-            )}
-            {detail.inboxItems.map((item) => (
-              <div className={styles.actions!} key={item.id}>
-                <span>
-                  {t(inboxStatusLabelKeys[item.status])} · {item.receivedAt}
-                </span>
-                <Link
-                  href={withOrganization(
-                    `/inbox/${encodeURIComponent(item.id)}`,
-                    organization.slug,
-                  )}
-                >
-                  {item.id}
-                </Link>
-              </div>
-            ))}
-          </Stack>
-        </section>
-      </Tile>
-      <section aria-labelledby="document-links-heading">
-        <Stack gap={5}>
-          <h2 id="document-links-heading">{t('documents.linksTitle')}</h2>
-          {detail.links.length === 0 ? <p>{t('documents.linksNone')}</p> : null}
-          {detail.links.map((link) => (
-            <div className={styles.actions!} key={link.id}>
-              <span>
-                {t(documentLinkKindLabelKeys[link.kind])}{' '}
-                {link.fromDocumentId === document.id
-                  ? link.toDocumentId
-                  : link.fromDocumentId}
-              </span>
-              {canManage ? (
-                <Button
-                  kind="ghost"
-                  onClick={() => {
-                    void removeLink(link.id);
-                  }}
-                  size="sm"
-                  type="button"
-                >
-                  {t('documents.removeLink')}
-                </Button>
-              ) : null}
-            </div>
-          ))}
-          {canManage ? (
-            <>
-              <Select
-                id="document-link-kind"
-                labelText={t('documents.linkKind')}
-                onChange={(event) => {
-                  const parsed = documentLinkKindSchema.safeParse(
-                    event.target.value,
-                  );
-                  setLinkKind(parsed.success ? parsed.data : 'relates');
-                }}
-                value={linkKind}
-              >
-                {documentLinkKindSchema.options.map((option) => (
-                  <SelectItem
-                    key={option}
-                    text={t(documentLinkKindLabelKeys[option])}
-                    value={option}
-                  />
-                ))}
-              </Select>
-              <ComboBox
-                id="document-link-target"
-                items={candidates}
-                itemToString={(item) => (item === null ? '' : item.title)}
-                onChange={(change) => {
-                  setLinkTargetId(change.selectedItem?.id ?? '');
-                }}
-                onInputChange={(value) => {
-                  setLinkQuery(value);
-                }}
-                selectedItem={
-                  candidates.find((summary) => summary.id === linkTargetId) ??
-                  null
-                }
-                titleText={t('documents.linkTarget')}
-              />
+              </Tag>
+            ) : null}
+          </div>
+        </div>
+        {canManage ? (
+          <div className={styles.headerActions!}>
+            {primaryStatus !== null && primaryLabelKey !== null ? (
               <Button
-                disabled={linkTargetId.length === 0}
-                kind="tertiary"
                 onClick={() => {
-                  void addLink();
+                  void changeStatus(primaryStatus);
                 }}
                 type="button"
               >
-                {t('documents.addLink')}
+                {t(primaryLabelKey)}
               </Button>
-            </>
+            ) : null}
+            <OverflowMenu
+              aria-label={t('documents.detail.moreActions')}
+              flipped
+              iconDescription={t('documents.detail.moreActions')}
+            >
+              {overflowStatuses.map((action) => (
+                <OverflowMenuItem
+                  itemText={t(action.labelKey)}
+                  key={action.status}
+                  onClick={() => {
+                    void changeStatus(action.status);
+                  }}
+                />
+              ))}
+              <OverflowMenuItem
+                itemText={t('documents.detail.linkAction')}
+                onClick={() => {
+                  setLinkModalOpen(true);
+                }}
+              />
+              {inboxItems.length > 0 ? (
+                <OverflowMenuItem
+                  href={inboxHref(inboxItems[0]!.id)}
+                  itemText={t('documents.detail.openInInbox')}
+                />
+              ) : null}
+            </OverflowMenu>
+          </div>
+        ) : null}
+      </div>
+
+      <Tile>
+        <Stack gap={5}>
+          <h2 className={styles.summaryTitle!}>
+            {t('documents.detail.summaryTitle')}
+          </h2>
+          <dl className={styles.summaryGrid!}>
+            {summaryItems.map((item) => (
+              <div className={styles.summaryItem!} key={item.label}>
+                <dt className={styles.summaryLabel!}>{item.label}</dt>
+                <dd className={styles.summaryValue!}>{item.value}</dd>
+              </div>
+            ))}
+          </dl>
+          {!invoiceKind && attributes.length > 0 ? (
+            <dl className={styles.summaryGrid!}>
+              {attributes.map(([key, value]) => (
+                <div className={styles.summaryItem!} key={key}>
+                  <dt className={styles.summaryLabel!}>{key}</dt>
+                  <dd className={styles.summaryValue!}>{value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+          {document.openIssueCount > 0 ? (
+            <ul
+              aria-label={t('documents.issuesTitle')}
+              className={styles.issueList!}
+            >
+              {openIssues.map((issue) => (
+                <li className={styles.issueItem!} key={issue.id}>
+                  <Tag size="sm" type="red">
+                    {t(dataIssueLabelKeys[issue.code])}
+                  </Tag>
+                </li>
+              ))}
+            </ul>
           ) : null}
         </Stack>
-      </section>
-      {attributes.length > 0 ? (
-        <section aria-labelledby="document-attributes-heading">
+      </Tile>
+
+      <div className={styles.tabs!}>
+        <Tabs defaultSelectedIndex={defaultTabIndex}>
+          <TabList aria-label={t('documents.title')}>
+            {tabs.map((tab) => (
+              <Tab key={tab.key}>{tab.label}</Tab>
+            ))}
+          </TabList>
+          <TabPanels>
+            {tabs.map((tab) => (
+              <TabPanel key={tab.key}>{tab.panel}</TabPanel>
+            ))}
+          </TabPanels>
+        </Tabs>
+      </div>
+
+      {linkModalOpen ? (
+        <Modal
+          modalHeading={t('documents.detail.linkModalTitle')}
+          onRequestClose={() => {
+            setLinkModalOpen(false);
+          }}
+          onRequestSubmit={() => {
+            void addLink();
+          }}
+          open
+          primaryButtonDisabled={linkTargetId.length === 0}
+          primaryButtonText={t('documents.addLink')}
+          secondaryButtonText={t('documents.cancel')}
+        >
           <Stack gap={5}>
-            <h2 id="document-attributes-heading">
-              {t('documents.attributesTitle')}
-            </h2>
-            <StructuredListWrapper
-              aria-label={t('documents.attributesTitle')}
-              isCondensed
+            <Select
+              id="document-link-kind"
+              labelText={t('documents.linkKind')}
+              onChange={(event) => {
+                const parsed = documentLinkKindSchema.safeParse(
+                  event.target.value,
+                );
+                setLinkKind(parsed.success ? parsed.data : 'relates');
+              }}
+              value={linkKind}
             >
-              <StructuredListHead>
-                <StructuredListRow head>
-                  <StructuredListCell head>
-                    {t('documents.attributesTitle')}
-                  </StructuredListCell>
-                  <StructuredListCell head>
-                    {t('documents.columnTitle')}
-                  </StructuredListCell>
-                </StructuredListRow>
-              </StructuredListHead>
-              <StructuredListBody>
-                {attributes.map(([key, value]) => (
-                  <StructuredListRow key={key}>
-                    <StructuredListCell>{key}</StructuredListCell>
-                    <StructuredListCell>{value}</StructuredListCell>
-                  </StructuredListRow>
-                ))}
-              </StructuredListBody>
-            </StructuredListWrapper>
+              {documentLinkKindSchema.options.map((option) => (
+                <SelectItem
+                  key={option}
+                  text={t(documentLinkKindLabelKeys[option])}
+                  value={option}
+                />
+              ))}
+            </Select>
+            <ComboBox
+              id="document-link-target"
+              items={candidates}
+              itemToString={(item) => (item === null ? '' : item.title)}
+              onChange={(change) => {
+                setLinkTargetId(change.selectedItem?.id ?? '');
+              }}
+              onInputChange={(value) => {
+                setLinkQuery(value);
+              }}
+              selectedItem={
+                candidates.find((summary) => summary.id === linkTargetId) ??
+                null
+              }
+              titleText={t('documents.linkTarget')}
+            />
           </Stack>
-        </section>
+        </Modal>
       ) : null}
-      <Button href="/documents" kind="tertiary">
-        {t('documents.back')}
-      </Button>
     </PageContainer>
   );
 }

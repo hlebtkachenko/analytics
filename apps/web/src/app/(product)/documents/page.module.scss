@@ -1,42 +1,95 @@
 @use '@bap/design-system/tokens/spacing.scss' as spacing;
 
+// Title and actions share one row; the title truncates so the entity control never wraps.
 .headingRow {
   align-items: center;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: spacing.$spacing-05;
   justify-content: space-between;
+
+  h1 {
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .headingActions {
+  align-items: center;
   display: flex;
-  flex-wrap: wrap;
+  flex: none;
+  flex-wrap: nowrap;
   gap: spacing.$spacing-03;
 }
 
-.totals {
+// Zero Carbon's tab panel inline padding so the grid shares the page-grid edges.
+.tabsRow :global(.cds--tab-content) {
+  padding-inline: 0;
+}
+
+// The filter tags, the filter panel and the grid stack under the tab row.
+.gridStack {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-05;
+  margin-block-start: spacing.$spacing-05;
+}
+
+.filterTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-02;
+}
+
+.filterPanel {
   display: grid;
   gap: spacing.$spacing-05;
-  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
 }
 
-.totalLabel {
-  margin-block-end: spacing.$spacing-02;
-}
-
-.totalValue {
-  font-variant-numeric: tabular-nums;
-}
-
-.tableContainer {
+.documentCell {
+  align-items: center;
+  display: flex;
+  gap: spacing.$spacing-03;
   min-inline-size: 0;
 }
 
-.filter {
-  min-inline-size: 12rem;
+.documentIcon {
+  color: var(--cds-icon-secondary);
+  flex: none;
+}
+
+// The title takes the remaining width and truncates; the reference sits beneath.
+.documentText {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+}
+
+.documentTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// The reference truncates on its own line so the fit-layout cell never clips it mid-character.
+.documentReference {
+  color: var(--cds-text-secondary);
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .amount {
   font-variant-numeric: tabular-nums;
-  text-align: end;
+}
+
+.issuesCell {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-02;
 }

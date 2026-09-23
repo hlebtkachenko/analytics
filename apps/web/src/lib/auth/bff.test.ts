@@ -25,6 +25,7 @@ import {
   getMemberEntityScope,
   getMemberEntityScopes,
   getOrganizationAccess,
+  getOrganizationMembers,
   patchInboxChannel,
   patchInboxRule,
   patchInboxSettings,
@@ -44,7 +45,7 @@ import {
   putMemberEntityScope,
   writeInboxItem,
 } from './bff.js';
-import type { BffAuth } from './bff.js';
+import type { BffAuth, BffMembersAuth } from './bff.js';
 
 const memberCapabilities = {
   createEntities: false,
@@ -1222,6 +1223,7 @@ const documentSummary = {
   version: 1,
 };
 const documentList = {
+  counts: { all: 1, archived: 0, needsReview: 0, verified: 0, withIssues: 0 },
   documents: [documentSummary],
   page: 1,
   pageSize: 25,
@@ -1394,10 +1396,11 @@ const documentAnalytics = {
     },
   ],
   stats: {
+    documentCount: 1,
     elapsedMs: 12,
     eventLineCount: 10,
     invoiceLineCount: 5,
-    queryCount: 4,
+    queryCount: 6,
   },
 };
 
@@ -1672,7 +1675,12 @@ const inboxDetail = {
   events: [],
   extraction: null,
   files: [inboxFile],
-  item: { ...inboxItem, sender: null, senderAuthenticated: false },
+  item: {
+    ...inboxItem,
+    decidedByRuleName: null,
+    sender: null,
+    senderAuthenticated: false,
+  },
   routingTarget: {
     auto: 'never',
     autoThreshold: null,
@@ -1772,12 +1780,16 @@ describe('getInboxItems', () => {
         'http://api:3001/v1/organizations/org_1/inbox/items?status=received%2Cfailed&page=1&pageSize=25',
       );
       return Response.json({
+        counts: { all: 1, discarded: 0, filed: 0, toReview: 1 },
         items: [
           {
             ...inboxItem,
+            decidedByRuleName: null,
             fileCount: 1,
             humanTouched: false,
             primaryFilename: 'a.pdf',
+            sender: null,
+            senderAuthenticated: false,
           },
         ],
         page: 1,
@@ -1802,7 +1814,13 @@ describe('getInboxItems', () => {
       expect(String(input)).toBe(
         'http://api:3001/v1/organizations/org_1/inbox/items?issue=duplicate_probable&assigneeId=none&confidence=low&page=1&pageSize=25',
       );
-      return Response.json({ items: [], page: 1, pageSize: 25, total: 0 });
+      return Response.json({
+        counts: { all: 0, discarded: 0, filed: 0, toReview: 0 },
+        items: [],
+        page: 1,
+        pageSize: 25,
+        total: 0,
+      });
     });
 
     const filtered = await getInboxItems(
@@ -1897,6 +1915,7 @@ describe('inbox item reads and writes', () => {
         ...inboxDetail,
         item: {
           ...inboxItem,
+          decidedByRuleName: null,
           documentId: DATASET_ID,
           sender: null,
           senderAuthenticated: false,
@@ -2028,6 +2047,7 @@ describe('inbox item reads and writes', () => {
         ...inboxDetail,
         item: {
           ...inboxItem,
+          decidedByRuleName: null,
           documentId: DATASET_ID,
           sender: null,
           senderAuthenticated: false,
@@ -2116,6 +2136,7 @@ describe('inbox item reads and writes', () => {
         ...inboxDetail,
         item: {
           ...inboxItem,
+          decidedByRuleName: null,
           sender: null,
           senderAuthenticated: false,
           status: 'discarded',
@@ -3017,5 +3038,81 @@ describe('inbox rules', () => {
     expect(repeated.status).toBe(400);
     expect(empty.status).toBe(400);
     expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('getOrganizationMembers', () => {
+  const membersRequest = new Request(
+    'https://bap.invalid/api/bff/application/organizations/org_1/members',
+  );
+
+  it('returns id, name and email for each member of the caller organization', async () => {
+    const listMembers = vi.fn<BffMembersAuth['listMembers']>(async () => ({
+      members: [
+        {
+          user: { email: 'creator@example.test', name: 'Creator' },
+          userId: 'user_1',
+        },
+        {
+          user: { email: 'grantee@example.test', name: 'Grantee' },
+          userId: 'user_2',
+        },
+      ],
+    }));
+    const membersAuth: BffMembersAuth = { getSession, listMembers };
+
+    const response = await getOrganizationMembers(
+      membersAuth,
+      membersRequest,
+      'org_1',
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      members: [
+        { email: 'creator@example.test', id: 'user_1', name: 'Creator' },
+        { email: 'grantee@example.test', id: 'user_2', name: 'Grantee' },
+      ],
+    });
+    expect(listMembers).toHaveBeenCalledWith({
+      headers: membersRequest.headers,
+      query: { limit: 100, organizationId: 'org_1' },
+    });
+  });
+
+  it('answers 401 without a verified session and never lists', async () => {
+    const listMembers = vi.fn<BffMembersAuth['listMembers']>(async () => ({
+      members: [],
+    }));
+    const membersAuth: BffMembersAuth = {
+      getSession: async () => null,
+      listMembers,
+    };
+
+    const response = await getOrganizationMembers(
+      membersAuth,
+      membersRequest,
+      'org_1',
+    );
+
+    expect(response.status).toBe(401);
+    expect(listMembers).not.toHaveBeenCalled();
+  });
+
+  it('answers 403 when Better Auth refuses a caller who is not a member', async () => {
+    const membersAuth: BffMembersAuth = {
+      getSession,
+      listMembers: async () => {
+        throw new Error('not a member');
+      },
+    };
+
+    const response = await getOrganizationMembers(
+      membersAuth,
+      membersRequest,
+      'org_1',
+    );
+
+    expect(response.status).toBe(403);
   });
 });

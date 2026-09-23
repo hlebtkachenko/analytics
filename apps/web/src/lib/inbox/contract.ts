@@ -407,9 +407,10 @@ export const inboxItemDetailSchema = z
     events: z.array(inboxEventSchema),
     extraction: inboxExtractionSchema.nullable(),
     files: z.array(inboxItemFileSchema),
-    // The item plus its sender and the sender's DKIM verdict: shown only on the detail, never in the list.
+    // The item plus its sender, the sender's DKIM verdict, and the name of the rule that decided it, if any.
     item: inboxItemSchema
       .extend({
+        decidedByRuleName: z.string().nullable(),
         sender: z.string().nullable(),
         senderAuthenticated: z.boolean(),
       })
@@ -419,21 +420,51 @@ export const inboxItemDetailSchema = z
   })
   .strict();
 
-// The list carries the first file name and the file count so the browser needs no second request.
+// The list carries the first file name, the file count, the sender and the deciding rule name so the browser needs no second request.
 export const inboxItemListEntrySchema = inboxItemSchema
   .extend({
+    // The rule whose decision routed or discarded the item, resolved by name; null when no rule decided it.
+    decidedByRuleName: z.string().nullable(),
     fileCount: z.number().int().min(0),
     primaryFilename: z.string().min(1).max(255).nullable(),
+    // The item's envelope sender, shown for email items in place of a filename.
+    sender: z.string().nullable(),
+    // The sender's DKIM verdict, so the list never shows an unauthenticated From as trusted.
+    senderAuthenticated: z.boolean(),
+  })
+  .strict();
+
+// The tab counts of the list, on the unfiltered scope, so a tab shows its number before it is opened.
+export const inboxItemCountsSchema = z
+  .object({
+    all: z.number().int().min(0),
+    discarded: z.number().int().min(0),
+    filed: z.number().int().min(0),
+    toReview: z.number().int().min(0),
   })
   .strict();
 
 export const inboxItemListResponseSchema = z
   .object({
+    counts: inboxItemCountsSchema,
     items: z.array(inboxItemListEntrySchema),
     page: z.number().int().min(1),
     pageSize: z.number().int().min(1).max(MAX_INBOX_PAGE_SIZE),
     total: z.number().int().min(0),
   })
+  .strict();
+
+// Members for the assignee pickers, from Better Auth; the id is the member's user subject id.
+export const MAX_ORGANIZATION_MEMBERS = 100;
+export const organizationMemberSchema = z
+  .object({
+    email: z.string(),
+    id: subjectIdentifierSchema,
+    name: z.string(),
+  })
+  .strict();
+export const organizationMemberListResponseSchema = z
+  .object({ members: z.array(organizationMemberSchema) })
   .strict();
 
 // Comma separated statuses, capped at the vocabulary so a repeat cannot pad the query.
@@ -449,6 +480,13 @@ const csvStatusSchema = z
 
 // The literal that filters the list to unassigned items.
 export const INBOX_ASSIGNEE_NONE = 'none';
+// The statuses a person still has to act on: the To review tab and its count.
+export const INBOX_TO_REVIEW_STATUSES = [
+  'needs_review',
+  'received',
+  'processing',
+  'failed',
+] as const satisfies readonly InboxItemStatus[];
 
 export const inboxItemListQuerySchema = z
   .object({
@@ -465,6 +503,8 @@ export const inboxItemListQuerySchema = z
       .min(1)
       .max(MAX_INBOX_PAGE_SIZE)
       .default(DEFAULT_INBOX_PAGE_SIZE),
+    // Drops items snoozed into the future; the To review tab sets it, the All tab keeps them.
+    snoozed: z.literal('exclude').optional(),
     status: csvStatusSchema.optional(),
   })
   .strict()
@@ -845,6 +885,11 @@ export type InboxEvent = z.infer<typeof inboxEventSchema>;
 export type InboxExtraction = z.infer<typeof inboxExtractionSchema>;
 export type InboxHints = z.infer<typeof inboxHintsSchema>;
 export type InboxItem = z.infer<typeof inboxItemSchema>;
+export type InboxItemCounts = z.infer<typeof inboxItemCountsSchema>;
+export type OrganizationMember = z.infer<typeof organizationMemberSchema>;
+export type OrganizationMemberListResponse = z.infer<
+  typeof organizationMemberListResponseSchema
+>;
 export type InboxItemDetail = z.infer<typeof inboxItemDetailSchema>;
 export type InboxItemFile = z.infer<typeof inboxItemFileSchema>;
 export type InboxItemListEntry = z.infer<typeof inboxItemListEntrySchema>;

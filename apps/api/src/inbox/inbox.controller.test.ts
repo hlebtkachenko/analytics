@@ -108,8 +108,11 @@ const file: InboxItemFile = {
 
 const listEntry: InboxItemListEntry = {
   ...item,
+  decidedByRuleName: null,
   fileCount: 2,
   primaryFilename: file.originalFilename,
+  sender: null,
+  senderAuthenticated: false,
 };
 
 const detail: InboxItemDetail = {
@@ -137,7 +140,12 @@ const detail: InboxItemDetail = {
     reasons: [{ evidence: 'placeholder', step: 'sniff', weight: 1 }],
   },
   files: [file],
-  item: { ...item, sender: null, senderAuthenticated: false },
+  item: {
+    ...item,
+    decidedByRuleName: null,
+    sender: null,
+    senderAuthenticated: false,
+  },
   routingTarget: routingTargetFor('pdf'),
 };
 
@@ -207,6 +215,7 @@ describe('application inbox routes', () => {
     })),
     discardItem: record('discardItem', byItem),
     listItems: record('listItems', () => ({
+      counts: { all: 1, discarded: 0, filed: 0, toReview: 1 },
       items: [listEntry],
       page: 1,
       pageSize: 25,
@@ -385,6 +394,7 @@ describe('application inbox routes', () => {
       .expect(200);
 
     expect(response.body).toEqual({
+      counts: { all: 1, discarded: 0, filed: 0, toReview: 1 },
       items: [listEntry],
       page: 1,
       pageSize: 25,
@@ -817,6 +827,7 @@ describe('application inbox routes', () => {
     };
 
     expect(list.content['application/json']?.schema.required).toEqual([
+      'counts',
       'items',
       'page',
       'pageSize',

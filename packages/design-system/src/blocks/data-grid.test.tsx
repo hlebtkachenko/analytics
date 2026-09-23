@@ -40,6 +40,21 @@ describe('DataGrid', () => {
     expect(bodyRowText()).toHaveLength(3);
   });
 
+  it('marks an end-aligned column with the alignEnd class on its header and cells', () => {
+    render(<DataGrid columns={columns} rows={rows} />);
+    const scoreHeader = screen.getByText('Score').closest('th');
+    expect(scoreHeader?.className).toContain('alignEnd');
+    const firstBodyRow = screen.getAllByRole('row')[1] as HTMLElement;
+    const [, scoreCell] = within(firstBodyRow).getAllByRole('cell');
+    expect((scoreCell as HTMLElement).className).toContain('alignEnd');
+  });
+
+  it('marks an end-aligned sortable column header with the alignEnd class', () => {
+    render(<DataGrid columns={columns} rows={rows} sortable />);
+    const scoreHeader = screen.getByText('Score').closest('th');
+    expect(scoreHeader?.className).toContain('alignEnd');
+  });
+
   it('wraps the table in a container that never widens its parent', () => {
     const { container } = render(<DataGrid columns={columns} rows={rows} />);
     const section = container.querySelector('.cds--data-table-container');
@@ -165,6 +180,40 @@ describe('DataGrid', () => {
     expect(onSelectionChange).toHaveBeenCalledWith(['1']);
   });
 
+  it('drills into a row on a plain cell click', () => {
+    const onRowClick = vi.fn();
+    render(<DataGrid columns={columns} onRowClick={onRowClick} rows={rows} />);
+    fireEvent.click(screen.getByText('beta'));
+    expect(onRowClick).toHaveBeenCalledWith(
+      expect.objectContaining({ id: '1' }),
+    );
+  });
+
+  it('does not drill in when the selection checkbox or a cell link is clicked', () => {
+    const onRowClick = vi.fn();
+    const linked: readonly GridColumn[] = [
+      {
+        key: 'name',
+        header: 'Name',
+        renderCell: (row) => <a href={`/x/${row.id}`}>open</a>,
+      },
+    ];
+    render(
+      <DataGrid
+        columns={linked}
+        onRowClick={onRowClick}
+        rows={rows}
+        selection="multi"
+      />,
+    );
+    const firstBodyRow = screen.getAllByRole('row')[1] as HTMLElement;
+    fireEvent.click(within(firstBodyRow).getByRole('checkbox'));
+    fireEvent.click(
+      within(firstBodyRow).getAllByText('open')[0] as HTMLElement,
+    );
+    expect(onRowClick).not.toHaveBeenCalled();
+  });
+
   it('hides the batch action bar from focus until a row is selected', () => {
     render(
       <DataGrid
@@ -179,6 +228,31 @@ describe('DataGrid', () => {
     const firstBodyRow = screen.getAllByRole('row')[1] as HTMLElement;
     fireEvent.click(within(firstBodyRow).getByRole('checkbox'));
     expect(action).toHaveAttribute('tabindex', '0');
+  });
+
+  it('forces no width on a column that declares none, so the grid fits', () => {
+    render(<DataGrid columns={columns} rows={rows} />);
+    const firstBodyRow = screen.getAllByRole('row')[1] as HTMLElement;
+    const [nameCell] = within(firstBodyRow).getAllByRole('cell');
+    expect((nameCell as HTMLElement).style.width).toBe('');
+    expect((nameCell as HTMLElement).style.minWidth).toBe('');
+  });
+
+  it('names the table by ariaLabel when no visible title is set', () => {
+    render(<DataGrid ariaLabel="Inbox items" columns={columns} rows={rows} />);
+    expect(screen.getByRole('table', { name: 'Inbox items' })).toBeVisible();
+  });
+
+  it('keeps a sized column authoritative and an unsized column flexible with fitContainer', () => {
+    const mixed: readonly GridColumn[] = [
+      { key: 'name', header: 'Name' },
+      { key: 'score', header: 'Score', width: 120 },
+    ];
+    render(<DataGrid columns={mixed} fitContainer rows={rows} />);
+    const firstBodyRow = screen.getAllByRole('row')[1] as HTMLElement;
+    const [nameCell, scoreCell] = within(firstBodyRow).getAllByRole('cell');
+    expect((nameCell as HTMLElement).style.width).toBe('');
+    expect((scoreCell as HTMLElement).style.width).toBe('120px');
   });
 
   it('freezes a pinned column with a sticky left offset', () => {
@@ -508,5 +582,42 @@ describe('DataGrid', () => {
     }));
     render(<DataGrid columns={columns} pageSize={2} pagination rows={many} />);
     expect(bodyRowText()).toHaveLength(2);
+  });
+
+  it('never scrolls or gutters a fit-to-container grid', () => {
+    const { container } = render(
+      <DataGrid columns={columns} fitContainer rows={rows} />,
+    );
+    const scrollDiv = container.querySelector('[class*="scroll"]');
+    expect(scrollDiv?.className).not.toContain('scrollVertical');
+    expect(scrollDiv?.className).not.toContain('scrollHorizontal');
+    expect(container.querySelector('[class*="gutter"]')).toBeNull();
+  });
+
+  it('gives a plain grid a horizontal-only scroll region', () => {
+    const { container } = render(<DataGrid columns={columns} rows={rows} />);
+    const scrollDiv = container.querySelector('[class*="scroll"]');
+    expect(scrollDiv?.className).toContain('scrollHorizontal');
+    expect(scrollDiv?.className).not.toContain('scrollVertical');
+  });
+
+  it('reserves a scrollbar gutter around the toolbar and footer when it scrolls vertically', () => {
+    const { container } = render(
+      <DataGrid
+        batchActions={[{ id: 'archive', label: 'Archive', onClick: vi.fn() }]}
+        columns={columns}
+        maxHeight={200}
+        pagination
+        rows={rows}
+        selection="multi"
+      />,
+    );
+    const scrollDiv = container.querySelector('[class*="scroll"]');
+    expect(scrollDiv?.className).toContain('scrollVertical');
+    const pagination = container.querySelector('.cds--pagination');
+    expect(pagination?.parentElement?.className).toContain('gutter');
+    expect(
+      container.querySelectorAll('[class*="gutter"]').length,
+    ).toBeGreaterThanOrEqual(2);
   });
 });

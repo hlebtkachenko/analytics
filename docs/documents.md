@@ -135,6 +135,21 @@ For an invoice kind `app.document.total_amount` is the printed total,
 `gross_total + rounding_amount`, before any advance deduction; the list page and
 its totals by currency sum that number. `amount_due` lives on `app.invoice`.
 
+The `/documents` list response carries `counts` (`all`, `needsReview`,
+`verified`, `archived`, `withIssues`), one grouped query on the caller scope and
+the request's legal entity filter that ignores the status, kind, partner, search
+and date filters but keeps the same default that hides superseded versions, so a
+status tab shows its number before it is opened. `withIssues` counts the
+documents with at least one unresolved `app.data_issue`.
+
+The `legalEntityId` query parameter on `GET .../documents` (the list rows, the
+`counts` and the `totalsByCurrency`) accepts several entities at once, either
+repeated (`?legalEntityId=a&legalEntityId=b`) or comma separated
+(`?legalEntityId=a,b`); one id behaves exactly as before. None given leaves the
+whole caller scope in view. Each id is validated against the caller's entity
+scope the same way a single id is, so if any requested id falls outside the
+scope the read narrows to nothing rather than widening it.
+
 ### Category to account
 
 | Category    | Issued invoice credit (revenue) | Received invoice debit (expense) |
@@ -334,6 +349,17 @@ versioned `v1`, and is guarded the same way as the document routes above; see
 | GET    | `/inbox/blobs/:blobId/download`       | `readDocuments`   | 200     | 401, 403, 404, 409 (`blob_quarantined`, `blob_scan_pending`)                          |
 | GET    | `/inbox/blobs/:blobId/inline`         | `readDocuments`   | 200     | 401, 403, 404, 409 (`blob_quarantined`, `blob_scan_pending`), 415 (not inlineable)    |
 
+The list response of `/inbox/items` carries `counts` (`toReview`, `filed`,
+`discarded`, `all`) computed on the caller's scope while ignoring the status,
+issue, assignee and snooze filters, so a tab shows its number before it is
+opened; `toReview` counts `needs_review`, `received`, `failed` and `processing`
+items that are not snoozed into the future. The list also accepts
+`snoozed=exclude`, which drops items whose `snoozed_until` is still in the
+future. Every list entry and the detail item carry `sender`, its DKIM verdict
+`senderAuthenticated`, and `decidedByRuleName`, the name of the rule that routed
+or discarded the item resolved through a left join on `app.inbox_rule` (null
+when no rule decided it). These fields are additive and read-only.
+
 [ADR 0016](adr/0016-channel-principal.md) adds the channel principal and its
 routes, also mounted under `organizations/:organizationId/...` and versioned
 `v1`. `inboxItemSchema` gains `channelId` (the originating `app.inbox_channel`
@@ -472,17 +498,21 @@ event, and it equals `app.invoice.amount_due`, a generated column
 ### Analytics route
 
 `GET .../documents/analytics?legalEntityId=` runs exactly those group by
-statements over the caller's scope instead of one document: the invoice list
-capped at 50 rows, expense and revenue by month of `effective_date` and account,
-by `activity_code` on expense and revenue accounts, VAT by line kind and regime,
-and totals by account. Every query filters by `organization_id`, the event line
-aggregates read the caller's entity scope from
-`app.economic_event.legal_entity_id` rather than joining the register, and each
-grouping reads both sides in one pass with
+statements over the caller's scope instead of one document. The `legalEntityId`
+parameter accepts several entities at once, repeated
+(`?legalEntityId=a&legalEntityId=b`) or comma separated (`?legalEntityId=a,b`),
+and narrows to nothing if any requested id is outside the scope; none given
+reads the whole caller scope. It publishes the invoice list capped at 50 rows,
+expense and revenue by month of `effective_date` and account, by `activity_code`
+on expense and revenue accounts, VAT by line kind and regime, and totals by
+account. Every query filters by `organization_id`, the event line aggregates
+read the caller's entity scope from `app.economic_event.legal_entity_id` rather
+than joining the register, and each grouping reads both sides in one pass with
 `coalesce(sum(...) filter (where side = ...), 0)`. Nothing is recomputed in
 TypeScript: the amounts cross the boundary as the decimal strings PostgreSQL
-printed. The response also reports its own cost in `stats`: the five statements
-it ran, the event and invoice line counts those statements already carried, and
+printed. The response also reports its own cost in `stats`: the six statements
+it ran, the uncapped `documentCount` of invoices whose economic event is in
+scope, the event and invoice line counts those statements already carried, and
 the wall clock milliseconds they took.
 
 ## Out of scope

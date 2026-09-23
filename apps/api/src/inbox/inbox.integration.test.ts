@@ -479,6 +479,7 @@ describe('inbox intake', () => {
     expect(unrestricted.items[0]).toMatchObject({
       fileCount: 1,
       primaryFilename: 'placeholder.pdf',
+      senderAuthenticated: false,
     });
 
     const restricted = await listItems(apiPool, {
@@ -1672,5 +1673,142 @@ describe('inbox actions', () => {
     expect(
       untouched.items.find((entry) => entry.id === alphaItemId)?.humanTouched,
     ).toBe(false);
+  });
+});
+
+describe('inbox list counts, sender and deciding rule name', () => {
+  let ruleId = '';
+  let futureItemId = '';
+  let ruleItemId = '';
+
+  // The same scope predicate and count definitions the repository uses, read straight from the table.
+  const expectedCounts = (legalEntityIds: readonly string[] | null) =>
+    asTenant(creator, async (transaction) => {
+      const result = await transaction.query<{
+        all_count: number;
+        discarded_count: number;
+        filed_count: number;
+        to_review: number;
+      }>(
+        `select count(*)::int as all_count,
+                count(*) filter (where status = 'routed')::int as filed_count,
+                count(*) filter (where status = 'discarded')::int as discarded_count,
+                count(*) filter (
+                  where status in ('needs_review', 'received', 'failed', 'processing')
+                    and (snoozed_until is null or snoozed_until <= now())
+                )::int as to_review
+           from app.inbox_item
+          where ($1::uuid[] is null
+                 or (legal_entity_id is not null and legal_entity_id = any($1::uuid[])))`,
+        [legalEntityIds === null ? null : [...legalEntityIds]],
+      );
+      const row = result.rows[0];
+
+      return {
+        all: row?.all_count ?? 0,
+        discarded: row?.discarded_count ?? 0,
+        filed: row?.filed_count ?? 0,
+        toReview: row?.to_review ?? 0,
+      };
+    });
+
+  const list = (
+    overrides: Record<string, unknown>,
+    scope: { legalEntityIds: readonly string[] | null } = allEntities,
+  ) =>
+    listItems(apiPool, {
+      ...creator,
+      ...scope,
+      query: inboxItemListQuerySchema.parse(overrides),
+    });
+
+  beforeAll(async () => {
+    ruleId = await asTenant(creator, async (transaction) => {
+      const created = await transaction.query<{ id: string }>(
+        `insert into app.inbox_rule
+           (organization_id, name, priority, created_by, detected_type, discard_reason)
+         select 'org-1', 'Counts rule', coalesce(max(priority), 0) + 1, 'user-1',
+                'money_s3_export', 'spam'
+           from app.inbox_rule where organization_id = 'org-1'
+         returning id`,
+      );
+      return created.rows[0]?.id ?? '';
+    });
+    futureItemId = await asTenant(creator, async (transaction) => {
+      const created = await transaction.query<{ id: string }>(
+        `insert into app.inbox_item
+           (organization_id, channel_kind, payload_kind, status, legal_entity_id, sender,
+            snoozed_until, created_by)
+         values ('org-1', 'upload', 'file', 'needs_review', $1, 'future@snooze.example',
+                 now() + interval '30 days', 'user-1')
+         returning id`,
+        [ownedEntityId],
+      );
+      return created.rows[0]?.id ?? '';
+    });
+    ruleItemId = await asTenant(creator, async (transaction) => {
+      const created = await transaction.query<{ id: string }>(
+        `insert into app.inbox_item
+           (organization_id, channel_kind, payload_kind, status, legal_entity_id,
+            decided_by_kind, decided_by_rule_id, created_by)
+         values ('org-1', 'upload', 'file', 'discarded', $1, 'rule', $2, 'user-1')
+         returning id`,
+        [otherEntityId, ruleId],
+      );
+      return created.rows[0]?.id ?? '';
+    });
+  });
+
+  it('computes the tab counts on the caller scope, excluding future-snoozed from To review', async () => {
+    const unrestricted = await list({});
+    expect(unrestricted.counts).toEqual(await expectedCounts(null));
+
+    const restricted = await list({}, { legalEntityIds: [ownedEntityId] });
+    expect(restricted.counts).toEqual(await expectedCounts([ownedEntityId]));
+    // A narrower scope yields fewer items, so the counts follow the scope, not the whole organization.
+    expect(restricted.counts.all).toBeLessThan(unrestricted.counts.all);
+
+    // The future-snoozed needs_review item is in All but never in the To review predicate.
+    const included = await list({ status: 'needs_review' });
+    expect(included.items.map((entry) => entry.id)).toContain(futureItemId);
+    const excluded = await list({ snoozed: 'exclude', status: 'needs_review' });
+    expect(excluded.items.map((entry) => entry.id)).not.toContain(futureItemId);
+  });
+
+  it('carries the sender on a list entry, null when there is none', async () => {
+    const review = await list({ status: 'needs_review' });
+    expect(
+      review.items.find((entry) => entry.id === futureItemId)?.sender,
+    ).toBe('future@snooze.example');
+    const discarded = await list({ status: 'discarded' });
+    expect(
+      discarded.items.find((entry) => entry.id === ruleItemId)?.sender,
+    ).toBeNull();
+  });
+
+  it('resolves the deciding rule name on the list entry and the detail, null otherwise', async () => {
+    const discarded = await list({ status: 'discarded' });
+    expect(
+      discarded.items.find((entry) => entry.id === ruleItemId)
+        ?.decidedByRuleName,
+    ).toBe('Counts rule');
+    const ruleDetail = await readItem(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: ruleItemId,
+    });
+    expect(ruleDetail?.item.decidedByRuleName).toBe('Counts rule');
+
+    const review = await list({ status: 'needs_review' });
+    expect(
+      review.items.find((entry) => entry.id === futureItemId)
+        ?.decidedByRuleName,
+    ).toBeNull();
+    const futureDetail = await readItem(apiPool, {
+      ...creator,
+      ...allEntities,
+      itemId: futureItemId,
+    });
+    expect(futureDetail?.item.decidedByRuleName).toBeNull();
   });
 });

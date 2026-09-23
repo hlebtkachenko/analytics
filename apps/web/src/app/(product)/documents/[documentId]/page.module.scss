@@ -1,23 +1,161 @@
 @use '@bap/design-system/tokens/spacing.scss' as spacing;
 @use '@bap/design-system/tokens/type.scss' as type;
 
-// Tile sections keep the same heading scale as the bare page sections.
-.sectionHeading {
-  @include type.type-style('heading-03');
+// One non-wrapping header row: the title truncates, the actions stay right and top aligned.
+.header {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: spacing.$spacing-05;
+  justify-content: space-between;
 }
 
-.actions {
+.headerText {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+}
+
+// The kind icon rides beside the title, which keeps its own truncation.
+.titleRow {
+  align-items: center;
+  display: flex;
+  gap: spacing.$spacing-03;
+  min-inline-size: 0;
+}
+
+.titleIcon {
+  color: var(--cds-icon-secondary);
+  flex: none;
+}
+
+.title {
+  @include type.type-style('heading-04');
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  color: var(--cds-text-secondary);
+  margin-block-start: spacing.$spacing-02;
+}
+
+.tags {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-03;
+  margin-block-start: spacing.$spacing-03;
+}
+
+.headerActions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: spacing.$spacing-03;
+}
+
+// The summary tile's definition-list grid: four pairs at lg, two at md, one below.
+.summaryTitle {
+  @include type.type-style('heading-03');
+  margin-block-end: spacing.$spacing-05;
+}
+
+.summaryGrid {
+  column-gap: spacing.$spacing-06;
+  display: grid;
+  grid-template-columns: 1fr;
+  row-gap: spacing.$spacing-05;
+
+  @media (min-width: 42rem) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  @media (min-width: 66rem) {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.summaryItem {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-02;
+  min-inline-size: 0;
+}
+
+.summaryLabel {
+  color: var(--cds-text-secondary);
+  @include type.type-style('label-01');
+}
+
+.summaryValue {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-03;
+  margin: 0;
+}
+
+// Open issues sit full width under the summary grid, one red-tagged sentence each.
+.issueList {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-03;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.issueItem {
+  display: flex;
+}
+
+// The kind value pairs its icon with the label on one line.
+.kindValue {
+  align-items: center;
+  display: flex;
+  gap: spacing.$spacing-03;
+}
+
+.kindIcon {
+  color: var(--cds-icon-secondary);
+  flex: none;
+}
+
+// Zero Carbon's tab panel inline padding so the panels share the page edges.
+.tabs :global(.cds--tab-content) {
+  padding-inline: 0;
+}
+
+// Original tab: preview two thirds and files one third at lg, stacked below.
+.originalLayout {
+  // The file list and inbox link stay grouped at the top instead of stretching to the preview height.
+  align-items: start;
+  column-gap: spacing.$spacing-06;
+  display: grid;
+  grid-template-columns: 1fr;
+  row-gap: spacing.$spacing-05;
+
+  @media (min-width: 66rem) {
+    grid-template-columns: 2fr 1fr;
+  }
+}
+
+// The line description sits beside its advance-deduction tag on one row.
+.lineCell {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: spacing.$spacing-03;
 }
 
-.tableContainer {
-  min-inline-size: 0;
-}
-
-.amount {
-  font-variant-numeric: tabular-nums;
-  text-align: end;
+// The file name truncates while the Download link rides in the list action slot.
+.fileName {
+  display: block;
+  overflow: hidden;
+  padding-inline-end: spacing.$spacing-08;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

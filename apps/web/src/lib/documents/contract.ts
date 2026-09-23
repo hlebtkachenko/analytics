@@ -171,6 +171,8 @@ const storedFxRateSchema = z
 
 export const MAX_INVOICE_LINES = 200;
 export const MAX_DOCUMENT_ATTRIBUTES = 50;
+// The most legal entities one filter may name, the same bound the API contract carries.
+export const MAX_FILTER_LEGAL_ENTITIES = 200;
 export const MAX_DOCUMENT_PAGE_SIZE = 100;
 export const DEFAULT_DOCUMENT_PAGE_SIZE = 25;
 // The API refuses a window beyond this, so deep paging can never scan a whole tenant.
@@ -353,8 +355,20 @@ export const documentDetailSchema = z
   })
   .strict();
 
+// The tab counts of the list, on the caller scope and the entity filter, ignoring every other filter.
+export const documentCountsSchema = z
+  .object({
+    all: z.number().int().min(0),
+    archived: z.number().int().min(0),
+    needsReview: z.number().int().min(0),
+    verified: z.number().int().min(0),
+    withIssues: z.number().int().min(0),
+  })
+  .strict();
+
 export const documentListResponseSchema = z
   .object({
+    counts: documentCountsSchema,
     documents: z.array(documentSummarySchema),
     page: z.number().int().min(1),
     pageSize: z.number().int().min(1).max(MAX_DOCUMENT_PAGE_SIZE),
@@ -397,6 +411,16 @@ const csvStatusSchema = z
       .max(documentStatusSchema.options.length),
   );
 
+// An id filter arrives either repeated or comma separated; both collapse to the same validated id list.
+const legalEntityFilterSchema = z
+  .union([z.string(), z.array(z.string())])
+  .transform((value) =>
+    (Array.isArray(value) ? value : value.split(','))
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0),
+  )
+  .pipe(z.array(identifierSchema).min(1).max(MAX_FILTER_LEGAL_ENTITIES));
+
 export const DOCUMENT_CURRENT_FILTERS = ['true', 'false', 'all'] as const;
 export const documentCurrentFilterSchema = z.enum(DOCUMENT_CURRENT_FILTERS);
 
@@ -407,7 +431,8 @@ export const documentListQuerySchema = z
     dateFrom: documentDateSchema.optional(),
     dateTo: documentDateSchema.optional(),
     kind: csvKindSchema.optional(),
-    legalEntityId: identifierSchema.optional(),
+    // Several entities may be selected at once; none selected leaves the whole caller scope in view.
+    legalEntityId: legalEntityFilterSchema.optional(),
     order: documentOrderSchema.default('desc'),
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce
@@ -806,6 +831,7 @@ const analyticsByAccountSchema = z
 // The page states its own cost from these counters, so no reader has to trust the docs.
 const analyticsStatsSchema = z
   .object({
+    documentCount: z.number().int().min(0),
     elapsedMs: z.number().int().min(0),
     eventLineCount: z.number().int().min(0),
     invoiceLineCount: z.number().int().min(0),
@@ -825,10 +851,14 @@ export const documentAnalyticsResponseSchema = z
   .strict();
 
 export const documentAnalyticsQuerySchema = z
-  .object({ legalEntityId: identifierSchema.optional() })
+  .object({
+    // Several entities may be selected at once; none selected leaves the whole caller scope in view.
+    legalEntityId: legalEntityFilterSchema.optional(),
+  })
   .strict();
 
 export type DataIssue = z.infer<typeof dataIssueSchema>;
+export type DocumentCounts = z.infer<typeof documentCountsSchema>;
 export type DocumentAnalyticsResponse = z.infer<
   typeof documentAnalyticsResponseSchema
 >;

@@ -28,7 +28,11 @@ import {
   inboxEventKindSchema,
   inboxEventReasonSchema,
   inboxIssueCodeSchema,
+  inboxItemCountsSchema,
+  inboxItemDetailSchema,
+  inboxItemListEntrySchema,
   inboxItemListQuerySchema,
+  inboxItemListResponseSchema,
   inboxItemStatusSchema,
   inboxPayloadKindSchema,
   inboxRoutingAutoPolicySchema,
@@ -548,6 +552,132 @@ describe('inbox action contracts', () => {
     ).toBe(true);
     expect(
       inboxItemListQuerySchema.safeParse({ confidence: 'bogus' }).success,
+    ).toBe(false);
+  });
+
+  it('drops future-snoozed items only for snoozed=exclude', () => {
+    expect(
+      inboxItemListQuerySchema.safeParse({ snoozed: 'exclude' }).success,
+    ).toBe(true);
+    expect(
+      inboxItemListQuerySchema.safeParse({ snoozed: 'include' }).success,
+    ).toBe(false);
+  });
+});
+
+const ITEM_ID = '00000000-0000-4000-8000-000000000090';
+const baseItem = {
+  assigneeId: null,
+  channelId: null,
+  channelKind: 'upload',
+  confidence: null,
+  createdAt: '2026-09-20T08:00:00.000Z',
+  datasetId: null,
+  decidedByKind: null,
+  decidedByRuleId: null,
+  decidedByUserId: null,
+  detectedType: null,
+  documentId: null,
+  duplicateOfItemId: null,
+  hintKind: null,
+  hintLegalEntityId: null,
+  hintLinkDocumentId: null,
+  hintPartnerId: null,
+  hintText: null,
+  humanTouched: false,
+  id: ITEM_ID,
+  legalEntityId: null,
+  origin: null,
+  partnerId: null,
+  payloadKind: 'file',
+  receivedAt: '2026-09-20T08:00:00.000Z',
+  routedAt: null,
+  snoozedUntil: null,
+  status: 'needs_review',
+  updatedAt: '2026-09-20T08:00:00.000Z',
+};
+
+// The additive list and detail fields the page lanes code against.
+describe('inbox list counts, sender and deciding rule name', () => {
+  it('carries the sender and the deciding rule name on a list entry', () => {
+    expect(
+      inboxItemListEntrySchema.safeParse({
+        ...baseItem,
+        decidedByRuleName: 'Fio statements',
+        fileCount: 2,
+        primaryFilename: 'statement.pdf',
+        sender: 'billing@dodavatel.cz',
+        senderAuthenticated: false,
+      }).success,
+    ).toBe(true);
+    expect(
+      inboxItemListEntrySchema.safeParse({
+        ...baseItem,
+        decidedByRuleName: null,
+        fileCount: 1,
+        primaryFilename: null,
+        sender: null,
+        senderAuthenticated: false,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('requires the tab counts on the list response', () => {
+    const counts = { all: 5, discarded: 1, filed: 2, toReview: 2 };
+    expect(inboxItemCountsSchema.safeParse(counts).success).toBe(true);
+    expect(
+      inboxItemCountsSchema.safeParse({ ...counts, toReview: -1 }).success,
+    ).toBe(false);
+    expect(
+      inboxItemListResponseSchema.safeParse({
+        counts,
+        items: [],
+        page: 1,
+        pageSize: 25,
+        total: 0,
+      }).success,
+    ).toBe(true);
+    expect(
+      inboxItemListResponseSchema.safeParse({
+        items: [],
+        page: 1,
+        pageSize: 25,
+        total: 0,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('carries the deciding rule name on the detail item', () => {
+    const detail = {
+      corrections: [],
+      events: [],
+      extraction: null,
+      files: [],
+      item: {
+        ...baseItem,
+        decidedByRuleName: 'Fio statements',
+        sender: null,
+        senderAuthenticated: false,
+      },
+      routingTarget: {
+        auto: 'never',
+        autoThreshold: null,
+        defaultAssigneeId: null,
+        defaultLegalEntityId: null,
+        destination: 'documents',
+        detectedType: 'pdf',
+        documentKind: 'other',
+        partnerPolicy: 'match_only',
+        requiredFields: [],
+        source: 'platform',
+      },
+    };
+    expect(inboxItemDetailSchema.safeParse(detail).success).toBe(true);
+    const withoutRuleName: Record<string, unknown> = { ...detail.item };
+    delete withoutRuleName.decidedByRuleName;
+    expect(
+      inboxItemDetailSchema.safeParse({ ...detail, item: withoutRuleName })
+        .success,
     ).toBe(false);
   });
 });

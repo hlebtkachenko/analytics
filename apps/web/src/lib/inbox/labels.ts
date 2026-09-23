@@ -7,10 +7,15 @@ import type {
   InboxCorrectionField,
   InboxCorrectionSource,
   InboxDiscardReason,
+  InboxIssueCode,
   InboxItemListEntry,
   InboxItemStatus,
   InboxRoutingAutoPolicy,
   InboxRoutingDestination,
+} from './contract.ts';
+import {
+  INBOX_TO_REVIEW_STATUSES,
+  inboxChannelKindSchema,
 } from './contract.ts';
 
 // One translation key per contract value, so no page invents its own wording.
@@ -168,4 +173,116 @@ export const inboxItemStateSeverity: Readonly<
   routed: 'success',
   touched: 'neutral',
   untouched: 'neutral',
+};
+
+// The four list tabs in display order; the item page walks the neighbours of the one the user came from.
+export const inboxTabs = ['toReview', 'filed', 'discarded', 'all'] as const;
+export type InboxTab = (typeof inboxTabs)[number];
+
+export function isInboxTab(value: string | null): value is InboxTab {
+  return value !== null && (inboxTabs as readonly string[]).includes(value);
+}
+
+// The list filter behind a tab: its status set, and To review also hides snoozed items; All names neither.
+export function inboxTabQuery(tab: InboxTab): URLSearchParams {
+  const query = new URLSearchParams();
+  if (tab === 'toReview') {
+    query.set('status', INBOX_TO_REVIEW_STATUSES.join(','));
+    query.set('snoozed', 'exclude');
+  } else if (tab === 'filed') {
+    query.set('status', 'routed');
+  } else if (tab === 'discarded') {
+    query.set('status', 'discarded');
+  }
+  return query;
+}
+
+// The status word shown in the list, with a synthetic "snoozed" the enum has no code for.
+export type InboxListStatusWord = InboxItemStatus | 'snoozed';
+
+// The list uses "Filed" for routed and "Held" for received, distinct from the detail wording.
+export const inboxListStatusLabelKeys: Readonly<
+  Record<InboxListStatusWord, string>
+> = {
+  discarded: 'inbox.list.statusDiscarded',
+  failed: 'inbox.list.statusFailed',
+  needs_review: 'inbox.list.statusNeedsReview',
+  processing: 'inbox.list.statusProcessing',
+  received: 'inbox.list.statusHeld',
+  routed: 'inbox.list.statusFiled',
+  snoozed: 'inbox.list.statusSnoozed',
+};
+
+type InboxChannelKind = (typeof inboxChannelKindSchema.options)[number];
+
+// One word per source, so a channel kind code never reaches the screen.
+export const inboxSourceLabelKeys: Readonly<Record<InboxChannelKind, string>> =
+  {
+    api: 'inbox.list.sourceApi',
+    bank_api: 'inbox.list.sourceBankApi',
+    bank_file: 'inbox.list.sourceBankFile',
+    drive: 'inbox.list.sourceDrive',
+    email: 'inbox.list.sourceEmail',
+    fakturoid: 'inbox.list.sourceFakturoid',
+    idoklad: 'inbox.list.sourceIdoklad',
+    isdoc: 'inbox.list.sourceIsdoc',
+    isds: 'inbox.list.sourceIsds',
+    mcp: 'inbox.list.sourceMcp',
+    money_s3: 'inbox.list.sourceMoneyS3',
+    pohoda: 'inbox.list.sourcePohoda',
+    upload: 'inbox.list.sourceUpload',
+  };
+
+// One sentence per extraction issue code, so the item page never renders a raw code.
+export const inboxIssueCodeLabelKeys: Readonly<Record<InboxIssueCode, string>> =
+  {
+    decorative_image: 'inbox.item.issueDecorativeImage',
+    duplicate_exact: 'inbox.item.issueDuplicateExact',
+    duplicate_probable: 'inbox.item.issueDuplicateProbable',
+    empty: 'inbox.item.issueEmpty',
+    encrypted: 'inbox.item.issueEncrypted',
+    entity_unresolved: 'inbox.item.missingEntity',
+    missing_required_field: 'inbox.item.issueMissingRequiredField',
+    password_protected: 'inbox.item.issuePasswordProtected',
+    policy_rejected: 'inbox.item.issuePolicyRejected',
+    reference_conflict: 'inbox.item.issueReferenceConflict',
+    too_large: 'inbox.item.issueTooLarge',
+    unreadable: 'inbox.item.issueUnreadable',
+    unsupported_type: 'inbox.item.issueUnsupportedType',
+  };
+
+// One sentence per event kind, resolved with the actor name in the activity list.
+export const inboxEventKindLabelKeys: Readonly<Record<string, string>> = {
+  assigned: 'inbox.activity.assigned',
+  attached: 'inbox.activity.attached',
+  classified: 'inbox.activity.classified',
+  discarded: 'inbox.activity.discarded',
+  extracted: 'inbox.activity.extracted',
+  failed: 'inbox.activity.failed',
+  hint_added: 'inbox.activity.hintAdded',
+  received: 'inbox.activity.received',
+  reopened: 'inbox.activity.reopened',
+  restored: 'inbox.activity.restored',
+  routed: 'inbox.activity.routedBy',
+  rule_matched: 'inbox.activity.ruleMatched',
+  scanned: 'inbox.activity.scanned',
+  unrouted: 'inbox.activity.reopened',
+};
+
+// One word or sentence per event reason, so a reason code never reaches the screen.
+export const inboxEventReasonLabelKeys: Readonly<Record<string, string>> = {
+  decorative_image: 'inbox.item.reasonDecorativeImage',
+  duplicate: 'inbox.discardReasonDuplicate',
+  empty: 'inbox.item.reasonEmpty',
+  encrypted: 'inbox.item.reasonEncrypted',
+  irrelevant: 'inbox.discardReasonIrrelevant',
+  not_ours: 'inbox.discardReasonNotOurs',
+  password_protected: 'inbox.item.reasonPasswordProtected',
+  policy_rejected: 'inbox.item.reasonPolicyRejected',
+  rule_author_unavailable: 'inbox.item.reasonRuleAuthorUnavailable',
+  spam: 'inbox.discardReasonSpam',
+  stalled: 'inbox.item.reasonStalled',
+  too_large: 'inbox.item.reasonTooLarge',
+  unreadable: 'inbox.item.reasonUnreadable',
+  unsupported_type: 'inbox.item.reasonUnsupportedType',
 };

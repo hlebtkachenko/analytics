@@ -131,6 +131,13 @@ function renderNewDocumentPage() {
   );
 }
 
+// The Carbon DatePicker parses its input on blur, so a date is typed and then committed.
+function setDate(label: string, value: string) {
+  const input = screen.getByLabelText(label);
+  fireEvent.change(input, { target: { value } });
+  fireEvent.blur(input);
+}
+
 afterEach(() => {
   cleanup();
   delete posted.body;
@@ -152,9 +159,7 @@ describe('NewDocumentPage', () => {
     fireEvent.change(screen.getByLabelText('Title'), {
       target: { value: 'Placeholder document' },
     });
-    fireEvent.change(screen.getByLabelText('Document date'), {
-      target: { value: '2026-09-01' },
-    });
+    setDate('Document date', '2026-09-01');
     fireEvent.change(screen.getByLabelText('Description 1'), {
       target: { value: 'Placeholder line' },
     });
@@ -162,7 +167,7 @@ describe('NewDocumentPage', () => {
       target: { value: '1000' },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Register document' }));
+    fireEvent.submit(screen.getByRole('form', { name: 'Register a document' }));
 
     await waitFor(() => {
       expect(posted.body).toBeDefined();
@@ -315,9 +320,7 @@ describe('NewDocumentPage', () => {
     fireEvent.change(screen.getByLabelText('Title'), {
       target: { value: 'Placeholder document' },
     });
-    fireEvent.change(screen.getByLabelText('Document date'), {
-      target: { value: '2026-09-01' },
-    });
+    setDate('Document date', '2026-09-01');
     fireEvent.change(screen.getByLabelText('Description 1'), {
       target: { value: 'Placeholder line' },
     });
@@ -335,7 +338,7 @@ describe('NewDocumentPage', () => {
       target: { value: '500' },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Register document' }));
+    fireEvent.submit(screen.getByRole('form', { name: 'Register a document' }));
 
     await waitFor(() => {
       expect(posted.body).toBeDefined();
@@ -364,9 +367,7 @@ describe('NewDocumentPage', () => {
     fireEvent.change(screen.getByLabelText('Title'), {
       target: { value: 'Placeholder document' },
     });
-    fireEvent.change(screen.getByLabelText('Document date'), {
-      target: { value: '2026-09-01' },
-    });
+    setDate('Document date', '2026-09-01');
     fireEvent.change(screen.getByLabelText('Description 1'), {
       target: { value: 'Placeholder line' },
     });
@@ -378,7 +379,7 @@ describe('NewDocumentPage', () => {
       target: { value: '' },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Register document' }));
+    fireEvent.submit(screen.getByRole('form', { name: 'Register a document' }));
 
     await waitFor(() => {
       expect(posted.body).toBeDefined();
@@ -411,9 +412,48 @@ describe('NewDocumentPage', () => {
 
     const totals = screen.getByLabelText('Invoice totals');
     // Gross 1210.00 plus rounding 0.20 less the deducted 605.00 leaves 605.20 to pay.
-    expect(within(totals).getByText('CZK 1,210.00')).toBeVisible();
-    expect(within(totals).getByText('CZK 0.20')).toBeVisible();
-    expect(within(totals).getByText('CZK 605.00')).toBeVisible();
-    expect(within(totals).getByText('CZK 605.20')).toBeVisible();
+    expect(within(totals).getByText('1 210,00 CZK')).toBeVisible();
+    expect(within(totals).getByText('0,20 CZK')).toBeVisible();
+    expect(within(totals).getByText('605,00 CZK')).toBeVisible();
+    expect(within(totals).getByText('605,20 CZK')).toBeVisible();
+  });
+
+  it('lays the form out in Where, Document and Lines sections with status tags', async () => {
+    vi.stubGlobal('fetch', respond());
+
+    renderNewDocumentPage();
+    await screen.findByDisplayValue('Placeholder Holding');
+
+    expect(screen.getByRole('heading', { name: 'Where' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Document' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Lines' })).toBeVisible();
+
+    // The prefilled entity completes Where; the document and lines still miss required fields.
+    expect(screen.getByText('Complete')).toBeVisible();
+    expect(screen.getAllByText('Missing').length).toBeGreaterThanOrEqual(2);
+
+    fireEvent.change(screen.getByLabelText('Title'), {
+      target: { value: 'Placeholder document' },
+    });
+    setDate('Document date', '2026-09-01');
+
+    // With a title and a date the Document section reads complete as well.
+    await waitFor(() => {
+      expect(screen.getAllByText('Complete').length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it('offers Cancel and the primary Register document in the bottom bar', async () => {
+    vi.stubGlobal('fetch', respond());
+
+    renderNewDocumentPage();
+    await screen.findByDisplayValue('Placeholder Holding');
+
+    // The partner modal also carries a Cancel, so the bottom bar is read inside the form.
+    const form = screen.getByRole('form', { name: 'Register a document' });
+    expect(within(form).getByRole('button', { name: 'Cancel' })).toBeVisible();
+    expect(
+      within(form).getByRole('button', { name: 'Register document' }),
+    ).toBeVisible();
   });
 });

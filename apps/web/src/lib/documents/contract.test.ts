@@ -7,13 +7,16 @@ import {
   derivedVatAmount,
   documentAnalyticsQuerySchema,
   documentAnalyticsResponseSchema,
+  documentCountsSchema,
   documentListQuerySchema,
+  documentListResponseSchema,
   economicEventLineSchema,
   invoiceSchema,
   updateDocumentRequestSchema,
 } from './contract.ts';
 
 const LEGAL_ENTITY_ID = '9b7d1c30-6a4b-4d1f-9c2e-7a5f0e3b8d21';
+const OTHER_LEGAL_ENTITY_ID = '1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
 const INVOICE_LINE_ID = '00000000-0000-4000-8000-000000000020';
 const DOCUMENT_ID = '00000000-0000-4000-8000-000000000010';
 
@@ -232,6 +235,53 @@ describe('validity windows', () => {
   });
 });
 
+describe('documentCountsSchema', () => {
+  const counts = {
+    all: 4,
+    archived: 0,
+    needsReview: 1,
+    verified: 2,
+    withIssues: 1,
+  };
+
+  it('accepts the five non-negative integer counts the list carries', () => {
+    expect(documentCountsSchema.safeParse(counts).success).toBe(true);
+  });
+
+  it('refuses a negative, fractional, or missing count', () => {
+    expect(
+      documentCountsSchema.safeParse({ ...counts, withIssues: -1 }).success,
+    ).toBe(false);
+    expect(
+      documentCountsSchema.safeParse({ ...counts, verified: 2.5 }).success,
+    ).toBe(false);
+    const partial: Record<string, number> = { ...counts };
+    delete partial.withIssues;
+    expect(documentCountsSchema.safeParse(partial).success).toBe(false);
+  });
+
+  it('is required on the list response and rejects an unknown key', () => {
+    const list = {
+      counts,
+      documents: [],
+      page: 1,
+      pageSize: 25,
+      total: 4,
+      totalsByCurrency: [],
+    };
+
+    expect(documentListResponseSchema.safeParse(list).success).toBe(true);
+    const withoutCounts: Record<string, unknown> = { ...list };
+    delete withoutCounts.counts;
+    expect(documentListResponseSchema.safeParse(withoutCounts).success).toBe(
+      false,
+    );
+    expect(
+      documentCountsSchema.safeParse({ ...counts, unexpected: 0 }).success,
+    ).toBe(false);
+  });
+});
+
 describe('documentListQuerySchema', () => {
   it('refuses a date range that ends before it starts', () => {
     expect(
@@ -246,6 +296,43 @@ describe('documentListQuerySchema', () => {
     expect(
       documentListQuerySchema.safeParse({
         status: new Array(5).fill('registered').join(','),
+      }).success,
+    ).toBe(false);
+  });
+
+  it('reads one legal entity, several repeated, or several comma separated', () => {
+    const single = documentListQuerySchema.safeParse({
+      legalEntityId: LEGAL_ENTITY_ID,
+    });
+    expect(single.success && single.data.legalEntityId).toEqual([
+      LEGAL_ENTITY_ID,
+    ]);
+
+    const repeated = documentListQuerySchema.safeParse({
+      legalEntityId: [LEGAL_ENTITY_ID, OTHER_LEGAL_ENTITY_ID],
+    });
+    expect(repeated.success && repeated.data.legalEntityId).toEqual([
+      LEGAL_ENTITY_ID,
+      OTHER_LEGAL_ENTITY_ID,
+    ]);
+
+    const csv = documentListQuerySchema.safeParse({
+      legalEntityId: `${LEGAL_ENTITY_ID},${OTHER_LEGAL_ENTITY_ID}`,
+    });
+    expect(csv.success && csv.data.legalEntityId).toEqual([
+      LEGAL_ENTITY_ID,
+      OTHER_LEGAL_ENTITY_ID,
+    ]);
+  });
+
+  it('refuses an entity filter that carries an unusable id', () => {
+    expect(
+      documentListQuerySchema.safeParse({ legalEntityId: 'not-a-uuid' })
+        .success,
+    ).toBe(false);
+    expect(
+      documentListQuerySchema.safeParse({
+        legalEntityId: [LEGAL_ENTITY_ID, 'not-a-uuid'],
       }).success,
     ).toBe(false);
   });
@@ -459,10 +546,11 @@ describe('documentAnalyticsResponseSchema', () => {
       },
     ],
     stats: {
+      documentCount: 1,
       elapsedMs: 12,
       eventLineCount: 10,
       invoiceLineCount: 5,
-      queryCount: 4,
+      queryCount: 6,
     },
   };
 
@@ -538,5 +626,23 @@ describe('documentAnalyticsQuerySchema', () => {
     expect(documentAnalyticsQuerySchema.safeParse({ page: '2' }).success).toBe(
       false,
     );
+  });
+
+  it('reads several entities repeated or comma separated', () => {
+    const repeated = documentAnalyticsQuerySchema.safeParse({
+      legalEntityId: [LEGAL_ENTITY_ID, OTHER_LEGAL_ENTITY_ID],
+    });
+    expect(repeated.success && repeated.data.legalEntityId).toEqual([
+      LEGAL_ENTITY_ID,
+      OTHER_LEGAL_ENTITY_ID,
+    ]);
+
+    const csv = documentAnalyticsQuerySchema.safeParse({
+      legalEntityId: `${LEGAL_ENTITY_ID},${OTHER_LEGAL_ENTITY_ID}`,
+    });
+    expect(csv.success && csv.data.legalEntityId).toEqual([
+      LEGAL_ENTITY_ID,
+      OTHER_LEGAL_ENTITY_ID,
+    ]);
   });
 });
