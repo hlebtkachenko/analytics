@@ -106,7 +106,7 @@ describe('routingTargetSentence', () => {
         documentKind: 'received_invoice',
       }),
     ).toBe(
-      'An ISDOC invoice goes to Documents as Received invoice; a person confirms every one until the ISDOC parser lands.',
+      'An ISDOC invoice goes to Documents as Received invoice; it may file without review after a clean ISDOC parse and matching legal entity and partner, otherwise a person confirms it.',
     );
   });
 

@@ -260,12 +260,12 @@ describe('inbox email channel', () => {
     const compatibility = await checkMigrationCompatibility(apiPool);
 
     expect(result.applied).toEqual([]);
-    expect(result.currentVersion).toBe('20260922.0009');
-    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260922.0009');
+    expect(result.currentVersion).toBe('20260923.0001');
+    expect(DATABASE_MIGRATION_COMPATIBILITY).toBe('20260923.0001');
     expect(compatibility).toEqual({
       compatible: true,
-      expectedVersion: '20260922.0009',
-      version: '20260922.0009',
+      expectedVersion: '20260923.0001',
+      version: '20260923.0001',
     });
 
     const indexes = await rootPool.query<{ indexdef: string }>(

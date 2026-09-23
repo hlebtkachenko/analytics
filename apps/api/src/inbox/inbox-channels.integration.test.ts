@@ -253,6 +253,7 @@ beforeAll(async () => {
     updateInboxSettings: (input) => updateInboxSettings(apiPool, input),
   };
   service = new InboxService(repository, store, QUOTA, INTAKE_DOMAIN, {
+    enqueueParseInboxItem: async () => undefined,
     enqueueRerunInboxRule: async () => undefined,
     enqueueRouteInboxItem: async () => undefined,
     enqueueScanInboxItem: async () => undefined,

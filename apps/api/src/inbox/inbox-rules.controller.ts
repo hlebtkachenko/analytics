@@ -62,16 +62,6 @@ import type {
 } from './contract.js';
 import { RuleLimitError } from './inbox-rule-repository.js';
 import { InboxService } from './inbox.service.js';
-import { isInvoiceAutoRoute } from './rules.js';
-
-export function refuseInvoiceAutoRoute(rule: {
-  autoRoute: boolean;
-  setDocumentKind: string | null;
-}): void {
-  if (isInvoiceAutoRoute(rule)) {
-    throw new UnprocessableEntityException('not_available');
-  }
-}
 
 const unauthorized = { description: 'The resource token is invalid' };
 const forbidden = { description: 'Organization access is denied' };
@@ -122,8 +112,7 @@ export class InboxRulesController {
   @ApiForbiddenResponse(forbidden)
   @ApiNotFoundResponse(ruleNotFound)
   @ApiUnprocessableEntityResponse({
-    description:
-      'The enabled rule limit is reached, or an invoice kind cannot auto-route',
+    description: 'The enabled rule limit is reached',
   })
   async createRule(
     @Param('organizationId', { schema: organizationIdentifierSchema })
@@ -133,7 +122,6 @@ export class InboxRulesController {
     @Req() request: AuthenticatedRequest,
   ): Promise<InboxRule> {
     const { entityScope, tenant } = await this.manage(organizationId, request);
-    refuseInvoiceAutoRoute(body);
 
     return this.rule(
       this.inbox.createRule({
@@ -154,8 +142,7 @@ export class InboxRulesController {
   @ApiForbiddenResponse(forbidden)
   @ApiNotFoundResponse(ruleNotFound)
   @ApiUnprocessableEntityResponse({
-    description:
-      'The enabled rule limit is reached, or an invoice kind cannot auto-route',
+    description: 'The enabled rule limit is reached',
   })
   async updateRule(
     @Param('organizationId', { schema: organizationIdentifierSchema })
@@ -166,12 +153,6 @@ export class InboxRulesController {
     @Req() request: AuthenticatedRequest,
   ): Promise<InboxRule> {
     const { entityScope, tenant } = await this.manage(organizationId, request);
-
-    // The patch alone is refused here; the service refuses the merged row against the stored rule.
-    refuseInvoiceAutoRoute({
-      autoRoute: body.autoRoute ?? false,
-      setDocumentKind: body.setDocumentKind ?? null,
-    });
 
     return this.rule(
       this.inbox.updateRule({

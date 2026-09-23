@@ -210,6 +210,116 @@ const documentSummary = {
   version: 1,
 };
 
+const PARTNER_ID = '00000000-0000-4000-8000-000000000080';
+const PARSED_ID = '00000000-0000-4000-8000-000000000071';
+const CREATED_PARTNER_ID = '00000000-0000-4000-8000-000000000081';
+
+// A parsed ISDOC row: one supply line, one deducted advance and a rounding, all synthetic.
+const parsedRow = {
+  confidence: 1,
+  createdAt: '2026-09-16T08:02:00.000Z',
+  detectedType: 'isdoc_invoice',
+  draft: {
+    attributes: { isdoc_document_type: '1' },
+    currencyCode: 'CZK',
+    documentDate: '2026-09-01',
+    invoice: {
+      dueDate: '2026-09-15',
+      lines: [
+        {
+          baseAmount: '1000.00',
+          description: 'Placeholder service',
+          lineKind: 'item',
+          quantity: '2',
+          unit: 'h',
+          unitPrice: '500.00',
+          vatAmount: '210.00',
+          vatMode: 'standard',
+          vatRate: '21',
+        },
+        {
+          baseAmount: '100.00',
+          description: 'Advance ADV-1',
+          lineKind: 'advance_deduction',
+          vatAmount: '21.00',
+          vatMode: 'standard',
+          vatRate: '21',
+        },
+      ],
+      roundingAmount: '0.40',
+      taxPointDate: '2026-09-01',
+      variableSymbol: '20260001',
+    },
+    kind: 'received_invoice',
+    legalEntityId: LEGAL_ENTITY_ID,
+    partnerId: PARTNER_ID,
+    reference: 'FV-1',
+    title: 'Placeholder Supplier FV-1',
+    totalAmount: '1210.00',
+  },
+  fieldConfidences: {},
+  id: PARSED_ID,
+  issues: [] as { code: string; field?: string; message: string }[],
+  legalEntityId: LEGAL_ENTITY_ID,
+  provider: 'isdoc',
+  providerVersion: '1',
+  reasons: [
+    {
+      evidence: 'The counterparty matches a partner.',
+      step: 'parse',
+      weight: 1,
+    },
+  ],
+};
+
+function partner(defaultLineCategory: string | null, id = PARTNER_ID) {
+  return {
+    countryCode: 'CZ',
+    createdAt: '2026-09-01T00:00:00.000Z',
+    defaultLineCategory,
+    id,
+    legalEntityId: null,
+    name: 'Placeholder Supplier',
+    registrationNumber: '00000000',
+    updatedAt: '2026-09-01T00:00:00.000Z',
+    vatNumber: null,
+  };
+}
+
+// The item router with a stored partner list; a PATCH saves the category it was sent, as the API would.
+function respondWithParsed(
+  stored: ReturnType<typeof partner>[],
+  given: Record<string, unknown> = {},
+  manageDocuments = true,
+) {
+  const base = respondWith(
+    {
+      events: [],
+      extraction: parsedRow,
+      files: [file('application/pdf')],
+      item: inboxItem,
+      parsed: parsedRow,
+      ...given,
+    },
+    manageDocuments,
+  );
+  let partners = stored;
+  return vi.fn(async (input: string, init?: RequestInit) => {
+    if (input.includes('/partners')) {
+      if (init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body));
+        partners = [partner(body.defaultLineCategory)];
+        return Response.json(partners[0]);
+      }
+      if (init?.method === 'POST') {
+        return Response.json(partner(null, CREATED_PARTNER_ID));
+      }
+      return Response.json({ partners });
+    }
+    return base(input, init);
+  });
+}
+
 type RouteAnswers = Readonly<{ conflicts?: unknown[]; inlineText?: string }>;
 
 // One router per test, so every request is answered by the shape its route promises.
@@ -219,9 +329,18 @@ function respondWith(
   answers: RouteAnswers = {},
 ) {
   const conflicts = [...(answers.conflicts ?? [])];
+  const draft =
+    (given['extraction'] as { draft?: Record<string, unknown> } | undefined)
+      ?.draft ?? {};
   // The detail item always carries the sender's DKIM verdict; the list entries never do.
   const detail: Record<string, unknown> = {
     corrections: [],
+    parsed: null,
+    routeSuggestion: {
+      kind: draft['kind'] ?? routingTarget.documentKind,
+      legalEntityId: draft['legalEntityId'] ?? LEGAL_ENTITY_ID,
+      partnerId: draft['partnerId'] ?? null,
+    },
     routingTarget,
     ...given,
     item: { senderAuthenticated: false, ...(given['item'] as object) },
@@ -540,7 +659,7 @@ describe('InboxItemPage', () => {
     });
   });
 
-  it('handles an invoice kind by disabling the primary and offering attach', async () => {
+  it('handles an invoice kind without parsed content by disabling the primary and offering attach', async () => {
     vi.stubGlobal(
       'fetch',
       respondWith({
@@ -553,9 +672,7 @@ describe('InboxItemPage', () => {
 
     renderItemPage();
 
-    expect(
-      await screen.findByText('Waiting for the invoice parser'),
-    ).toBeVisible();
+    expect(await screen.findByText('No parsed invoice content')).toBeVisible();
     expect(
       screen.getByRole('button', { name: 'File as document' }),
     ).toBeDisabled();
@@ -1279,5 +1396,262 @@ describe('InboxItemPage', () => {
 
     fireEvent.keyDown(document.body, { key: 'j' });
     expect(push).not.toHaveBeenCalled();
+  });
+});
+
+describe('InboxItemPage with a parsed ISDOC invoice', () => {
+  it('summarises the parsed lines, deduction, totals, issues and the unverified signature', async () => {
+    const withIssue = {
+      ...parsedRow,
+      issues: [
+        {
+          code: 'amount_mismatch',
+          field: 'invoice.lines',
+          message: 'TaxExclusiveAmount 1000.00 differs from 990.00.',
+        },
+      ],
+    };
+    vi.stubGlobal(
+      'fetch',
+      respondWithParsed([partner('services')], {
+        extraction: withIssue,
+        parsed: withIssue,
+      }),
+    );
+
+    renderItemPage();
+
+    expect(
+      await screen.findByRole('heading', { name: 'Read from the ISDOC file' }),
+    ).toBeVisible();
+    expect(screen.getByText('Digital signature not verified.')).toBeVisible();
+    const grid = screen.getByRole('table', { name: 'Parsed lines' });
+    expect(within(grid).getByText('Placeholder service')).toBeVisible();
+    expect(within(grid).getByText('Advance ADV-1')).toBeVisible();
+    expect(within(grid).getByText('Advance deduction')).toBeVisible();
+    expect(within(grid).getByText('Rounding')).toBeVisible();
+    // 1210.00 supplied, 121.00 deducted, 0.40 rounding.
+    expect(within(grid).getByText(/1\s089,40 CZK/)).toBeVisible();
+    expect(within(grid).getByText(/^189,00 CZK$/)).toBeVisible();
+    const issues = screen.getByRole('list', { name: 'Parser findings' });
+    expect(
+      within(issues).getByText('The invoice amounts do not add up.'),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('list', { name: 'Invoice details' }),
+    ).toHaveTextContent('Variable symbol: 20260001');
+    expect(
+      screen.getByRole('button', { name: 'File as document' }),
+    ).toBeEnabled();
+  });
+
+  it('routes by the parsed row id and never sends the invoice, total or attributes', async () => {
+    const fetchMock = respondWithParsed([partner('services')]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderItemPage();
+
+    const category = await screen.findByLabelText('Line category');
+    await screen.findByRole('option', { name: 'Partner default (Services)' });
+    expect(category).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: 'File as document' }));
+
+    await waitFor(() => {
+      expect(routeBodies(fetchMock)).toHaveLength(1);
+    });
+    expect(routeBodies(fetchMock)[0]).toEqual({
+      document: {
+        currencyCode: 'CZK',
+        documentDate: '2026-09-01',
+        kind: 'received_invoice',
+        legalEntityId: LEGAL_ENTITY_ID,
+        partnerId: PARTNER_ID,
+        reference: 'FV-1',
+        title: 'Placeholder Supplier FV-1',
+      },
+      fileBlobIds: [BLOB_ID],
+      parsedExtractionId: PARSED_ID,
+    });
+  });
+
+  it('uses the server entity suggestion when the parsed file names another entity', async () => {
+    const otherEntityId = '00000000-0000-4000-8000-000000000099';
+    const conflicting = {
+      ...parsedRow,
+      draft: { ...parsedRow.draft, legalEntityId: otherEntityId },
+      legalEntityId: otherEntityId,
+      issues: [
+        {
+          code: 'entity_conflict',
+          field: 'legalEntityId',
+          message: 'The customer differs from the selected entity.',
+        },
+      ],
+    };
+    const fetchMock = respondWithParsed([partner('services')], {
+      extraction: conflicting,
+      parsed: conflicting,
+      routeSuggestion: {
+        kind: 'received_invoice',
+        legalEntityId: LEGAL_ENTITY_ID,
+        partnerId: PARTNER_ID,
+      },
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderItemPage();
+
+    expect(await screen.findByLabelText('Legal entity')).toHaveValue(
+      LEGAL_ENTITY_ID,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'File as document' }));
+    await waitFor(() => expect(routeBodies(fetchMock)).toHaveLength(1));
+    expect(routeBodies(fetchMock)[0].document.legalEntityId).toBe(
+      LEGAL_ENTITY_ID,
+    );
+  });
+
+  it('sends the chosen line category with the route', async () => {
+    const fetchMock = respondWithParsed([partner('services')]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderItemPage();
+
+    fireEvent.change(await screen.findByLabelText('Line category'), {
+      target: { value: 'goods' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'File as document' }));
+
+    await waitFor(() => {
+      expect(routeBodies(fetchMock)).toHaveLength(1);
+    });
+    const body = routeBodies(fetchMock)[0];
+    expect(body.lineCategory).toBe('goods');
+    expect(body.parsedExtractionId).toBe(PARSED_ID);
+    expect(body.document).not.toHaveProperty('invoice');
+  });
+
+  it('asks for a line category when the partner has no default and routes nothing', async () => {
+    const fetchMock = respondWithParsed([partner(null)]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderItemPage();
+
+    await screen.findByRole('option', { name: 'Choose a category' });
+    expect(
+      screen.getByText('Choose a line category for the parsed lines.'),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'File as document' }));
+
+    expect(
+      await screen.findByText(
+        'The draft is incomplete. Fill in every required field.',
+      ),
+    ).toBeVisible();
+    expect(routeBodies(fetchMock)).toHaveLength(0);
+  });
+
+  it('saves the partner default line category through the partner route', async () => {
+    const fetchMock = respondWithParsed([partner(null)]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderItemPage();
+
+    const select = await screen.findByLabelText(
+      'Partner default line category',
+    );
+    fireEvent.change(select, { target: { value: 'transport' } });
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.find(
+          (call) => (call[1] as RequestInit | undefined)?.method === 'PATCH',
+        ),
+      ).toBeDefined();
+    });
+    const patch = fetchMock.mock.calls.find(
+      (call) => (call[1] as RequestInit | undefined)?.method === 'PATCH',
+    )!;
+    expect(String(patch[0])).toBe(
+      `/api/bff/application/organizations/organization_1/partners/${PARTNER_ID}`,
+    );
+    expect(JSON.parse(String((patch[1] as RequestInit).body))).toEqual({
+      defaultLineCategory: 'transport',
+    });
+    expect(
+      await screen.findByRole('option', {
+        name: 'Partner default (Transport)',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('Choose a line category for the parsed lines.'),
+    ).toBeNull();
+  });
+
+  it('offers no partner default select without manageDocuments', async () => {
+    vi.stubGlobal('fetch', respondWithParsed([partner(null)], {}, false));
+
+    renderItemPage();
+
+    expect(await screen.findByLabelText('Line category')).toBeDisabled();
+    expect(screen.queryByLabelText('Partner default line category')).toBeNull();
+  });
+
+  it('creates a missing partner from the item and routes with it', async () => {
+    const unknown = {
+      ...parsedRow,
+      draft: { ...parsedRow.draft, partnerId: null },
+      issues: [
+        {
+          code: 'unknown_partner',
+          field: 'partnerId',
+          message: 'No partner matches the counterparty.',
+        },
+      ],
+      reasons: [
+        {
+          evidence:
+            'Proposed partner: name Placeholder Supplier, IČO 00000000, DIČ none, country CZ.',
+          step: 'parse',
+          weight: 0.5,
+        },
+      ],
+    };
+    const fetchMock = respondWithParsed([], {
+      extraction: unknown,
+      parsed: unknown,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderItemPage();
+
+    expect(
+      await screen.findByText(/Proposed partner: name Placeholder Supplier/),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Create partner' }));
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Create partner',
+    });
+    fireEvent.change(within(dialog).getByLabelText('Name'), {
+      target: { value: 'Placeholder Supplier' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+
+    // The new partner has no default yet, so the person picks the category for this invoice.
+    expect(
+      await screen.findByLabelText('Partner default line category'),
+    ).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('Line category'), {
+      target: { value: 'services' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'File as document' }));
+
+    await waitFor(() => {
+      expect(routeBodies(fetchMock)).toHaveLength(1);
+    });
+    const body = routeBodies(fetchMock)[0];
+    expect(body.document.partnerId).toBe(CREATED_PARTNER_ID);
+    expect(body.lineCategory).toBe('services');
+    expect(body.parsedExtractionId).toBe(PARSED_ID);
   });
 });

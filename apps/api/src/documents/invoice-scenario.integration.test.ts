@@ -252,6 +252,7 @@ async function seedPartner(
   const partner = await createPartner(apiPool, {
     ...context,
     countryCode: 'CZ',
+    defaultLineCategory: null,
     legalEntityId: null,
     legalEntityIds: null,
     name,
@@ -318,6 +319,7 @@ beforeAll(async () => {
   });
 
   const partner = await createPartner(apiPool, {
+    defaultLineCategory: null,
     ...creator,
     countryCode: 'CZ',
     legalEntityId: null,

@@ -212,6 +212,7 @@ async function runScan(itemId: string): Promise<void> {
   await scanInboxItem({
     blobs: store,
     data,
+    enqueueParseInboxItem: async () => undefined,
     enqueueRouteInboxItem: (job) => sendRouteInboxItem(boss, job),
     metrics: new WorkerMetrics(),
     pool: apiPool,
@@ -251,6 +252,7 @@ async function enqueuedRouteJob(itemId: string): Promise<RouteInboxItemJob> {
 // Runs the handler exactly as the worker would, on the job the intake enqueued or on an explicit payload.
 function runRoute(data: RouteInboxItemJob): Promise<RouteInboxItemOutcome> {
   return routeInboxItem({
+    blobs: store,
     data,
     logger,
     metrics: new WorkerMetrics(),
@@ -374,6 +376,7 @@ beforeAll(async () => {
     updateRule: (input) => updateRule(apiPool, input),
   };
   service = new InboxService(repository, store, QUOTA, 'intake.invalid', {
+    enqueueParseInboxItem: async () => undefined,
     enqueueRerunInboxRule: (job: RerunInboxRuleJob) =>
       sendRerunInboxRule(boss, job),
     enqueueRouteInboxItem: (job: RouteInboxItemJob) =>
@@ -493,6 +496,57 @@ describe('route_inbox_item', () => {
         ),
       );
     }
+  });
+
+  it('refuses a queued route when the rule no longer authorizes its match', async () => {
+    const created = await rule({
+      autoRoute: true,
+      detectedType: 'pdf',
+      name: 'Revocable route',
+      setDocumentKind: 'contract',
+      setLegalEntityId: entityA,
+    });
+    const first = await upload(
+      owner,
+      unique(fixtures.pdf()),
+      'revoked-auto.pdf',
+    );
+    const firstJob = await enqueuedRouteJob(first.item.id);
+    await updateRule(apiPool, {
+      ...owner,
+      ...allEntities,
+      body: { autoRoute: false },
+      ruleId: created?.id ?? '',
+    });
+    expect(await runRoute(firstJob)).toEqual({
+      kind: 'refused',
+      reason: 'rule_unavailable',
+    });
+
+    await updateRule(apiPool, {
+      ...owner,
+      ...allEntities,
+      body: { autoRoute: true },
+      ruleId: created?.id ?? '',
+    });
+    const second = await upload(
+      owner,
+      unique(fixtures.pdf()),
+      'revoked-match.pdf',
+    );
+    const secondJob = await enqueuedRouteJob(second.item.id);
+    await updateRule(apiPool, {
+      ...owner,
+      ...allEntities,
+      body: { detectedType: 'image' },
+      ruleId: created?.id ?? '',
+    });
+    expect(await runRoute(secondJob)).toEqual({
+      kind: 'refused',
+      reason: 'rule_unavailable',
+    });
+    expect((await detail(first.item.id))?.item.status).toBe('needs_review');
+    expect((await detail(second.item.id))?.item.status).toBe('needs_review');
   });
 
   it('leaves the item in review with a rule_author_unavailable event when the author was demoted', async () => {
@@ -841,6 +895,44 @@ describe('route_inbox_item', () => {
           [admin.userId],
         ),
       );
+    }
+  });
+
+  it('refuses a queued target route after its automation is turned off', async () => {
+    const body = {
+      auto: 'always' as const,
+      autoThreshold: null,
+      defaultAssigneeId: null,
+      defaultLegalEntityId: entityA,
+      destination: 'documents' as const,
+      documentKind: 'other' as const,
+      partnerPolicy: 'match_only' as const,
+      requiredFields: [],
+    };
+    await putRoutingTarget(apiPool, { ...owner, body, detectedType: 'image' });
+
+    try {
+      const response = await upload(
+        owner,
+        unique(fixtures.png()),
+        'revoked-target.png',
+      );
+      const job = await enqueuedRouteJob(response.item.id);
+      expect(job.ruleId).toBeNull();
+      await putRoutingTarget(apiPool, {
+        ...owner,
+        body: { ...body, auto: 'never' },
+        detectedType: 'image',
+      });
+      expect(await runRoute(job)).toEqual({
+        kind: 'refused',
+        reason: 'destination_refused',
+      });
+      expect((await detail(response.item.id))?.item.status).toBe(
+        'needs_review',
+      );
+    } finally {
+      await deleteRoutingTarget(apiPool, { ...owner, detectedType: 'image' });
     }
   });
 });

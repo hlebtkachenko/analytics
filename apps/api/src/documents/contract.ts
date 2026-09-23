@@ -1,4 +1,8 @@
-import { inboxChannelKinds, inboxItemStatuses } from '@bap/db';
+import {
+  inboxChannelKinds,
+  inboxItemStatuses,
+  invoiceLineCategories,
+} from '@bap/db';
 import { legalEntityIdentifierSchema } from '@bap/security';
 import { z } from 'zod';
 
@@ -38,15 +42,8 @@ export const DOCUMENT_STATUSES = [
 
 export const DOCUMENT_SOURCES = ['manual', 'upload', 'import', 'api'] as const;
 
-export const INVOICE_LINE_CATEGORIES = [
-  'goods',
-  'material',
-  'services',
-  'labour',
-  'transport',
-  'asset',
-  'other',
-] as const;
+// Re-exported from @bap/db so the line and the partner default checks cannot drift from Zod.
+export const INVOICE_LINE_CATEGORIES = invoiceLineCategories;
 
 // An advance deduction is a line kind, because the paper itemises the deducted advance by VAT rate.
 export const INVOICE_LINE_KINDS = ['item', 'advance_deduction'] as const;
@@ -680,7 +677,8 @@ export const INVOICE_KINDS: readonly (typeof DOCUMENT_KINDS)[number][] = [
   'received_invoice',
 ];
 
-export const createDocumentRequestSchema = z
+// The create body before its cross-field checks, so a parsed inbox route can take its invoice from the stored row.
+export const createDocumentBodySchema = z
   .object({
     attributes: documentAttributesSchema.optional(),
     currencyCode: currencyCodeSchema.default('CZK'),
@@ -696,38 +694,51 @@ export const createDocumentRequestSchema = z
     validFrom: z.iso.date().optional(),
     validTo: z.iso.date().optional(),
   })
-  .strict()
-  .superRefine((body, context) => {
-    const needsInvoice = INVOICE_KINDS.includes(body.kind);
+  .strict();
 
-    if (needsInvoice && body.invoice === undefined) {
+// The cross-field checks of a create body: invoice content exactly on an invoice kind, and ordered validity.
+export function checkDocumentBody(
+  body: z.infer<typeof createDocumentBodySchema>,
+  context: z.RefinementCtx,
+  options: { path?: string[] } = {},
+): void {
+  const needsInvoice = INVOICE_KINDS.includes(body.kind);
+  const path = options.path ?? [];
+
+  if (!needsInvoice && body.invoice !== undefined) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Only an invoice kind accepts invoice content.',
+      path: [...path, 'invoice'],
+    });
+  }
+
+  if (
+    body.validFrom !== undefined &&
+    body.validTo !== undefined &&
+    body.validFrom > body.validTo
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'validFrom must not be later than validTo.',
+      path: [...path, 'validFrom'],
+    });
+  }
+}
+
+export const createDocumentRequestSchema = createDocumentBodySchema.superRefine(
+  (body, context) => {
+    checkDocumentBody(body, context);
+
+    if (INVOICE_KINDS.includes(body.kind) && body.invoice === undefined) {
       context.addIssue({
         code: 'custom',
         message: 'An invoice kind requires invoice content.',
         path: ['invoice'],
       });
     }
-
-    if (!needsInvoice && body.invoice !== undefined) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Only an invoice kind accepts invoice content.',
-        path: ['invoice'],
-      });
-    }
-
-    if (
-      body.validFrom !== undefined &&
-      body.validTo !== undefined &&
-      body.validFrom > body.validTo
-    ) {
-      context.addIssue({
-        code: 'custom',
-        message: 'validFrom must not be later than validTo.',
-        path: ['validFrom'],
-      });
-    }
-  });
+  },
+);
 
 export type CreateDocumentRequest = z.infer<typeof createDocumentRequestSchema>;
 
@@ -780,6 +791,8 @@ export const partnerSchema = z
     createdAt: z.iso.datetime(),
     id: partnerIdentifierSchema,
     legalEntityId: legalEntityIdentifierSchema.nullable(),
+    // The category a parsed invoice's item lines take; null leaves them for a person.
+    defaultLineCategory: invoiceLineCategorySchema.nullable(),
     name: partnerNameSchema,
     registrationNumber: partnerRegistrationNumberSchema.nullable(),
     updatedAt: z.iso.datetime(),
@@ -804,6 +817,7 @@ export type PartnerListQuery = z.infer<typeof partnerListQuerySchema>;
 export const createPartnerRequestSchema = z
   .object({
     countryCode: countryCodeSchema.optional(),
+    defaultLineCategory: invoiceLineCategorySchema.optional(),
     legalEntityId: legalEntityIdentifierSchema.optional(),
     name: partnerNameSchema,
     registrationNumber: partnerRegistrationNumberSchema.optional(),
@@ -816,6 +830,7 @@ export type CreatePartnerRequest = z.infer<typeof createPartnerRequestSchema>;
 export const updatePartnerRequestSchema = z
   .object({
     countryCode: countryCodeSchema.nullish(),
+    defaultLineCategory: invoiceLineCategorySchema.nullish(),
     legalEntityId: legalEntityIdentifierSchema.nullish(),
     name: partnerNameSchema.optional(),
     registrationNumber: partnerRegistrationNumberSchema.nullish(),
@@ -1461,6 +1476,11 @@ export const partnerOpenApiSchema = {
   properties: {
     countryCode: { nullable: true, pattern: '^[A-Z]{2}$', type: 'string' },
     createdAt: dateTimeProperty,
+    defaultLineCategory: {
+      enum: [...INVOICE_LINE_CATEGORIES],
+      nullable: true,
+      type: 'string',
+    },
     id: uuidProperty,
     legalEntityId: { ...uuidProperty, nullable: true },
     name: { maxLength: 200, minLength: 1, type: 'string' },
@@ -1481,6 +1501,7 @@ export const partnerOpenApiSchema = {
   required: [
     'countryCode',
     'createdAt',
+    'defaultLineCategory',
     'id',
     'legalEntityId',
     'name',
@@ -1495,6 +1516,7 @@ export const partnerBodyOpenApiSchema = {
   additionalProperties: false,
   properties: {
     countryCode: { pattern: '^[A-Z]{2}$', type: 'string' },
+    defaultLineCategory: { enum: [...INVOICE_LINE_CATEGORIES], type: 'string' },
     legalEntityId: uuidProperty,
     name: { maxLength: 200, minLength: 1, type: 'string' },
     registrationNumber: {

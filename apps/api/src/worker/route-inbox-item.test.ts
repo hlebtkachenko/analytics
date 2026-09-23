@@ -2,8 +2,9 @@ import type { DatabasePool } from '@bap/db/pool';
 import type { PoolClient } from 'pg';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { BlobStore } from '../blobs/blob-store.js';
 import type { InboxItem } from '../inbox/contract.js';
-import type { ComposedDocument } from '../inbox/draft-composer.js';
+import type { RouteSuggestion } from '../inbox/inbox-repository.js';
 import {
   AUTO_ROUTE_PROVIDER,
   AUTOMATION_SUBJECT,
@@ -16,11 +17,32 @@ const repository = vi.hoisted(() => ({
   insertExtraction: vi.fn(async () => undefined),
   loadItem: vi.fn(),
   loadItemFiles: vi.fn(async () => [{ blobId: BLOB_ID }]),
-  loadLatestExtraction: vi.fn(async () => ({
-    reasons: [{ evidence: 'rule 1: type pdf sets kind other', step: 'rule' }],
-  })),
+  // The newest row of any provider is the rule row; the item has no isdoc row.
+  loadLatestExtraction: vi.fn(
+    async (_transaction: unknown, _itemId: string, provider?: string) =>
+      provider === 'isdoc'
+        ? null
+        : {
+            issues: [],
+            reasons: [
+              { evidence: 'rule 1: type pdf sets kind other', step: 'rule' },
+            ],
+          },
+  ),
   loadMatchedRuleIds: vi.fn(async () => []),
   loadRouteSuggestion: vi.fn(),
+  loadRoutingTargetOverrides: vi.fn(async () => ({
+    pdf: {
+      auto: 'always',
+      autoThreshold: null,
+      defaultAssigneeId: null,
+      defaultLegalEntityId: null,
+      destination: 'documents',
+      documentKind: 'other',
+      partnerPolicy: 'match_only',
+      requiredFields: [],
+    },
+  })),
 }));
 const documents = vi.hoisted(() => ({
   createDocumentInTransaction: vi.fn(),
@@ -49,6 +71,7 @@ interface FixtureOptions {
   authorRow?: Record<string, unknown>[];
   attempt?: { last_attempt: Date | null; last_touch: Date | null };
   membership?: Record<string, unknown>[];
+  ruleRow?: Record<string, unknown>[];
   scope?: { granted: string[]; mode: string };
   // The skip definer raises: the item left review between the two transactions.
   skipRefused?: boolean;
@@ -99,10 +122,11 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
 }
 
 function composed(
-  overrides: Partial<ComposedDocument['draft']> = {},
+  overrides: Partial<RouteSuggestion['draft']> = {},
   missing: string[] = [],
-): ComposedDocument {
+): RouteSuggestion {
   return {
+    content: { attributes: null, invoice: null, totalAmount: null },
     draft: {
       currencyCode: 'CZK',
       documentDate: '2026-09-17',
@@ -113,6 +137,7 @@ function composed(
       title: 'scan.pdf',
       ...overrides,
     },
+    lineCategory: null,
     missing,
     sources: {
       currency_code: 'provider',
@@ -144,6 +169,40 @@ function fixture(options: FixtureOptions = {}): Fixture {
 
       if (text.includes('from app.list_inbox_routing_targets() where')) {
         return { rows: options.authorRow ?? [] };
+      }
+
+      if (
+        text.includes('from app.inbox_item_extraction') &&
+        text.includes('select draft')
+      ) {
+        return {
+          rows: [
+            {
+              draft: { kind: null, matchedRuleIds: [RULE_ID], partnerId: null },
+            },
+          ],
+        };
+      }
+
+      if (text.includes('from app.list_inbox_rules()')) {
+        return {
+          rows: options.ruleRow ?? [
+            {
+              auto_route: true,
+              channel_id: null,
+              detected_type: 'pdf',
+              discard_reason: null,
+              id: RULE_ID,
+              keyword: null,
+              priority: 1,
+              sender_pattern: null,
+              set_assignee_id: null,
+              set_document_kind: 'other',
+              set_legal_entity_id: ENTITY_ID,
+              set_partner_id: null,
+            },
+          ],
+        };
       }
 
       if (
@@ -204,6 +263,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
     queries,
     run: (ruleId: string | null = RULE_ID) =>
       routeInboxItem({
+        blobs: {} as BlobStore,
         data: { itemId: ITEM_ID, organizationId: ORGANIZATION, ruleId },
         logger: { log: () => undefined },
         metrics,
@@ -534,16 +594,31 @@ describe('routeInboxItem failure modes', () => {
     expect(repository.finishRouteInTransaction).not.toHaveBeenCalled();
   });
 
-  it('refuses an invoice kind defensively as a missing invoice block', async () => {
+  it('runs the parsed-content guard again at route time and records why it stopped', async () => {
     repository.loadRouteSuggestion.mockResolvedValue(
       composed({ kind: 'received_invoice' }),
     );
 
     expect(await fixture().run()).toEqual({
-      field: 'invoice',
-      issue: 'missing_required_field',
+      field: null,
+      issue: 'policy_rejected',
       kind: 'failed',
     });
+    expect(repository.insertExtraction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      ITEM_ID,
+      expect.objectContaining({
+        output: expect.objectContaining({
+          issues: [
+            expect.objectContaining({
+              code: 'policy_rejected',
+              message: expect.stringContaining('clean ISDOC parse'),
+            }),
+          ],
+        }),
+      }),
+    );
     expect(documents.createDocumentInTransaction).not.toHaveBeenCalled();
   });
 
@@ -609,6 +684,7 @@ describe('routeInboxItem failure modes', () => {
   it('refuses a payload that names no item', async () => {
     await expect(
       routeInboxItem({
+        blobs: {} as BlobStore,
         data: { organizationId: ORGANIZATION, ruleId: RULE_ID },
         logger: { log: () => undefined },
         metrics: new WorkerMetrics(),

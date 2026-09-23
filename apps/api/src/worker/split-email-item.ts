@@ -18,7 +18,10 @@ import {
   MEDIA_TYPE_PATTERN,
   SPLIT_EMAIL_ITEM_QUEUE,
 } from '../inbox/contract.js';
-import type { RouteInboxItemJob } from '../inbox/contract.js';
+import type {
+  ParseInboxItemJob,
+  RouteInboxItemJob,
+} from '../inbox/contract.js';
 import {
   appendEvent,
   insertExtraction,
@@ -35,6 +38,7 @@ import {
   SNIFF_PROVIDER_VERSION,
   toProviderOutput,
 } from '../inbox/providers/sniff.js';
+import { ISDOC_DETECTED_TYPE } from '../inbox/providers/isdoc.js';
 import type { BlobScanner } from '../scanning/clamd-client.js';
 import { recordScan, setItemStatus } from './blob-scan.js';
 import { runTenantJob } from './job-context.js';
@@ -64,6 +68,8 @@ type SplitEmailItemPayload = z.infer<typeof splitEmailItemPayloadSchema>;
 export interface SplitEmailItemOptions {
   blobs: BlobStore;
   data: unknown;
+  // Sent after an ISDOC child's transaction has committed, instead of its route, under the channel payload.
+  enqueueParseInboxItem: (job: ParseInboxItemJob) => Promise<void>;
   // Sent after a child's transaction has committed when its rule pass asked for an automatic route.
   enqueueRouteInboxItem: (job: RouteInboxItemJob) => Promise<void>;
   metrics: WorkerMetrics;
@@ -672,7 +678,10 @@ async function createChildren(
       part.payloadKind === 'text'
         ? await readFile(part.temporaryPath, 'utf8')
         : null;
-    const routeJob = await runTenantJob<RouteInboxItemJob | null>({
+    const child = await runTenantJob<{
+      itemId: string;
+      routeJob: RouteInboxItemJob | null;
+    } | null>({
       data: payload,
       pool: options.pool,
       work: async (transaction) => {
@@ -757,12 +766,19 @@ async function createChildren(
           itemId: result.item.id,
           text,
         });
-        return rulePass.routeJob;
+        return { itemId: result.item.id, routeJob: rulePass.routeJob };
       },
     });
 
-    if (routeJob !== null) {
-      await options.enqueueRouteInboxItem(routeJob);
+    // An ISDOC child is parsed first; the parse recomputes the route from the stored rule matches.
+    if (child !== null && sniffed?.detectedType === ISDOC_DETECTED_TYPE) {
+      await options.enqueueParseInboxItem({
+        channelId: payload.channelId,
+        itemId: child.itemId,
+        organizationId: payload.organizationId,
+      });
+    } else if (child?.routeJob) {
+      await options.enqueueRouteInboxItem(child.routeJob);
     }
   }
 

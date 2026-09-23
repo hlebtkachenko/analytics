@@ -47,6 +47,7 @@ const DUPLICATE_REGISTRATION_NUMBER = 'PLACEHOLDER-DUPLICATE';
 const partner: Partner = {
   countryCode: 'CZ',
   createdAt: '2026-09-14T06:00:00.000Z',
+  defaultLineCategory: null,
   id: PARTNER_ID,
   legalEntityId: null,
   name: 'Placeholder Partner',
@@ -215,6 +216,7 @@ describe('application partner routes', () => {
     expect(createCalls).toEqual([
       {
         countryCode: 'CZ',
+        defaultLineCategory: null,
         legalEntityId: null,
         legalEntityIds: null,
         name: 'Placeholder Partner',
@@ -266,6 +268,7 @@ describe('application partner routes', () => {
       { name: 'Placeholder Partner', vatNumber: '12345678' },
       { name: 'Placeholder Partner', countryCode: 'CZE' },
       { name: 'Placeholder Partner', legalEntityId: 'not-a-uuid' },
+      { name: 'Placeholder Partner', defaultLineCategory: 'freight' },
       { name: 'Placeholder Partner', unknownField: 'x' },
       {},
     ]) {
@@ -315,6 +318,7 @@ describe('application partner routes', () => {
     expect(updateCalls).toEqual([
       {
         countryCode: undefined,
+        defaultLineCategory: undefined,
         legalEntityId: undefined,
         legalEntityIds: null,
         name: undefined,
@@ -326,6 +330,14 @@ describe('application partner routes', () => {
         vatNumber: null,
       },
     ]);
+
+    // The default line category is set and cleared through the same patch an owner or admin already uses.
+    await request(application.getHttpServer())
+      .patch(`/v1/organizations/organization_2/partners/${PARTNER_ID}`)
+      .set('Authorization', 'Bearer caller')
+      .send({ defaultLineCategory: 'services' })
+      .expect(200);
+    expect(updateCalls[1]?.defaultLineCategory).toBe('services');
 
     await request(application.getHttpServer())
       .patch(`/v1/organizations/organization_2/partners/${UNKNOWN_PARTNER_ID}`)
@@ -365,6 +377,7 @@ describe('application partner routes', () => {
     expect(created.content['application/json']?.schema.required).toEqual([
       'countryCode',
       'createdAt',
+      'defaultLineCategory',
       'id',
       'legalEntityId',
       'name',

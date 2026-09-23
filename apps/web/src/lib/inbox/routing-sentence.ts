@@ -61,7 +61,7 @@ function destinationClause(
   );
 }
 
-// Mirrors the destination and invoice-kind refusals of the worker's auto-route decision.
+// Mirrors the destination and invoice-kind conditions of the worker's auto-route decision.
 function confirmationClause(
   target: InboxRoutingTarget,
   locale: string,
@@ -77,7 +77,7 @@ function confirmationClause(
     return t(`${prefix}.confirmDocumentsOnly`);
   }
   if (target.documentKind !== null && isInvoiceKind(target.documentKind)) {
-    return t(`${prefix}.confirmInvoiceParser`);
+    return t(`${prefix}.confirmInvoiceChecks`);
   }
   // Past the first check only always is left without a threshold.
   if (threshold === null) {

@@ -605,11 +605,7 @@ export default function InboxRulesPage() {
           kind="error"
           lowContrast
           role="alert"
-          title={t(
-            refusal === 'rule_limit'
-              ? 'inboxRules.refusedRuleLimit'
-              : 'inboxRules.refusedNotAvailable',
-          )}
+          title={t('inboxRules.refusedRuleLimit')}
         />
       )}
       {organization.organizations.length > 0 ? (
@@ -683,11 +679,7 @@ export default function InboxRulesPage() {
                 kind="error"
                 lowContrast
                 role="alert"
-                title={t(
-                  refusal === 'rule_limit'
-                    ? 'inboxRules.refusedRuleLimit'
-                    : 'inboxRules.refusedNotAvailable',
-                )}
+                title={t('inboxRules.refusedRuleLimit')}
               />
             )}
             <TextInput

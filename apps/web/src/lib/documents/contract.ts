@@ -612,7 +612,8 @@ export function isInvoiceKind(kind: string): boolean {
   return (invoiceDocumentKinds as readonly string[]).includes(kind);
 }
 
-export const createDocumentRequestSchema = z
+// The create body before its cross-field checks, which a parsed inbox route completes from the stored row.
+export const createDocumentBodySchema = z
   .object({
     attributes: z
       .record(attributeKeySchema, attributeValueSchema)
@@ -631,29 +632,49 @@ export const createDocumentRequestSchema = z
     validFrom: documentDateSchema.optional(),
     validTo: documentDateSchema.optional(),
   })
-  .strict()
-  .superRefine((body, context) => {
-    // Invoice content belongs to the two invoice kinds and to no other kind.
-    if (isInvoiceKind(body.kind) !== (body.invoice !== undefined)) {
+  .strict();
+
+export function checkDocumentBody(
+  body: z.infer<typeof createDocumentBodySchema>,
+  context: z.RefinementCtx,
+  options: { path?: string[] } = {},
+): void {
+  const path = options.path ?? [];
+  // Invoice content belongs to the two invoice kinds and to no other kind.
+  if (body.invoice !== undefined && !isInvoiceKind(body.kind)) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Invoice content is required for invoice kinds only.',
+      path: [...path, 'invoice'],
+    });
+  }
+  // A validity window that ends before it starts is refused rather than stored.
+  if (
+    body.validFrom !== undefined &&
+    body.validTo !== undefined &&
+    body.validFrom > body.validTo
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'validFrom must not be later than validTo.',
+      path: [...path, 'validTo'],
+    });
+  }
+}
+
+export const createDocumentRequestSchema = createDocumentBodySchema.superRefine(
+  (body, context) => {
+    checkDocumentBody(body, context);
+
+    if (isInvoiceKind(body.kind) && body.invoice === undefined) {
       context.addIssue({
         code: 'custom',
         message: 'Invoice content is required for invoice kinds only.',
         path: ['invoice'],
       });
     }
-    // A validity window that ends before it starts is refused rather than stored.
-    if (
-      body.validFrom !== undefined &&
-      body.validTo !== undefined &&
-      body.validFrom > body.validTo
-    ) {
-      context.addIssue({
-        code: 'custom',
-        message: 'validFrom must not be later than validTo.',
-        path: ['validTo'],
-      });
-    }
-  });
+  },
+);
 
 export const updateDocumentRequestSchema = z
   .object({
@@ -689,6 +710,8 @@ export const partnerSchema = z
   .object({
     countryCode: z.string().nullable(),
     createdAt: z.iso.datetime(),
+    // The category a parsed invoice's item lines take; null leaves them for a person.
+    defaultLineCategory: invoiceLineCategorySchema.nullable(),
     id: identifierSchema,
     legalEntityId: identifierSchema.nullable(),
     name: z.string(),
@@ -719,6 +742,7 @@ const countryCodeSchema = z
 export const createPartnerRequestSchema = z
   .object({
     countryCode: countryCodeSchema.optional(),
+    defaultLineCategory: invoiceLineCategorySchema.optional(),
     legalEntityId: identifierSchema.optional(),
     name: partnerNameSchema,
     registrationNumber: partnerRegistrationNumberSchema.optional(),
@@ -729,6 +753,7 @@ export const createPartnerRequestSchema = z
 export const updatePartnerRequestSchema = z
   .object({
     countryCode: countryCodeSchema.nullable().optional(),
+    defaultLineCategory: invoiceLineCategorySchema.nullable().optional(),
     legalEntityId: identifierSchema.nullable().optional(),
     name: partnerNameSchema.optional(),
     registrationNumber: partnerRegistrationNumberSchema.nullable().optional(),

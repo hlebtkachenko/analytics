@@ -6,7 +6,7 @@ import { createDatabasePool } from '@bap/db/pool';
 import type { DatabasePool } from '@bap/db/pool';
 
 import { MAX_PARTNER_LIST_SIZE } from './contract.js';
-import type { Partner } from './contract.js';
+import type { InvoiceLineCategory, Partner } from './contract.js';
 import { entityFilter, isUniqueViolation, likePattern } from './sql.js';
 
 export interface ListPartnersInput extends TenantContext {
@@ -16,6 +16,7 @@ export interface ListPartnersInput extends TenantContext {
 
 export interface CreatePartnerInput extends TenantContext {
   countryCode: string | null;
+  defaultLineCategory: InvoiceLineCategory | null;
   // null is the absence of an intercompany link; the composite foreign key pins the entity to this organization.
   legalEntityId: string | null;
   legalEntityIds: readonly string[] | null;
@@ -26,6 +27,7 @@ export interface CreatePartnerInput extends TenantContext {
 
 export interface UpdatePartnerInput extends TenantContext {
   countryCode: string | null | undefined;
+  defaultLineCategory: InvoiceLineCategory | null | undefined;
   legalEntityId: string | null | undefined;
   legalEntityIds: readonly string[] | null;
   name: string | undefined;
@@ -37,6 +39,7 @@ export interface UpdatePartnerInput extends TenantContext {
 interface PartnerRow {
   country_code: string | null;
   created_at: Date;
+  default_line_category: InvoiceLineCategory | null;
   id: string;
   legal_entity_id: string | null;
   name: string;
@@ -47,7 +50,7 @@ interface PartnerRow {
 
 // A partner is organization wide, so it stays visible; only an intercompany entity outside the scope is masked away.
 function partnerColumns(entityFilterParameter: string): string {
-  return `id, name, registration_number, vat_number, country_code,
+  return `id, name, registration_number, vat_number, country_code, default_line_category,
           case when ${entityFilterParameter}::uuid[] is null
                     or legal_entity_id = any(${entityFilterParameter}::uuid[])
                then legal_entity_id
@@ -59,6 +62,7 @@ function toPartner(row: PartnerRow): Partner {
   return {
     countryCode: row.country_code,
     createdAt: row.created_at.toISOString(),
+    defaultLineCategory: row.default_line_category,
     id: row.id,
     legalEntityId: row.legal_entity_id,
     name: row.name,
@@ -118,8 +122,9 @@ export async function createPartner(
     }
 
     const created = await transaction.query<PartnerRow>(
-      `insert into app.partner (organization_id, name, registration_number, vat_number, country_code, legal_entity_id, created_by)
-       values ($1, $2, $3, $4, $5, $6, $7)
+      `insert into app.partner (organization_id, name, registration_number, vat_number, country_code, legal_entity_id, created_by,
+                                default_line_category)
+       values ($1, $2, $3, $4, $5, $6, $7, $9)
        returning ${partnerColumns('$8')}`,
       [
         input.organizationId,
@@ -130,6 +135,7 @@ export async function createPartner(
         input.legalEntityId,
         input.userId,
         entityFilter(input.legalEntityIds),
+        input.defaultLineCategory,
       ],
     );
     const row = created.rows[0];
@@ -188,6 +194,7 @@ export async function updatePartner(
            vat_number = case when $5 then $6 else vat_number end,
            country_code = case when $7 then $8 else country_code end,
            legal_entity_id = case when $9 then $10 else legal_entity_id end,
+           default_line_category = case when $12 then $13 else default_line_category end,
            updated_at = now()
        where id = $1
        returning ${partnerColumns('$11')}`,
@@ -203,6 +210,8 @@ export async function updatePartner(
         input.legalEntityId !== undefined,
         input.legalEntityId ?? null,
         entityFilter(input.legalEntityIds),
+        input.defaultLineCategory !== undefined,
+        input.defaultLineCategory ?? null,
       ],
     );
     const row = updated.rows[0];

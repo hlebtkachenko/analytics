@@ -344,6 +344,19 @@ export const documentKinds = [
 ] as const;
 export type DocumentKind = (typeof documentKinds)[number];
 
+// The invoice line categories, mirrored from invoice_line_category_check and partner_default_line_category_check;
+// app.invoice_line and app.partner have no Drizzle definition yet.
+export const invoiceLineCategories = [
+  'goods',
+  'material',
+  'services',
+  'labour',
+  'transport',
+  'asset',
+  'other',
+] as const;
+export type InvoiceLineCategory = (typeof invoiceLineCategories)[number];
+
 // The draft fields the route form edits, so a correction names one of them.
 export const inboxCorrectionFields = [
   'kind',

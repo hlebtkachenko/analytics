@@ -7,12 +7,14 @@ import {
   createQueueClientFromConfiguration,
 } from '../worker/queue.js';
 import {
+  PARSE_INBOX_ITEM_QUEUE,
   RERUN_INBOX_RULE_QUEUE,
   ROUTE_INBOX_ITEM_QUEUE,
   SCAN_INBOX_ITEM_QUEUE,
   SPLIT_EMAIL_ITEM_QUEUE,
 } from './contract.js';
 import type {
+  ParseInboxItemJob,
   RerunInboxRuleJob,
   RouteInboxItemJob,
   ScanInboxItemJob,
@@ -30,6 +32,7 @@ export const INBOX_QUEUES = [
   SCAN_INBOX_ITEM_QUEUE,
   ROUTE_INBOX_ITEM_QUEUE,
   RERUN_INBOX_RULE_QUEUE,
+  PARSE_INBOX_ITEM_QUEUE,
 ] as const;
 
 // The one way a split job is sent, shared by the intake and the maintenance requeue.
@@ -50,6 +53,18 @@ export async function sendScanInboxItem(
   job: ScanInboxItemJob,
 ): Promise<void> {
   await client.send(SCAN_INBOX_ITEM_QUEUE, job, {
+    retryDelay: SPLIT_EMAIL_ITEM_RETRY_DELAY_SECONDS,
+    retryLimit: SPLIT_EMAIL_ITEM_RETRY_LIMIT,
+    singletonKey: job.itemId,
+  });
+}
+
+// One parse per item at a time, sent after a clean verdict by the scan, the split or a person's process.
+export async function sendParseInboxItem(
+  client: PgBoss,
+  job: ParseInboxItemJob,
+): Promise<void> {
+  await client.send(PARSE_INBOX_ITEM_QUEUE, job, {
     retryDelay: SPLIT_EMAIL_ITEM_RETRY_DELAY_SECONDS,
     retryLimit: SPLIT_EMAIL_ITEM_RETRY_LIMIT,
     singletonKey: job.itemId,
@@ -88,6 +103,7 @@ export async function sendRerunInboxRule(
 }
 
 export abstract class InboxQueue {
+  abstract enqueueParseInboxItem(job: ParseInboxItemJob): Promise<void>;
   abstract enqueueRerunInboxRule(job: RerunInboxRuleJob): Promise<void>;
   abstract enqueueRouteInboxItem(job: RouteInboxItemJob): Promise<void>;
   abstract enqueueScanInboxItem(job: ScanInboxItemJob): Promise<void>;
@@ -98,6 +114,10 @@ export abstract class InboxQueue {
 export class PgBossInboxQueue extends InboxQueue implements OnModuleDestroy {
   private clientPromise: Promise<PgBoss> | undefined;
   private readonly logger = new Logger(PgBossInboxQueue.name);
+
+  async enqueueParseInboxItem(job: ParseInboxItemJob): Promise<void> {
+    await sendParseInboxItem(await this.getClient(), job);
+  }
 
   async enqueueRerunInboxRule(job: RerunInboxRuleJob): Promise<void> {
     await sendRerunInboxRule(await this.getClient(), job);

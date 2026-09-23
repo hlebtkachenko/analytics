@@ -1,0 +1,12 @@
+@use '@bap/design-system/tokens/spacing.scss' as spacing;
+
+.note {
+  color: var(--cds-text-secondary);
+}
+
+.lineCell {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-03;
+}

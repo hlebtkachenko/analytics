@@ -1,7 +1,11 @@
 import type { InboxCorrectionField, InboxCorrectionSource } from '@bap/db';
 
-import { DOCUMENT_KINDS } from '../documents/contract.js';
-import type { InboxItem, InboxRoutingTarget } from './contract.js';
+import { DOCUMENT_KINDS, INVOICE_KINDS } from '../documents/contract.js';
+import type {
+  InboxItem,
+  InboxRoutingTarget,
+  ParsedIsdocDraft,
+} from './contract.js';
 import type { InboxRuleDefinition } from './rules.js';
 
 export const DEFAULT_DRAFT_CURRENCY = 'CZK';
@@ -30,7 +34,27 @@ export interface ComposedDocumentDraft {
   title: string;
 }
 
+// The newest ISDOC row as the composer reads it; the schema checks the stored draft.
+export interface ParsedLayer {
+  draft: ParsedIsdocDraft;
+  legalEntityId: string | null;
+}
+
+// The content a parsed file carries beyond the correctable header fields; copied, never edited in the Inbox.
+export interface DraftContent {
+  attributes: Record<string, string> | null;
+  invoice: NonNullable<ParsedIsdocDraft['invoice']> | null;
+  totalAmount: string | null;
+}
+
+const NO_CONTENT: DraftContent = {
+  attributes: null,
+  invoice: null,
+  totalAmount: null,
+};
+
 export interface ComposedDocument {
+  content: DraftContent;
   draft: ComposedDocumentDraft;
   // The required fields the draft leaves empty: the destination's own plus the target's requiredFields.
   missing: string[];
@@ -56,12 +80,33 @@ export const CORRECTION_FIELD_BY_DRAFT_KEY: Record<
   title: 'title',
 };
 
-// Precedence per field is hint, rule, target default, provider; the rules come in priority order, first writer wins.
+export function isInvoiceKind(kind: string | null): boolean {
+  return INVOICE_KINDS.some((invoiceKind) => invoiceKind === kind);
+}
+
+// Parsed content stays attached to a parsed route; a different kind drops only its invoice block.
+export function parsedContent(
+  draft: ParsedIsdocDraft,
+  kind: string | null,
+): DraftContent {
+  return {
+    attributes: draft.attributes ?? null,
+    invoice: isInvoiceKind(kind) ? (draft.invoice ?? null) : null,
+    totalAmount: draft.totalAmount || null,
+  };
+}
+
+// Precedence for kind and entity is hint, rule, parse, target default: the parsed kind is a fact from the file,
+// so it outranks the target default. Partner is hint, rule, parse. The rules come in priority order.
 export function composeDocumentDraft(
   item: DraftSourceItem,
   matchedRules: readonly InboxRuleDefinition[],
   effectiveTarget: InboxRoutingTarget,
+  parsed: ParsedLayer | null = null,
 ): ComposedDocument {
+  const parsedDraft = parsed?.draft ?? null;
+  const parsedKind = parsedDraft?.kind ?? null;
+  const parsedPartner = parsedDraft?.partnerId ?? null;
   const rules = [...matchedRules].sort((a, b) => a.priority - b.priority);
   const ruleKind = rules.find((rule) => rule.setDocumentKind !== null);
   const ruleEntity = rules.find((rule) => rule.setLegalEntityId !== null);
@@ -82,6 +127,9 @@ export function composeDocumentDraft(
   } else if (ruleKind !== undefined) {
     kind = documentKindOf(ruleKind.setDocumentKind);
     sources.kind = 'rule';
+  } else if (parsedKind !== null) {
+    kind = parsedKind;
+    sources.kind = 'provider';
   } else if (effectiveTarget.documentKind !== null) {
     kind = effectiveTarget.documentKind;
     sources.kind = 'target_default';
@@ -94,6 +142,9 @@ export function composeDocumentDraft(
   } else if (ruleEntity !== undefined) {
     legalEntityId = ruleEntity.setLegalEntityId;
     sources.legal_entity_id = 'rule';
+  } else if (parsed !== null && parsed.legalEntityId !== null) {
+    legalEntityId = parsed.legalEntityId;
+    sources.legal_entity_id = 'provider';
   } else if (effectiveTarget.defaultLegalEntityId !== null) {
     legalEntityId = effectiveTarget.defaultLegalEntityId;
     sources.legal_entity_id = 'target_default';
@@ -105,20 +156,35 @@ export function composeDocumentDraft(
   } else if (rulePartner !== undefined) {
     partnerId = rulePartner.setPartnerId;
     sources.partner_id = 'rule';
+  } else if (parsedPartner !== null) {
+    partnerId = parsedPartner;
+    sources.partner_id = 'provider';
   }
 
-  const title = (item.primaryFilename ?? item.detectedType ?? 'unknown')
+  const reference = parsedDraft?.reference || null;
+
+  if (reference !== null) {
+    sources.reference = 'provider';
+  }
+
+  const title = (
+    (parsedDraft?.title || item.primaryFilename) ??
+    item.detectedType ??
+    'unknown'
+  )
     .trim()
     .slice(0, MAX_TITLE_LENGTH);
   const draft: ComposedDocumentDraft = {
-    currencyCode: DEFAULT_DRAFT_CURRENCY,
-    documentDate: item.receivedAt.slice(0, 10),
+    currencyCode: parsedDraft?.currencyCode || DEFAULT_DRAFT_CURRENCY,
+    documentDate: parsedDraft?.documentDate || item.receivedAt.slice(0, 10),
     kind,
     legalEntityId,
     partnerId,
-    reference: null,
+    reference,
     title: title.length > 0 ? title : 'unknown',
   };
+  const content =
+    parsedDraft === null ? NO_CONTENT : parsedContent(parsedDraft, kind);
   const missing: string[] = [];
 
   if (draft.kind === null) {
@@ -139,17 +205,48 @@ export function composeDocumentDraft(
     }
   }
 
-  return { draft, missing, sources };
+  return { content, draft, missing, sources };
 }
 
-// The composed draft as the create body the documents contract parses; a null partner is left out, not sent.
-export function toCreateDocumentBody(draft: ComposedDocumentDraft): unknown {
+// The composed draft as the create body the documents contract parses; a null field is left out, not sent.
+export function toCreateDocumentBody(
+  draft: ComposedDocumentDraft,
+  content: DraftContent = NO_CONTENT,
+): unknown {
   return {
+    ...(content.attributes === null ? {} : { attributes: content.attributes }),
     currencyCode: draft.currencyCode,
     documentDate: draft.documentDate,
+    ...(content.invoice === null || !isInvoiceKind(draft.kind)
+      ? {}
+      : { invoice: content.invoice }),
     kind: draft.kind,
     legalEntityId: draft.legalEntityId,
     ...(draft.partnerId === null ? {} : { partnerId: draft.partnerId }),
+    ...(draft.reference === null ? {} : { reference: draft.reference }),
     title: draft.title,
+    ...(content.totalAmount === null
+      ? {}
+      : { totalAmount: content.totalAmount }),
+  };
+}
+
+// Item lines of parsed content take one category; deduction lines keep none. Null leaves the content untouched.
+export function withLineCategory(
+  content: DraftContent,
+  category: string | null,
+): DraftContent {
+  if (category === null || content.invoice === null) {
+    return content;
+  }
+
+  return {
+    ...content,
+    invoice: {
+      ...content.invoice,
+      lines: content.invoice.lines.map((line) => {
+        return line.lineKind === 'item' ? { ...line, category } : line;
+      }),
+    },
   };
 }

@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
   type OnModuleDestroy,
 } from '@nestjs/common';
 import { runInTenantContext } from '@bap/db';
@@ -21,7 +22,10 @@ import type { PoolClient } from 'pg';
 import type { ChannelPrincipalReader } from '../channel-access.js';
 import type { EntityScopeSelector } from '../datasets/dataset-repository.js';
 import { createDocumentRequestSchema } from '../documents/contract.js';
-import type { CreateDocumentRequest } from '../documents/contract.js';
+import type {
+  CreateDocumentRequest,
+  InvoiceLineCategory,
+} from '../documents/contract.js';
 import {
   createDocumentInTransaction,
   deleteDocumentInTransaction,
@@ -41,6 +45,7 @@ import type {
   InboxChannel,
   InboxCorrection,
   InboxEvent,
+  InboxExtraction,
   InboxItem,
   InboxItemDetail,
   InboxItemFile,
@@ -59,7 +64,11 @@ import type {
 import {
   CORRECTION_FIELD_BY_DRAFT_KEY,
   composeDocumentDraft,
+  isInvoiceKind,
+  parsedContent,
   toCreateDocumentBody,
+  withLineCategory,
+  type ComposedDocument,
   type ComposedDocumentDraft,
 } from './draft-composer.js';
 import {
@@ -92,15 +101,18 @@ import {
   type ItemFileRecord,
   type ItemRow,
 } from './inbox-repository-support.js';
+import { loadParsedDraft } from './parsed-draft.js';
 import {
   adoptRule,
   applyInboxRules,
   createRule,
   deleteRule,
   listRules,
-  loadMatchedRuleIds,
-  loadRulesById,
+  invoiceRouteBlocker,
+  loadMatchedLiveRules,
+  loadSenderFacts,
   orderRules,
+  readPartnerLineCategory,
   readRule,
   updateRule,
   type AdoptRuleInput,
@@ -126,6 +138,7 @@ import {
   manualProvider,
 } from './providers/manual.js';
 import { routingTargetFor } from './routing-targets.js';
+import type { InboxRuleDefinition } from './rules.js';
 
 // The repository contract keeps one import site for its callers.
 export type {
@@ -211,6 +224,10 @@ export interface RouteToDocumentInput extends ReadItemInput {
   // The manual provider's verdict, stored so the decision keeps its provenance.
   extraction: ExtractionRecord;
   fileBlobIds: readonly string[];
+  // The category every parsed item line takes; absent falls back to the partner's default.
+  lineCategory?: InvoiceLineCategory;
+  // The item's newest isdoc row, whose invoice, total and attributes replace anything the body carried.
+  parsedExtractionId?: string;
   // The current document of a reference_conflict refusal; the new one becomes its next version.
   supersedesDocumentId?: string;
 }
@@ -366,9 +383,45 @@ async function loadCorrections(
   }));
 }
 
+// A parsed entity outside the reader's scope is masked, so the reader never learns the organization owns it.
+function scopedEntity(
+  legalEntityId: string | null,
+  legalEntityIds: readonly string[] | null,
+): string | null {
+  return legalEntityIds === null ||
+    legalEntityId === null ||
+    legalEntityIds.includes(legalEntityId)
+    ? legalEntityId
+    : null;
+}
+
+function scopedExtraction(
+  extraction: InboxExtraction | null,
+  legalEntityIds: readonly string[] | null,
+): InboxExtraction | null {
+  if (extraction === null) {
+    return null;
+  }
+
+  const draftEntity = extraction.draft.legalEntityId;
+
+  return {
+    ...extraction,
+    draft:
+      typeof draftEntity === 'string'
+        ? {
+            ...extraction.draft,
+            legalEntityId: scopedEntity(draftEntity, legalEntityIds),
+          }
+        : extraction.draft,
+    legalEntityId: scopedEntity(extraction.legalEntityId, legalEntityIds),
+  };
+}
+
 async function loadDetail(
   transaction: PoolClient,
   item: InboxItem,
+  legalEntityIds: readonly string[] | null,
 ): Promise<InboxItemDetail> {
   // The sender, its DKIM verdict, and the name of the rule that decided the item, in one read; a deleted rule still resolves.
   const meta = await transaction.query<{
@@ -384,16 +437,34 @@ async function loadDetail(
     [item.id],
   );
 
+  const files = await loadItemFiles(transaction, item.id);
+  const suggestion = await loadRouteSuggestion(transaction, item, files);
+
   return {
     corrections: await loadCorrections(transaction, item.id),
     events: await loadEvents(transaction, item.id),
-    extraction: await loadLatestExtraction(transaction, item.id),
-    files: (await loadItemFiles(transaction, item.id)).map(publicFile),
+    extraction: scopedExtraction(
+      await loadLatestExtraction(transaction, item.id),
+      legalEntityIds,
+    ),
+    files: files.map(publicFile),
+    parsed: scopedExtraction(
+      await loadParsedDraft(transaction, item.id),
+      legalEntityIds,
+    ),
     item: {
       ...item,
       decidedByRuleName: meta.rows[0]?.decided_by_rule_name ?? null,
       sender: meta.rows[0]?.sender ?? null,
       senderAuthenticated: meta.rows[0]?.sender_authenticated ?? false,
+    },
+    routeSuggestion: {
+      kind: suggestion.draft.kind,
+      legalEntityId: scopedEntity(
+        suggestion.draft.legalEntityId,
+        legalEntityIds,
+      ),
+      partnerId: suggestion.draft.partnerId,
     },
     routingTarget: routingTargetFor(
       item.detectedType,
@@ -771,7 +842,9 @@ export async function readItem(
       input.itemId,
       input.legalEntityIds,
     );
-    return item === null ? null : loadDetail(transaction, item);
+    return item === null
+      ? null
+      : loadDetail(transaction, item, input.legalEntityIds);
   });
 }
 
@@ -876,7 +949,9 @@ export async function recordExtraction(
     }
 
     const after = await loadItem(transaction, before.id, input.legalEntityIds);
-    return after === null ? null : loadDetail(transaction, after);
+    return after === null
+      ? null
+      : loadDetail(transaction, after, input.legalEntityIds);
   });
 }
 
@@ -930,7 +1005,9 @@ export async function updateHints(
     await appendEvent(transaction, input, before.id, 'hint_added');
 
     const after = await loadItem(transaction, before.id, input.legalEntityIds);
-    return after === null ? null : loadDetail(transaction, after);
+    return after === null
+      ? null
+      : loadDetail(transaction, after, input.legalEntityIds);
   });
 }
 
@@ -1163,7 +1240,12 @@ export function routeToDocument(
       throw new BadRequestException();
     }
 
-    return routeInTransaction(transaction, input, before, files);
+    return routeInTransaction(
+      transaction,
+      await withParsedContent(transaction, input, before),
+      before,
+      files,
+    );
   });
 }
 
@@ -1193,7 +1275,7 @@ export function approveItem(
     const parsed =
       composed.missing.length === 0
         ? createDocumentRequestSchema.safeParse(
-            toCreateDocumentBody(composed.draft),
+            toCreateDocumentBody(composed.draft, composed.content),
           )
         : null;
     const field =
@@ -1208,6 +1290,30 @@ export function approveItem(
         { code: 'missing_required_field', field: field ?? 'kind' },
         null,
       );
+    }
+
+    // Parsed invoice content is filed in bulk only when the parse is clean and names the same entity, kind and
+    // partner; the parse's own issues count, a later failed auto-route row does not.
+    if (composed.content.invoice !== null) {
+      const newest = await loadParsedDraft(transaction, before.id);
+      const blocked = invoiceRouteBlocker({
+        asker: { kind: 'person' },
+        composed,
+        facts: {
+          ...(await loadSenderFacts(transaction, before.id)),
+          issuesSinceParsed: (newest?.issues.length ?? 0) > 0,
+          latestIssueCount: newest?.issues.length ?? 0,
+          parsed:
+            newest === null
+              ? null
+              : { draft: newest.draft, legalEntityId: newest.legalEntityId },
+        },
+        lineCategory: composed.lineCategory,
+      });
+
+      if (blocked !== null) {
+        throw new BadRequestException();
+      }
     }
 
     const { document, output } = manualProvider(parsed.data);
@@ -1293,26 +1399,101 @@ async function routeInTransaction(
   );
 
   const after = await loadItem(transaction, before.id, input.legalEntityIds);
-  return after === null ? null : loadDetail(transaction, after);
+  return after === null
+    ? null
+    : loadDetail(transaction, after, input.legalEntityIds);
 }
 
-// The draft a route suggests: the hints, the rules the newest rule extraction named, and the effective target.
+// The composed draft plus the partner default its parsed item lines took; null when no line took one.
+export type RouteSuggestion = ComposedDocument & {
+  lineCategory: string | null;
+};
+
+// The draft a route suggests: the hints, the live rules the newest rule extraction named (the set the parse used),
+// the newest isdoc row and the effective target; parsed item lines take the partner's default category.
 export async function loadRouteSuggestion(
   transaction: PoolClient,
   item: InboxItem,
   files: readonly ItemFileRecord[],
-): Promise<ReturnType<typeof composeDocumentDraft>> {
-  return composeDocumentDraft(
+  matchedRules?: readonly InboxRuleDefinition[],
+): Promise<RouteSuggestion> {
+  const parsed = await loadParsedDraft(transaction, item.id);
+  const composed = composeDocumentDraft(
     { ...item, primaryFilename: files[0]?.originalFilename ?? null },
-    await loadRulesById(
-      transaction,
-      await loadMatchedRuleIds(transaction, item.id),
-    ),
+    matchedRules ?? (await loadMatchedLiveRules(transaction, item.id)),
     routingTargetFor(
       item.detectedType,
       await loadRoutingTargetOverrides(transaction),
     ),
+    parsed === null
+      ? null
+      : { draft: parsed.draft, legalEntityId: parsed.legalEntityId },
   );
+  const category =
+    composed.content.invoice === null
+      ? null
+      : await readPartnerLineCategory(transaction, composed.draft.partnerId);
+
+  return category === null
+    ? { ...composed, lineCategory: null }
+    : {
+        ...composed,
+        content: withLineCategory(composed.content, category),
+        lineCategory: category,
+      };
+}
+
+// A parsed route copies the invoice, total and attributes from the stored row the body names, never the body's own;
+// a client invoice beside a parsed invoice is refused, and a stale row id is refused too.
+async function withParsedContent(
+  transaction: PoolClient,
+  input: RouteToDocumentInput,
+  item: InboxItem,
+): Promise<RouteToDocumentInput> {
+  const newest = await loadParsedDraft(transaction, item.id);
+
+  if (newest?.draft.invoice != null && !isInvoiceKind(input.document.kind)) {
+    throw new UnprocessableEntityException('parsed_kind_mismatch');
+  }
+
+  if (input.parsedExtractionId === undefined) {
+    if (input.document.invoice !== undefined && newest?.draft.invoice != null) {
+      throw new UnprocessableEntityException('parsed_invoice_only');
+    }
+
+    return input;
+  }
+
+  if (newest === null || newest.id !== input.parsedExtractionId) {
+    throw new UnprocessableEntityException('parsed_extraction_stale');
+  }
+
+  const content = parsedContent(newest.draft, input.document.kind);
+  const category =
+    input.lineCategory ??
+    (await readPartnerLineCategory(
+      transaction,
+      input.document.partnerId ?? null,
+    ));
+  const filled = withLineCategory(content, category);
+  const merged = createDocumentRequestSchema.safeParse({
+    ...input.document,
+    ...(filled.attributes === null ? {} : { attributes: filled.attributes }),
+    ...(filled.invoice === null ? {} : { invoice: filled.invoice }),
+    ...(filled.totalAmount === null ? {} : { totalAmount: filled.totalAmount }),
+  });
+
+  if (!merged.success) {
+    throw new UnprocessableEntityException(
+      filled.invoice !== null && category === null
+        ? 'line_category_required'
+        : 'parsed_content_invalid',
+    );
+  }
+
+  const { document, output } = manualProvider(merged.data);
+
+  return { ...input, document, extraction: { ...input.extraction, output } };
 }
 
 // The rows every route writes once the document exists: its files, the item's decision, the event and the audit entry.
@@ -1454,7 +1635,9 @@ export async function attachItem(
     );
 
     const after = await loadItem(transaction, before.id, input.legalEntityIds);
-    return after === null ? null : loadDetail(transaction, after);
+    return after === null
+      ? null
+      : loadDetail(transaction, after, input.legalEntityIds);
   });
 }
 
@@ -1498,7 +1681,7 @@ export async function reopenEmailItem(
     return after === null
       ? null
       : {
-          detail: await loadDetail(transaction, after),
+          detail: await loadDetail(transaction, after, input.legalEntityIds),
           job: {
             channelId: before.channelId,
             itemId: before.id,
@@ -1513,7 +1696,7 @@ async function insertCorrections(
   transaction: PoolClient,
   input: RouteToDocumentInput,
   itemId: string,
-  suggested: ReturnType<typeof composeDocumentDraft>,
+  suggested: ComposedDocument,
   final: ComposedDocumentDraft,
 ): Promise<void> {
   for (const key of Object.keys(
@@ -1629,7 +1812,9 @@ export async function undoRoute(
     );
 
     const after = await loadItem(transaction, before.id, input.legalEntityIds);
-    return after === null ? null : loadDetail(transaction, after);
+    return after === null
+      ? null
+      : loadDetail(transaction, after, input.legalEntityIds);
   });
 }
 
@@ -1680,7 +1865,9 @@ async function transition(
     );
 
     const after = await loadItem(transaction, before.id, input.legalEntityIds);
-    return after === null ? null : loadDetail(transaction, after);
+    return after === null
+      ? null
+      : loadDetail(transaction, after, input.legalEntityIds);
   });
 }
 
@@ -1747,7 +1934,9 @@ export async function assignItem(
     await appendEvent(transaction, input, before.id, 'assigned');
 
     const after = await loadItem(transaction, before.id, input.legalEntityIds);
-    return after === null ? null : loadDetail(transaction, after);
+    return after === null
+      ? null
+      : loadDetail(transaction, after, input.legalEntityIds);
   });
 }
 
@@ -1781,7 +1970,9 @@ export async function snoozeItem(
     }
 
     const after = await loadItem(transaction, before.id, input.legalEntityIds);
-    return after === null ? null : loadDetail(transaction, after);
+    return after === null
+      ? null
+      : loadDetail(transaction, after, input.legalEntityIds);
   });
 }
 

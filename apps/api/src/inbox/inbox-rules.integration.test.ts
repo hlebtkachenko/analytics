@@ -217,6 +217,7 @@ async function runScan(itemId: string): Promise<void> {
   await scanInboxItem({
     blobs: store,
     data,
+    enqueueParseInboxItem: async () => undefined,
     enqueueRouteInboxItem: (job) => sendRouteInboxItem(boss, job),
     metrics: new WorkerMetrics(),
     pool: apiPool,
@@ -321,6 +322,7 @@ beforeAll(async () => {
   };
   // The route job goes to the real pg-boss client so the test can read it back; nothing dequeues it.
   service = new InboxService(repository, store, QUOTA, 'intake.invalid', {
+    enqueueParseInboxItem: async () => undefined,
     enqueueRerunInboxRule: async () => undefined,
     enqueueRouteInboxItem: (job: RouteInboxItemJob) =>
       sendRouteInboxItem(boss, job),
@@ -738,7 +740,7 @@ describe('inbox rules', () => {
 
     expect(detail?.item.status).toBe('needs_review');
     expect(detail?.extraction?.reasons.at(-1)?.evidence).toBe(
-      'Auto-route waits: an invoice kind needs the ISDOC parser on the connections track.',
+      'Auto-route waits: an invoice kind needs a clean ISDOC parse.',
     );
     const jobs = await apiPool.query(
       'select 1 from pgboss.job where name = $1 and singleton_key = $2',

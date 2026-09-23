@@ -236,19 +236,23 @@ export const inboxSourceLabelKeys: Readonly<Record<InboxChannelKind, string>> =
 // One sentence per extraction issue code, so the item page never renders a raw code.
 export const inboxIssueCodeLabelKeys: Readonly<Record<InboxIssueCode, string>> =
   {
+    amount_mismatch: 'inbox.item.issueAmountMismatch',
     decorative_image: 'inbox.item.issueDecorativeImage',
     duplicate_exact: 'inbox.item.issueDuplicateExact',
     duplicate_probable: 'inbox.item.issueDuplicateProbable',
     empty: 'inbox.item.issueEmpty',
     encrypted: 'inbox.item.issueEncrypted',
+    entity_conflict: 'inbox.item.issueEntityConflict',
     entity_unresolved: 'inbox.item.missingEntity',
     missing_required_field: 'inbox.item.issueMissingRequiredField',
     password_protected: 'inbox.item.issuePasswordProtected',
     policy_rejected: 'inbox.item.issuePolicyRejected',
     reference_conflict: 'inbox.item.issueReferenceConflict',
     too_large: 'inbox.item.issueTooLarge',
+    unknown_partner: 'inbox.item.issueUnknownPartner',
     unreadable: 'inbox.item.issueUnreadable',
     unsupported_type: 'inbox.item.issueUnsupportedType',
+    vat_mismatch: 'inbox.item.issueVatMismatch',
   };
 
 // One sentence per event kind, resolved with the actor name in the activity list.

@@ -94,6 +94,7 @@ export class PartnerController {
       const created = await this.partners.createPartner({
         ...tenant,
         countryCode: body.countryCode ?? null,
+        defaultLineCategory: body.defaultLineCategory ?? null,
         legalEntityId: body.legalEntityId ?? null,
         legalEntityIds: allowedEntityIds(entityScope),
         name: body.name,
@@ -156,7 +157,10 @@ export class PartnerController {
 
   @Patch(':organizationId/partners/:partnerId')
   @UseGuards(ResourceJwtGuard, SubjectRateLimitGuard)
-  @ApiOperation({ summary: 'Change the partner name, numbers or country' })
+  @ApiOperation({
+    summary:
+      'Change the partner name, numbers, country or default line category',
+  })
   @ApiBody({ schema: { ...partnerBodyOpenApiSchema, required: [] } })
   @ApiOkResponse({ schema: partnerOpenApiSchema })
   @ApiUnauthorizedResponse({ description: 'The resource token is invalid' })
@@ -184,6 +188,7 @@ export class PartnerController {
         ...tenant,
         // An absent field leaves the stored value alone; an explicit null clears it.
         countryCode: body.countryCode,
+        defaultLineCategory: body.defaultLineCategory,
         legalEntityId: body.legalEntityId,
         legalEntityIds: allowedEntityIds(entityScope),
         name: body.name,

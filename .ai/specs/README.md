@@ -2,6 +2,7 @@
 
 ## Delivered and historical records
 
+- [Inbox ISDOC and ISDOCX parser](2026-09-23-inbox-isdoc.md)
 - [Inbox settings fold into the Rules page](2026-09-23-inbox-settings-fold.md)
 - [Documents analytics charts](2026-09-23-documents-analytics-charts.md)
 - [Inbox scan of direct uploads and API-channel blobs](2026-09-22-inbox-scan-uploads.md)

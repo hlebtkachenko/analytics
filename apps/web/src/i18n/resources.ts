@@ -731,6 +731,7 @@ export const resources = {
           checkNoDuplicate: 'No earlier copy of this file',
           checkRouting: 'Goes to {{destination}} ({{source}})',
           checkRoutingKind: 'Goes to {{destination}} as {{kind}} ({{source}})',
+          chooseLineCategory: 'Choose a line category for the parsed lines.',
           derivedByRule: 'Rule {{name}} filed it as {{kind}} for {{entity}}.',
           derivedDateReceived: 'Date is the day it was received.',
           derivedNothingRead: 'Nothing read the file contents yet.',
@@ -748,13 +749,16 @@ export const resources = {
           filedByUser: 'By {{name}}, {{date}}',
           filedTitle: 'Filed',
           invoiceBody:
-            'Invoices are filed after the ISDOC parser lands. Attach this to an existing document in the meantime.',
-          invoiceTitle: 'Waiting for the invoice parser',
+            'An invoice is filed from a parsed ISDOC file, which this item does not carry. Attach it to an existing document instead.',
+          invoiceTitle: 'No parsed invoice content',
+          issueAmountMismatch: 'The invoice amounts do not add up.',
           issueDecorativeImage: 'This image carries no readable document.',
           issueDuplicateExact: 'Exact copy of an earlier item.',
           issueDuplicateProbable: 'Probable duplicate, review or acknowledge.',
           issueEmpty: 'This file is empty.',
           issueEncrypted: 'This file is encrypted.',
+          issueEntityConflict:
+            'The legal entity in the file disagrees with the one chosen for this item.',
           issueMissingField: 'A required field is missing: {{field}}',
           issueMissingRequiredField: 'A required field is missing.',
           issuePasswordProtected: 'This file is password protected.',
@@ -762,8 +766,14 @@ export const resources = {
           issueReferenceConflict:
             'Reference {{reference}} already exists, file as a new version or change it.',
           issueTooLarge: 'This file is too large.',
+          issueUnknownPartner: 'The partner in the file is not registered.',
           issueUnreadable: 'This file could not be read.',
           issueUnsupportedType: 'This file type is not supported.',
+          issueVatMismatch: 'The invoice VAT amounts do not add up.',
+          lineCategory: 'Line category',
+          lineCategoryChoose: 'Choose a category',
+          lineCategoryHelp: 'Every parsed supply line takes this category.',
+          lineCategoryPartner: 'Partner default ({{category}})',
           missingEntity: 'Choose the legal entity.',
           moreActions: 'More actions',
           needsInputTitle: 'Needs your input',
@@ -772,6 +782,17 @@ export const resources = {
           noteLine: 'Note: {{text}}',
           original: 'Original',
           overviewTab: 'Overview',
+          parsedFacts: 'Invoice details',
+          parsedIssues: 'Parser findings',
+          parsedLines: 'Parsed lines',
+          parsedReasons: 'Parser notes',
+          parsedSignatureNote: 'Digital signature not verified.',
+          parsedTitle: 'Read from the ISDOC file',
+          partnerCategory: 'Partner default line category',
+          partnerCategoryHelp:
+            'Saved on the partner; later invoices from it take this category.',
+          partnerCategoryNone: 'None',
+          partnerCategorySaved: 'The partner default line category was saved.',
           previous: 'Previous',
           reasonDecorativeImage: 'the image carried no readable document',
           reasonEmpty: 'the file was empty',
@@ -1001,7 +1022,7 @@ export const resources = {
         autoRouteHelp:
           'Creates the document without review when the rule fills every required field. Runs under your account.',
         autoRouteInvoiceNote:
-          'Auto-route for an invoice kind waits for the ISDOC parser on the connections track; the item stays in review.',
+          'An invoice kind auto-routes only from a clean parsed ISDOC with a matching legal entity and partner and a partner line category. Email attachments also need an authenticated sender and a matching sender rule.',
         cancel: 'Cancel',
         channel: 'Channel',
         channelAny: 'Any channel',
@@ -1034,8 +1055,8 @@ export const resources = {
           confirmDocumentsOnly:
             'a person confirms every one, because only Documents files automatically',
           confirmEvery: 'a person confirms every one',
-          confirmInvoiceParser:
-            'a person confirms every one until the ISDOC parser lands',
+          confirmInvoiceChecks:
+            'it may file without review after a clean ISDOC parse and matching legal entity and partner, otherwise a person confirms it',
           confirmNone: 'it is filed without review',
           destination: 'Where it goes',
           destinationDatasets: 'Datasets',
@@ -1056,7 +1077,7 @@ export const resources = {
           isDiscarded: '{{subject}} is discarded',
           kind: 'Document kind',
           kindNone: 'n/a',
-          lead: "Your rules above and a source's standing hint come first, including a rule's own auto-route; automatic filing still waits when the legal entity or a required field is missing, the read raised an issue, or the owner who saved the default is no longer an owner or admin.",
+          lead: "Your rules above and a source's standing hint come first, including a rule's own auto-route; automatic filing still waits when the legal entity or a required field is missing, the read raised an issue, or the owner who saved the default is no longer an owner or admin. Parsed email attachments also need an authenticated sender and a matching sender rule.",
           ownerOnly: 'Only an owner can change the defaults.',
           platformListTitle: 'Platform defaults',
           platformTitle: 'Defaults ({{total}})',
@@ -1124,8 +1145,6 @@ export const resources = {
         paused: 'Paused: author unavailable',
         pausedHelp:
           'The author is no longer an owner or admin. Adopt the rule to run it under your account.',
-        refusedNotAvailable:
-          'Auto-route is not available for an invoice kind yet. Turn it off or choose another kind.',
         refusedRuleLimit: 'This organization already has 200 enabled rules.',
         ruleInvalid:
           'The rule is incomplete: it needs at least one condition and one action, and a discard rule sets nothing else.',

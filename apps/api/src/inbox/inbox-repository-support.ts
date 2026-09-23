@@ -180,9 +180,11 @@ export async function loadItemFiles(
   return result.rows.map(toFile);
 }
 
+// The newest row of any provider, or of one provider when named (the detail's parsed row is the newest isdoc row).
 export async function loadLatestExtraction(
   transaction: PoolClient,
   itemId: string,
+  provider: string | null = null,
 ): Promise<InboxExtraction | null> {
   const result = await transaction.query<{
     confidence: string;
@@ -200,10 +202,10 @@ export async function loadLatestExtraction(
     `select id, provider, provider_version, detected_type, confidence::text as confidence, legal_entity_id,
             draft, field_confidences, reasons, issues, created_at
        from app.inbox_item_extraction
-      where item_id = $1
+      where item_id = $1 and ($2::text is null or provider = $2)
       order by created_at desc, id desc
       limit 1`,
-    [itemId],
+    [itemId, provider],
   );
   const row = result.rows[0];
 

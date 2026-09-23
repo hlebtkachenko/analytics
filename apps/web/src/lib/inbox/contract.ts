@@ -1,14 +1,59 @@
 import { z } from 'zod';
 
 import {
-  createDocumentRequestSchema,
+  checkDocumentBody,
+  createDocumentBodySchema,
   decimalStringSchema,
   documentDateSchema,
   documentKindSchema,
   identifierSchema,
+  invoiceLineCategorySchema,
+  isInvoiceKind,
 } from '../documents/contract.ts';
 
 // Mirrors apps/api inbox contract, which apps/web must not import.
+
+export const parsedIsdocLineSchema = z
+  .object({
+    baseAmount: z.string(),
+    description: z.string(),
+    lineKind: z.enum(['item', 'advance_deduction']).default('item'),
+    quantity: z.string().optional(),
+    unit: z.string().optional(),
+    unitPrice: z.string().optional(),
+    vatAmount: z.string().default('0'),
+    vatMode: z
+      .enum(['exempt', 'outside_scope', 'reverse_charge', 'standard'])
+      .optional(),
+    vatRate: z.string().optional(),
+  })
+  .passthrough();
+
+export const parsedIsdocInvoiceSchema = z
+  .object({
+    dueDate: z.string().optional(),
+    fxRate: z.string().optional(),
+    lines: z.array(parsedIsdocLineSchema),
+    roundingAmount: z.string().default('0'),
+    taxPointDate: z.string().optional(),
+    variableSymbol: z.string().optional(),
+  })
+  .passthrough();
+
+export const parsedIsdocDraftSchema = z
+  .object({
+    attributes: z.record(z.string(), z.string()).optional(),
+    currencyCode: z.string().optional(),
+    documentDate: z.string().optional(),
+    invoice: parsedIsdocInvoiceSchema.nullish(),
+    kind: documentKindSchema.nullable().optional(),
+    legalEntityId: identifierSchema.nullable().optional(),
+    partnerId: identifierSchema.nullable().optional(),
+    reference: z.string().optional(),
+    title: z.string().optional(),
+    totalAmount: z.string().optional(),
+  })
+  .passthrough();
 
 export const MAX_INBOX_PAGE_SIZE = 100;
 export const DEFAULT_INBOX_PAGE_SIZE = 25;
@@ -141,6 +186,10 @@ export const inboxIssueCodeSchema = z.enum([
   'entity_unresolved',
   'missing_required_field',
   'reference_conflict',
+  'amount_mismatch',
+  'vat_mismatch',
+  'unknown_partner',
+  'entity_conflict',
   ...inboxUnprocessableReasonSchema.options,
 ]);
 // The four bands the list filter names; the API owns the thresholds.
@@ -150,7 +199,13 @@ export const inboxConfidenceBandSchema = z.enum([
   'high',
   'unknown',
 ]);
-export const providerStepSchema = z.enum(['sniff', 'hint', 'rule', 'manual']);
+export const providerStepSchema = z.enum([
+  'sniff',
+  'parse',
+  'hint',
+  'rule',
+  'manual',
+]);
 
 export const tokenSchema = z.string().regex(TOKEN_PATTERN);
 const confidenceSchema = z.number().min(0).max(1);
@@ -423,12 +478,22 @@ export const inboxItemDetailSchema = z
     events: z.array(inboxEventSchema),
     extraction: inboxExtractionSchema.nullable(),
     files: z.array(inboxItemFileSchema),
+    // The newest isdoc row, which a route names by id so the server copies its invoice content.
+    parsed: inboxExtractionSchema.nullable(),
     // The item plus its sender, the sender's DKIM verdict, and the name of the rule that decided it, if any.
     item: inboxItemSchema
       .extend({
         decidedByRuleName: z.string().nullable(),
         sender: z.string().nullable(),
         senderAuthenticated: z.boolean(),
+      })
+      .strict(),
+    // The kind, entity and partner the server composes for a route; the route form pre-fills these, never the raw file.
+    routeSuggestion: z
+      .object({
+        kind: documentKindSchema.nullable(),
+        legalEntityId: identifierSchema.nullable(),
+        partnerId: identifierSchema.nullable(),
       })
       .strict(),
     // The effective target of the item's detected type, so the setting is visible on the item the day it lands.
@@ -542,13 +607,41 @@ export const routeInboxItemToDocumentRequestSchema = z
     // Names one candidate of a duplicate_probable answer, so the same route proceeds.
     acknowledgeDuplicateOf: identifierSchema.optional(),
     correctionReasons: correctionReasonsSchema.optional(),
-    document: createDocumentRequestSchema,
+    document: createDocumentBodySchema,
     fileBlobIds: z.array(identifierSchema).min(1).max(MAX_INBOX_FILES),
+    // The category every parsed item line takes; absent falls back to the partner's default.
+    lineCategory: invoiceLineCategorySchema.optional(),
+    // The item's newest isdoc row; the server copies its invoice, total and attributes, never the body's.
+    parsedExtractionId: identifierSchema.optional(),
     // Names the current document of a reference_conflict answer, so the new row becomes its next version.
     supersedesDocumentId: identifierSchema.optional(),
   })
   .strict()
-  .refine((body) => new Set(body.fileBlobIds).size === body.fileBlobIds.length);
+  .refine((body) => new Set(body.fileBlobIds).size === body.fileBlobIds.length)
+  .superRefine((body, context) => {
+    checkDocumentBody(body.document, context, { path: ['document'] });
+
+    if (
+      body.document.invoice === undefined &&
+      body.parsedExtractionId === undefined &&
+      isInvoiceKind(body.document.kind)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Invoice content is required for invoice kinds only.',
+        path: ['document', 'invoice'],
+      });
+    }
+  })
+  .refine(
+    (body) =>
+      body.parsedExtractionId === undefined ||
+      body.document.invoice === undefined,
+  )
+  .refine(
+    (body) =>
+      body.lineCategory === undefined || body.parsedExtractionId !== undefined,
+  );
 
 export const inboxDuplicateCandidateSchema = z
   .object({
@@ -778,11 +871,7 @@ export const putInboxRuleOrderRequestSchema = z
   .strict()
   .refine((body) => new Set(body.ruleIds).size === body.ruleIds.length);
 
-// The two refusals a rule write names beside the generic rejection code.
-export const inboxRuleRefusalCodeSchema = z.enum([
-  'rule_limit',
-  'not_available',
-]);
+export const inboxRuleRefusalCodeSchema = z.enum(['rule_limit']);
 
 // An intake secret: the fixed prefix, then 32 random bytes in base64url. The 8 characters after the prefix are shown.
 export const INTAKE_SECRET_PREFIX = 'bap_intake_';

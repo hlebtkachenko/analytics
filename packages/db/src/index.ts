@@ -90,6 +90,7 @@ export {
   inboxRoutingTargets,
   inboxRules,
   inboxUnprocessableReasons,
+  invoiceLineCategories,
   organizationInboxSettings,
   schema,
 } from './schema.js';
@@ -123,6 +124,7 @@ export type {
   InboxRoutingTarget,
   InboxRule,
   InboxUnprocessableReason,
+  InvoiceLineCategory,
   NewBlob,
   NewDocumentFile,
   NewInboxChannel,

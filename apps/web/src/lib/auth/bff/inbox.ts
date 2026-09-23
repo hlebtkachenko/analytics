@@ -1036,7 +1036,7 @@ export async function getInboxRules(
   );
 }
 
-// A 422 carries rule_limit or not_available beside the rejection code, so the page can name the refusal.
+// A 422 carries rule_limit beside the rejection code, so the page can name the refusal.
 export async function postInboxRule(
   auth: BffAuth,
   request: Request,

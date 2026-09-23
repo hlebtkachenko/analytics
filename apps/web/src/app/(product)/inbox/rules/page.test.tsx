@@ -543,7 +543,7 @@ describe('InboxRulesPage', () => {
       target: { value: 'received_invoice' },
     });
     expect(
-      within(dialog).getByText(/waits for the ISDOC parser/),
+      within(dialog).getByText(/only from a clean parsed ISDOC/),
     ).toBeVisible();
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
@@ -682,7 +682,7 @@ describe('InboxRulesPage', () => {
     });
     expect(
       within(dialog).getByText(
-        'A PDF goes to Documents as Received invoice; a person confirms every one until the ISDOC parser lands.',
+        'A PDF goes to Documents as Received invoice; it may file without review after a clean ISDOC parse and matching legal entity and partner, otherwise a person confirms it.',
       ),
     ).toBeVisible();
     fireEvent.change(within(dialog).getByLabelText('Document kind'), {
