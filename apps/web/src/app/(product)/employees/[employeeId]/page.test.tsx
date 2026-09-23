@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const employeeId = '00000000-0000-4000-8000-000000000001';
 const relationshipId = '00000000-0000-4000-8000-000000000002';
 const documentId = '00000000-0000-4000-8000-000000000003';
+const effectiveAtInput = '2026-02-01T10:00';
+const effectiveAtInstant = new Date(effectiveAtInput).toISOString();
 const accessMock = vi.hoisted(() =>
   vi.fn(() => ({
     access: { capabilities: { readHr: true, manageHr: true } },
@@ -174,7 +176,7 @@ describe('EmployeeDetailPage', () => {
     await screen.findByRole('button', { name: 'Reactivate' });
     fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));
     fireEvent.change(screen.getByLabelText('Effective at'), {
-      target: { value: '2026-02-01T10:00' },
+      target: { value: effectiveAtInput },
     });
     fireEvent.change(screen.getByLabelText('Reason'), {
       target: { value: '  Return  ' },
@@ -186,7 +188,7 @@ describe('EmployeeDetailPage', () => {
         expect.objectContaining({
           body: JSON.stringify({
             toStatus: 'active',
-            effectiveAt: '2026-02-01T09:00:00.000Z',
+            effectiveAt: effectiveAtInstant,
             reason: 'Return',
           }),
           method: 'POST',
@@ -214,7 +216,7 @@ describe('EmployeeDetailPage', () => {
       await screen.findByRole('button', { name: action });
       fireEvent.click(screen.getByRole('button', { name: action }));
       fireEvent.change(screen.getByLabelText('Effective at'), {
-        target: { value: '2026-02-01T10:00' },
+        target: { value: effectiveAtInput },
       });
       expect(screen.queryByLabelText('Reason')).toBeNull();
       fireEvent.click(
@@ -226,7 +228,7 @@ describe('EmployeeDetailPage', () => {
           expect.objectContaining({
             body: JSON.stringify({
               toStatus,
-              effectiveAt: '2026-02-01T09:00:00.000Z',
+              effectiveAt: effectiveAtInstant,
             }),
             method: 'POST',
           }),
