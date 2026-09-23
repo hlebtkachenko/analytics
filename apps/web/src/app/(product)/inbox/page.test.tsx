@@ -600,4 +600,17 @@ describe('InboxPage', () => {
     expect(screen.queryByLabelText('Select all rows')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Upload' })).toBeNull();
   });
+
+  it('offers Sources and Rules in the overflow menu and no Settings entry', async () => {
+    vi.stubGlobal('fetch', respondWith([inboxItem], true, true));
+
+    renderInboxPage();
+    await screen.findByText('Placeholder Holding');
+    // The overflow button is named by its icon description; its items mount in a portal.
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions' }));
+    const option = { selector: '.cds--overflow-menu-options__option-content' };
+    expect(await screen.findByText('Sources', option)).toBeInTheDocument();
+    expect(screen.getByText('Rules', option)).toBeInTheDocument();
+    expect(screen.queryByText('Settings', option)).toBeNull();
+  });
 });

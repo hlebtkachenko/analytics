@@ -18,11 +18,14 @@ export default async function OrganizationSettingsPage({
   const access = await readOrganizationAccess(organization.id);
   const canManageOrganization =
     access?.capabilities.manageOrganization ?? false;
+  // The inbox settings read refuses a member, so the storage section needs manageDocuments.
+  const canReadStorage = access?.capabilities.manageDocuments ?? false;
 
   return (
     <PageContainer>
       <SettingsView
         canManageOrganization={canManageOrganization}
+        canReadStorage={canReadStorage}
         organizationId={organization.id}
         workspaceName={organization.name}
         workspaceSlug={organization.slug}

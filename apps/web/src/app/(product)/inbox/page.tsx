@@ -65,6 +65,7 @@ import type {
   BulkInboxItemsResponse,
   InboxBulkAction,
   InboxConfidenceBand,
+  InboxDetectedType,
   InboxDiscardReason,
   InboxIssueCode,
   InboxItemCounts,
@@ -121,7 +122,7 @@ const detectedTypeIcons: Readonly<Record<string, typeof Document>> = {
   tabular: DataTable,
   text: Txt,
   unknown: DocumentUnknown,
-};
+} satisfies Record<InboxDetectedType, typeof Document>;
 
 // Fallback icon per payload kind when the detected type is missing or unmapped.
 const payloadIcons: Readonly<Record<string, typeof Document>> = {
@@ -797,7 +798,12 @@ export default function InboxPage() {
               </Button>
             ) : null}
             {canManage || canManageChannels ? (
-              <OverflowMenu aria-label={t('inbox.actions')} flipped size="md">
+              <OverflowMenu
+                aria-label={t('inbox.actions')}
+                flipped
+                iconDescription={t('inbox.actions')}
+                size="md"
+              >
                 {canManageChannels ? (
                   <OverflowMenuItem
                     href={withOrganization(
@@ -811,15 +817,6 @@ export default function InboxPage() {
                   <OverflowMenuItem
                     href={withOrganization('/inbox/rules', organization.slug)}
                     itemText={t('inbox.rules')}
-                  />
-                ) : null}
-                {canManageChannels ? (
-                  <OverflowMenuItem
-                    href={withOrganization(
-                      '/inbox/settings',
-                      organization.slug,
-                    )}
-                    itemText={t('inbox.settings')}
                   />
                 ) : null}
               </OverflowMenu>

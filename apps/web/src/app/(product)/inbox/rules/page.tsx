@@ -51,10 +51,11 @@ import type {
   InboxRuleRefusalCode,
 } from '../../../../lib/inbox/contract.ts';
 import { inboxDiscardReasonLabelKeys } from '../../../../lib/inbox/labels.ts';
-import { useLegalEntities } from '../../../../lib/organizations/use-legal-entities';
+import { useLegalEntityList } from '../../../../lib/organizations/use-legal-entities';
 import { useOrganizationAccess } from '../../../../lib/organizations/use-organization-access';
 import { useOrganizationSelection } from '../../../../lib/organizations/use-organization-selection';
 import styles from './page.module.scss';
+import RoutingDefaults from './routing-defaults';
 
 type Loaded = Readonly<{ channels: InboxChannel[]; rules: InboxRule[] }>;
 type LoadResult = Readonly<{ key: string; value?: Loaded }>;
@@ -167,7 +168,8 @@ export default function InboxRulesPage() {
   const organization = useOrganizationSelection();
   const organizationId = organization.organizationId;
   const { access, state: accessState } = useOrganizationAccess(organizationId);
-  const legalEntities = useLegalEntities(organizationId);
+  const entityList = useLegalEntityList(organizationId);
+  const legalEntities = entityList ?? [];
   const [refreshCount, setRefreshCount] = useState(0);
   const [result, setResult] = useState<LoadResult>();
   const [form, setForm] = useState<RuleForm | undefined>(() =>
@@ -237,7 +239,6 @@ export default function InboxRulesPage() {
   const channelNames = new Map(
     channels.map((channel) => [channel.id, channel.name]),
   );
-
   function settle(outcome: RuleWriteOutcome): boolean {
     if (outcome.kind === 'refused') {
       setRefusal(outcome.code);
@@ -643,6 +644,12 @@ export default function InboxRulesPage() {
                 : 'ready'
         }
         title={t('inboxRules.listTitle')}
+      />
+      <RoutingDefaults
+        accessState={accessState}
+        canManageOrganization={access?.capabilities.manageOrganization ?? false}
+        entityList={entityList}
+        organizationId={organizationId}
       />
       {form === undefined ? null : (
         <Modal

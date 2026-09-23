@@ -199,7 +199,7 @@ describe('InboxChannelsPage', () => {
     renderPage();
 
     expect(
-      await screen.findByRole('heading', { level: 1, name: 'Channels' }),
+      await screen.findByRole('heading', { level: 1, name: 'Sources' }),
     ).toBeVisible();
     expect(await screen.findByText('Placeholder push')).toBeVisible();
     const table = screen.getByRole('table');

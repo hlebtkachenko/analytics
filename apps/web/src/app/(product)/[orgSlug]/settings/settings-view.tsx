@@ -20,9 +20,11 @@ import {
   normalizeOrganizationSlug,
   organizationSlugSchema,
 } from '../../../../lib/organizations/slug';
+import StorageQuota from './storage-quota';
 
 type SettingsViewProperties = Readonly<{
   canManageOrganization: boolean;
+  canReadStorage: boolean;
   organizationId: string;
   workspaceName: string;
   workspaceSlug: string;
@@ -30,6 +32,7 @@ type SettingsViewProperties = Readonly<{
 
 export default function SettingsView({
   canManageOrganization,
+  canReadStorage,
   organizationId,
   workspaceName,
   workspaceSlug,
@@ -159,6 +162,13 @@ export default function SettingsView({
           ) : null}
         </Stack>
       </Form>
+
+      {canReadStorage ? (
+        <StorageQuota
+          canManageOrganization={canManageOrganization}
+          organizationId={organizationId}
+        />
+      ) : null}
 
       <section aria-labelledby="settings-danger-heading">
         <h2 id="settings-danger-heading">{t('settings.leave.heading')}</h2>
