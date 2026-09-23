@@ -29,8 +29,10 @@ const INVOICE_LINE_SOURCE = `from app.invoice_line as il
           join app.document as d
             on d.id = il.document_id and d.organization_id = il.organization_id`;
 
+// A superseded version keeps its invoice content but loses its event, so the invoice reads skip it like the event reads do.
 const INVOICE_LINE_FILTER = `il.organization_id = $1
-            and ($2::uuid[] is null or d.legal_entity_id = any($2::uuid[]))`;
+            and ($2::uuid[] is null or d.legal_entity_id = any($2::uuid[]))
+            and d.is_current`;
 
 // One pass per grouping answers both sides, so a debit and a credit total never cost two scans.
 const DEBIT_SUM = `coalesce(sum(l.amount) filter (where l.side = 'debit'), 0.0000)::text as debit`;
@@ -56,6 +58,7 @@ const DOCUMENTS_QUERY = `select d.id,
        on p.id = d.partner_id and p.organization_id = d.organization_id
     where d.organization_id = $1
       and ($2::uuid[] is null or d.legal_entity_id = any($2::uuid[]))
+      and d.is_current
     order by d.document_date desc, d.id desc
     limit $3`;
 

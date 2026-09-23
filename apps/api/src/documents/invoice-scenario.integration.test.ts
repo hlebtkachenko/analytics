@@ -38,6 +38,7 @@ import { readDocumentAnalytics } from './analytics-repository.js';
 import { DocumentController } from './document.controller.js';
 import {
   createDocument,
+  createDocumentInTransaction,
   createDocumentLink,
   deleteDocument,
   deleteDocumentLink,
@@ -47,6 +48,8 @@ import {
   updateDocument,
   DocumentRepository,
 } from './document-repository.js';
+import { supersedeDocument } from '../inbox/inbox-repository.js';
+import { createDocumentRequestSchema } from './contract.js';
 import { createPartner } from './partner-repository.js';
 
 const postgresImage =
@@ -163,11 +166,12 @@ function poolFor(role: DatabaseRole): DatabasePool {
 
 async function asTenant<T>(
   operation: (transaction: PoolClient) => Promise<T>,
+  context: TenantContext = creator,
 ): Promise<T> {
   const client = await apiPool.connect();
 
   try {
-    return await withTenantContext(client, creator, operation);
+    return await withTenantContext(client, context, operation);
   } finally {
     client.release();
   }
@@ -184,11 +188,61 @@ async function rows<T extends Record<string, unknown>>(
   });
 }
 
-function postDocument(body: Record<string, unknown>): request.Test {
+function postDocument(
+  body: Record<string, unknown>,
+  organizationId = ORGANIZATION_ID,
+): request.Test {
   return request(application.getHttpServer())
-    .post(`/v1/organizations/${ORGANIZATION_ID}/documents`)
+    .post(`/v1/organizations/${organizationId}/documents`)
     .set('Authorization', 'Bearer caller')
     .send(body);
+}
+
+function getAnalytics(organizationId: string, search = ''): request.Test {
+  return request(application.getHttpServer())
+    .get(`/v1/organizations/${organizationId}/documents/analytics${search}`)
+    .set('Authorization', 'Bearer caller')
+    .expect(200);
+}
+
+// A fresh organization owned by the same user, so a describe block can seed its own rows without moving the scenario's numbers.
+async function seedOrganization(
+  organizationId: string,
+): Promise<TenantContext> {
+  const migrator = await migratorPool.connect();
+
+  try {
+    await migrator.query('begin');
+    await migrator.query('set local role bap_owner');
+    await migrator.query(
+      'insert into auth.organization (id, name, slug) values ($1, $1, $1)',
+      [organizationId],
+    );
+    await migrator.query(
+      "insert into auth.member (id, organization_id, user_id, role) values ($1, $2, 'user-1', 'owner')",
+      [`member-${organizationId}`, organizationId],
+    );
+    await migrator.query('commit');
+  } finally {
+    migrator.release();
+  }
+
+  return { ...creator, organizationId };
+}
+
+async function seedEntity(
+  context: TenantContext,
+  name: string,
+): Promise<string> {
+  return asTenant(async (transaction) => {
+    const created = await transaction.query<{ id: string }>(
+      `insert into app.legal_entity (organization_id, name, kind, created_by)
+       values ($1, $2, 'company', $3)
+       returning id`,
+      [context.organizationId, name, context.userId],
+    );
+    return created.rows[0]?.id ?? '';
+  }, context);
 }
 
 beforeAll(async () => {
@@ -797,5 +851,88 @@ describe('a five month invoice with mixed VAT, a deducted advance and rounding',
         created.body.document.id,
       ]),
     ).toEqual([{ total_amount: '100.0000' }]);
+  });
+});
+
+describe('the analytics after an invoice is replaced by a newer version', () => {
+  const organizationId = 'org-versions';
+  let context: TenantContext;
+  let currentId = '';
+
+  // Two versions of one invoice: the first carries 1000 of base, the one replacing it 400.
+  function versionBody(
+    legalEntityId: string,
+    baseAmount: string,
+    vatAmount: string,
+  ) {
+    return {
+      documentDate: '2026-03-10',
+      invoice: {
+        lines: [
+          {
+            baseAmount,
+            category: 'services',
+            description: 'placeholder versioned line',
+            vatAmount,
+            vatMode: 'standard',
+            vatRate: '21.00',
+          },
+        ],
+      },
+      kind: 'issued_invoice',
+      legalEntityId,
+      reference: 'PLACEHOLDER-VERSIONED',
+      title: 'Placeholder versioned invoice',
+    };
+  }
+
+  beforeAll(async () => {
+    context = await seedOrganization(organizationId);
+    const legalEntityId = await seedEntity(context, 'Placeholder Versions');
+    const first = await postDocument(
+      versionBody(legalEntityId, '1000.00', '210.00'),
+      organizationId,
+    ).expect(201);
+
+    // The inbox version route, without the inbox: flip the old row, then insert its successor in one transaction.
+    currentId = await asTenant(async (transaction) => {
+      await supersedeDocument(transaction, first.body.document.id);
+      const created = await createDocumentInTransaction(transaction, {
+        ...context,
+        body: createDocumentRequestSchema.parse(
+          versionBody(legalEntityId, '400.00', '84.00'),
+        ),
+        legalEntityIds: null,
+        supersedes: { documentId: first.body.document.id, version: 1 },
+      });
+      return created?.document.id ?? '';
+    }, context);
+  });
+
+  it('lists and sums only the current version, matching the event based totals', async () => {
+    const analytics = (await getAnalytics(organizationId)).body;
+
+    expect(analytics.documents.map((row: { id: string }) => row.id)).toEqual([
+      currentId,
+    ]);
+    expect(analytics.byVatRegime).toEqual([
+      {
+        baseAmount: '400.0000',
+        lineCount: 1,
+        lineKind: 'item',
+        vatAmount: '84.0000',
+        vatMode: 'standard',
+        vatRate: '21.00',
+      },
+    ]);
+    expect(
+      analytics.byAccount.find(
+        (row: { accountCode: string }) => row.accountCode === '343',
+      ),
+    ).toMatchObject({ credit: '84.0000', debit: '0.0000' });
+    expect(analytics.stats).toMatchObject({
+      documentCount: 1,
+      invoiceLineCount: 1,
+    });
   });
 });
