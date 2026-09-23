@@ -68,13 +68,20 @@ export const entityScopeRequestSchema = z.discriminatedUnion('mode', [
 // Capabilities only tell the UI which actions to show, the database stays the enforcement layer.
 export const organizationCapabilitiesSchema = z
   .object({
+    approvePayroll: z.boolean(),
     createEntities: z.boolean(),
     deleteEntities: z.boolean(),
     manageDocuments: z.boolean(),
     manageEntityAccess: z.boolean(),
+    manageHr: z.boolean(),
+    managePayroll: z.boolean(),
+    manageSensitiveHr: z.boolean(),
     manageMembers: z.boolean(),
     manageOrganization: z.boolean(),
     readDocuments: z.boolean(),
+    readHr: z.boolean(),
+    readPayroll: z.boolean(),
+    readSensitiveHr: z.boolean(),
     updateEntities: z.boolean(),
     uploadData: z.boolean(),
     useAi: z.boolean(),
@@ -133,6 +140,25 @@ export type OrganizationCapabilities = z.infer<
 >;
 export type OrganizationRole = z.infer<typeof organizationRoleSchema>;
 
+export const hrAccessRoleSchema = z.enum([
+  'hr_admin',
+  'payroll_specialist',
+  'payroll_approver',
+  'sensitive_hr',
+  'hr_auditor',
+]);
+export type HrAccessRole = z.infer<typeof hrAccessRoleSchema>;
+
+export const hrAssignmentCapabilities: Readonly<
+  Record<HrAccessRole, readonly (keyof OrganizationCapabilities)[]>
+> = {
+  hr_admin: ['readHr', 'manageHr'],
+  hr_auditor: ['readHr', 'readPayroll'],
+  payroll_approver: ['readPayroll', 'approvePayroll'],
+  payroll_specialist: ['readPayroll', 'managePayroll'],
+  sensitive_hr: ['readSensitiveHr', 'manageSensitiveHr'],
+};
+
 export interface MembershipResolution {
   emailVerified: boolean;
   role: OrganizationRole | null;
@@ -147,9 +173,16 @@ const capabilitiesByRole: Readonly<
     deleteEntities: false,
     manageDocuments: true,
     manageEntityAccess: false,
+    manageHr: true,
+    managePayroll: false,
+    manageSensitiveHr: false,
     manageMembers: false,
     manageOrganization: false,
     readDocuments: true,
+    readHr: true,
+    readPayroll: false,
+    readSensitiveHr: false,
+    approvePayroll: false,
     updateEntities: true,
     uploadData: true,
     useAi: true,
@@ -159,9 +192,16 @@ const capabilitiesByRole: Readonly<
     deleteEntities: false,
     manageDocuments: false,
     manageEntityAccess: false,
+    manageHr: false,
+    managePayroll: false,
+    manageSensitiveHr: false,
     manageMembers: false,
     manageOrganization: false,
     readDocuments: true,
+    readHr: false,
+    readPayroll: false,
+    readSensitiveHr: false,
+    approvePayroll: false,
     updateEntities: false,
     uploadData: false,
     useAi: true,
@@ -171,9 +211,16 @@ const capabilitiesByRole: Readonly<
     deleteEntities: true,
     manageDocuments: true,
     manageEntityAccess: true,
+    manageHr: true,
+    managePayroll: true,
+    manageSensitiveHr: true,
     manageMembers: true,
     manageOrganization: true,
     readDocuments: true,
+    readHr: true,
+    readPayroll: true,
+    readSensitiveHr: true,
+    approvePayroll: true,
     updateEntities: true,
     uploadData: true,
     useAi: true,

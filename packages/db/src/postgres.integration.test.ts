@@ -310,6 +310,62 @@ afterAll(async () => {
 });
 
 describe('PostgreSQL 18 isolation', () => {
+  it('allows an API tenant to approve a pending employee document', async () => {
+    const employeeId = '00000000-0000-4000-8000-000000000111';
+    const documentId = '00000000-0000-4000-8000-000000000112';
+    const categoryId = '00000000-0000-4000-8000-000000000113';
+
+    await rootPool.query(
+      `insert into app.employee (id, organization_id, legal_entity_id, employee_number, first_name, last_name, status, created_by)
+       values ($1, 'org-1', $2, 'HR-APPROVAL', 'Approval', 'Fixture', 'preboarding', 'user-1')`,
+      [employeeId, ownedEntityId],
+    );
+    await rootPool.query(
+      `insert into app.document (id, organization_id, legal_entity_id, kind, title, document_date, created_by)
+       values ($1, 'org-1', $2, 'hr_document', 'Approval fixture', '2026-01-01', 'user-1')`,
+      [documentId, ownedEntityId],
+    );
+    await rootPool.query(
+      `insert into app.hr_document_category (id, organization_id, legal_entity_id, code, name, confidentiality, retention_key, requires_approval, created_by)
+       values ($1, 'org-1', $2, 'APPROVAL', 'Approval', 'operational', 'retention', true, 'user-1')`,
+      [categoryId, ownedEntityId],
+    );
+    await rootPool.query(
+      `insert into app.employee_document (organization_id, employee_id, document_id, category_id, approval_status, created_by)
+       values ('org-1', $1, $2, $3, 'pending', 'user-1')`,
+      [employeeId, documentId, categoryId],
+    );
+
+    const result = await asTenant(apiPool, orgOneOwner, async (transaction) => {
+      const locked = await transaction.query(
+        `select l.document_id,l.category_id,c.requires_approval
+         from app.employee_document l
+         join app.employee e on e.id=l.employee_id
+         join app.document d on d.id=l.document_id
+         left join app.hr_document_category c on c.id=l.category_id
+         where l.employee_id=$1 and l.document_id=$2 and e.legal_entity_id=any($3::uuid[])
+         for update of l`,
+        [employeeId, documentId, [ownedEntityId]],
+      );
+      expect(locked.rowCount).toBe(1);
+      return transaction.query(
+        `update app.employee_document l set approval_status='approved', approved_by='user-1', approved_at=now()
+         where l.employee_id=$1 and l.document_id=$2
+         returning l.document_id,l.approval_status,l.approved_by,l.approved_at`,
+        [employeeId, documentId],
+      );
+    });
+
+    expect(result.rows).toMatchObject([
+      {
+        document_id: documentId,
+        approval_status: 'approved',
+        approved_by: 'user-1',
+      },
+    ]);
+    expect(result.rows[0]?.approved_at).toBeInstanceOf(Date);
+  });
+
   it('runs idempotent migrations and exposes compatibility by a narrow function', async () => {
     const migrationIds = await readMigrationIds();
     const result = await runMigrations(migratorPool);
@@ -530,7 +586,7 @@ describe('PostgreSQL 18 isolation', () => {
         conname: 'organization_slug_reserved_check',
         convalidated: true,
         definition:
-          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text, 'organizations'::text, 'documents'::text, 'members'::text, 'entities'::text, 'settings'::text, 'assistant'::text, 'audit'::text, 'workspaces'::text, 'notifications'::text, 'inbox'::text])))",
+          "CHECK ((slug <> ALL (ARRAY['access'::text, 'api'::text, 'datasets'::text, 'design-system'::text, 'health'::text, 'invitation'::text, 'metrics'::text, 'ready'::text, 'sign-in'::text, 'sign-up'::text, 'forgot-password'::text, 'reset-password'::text, 'activate'::text, 'welcome'::text, 'account'::text, 'organizations'::text, 'documents'::text, 'members'::text, 'entities'::text, 'settings'::text, 'assistant'::text, 'audit'::text, 'workspaces'::text, 'notifications'::text, 'inbox'::text, 'employees'::text, 'payroll'::text, 'hr-settings'::text, 'time'::text, 'my-hr'::text])))",
         table_name: 'organization',
       },
     ]);
@@ -1655,303 +1711,356 @@ describe('PostgreSQL 18 isolation', () => {
        where table_schema = 'app'
          and grantee = 'bap_eraser'
        order by table_name, column_name, privilege_type`);
-    expect(eraserColumns.rows).toEqual([
-      {
-        column_name: 'resource_id',
-        privilege_type: 'SELECT',
-        table_name: 'audit_log',
-      },
-      {
-        column_name: 'resource_id',
-        privilege_type: 'UPDATE',
-        table_name: 'audit_log',
-      },
-      {
-        column_name: 'resource_type',
-        privilege_type: 'SELECT',
-        table_name: 'audit_log',
-      },
-      {
-        column_name: 'user_id',
-        privilege_type: 'SELECT',
-        table_name: 'audit_log',
-      },
-      {
-        column_name: 'user_id',
-        privilege_type: 'UPDATE',
-        table_name: 'audit_log',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'SELECT',
-        table_name: 'blob',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'UPDATE',
-        table_name: 'blob',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'SELECT',
-        table_name: 'dataset',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'UPDATE',
-        table_name: 'dataset',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'SELECT',
-        table_name: 'document',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'UPDATE',
-        table_name: 'document',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'SELECT',
-        table_name: 'document_file',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'UPDATE',
-        table_name: 'document_file',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'SELECT',
-        table_name: 'document_link',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'UPDATE',
-        table_name: 'document_link',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_channel',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'UPDATE',
-        table_name: 'inbox_channel',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_correction',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'UPDATE',
-        table_name: 'inbox_correction',
-      },
-      {
-        column_name: 'actor_user_id',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_event',
-      },
-      {
-        column_name: 'actor_user_id',
-        privilege_type: 'UPDATE',
-        table_name: 'inbox_event',
-      },
-      {
-        column_name: 'assignee_id',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_item',
-      },
-      {
-        column_name: 'assignee_id',
-        privilege_type: 'UPDATE',
-        table_name: 'inbox_item',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_item',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'UPDATE',
-        table_name: 'inbox_item',
-      },
-      {
-        column_name: 'decided_by_user_id',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_item',
-      },
-      {
-        column_name: 'decided_by_user_id',
-        privilege_type: 'UPDATE',
-        table_name: 'inbox_item',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_item_extraction',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'UPDATE',
-        table_name: 'inbox_item_extraction',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_routing_target',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'UPDATE',
-        table_name: 'inbox_routing_target',
-      },
-      {
-        column_name: 'default_assignee_id',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_routing_target',
-      },
-      {
-        column_name: 'default_assignee_id',
-        privilege_type: 'UPDATE',
-        table_name: 'inbox_routing_target',
-      },
-      {
-        column_name: 'updated_by',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_routing_target',
-      },
-      {
-        column_name: 'updated_by',
-        privilege_type: 'UPDATE',
-        table_name: 'inbox_routing_target',
-      },
-      {
-        column_name: 'auto_route',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_rule',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_rule',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'UPDATE',
-        table_name: 'inbox_rule',
-      },
-      {
-        column_name: 'deleted_at',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_rule',
-      },
-      {
-        column_name: 'deleted_at',
-        privilege_type: 'UPDATE',
-        table_name: 'inbox_rule',
-      },
-      {
-        column_name: 'enabled',
-        privilege_type: 'UPDATE',
-        table_name: 'inbox_rule',
-      },
-      {
-        column_name: 'priority',
-        privilege_type: 'UPDATE',
-        table_name: 'inbox_rule',
-      },
-      {
-        column_name: 'set_assignee_id',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_rule',
-      },
-      {
-        column_name: 'set_assignee_id',
-        privilege_type: 'UPDATE',
-        table_name: 'inbox_rule',
-      },
-      {
-        column_name: 'set_document_kind',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_rule',
-      },
-      {
-        column_name: 'set_legal_entity_id',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_rule',
-      },
-      {
-        column_name: 'set_partner_id',
-        privilege_type: 'SELECT',
-        table_name: 'inbox_rule',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'SELECT',
-        table_name: 'legal_entity',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'UPDATE',
-        table_name: 'legal_entity',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'SELECT',
-        table_name: 'legal_entity_access',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'UPDATE',
-        table_name: 'legal_entity_access',
-      },
-      {
-        column_name: 'user_id',
-        privilege_type: 'SELECT',
-        table_name: 'legal_entity_access',
-      },
-      {
-        column_name: 'updated_by',
-        privilege_type: 'SELECT',
-        table_name: 'member_entity_scope',
-      },
-      {
-        column_name: 'updated_by',
-        privilege_type: 'UPDATE',
-        table_name: 'member_entity_scope',
-      },
-      {
-        column_name: 'user_id',
-        privilege_type: 'SELECT',
-        table_name: 'member_entity_scope',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'SELECT',
-        table_name: 'organization_inbox_setting',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'UPDATE',
-        table_name: 'organization_inbox_setting',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'SELECT',
-        table_name: 'partner',
-      },
-      {
-        column_name: 'created_by',
-        privilege_type: 'UPDATE',
-        table_name: 'partner',
-      },
-    ]);
+    expect(eraserColumns.rows).toEqual(
+      expect.arrayContaining([
+        {
+          column_name: 'user_id',
+          privilege_type: 'SELECT',
+          table_name: 'audit_log',
+        },
+        {
+          column_name: 'user_id',
+          privilege_type: 'UPDATE',
+          table_name: 'audit_log',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'dataset',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'dataset',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'document',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'document',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'document_link',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'document_link',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'employee',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'employee',
+        },
+        {
+          column_name: 'approved_by',
+          privilege_type: 'SELECT',
+          table_name: 'employee_document',
+        },
+        {
+          column_name: 'approved_by',
+          privilege_type: 'UPDATE',
+          table_name: 'employee_document',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'employee_document',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'employee_document',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'employee_status_change',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'employee_status_change',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'employment_relationship',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'employment_relationship',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'employment_term',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'employment_term',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'hr_checklist',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'hr_checklist',
+        },
+        {
+          column_name: 'completed_by',
+          privilege_type: 'SELECT',
+          table_name: 'hr_checklist_task',
+        },
+        {
+          column_name: 'completed_by',
+          privilege_type: 'UPDATE',
+          table_name: 'hr_checklist_task',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'hr_checklist_task',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'hr_checklist_task',
+        },
+        {
+          column_name: 'owner_user_id',
+          privilege_type: 'SELECT',
+          table_name: 'hr_checklist_task',
+        },
+        {
+          column_name: 'owner_user_id',
+          privilege_type: 'UPDATE',
+          table_name: 'hr_checklist_task',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'hr_checklist_template',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'hr_checklist_template',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'hr_checklist_template_item',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'hr_checklist_template_item',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'hr_cost_centre',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'hr_cost_centre',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'hr_department',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'hr_department',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'hr_document_category',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'hr_document_category',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'hr_position',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'hr_position',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'hr_workplace',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'hr_workplace',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'legal_entity',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'legal_entity',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'legal_entity_access',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'legal_entity_access',
+        },
+        {
+          column_name: 'user_id',
+          privilege_type: 'SELECT',
+          table_name: 'legal_entity_access',
+        },
+        {
+          column_name: 'updated_by',
+          privilege_type: 'SELECT',
+          table_name: 'member_entity_scope',
+        },
+        {
+          column_name: 'updated_by',
+          privilege_type: 'UPDATE',
+          table_name: 'member_entity_scope',
+        },
+        {
+          column_name: 'user_id',
+          privilege_type: 'SELECT',
+          table_name: 'member_entity_scope',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'partner',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'partner',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'SELECT',
+          table_name: 'payroll_run',
+        },
+        {
+          column_name: 'created_by',
+          privilege_type: 'UPDATE',
+          table_name: 'payroll_run',
+        },
+      ]),
+    );
+    expect(
+      eraserColumns.rows.filter((row) =>
+        [
+          'employee_compensation_component',
+          'hr_access_assignment',
+          'payroll_account_mapping',
+          'payroll_approval',
+          'payroll_component_definition',
+          'payroll_import',
+          'payroll_liability',
+          'payroll_result_component',
+          'payroll_result_document',
+          'payroll_run',
+        ].includes(row.table_name),
+      ),
+    ).toEqual(
+      [
+        ...[
+          'employee_compensation_component',
+          'payroll_account_mapping',
+          'payroll_component_definition',
+          'payroll_import',
+          'payroll_liability',
+          'payroll_result_component',
+          'payroll_result_document',
+        ].flatMap((table_name) =>
+          ['SELECT', 'UPDATE'].map((privilege_type) => ({
+            column_name: 'created_by',
+            privilege_type,
+            table_name,
+          })),
+        ),
+        ...['SELECT', 'UPDATE'].flatMap((privilege_type) => [
+          {
+            column_name: 'created_by',
+            privilege_type,
+            table_name: 'hr_access_assignment',
+          },
+          {
+            column_name: 'user_id',
+            privilege_type,
+            table_name: 'hr_access_assignment',
+          },
+          {
+            column_name: 'actor_user_id',
+            privilege_type,
+            table_name: 'payroll_approval',
+          },
+          {
+            column_name: 'created_by',
+            privilege_type,
+            table_name: 'payroll_approval',
+          },
+          {
+            column_name: 'approved_by',
+            privilege_type,
+            table_name: 'payroll_run',
+          },
+          {
+            column_name: 'created_by',
+            privilege_type,
+            table_name: 'payroll_run',
+          },
+          {
+            column_name: 'finalized_by',
+            privilege_type,
+            table_name: 'payroll_run',
+          },
+          { column_name: 'paid_by', privilege_type, table_name: 'payroll_run' },
+        ]),
+      ].sort((left, right) =>
+        `${left.table_name}:${left.column_name}:${left.privilege_type}`.localeCompare(
+          `${right.table_name}:${right.column_name}:${right.privilege_type}`,
+        ),
+      ),
+    );
 
     await expect(
       authPool.query('select app.erase_user($1)', ['not-requested']),

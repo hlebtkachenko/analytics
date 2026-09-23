@@ -10,6 +10,7 @@ import {
   organizationAccessResponseSchema,
   organizationCapabilityNames,
   organizationIdentifierSchema,
+  hrAssignmentCapabilities,
   resolveCapabilities,
   resolveOrganizationAccess,
 } from './access-contract.js';
@@ -18,39 +19,60 @@ const entityId = '4a2b7c1e-9f5d-4c3a-8b21-6e0f7d5a4c39';
 const otherEntityId = '5b3c8d2f-0a6e-4d4b-9c32-7f1a8e6b5d40';
 
 const ownerCapabilities = {
+  approvePayroll: true,
   createEntities: true,
   deleteEntities: true,
   manageDocuments: true,
   manageEntityAccess: true,
+  manageHr: true,
+  managePayroll: true,
+  manageSensitiveHr: true,
   manageMembers: true,
   manageOrganization: true,
   readDocuments: true,
+  readHr: true,
+  readPayroll: true,
+  readSensitiveHr: true,
   updateEntities: true,
   uploadData: true,
   useAi: true,
 };
 
 const adminCapabilities = {
+  approvePayroll: false,
   createEntities: true,
   deleteEntities: false,
   manageDocuments: true,
   manageEntityAccess: false,
+  manageHr: true,
+  managePayroll: false,
+  manageSensitiveHr: false,
   manageMembers: false,
   manageOrganization: false,
   readDocuments: true,
+  readHr: true,
+  readPayroll: false,
+  readSensitiveHr: false,
   updateEntities: true,
   uploadData: true,
   useAi: true,
 };
 
 const memberCapabilities = {
+  approvePayroll: false,
   createEntities: false,
   deleteEntities: false,
   manageDocuments: false,
   manageEntityAccess: false,
+  manageHr: false,
+  managePayroll: false,
+  manageSensitiveHr: false,
   manageMembers: false,
   manageOrganization: false,
   readDocuments: true,
+  readHr: false,
+  readPayroll: false,
+  readSensitiveHr: false,
   updateEntities: false,
   uploadData: false,
   useAi: true,
@@ -133,6 +155,16 @@ describe('organization access contract', () => {
     expect(resolveCapabilities('owner')).toEqual(ownerCapabilities);
     expect(resolveCapabilities('admin')).toEqual(adminCapabilities);
     expect(resolveCapabilities('member')).toEqual(memberCapabilities);
+  });
+
+  it('uses only the fixed additive HR assignment expansions', () => {
+    expect(hrAssignmentCapabilities).toEqual({
+      hr_admin: ['readHr', 'manageHr'],
+      hr_auditor: ['readHr', 'readPayroll'],
+      payroll_approver: ['readPayroll', 'approvePayroll'],
+      payroll_specialist: ['readPayroll', 'managePayroll'],
+      sensitive_hr: ['readSensitiveHr', 'manageSensitiveHr'],
+    });
   });
 
   it('gives every role an independent capability object', () => {
