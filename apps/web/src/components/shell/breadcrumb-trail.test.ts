@@ -13,10 +13,9 @@ const navigationLabels: Readonly<Record<string, string>> = {
   'shell.nav.documentsAnalytics': 'Analytics',
   'shell.nav.documentsNew': 'New document',
   'shell.nav.inbox': 'Inbox',
-  'shell.nav.inboxChannels': 'Channels',
+  'shell.nav.inboxChannels': 'Sources',
   'shell.nav.inboxItem': 'Item',
   'shell.nav.inboxRules': 'Rules',
-  'shell.nav.inboxSettings': 'Settings',
   'shell.nav.notifications': 'Notifications',
   'shell.nav.settings': 'Settings',
   'shell.nav.singleDocument': 'Document',
@@ -84,20 +83,7 @@ describe('buildTrail', () => {
       {
         current: true,
         href: '/inbox/channels',
-        label: 'Channels',
-      },
-    ]);
-  });
-
-  it('names the inbox settings child under Inbox, not the top-level Settings module', () => {
-    expect(
-      buildTrail(['(product)', 'inbox', 'settings'], undefined, translate),
-    ).toEqual([
-      { current: false, href: '/inbox', label: 'Inbox' },
-      {
-        current: true,
-        href: '/inbox/settings',
-        label: 'Settings',
+        label: 'Sources',
       },
     ]);
   });

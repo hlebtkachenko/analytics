@@ -798,7 +798,12 @@ export default function InboxPage() {
               </Button>
             ) : null}
             {canManage || canManageChannels ? (
-              <OverflowMenu aria-label={t('inbox.actions')} flipped size="md">
+              <OverflowMenu
+                aria-label={t('inbox.actions')}
+                flipped
+                iconDescription={t('inbox.actions')}
+                size="md"
+              >
                 {canManageChannels ? (
                   <OverflowMenuItem
                     href={withOrganization(
@@ -812,15 +817,6 @@ export default function InboxPage() {
                   <OverflowMenuItem
                     href={withOrganization('/inbox/rules', organization.slug)}
                     itemText={t('inbox.rules')}
-                  />
-                ) : null}
-                {canManageChannels ? (
-                  <OverflowMenuItem
-                    href={withOrganization(
-                      '/inbox/settings',
-                      organization.slug,
-                    )}
-                    itemText={t('inbox.settings')}
                   />
                 ) : null}
               </OverflowMenu>
