@@ -5,3 +5,4 @@ export * from './bff/documents.ts';
 export * from './bff/inbox.ts';
 export * from './bff/legal-entities.ts';
 export * from './bff/members.ts';
+export * from './bff/hr.ts';

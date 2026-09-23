@@ -75,26 +75,38 @@ describe('server-side legal entity reads and writes', () => {
     );
   });
 
-  it('reads the access contract', async () => {
-    const fetchMock = vi.fn(async () =>
-      Response.json({
-        capabilities: {
-          createEntities: true,
-          deleteEntities: true,
-          manageDocuments: true,
-          manageEntityAccess: true,
-          manageMembers: true,
-          manageOrganization: true,
-          readDocuments: true,
-          updateEntities: true,
-          uploadData: true,
-          useAi: true,
-        },
-        entityScope: { mode: 'all' },
-        organizationId: 'organization-1',
-        role: 'owner',
-        service: 'application-api',
-      }),
+  it('reads the access contract and one member entity scope', async () => {
+    const fetchMock = vi.fn(async (input: string) =>
+      input.endsWith('/access')
+        ? Response.json({
+            capabilities: {
+              createEntities: true,
+              deleteEntities: true,
+              manageDocuments: true,
+              manageHr: true,
+              managePayroll: true,
+              manageSensitiveHr: true,
+              manageEntityAccess: true,
+              manageMembers: true,
+              manageOrganization: true,
+              readDocuments: true,
+              readHr: true,
+              readPayroll: true,
+              readSensitiveHr: true,
+              updateEntities: true,
+              uploadData: true,
+              useAi: true,
+              approvePayroll: true,
+            },
+            entityScope: { mode: 'all' },
+            organizationId: 'organization-1',
+            role: 'owner',
+            service: 'application-api',
+          })
+        : Response.json({
+            legalEntityIds: [LEGAL_ENTITY_ID],
+            mode: 'restricted',
+          }),
     );
     vi.stubGlobal('fetch', fetchMock);
 

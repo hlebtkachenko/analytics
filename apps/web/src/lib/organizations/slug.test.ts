@@ -49,6 +49,11 @@ describe('organization slugs', () => {
       'workspaces',
       'notifications',
       'inbox',
+      'employees',
+      'payroll',
+      'hr-settings',
+      'time',
+      'my-hr',
     ]);
   });
 

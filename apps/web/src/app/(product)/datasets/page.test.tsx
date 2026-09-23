@@ -44,13 +44,20 @@ const capabilities = {
   createEntities: false,
   deleteEntities: false,
   manageDocuments: false,
+  manageHr: false,
+  managePayroll: false,
+  manageSensitiveHr: false,
   manageEntityAccess: false,
   manageMembers: false,
   manageOrganization: false,
   readDocuments: true,
+  readHr: false,
+  readPayroll: false,
+  readSensitiveHr: false,
   updateEntities: false,
   uploadData: true,
   useAi: true,
+  approvePayroll: false,
 };
 
 const dataset = {

@@ -71,7 +71,9 @@ const reviewedImports = {
     'DataSet',
     'Document',
     'Email',
+    'Settings',
     'UserAvatar',
+    'UserMultiple',
   ],
   'components/shell/product-shell.tsx': [
     'Close',

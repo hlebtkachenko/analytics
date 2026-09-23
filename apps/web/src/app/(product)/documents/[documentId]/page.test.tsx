@@ -203,19 +203,26 @@ const candidate = {
 const patched: { body?: unknown } = {};
 const linked: { body?: unknown } = {};
 
-// The ten capabilities the access contract always carries, tuned per test.
+// The capabilities the access contract always carries, tuned per test.
 function capabilities(manageDocuments: boolean) {
   return {
     createEntities: false,
     deleteEntities: false,
     manageDocuments,
+    manageHr: false,
+    managePayroll: false,
+    manageSensitiveHr: false,
     manageEntityAccess: false,
     manageMembers: false,
     manageOrganization: false,
     readDocuments: true,
+    readHr: false,
+    readPayroll: false,
+    readSensitiveHr: false,
     updateEntities: false,
     uploadData: false,
     useAi: false,
+    approvePayroll: false,
   };
 }
 

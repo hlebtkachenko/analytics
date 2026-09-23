@@ -132,13 +132,20 @@ function capabilities(manageDocuments: boolean, readDocuments = true) {
     createEntities: false,
     deleteEntities: false,
     manageDocuments,
+    manageHr: false,
+    managePayroll: false,
+    manageSensitiveHr: false,
     manageEntityAccess: false,
     manageMembers: false,
     manageOrganization: false,
     readDocuments,
+    readHr: false,
+    readPayroll: false,
+    readSensitiveHr: false,
     updateEntities: false,
     uploadData: false,
     useAi: false,
+    approvePayroll: false,
   };
 }
 

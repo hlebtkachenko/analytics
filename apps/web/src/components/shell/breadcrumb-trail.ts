@@ -9,11 +9,16 @@ export const moduleLabelKeys: Readonly<Record<string, string>> = {
   assistant: 'shell.nav.assistant',
   datasets: 'shell.nav.datasets',
   documents: 'shell.nav.documents',
+  employees: 'shell.nav.employees',
   entities: 'shell.nav.entities',
+  'hr-settings': 'shell.nav.hrSettings',
   inbox: 'shell.nav.inbox',
   members: 'shell.nav.members',
+  'my-hr': 'shell.nav.myHr',
   notifications: 'shell.nav.notifications',
+  payroll: 'shell.nav.payroll',
   settings: 'shell.nav.settings',
+  time: 'shell.nav.time',
   workspaces: 'shell.nav.workspaces',
 };
 
@@ -31,9 +36,42 @@ const childLabelKeys: Readonly<
     analytics: 'shell.nav.documentsAnalytics',
     new: 'shell.nav.documentsNew',
   },
+  employees: {
+    new: 'shell.nav.employeesNew',
+    workflows: 'shell.nav.workflows',
+  },
+  'hr-settings': {
+    access: 'shell.nav.hrAccess',
+    checklists: 'shell.nav.checklists',
+    documents: 'shell.nav.documents',
+    structure: 'shell.nav.structure',
+  },
   inbox: {
     channels: 'shell.nav.inboxChannels',
     rules: 'shell.nav.inboxRules',
+  },
+  'my-hr': {
+    documents: 'shell.nav.documents',
+    leave: 'shell.nav.leave',
+    payslips: 'shell.nav.payslips',
+    time: 'shell.nav.time',
+  },
+  payroll: {
+    accounting: 'shell.nav.accounting',
+    corrections: 'shell.nav.corrections',
+    documents: 'shell.nav.documents',
+    import: 'shell.nav.payrollImport',
+    new: 'shell.nav.payrollNew',
+    results: 'shell.nav.results',
+    submissions: 'shell.nav.submissions',
+    taxes: 'shell.nav.taxes',
+    validation: 'shell.nav.validation',
+  },
+  time: {
+    approvals: 'shell.nav.approvals',
+    calendar: 'shell.nav.calendar',
+    leave: 'shell.nav.leave',
+    timesheets: 'shell.nav.timesheets',
   },
   workspaces: { new: 'shell.nav.workspacesNew' },
 };
@@ -41,7 +79,10 @@ const childLabelKeys: Readonly<
 // The label key an unknown child segment takes, so an opaque identifier never reaches the trail.
 const childFallbackKeys: Readonly<Record<string, string>> = {
   documents: 'shell.nav.singleDocument',
+  employees: 'shell.nav.singleEmployee',
   inbox: 'shell.nav.inboxItem',
+  payroll: 'shell.nav.singlePayrollRun',
+  time: 'shell.nav.singleTimeRecord',
 };
 
 function segmentLabel(
@@ -91,7 +132,12 @@ export function buildTrail(
     crumbs.push({
       current: parts.length === 1,
       href,
-      label: organization?.slug === first ? organization.name : first,
+      label:
+        organization?.slug === first
+          ? organization.name
+          : /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(first) || /^\d+$/.test(first)
+            ? 'Organization'
+            : first,
     });
     start = 1;
   }
