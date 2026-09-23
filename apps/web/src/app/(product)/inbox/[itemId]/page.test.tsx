@@ -152,6 +152,13 @@ function capabilities(manageDocuments: boolean) {
     createEntities: false,
     deleteEntities: false,
     manageDocuments,
+    manageHr: false,
+    managePayroll: false,
+    manageSensitiveHr: false,
+    readHr: false,
+    readPayroll: false,
+    readSensitiveHr: false,
+    approvePayroll: false,
     manageEntityAccess: false,
     manageMembers: false,
     manageOrganization: false,
@@ -1539,7 +1546,7 @@ describe('InboxItemPage with a parsed ISDOC invoice', () => {
 
     await screen.findByRole('option', { name: 'Choose a category' });
     expect(
-      screen.getByText('Choose a line category for the parsed lines.'),
+      await screen.findByText('Choose a line category for the parsed lines.'),
     ).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'File as document' }));
 
