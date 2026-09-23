@@ -1,6 +1,6 @@
 # Feature Implementation Records
 
-## Delivered and historical records
+## Current and historical records
 
 - [Inbox ISDOC and ISDOCX parser](2026-09-23-inbox-isdoc.md)
 - [Inbox settings fold into the Rules page](2026-09-23-inbox-settings-fold.md)
@@ -26,6 +26,30 @@
 - [Workspace list and create pages in Carbon, plus reserved-slug fix](2026-09-16-workspace-list-and-slug-reservation.md)
 - [Members page in Carbon](2026-09-16-workspace-members-page.md)
 - [Workspace settings page in Carbon](2026-09-16-workspace-settings-page.md)
+- [HR employees and payroll analytics](2026-09-18-hr-employees-payroll.md)
+  (implementation incomplete)
+- [HR Wave 1: employee lifecycle](2026-09-20-hr-wave-1-employee-lifecycle.md)
+  (delivered)
+- [HR Wave 2: payroll workflow and accounting](2026-09-20-hr-wave-2-payroll-workflow.md)
+  (delivered)
+- [HR Wave 3: time, leave, and absence](2026-09-20-hr-wave-3-time-leave.md)
+  (delivered)
+- [HR Wave 4: restricted employee dossier](2026-09-20-hr-wave-4-restricted-dossier.md)
+  (superseded, deferred extension)
+- [HR Wave 5: Czech payroll calculation](2026-09-20-hr-wave-5-payroll-calculation.md)
+  (superseded, deferred extension)
+- [HR Wave 6: statutory exports](2026-09-20-hr-wave-6-statutory-exports.md)
+  (superseded, deferred extension)
+- [HR Wave 7: self-service, analytics, and operations](2026-09-20-hr-wave-7-self-service-analytics.md)
+  (superseded)
+- [HR Wave 4: employee self-service](2026-09-21-hr-wave-4-self-service.md)
+  (active)
+- [HR Wave 5: notifications and deadlines](2026-09-21-hr-wave-5-notifications.md)
+  (active)
+- [HR Wave 6: supplied-input payroll calculation](2026-09-21-hr-wave-6-supplied-payroll-calculation.md)
+  (active)
+- [HR Wave 7: analytics and operational closure](2026-09-21-hr-wave-7-analytics-operations.md)
+  (active)
 - [Document analytics page and documents demo](2026-09-15-document-analytics-page.md)
 - [Invoice line periods, advance deductions and rounding](2026-09-15-invoice-periods-advances.md)
 - [Documents register and derived economic events](2026-09-14-documents-register.md)

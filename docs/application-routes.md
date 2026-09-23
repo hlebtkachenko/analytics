@@ -21,19 +21,23 @@ holds the signed-in identity and workspace role, the account links, the
 light/dark/system theme control, and sign out.
 
 The left icon rail (Carbon `SideNav` with `isRail`) is the whole-app navigation
-to these five top-level destinations, plus a workspace section (Members,
+to these nine top-level destinations, plus a workspace section (Members,
 Entities, Settings) shown only while an organization is active. The rail, its
 labels, its icons, and its active state are rendered from the `railDestinations`
 array in `components/shell/product-navigation.ts`, which is the single place a
 new destination is registered:
 
-| Label      | Route         | Purpose                                     |
-| ---------- | ------------- | ------------------------------------------- |
-| Workspaces | `/workspaces` | List, create, and enter workspaces          |
-| Datasets   | `/datasets`   | Ingest, list, inspect, export, and chat     |
-| Inbox      | `/inbox`      | Drop files, review them, route to Documents |
-| Documents  | `/documents`  | Register documents and read derived events  |
-| Account    | `/account`    | Profile, security, preferences, and access  |
+| Label       | Route                    | Purpose                                        |
+| ----------- | ------------------------ | ---------------------------------------------- |
+| Datasets    | `/datasets`              | Ingest, list, inspect, export, and chat        |
+| Inbox       | `/inbox`                 | Drop files, review them, route to Documents    |
+| Documents   | `/documents`             | Register documents and read derived events     |
+| Employees   | `/employees`             | HR directory and employee workflows            |
+| Time        | `/time`                  | HR team time, leave, and approvals             |
+| My HR       | `/my-hr`                 | Bound employee self-service                    |
+| Payroll     | `/payroll`               | Payroll import, runs, and workflow             |
+| HR settings | `/hr-settings/structure` | HR references, access, checklists, and payroll |
+| Account     | `/account`               | Profile, security, preferences, and access     |
 
 The header hamburger toggles a pinned expanded rail, persisted in the `bap_rail`
 cookie. The rail's `aria-label` is "Side navigation", and the hamburger button
@@ -54,6 +58,22 @@ do not add breadcrumbs.
 
 The `bap_theme` and `bap_rail` preference cookies hold only enum values, are not
 secrets, and are validated with zod on read.
+
+## HR delivery state
+
+Waves 0-4 are implemented in the current worktree. `/employees` includes
+lifecycle, employment, compensation, time, leave, payroll, documents, and
+workflows. `/payroll` includes imports and the run workflow. `/time` provides
+team time and leave views; `/my-hr` provides only a bound user's profile,
+operational documents, finalized payslips, timesheets, and leave requests.
+`/hr-settings` provides reference data, access assignments, checklists, and
+payroll setup.
+
+Wave 4 browser-gate completion is not claimed. Waves 5-7, notifications and
+deadlines, supplied-input payroll calculation, and analytics/operational
+closure, remain outstanding. See
+[HR execution tasks](planning/hr-execution-tasks.md) for delivery and gate
+status.
 
 ## Browser pages
 
@@ -105,10 +125,10 @@ policy, and verification-delivery boundary before or around Better Auth
 dispatch. The complete endpoint inventory is in
 [authentication](authentication.md).
 
-The browser can call exactly 43 fixed BFF-to-service route shapes. Each requires
-a verified opaque-cookie session, mints a short-lived in-memory resource JWT for
-1 outbound request, targets a compile-time internal origin, and validates the
-response before returning it. There is no catch-all service proxy.
+The browser can call exactly 156 fixed BFF-to-service route shapes. Each
+requires a verified opaque-cookie session, mints a short-lived in-memory
+resource JWT for 1 outbound request, targets a compile-time internal origin, and
+validates the response before returning it. There is no catch-all service proxy.
 
 | Browser route                                                                                                        | Internal target                     | Result                                                                                                                                                                                                                       |
 | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
