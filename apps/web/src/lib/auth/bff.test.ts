@@ -1369,6 +1369,22 @@ const documentAnalytics = {
       month: '2026-01-01',
     },
   ],
+  byMonthTotals: [
+    {
+      expense: '5000.0000',
+      month: '2026-01-01',
+      revenue: '0.0000',
+      vatBalance: '-1050.0000',
+    },
+  ],
+  byPartner: [
+    {
+      issued: '0.0000',
+      partnerId: '00000000-0000-4000-8000-000000000030',
+      partnerName: 'Placeholder Supplier',
+      received: '6050.0000',
+    },
+  ],
   byVatRegime: [
     {
       baseAmount: '5000.0000',
@@ -1379,6 +1395,7 @@ const documentAnalytics = {
       vatRate: '21',
     },
   ],
+  currencyCodes: ['CZK'],
   documents: [
     {
       advanceTotal: '0.0000',
@@ -1400,7 +1417,7 @@ const documentAnalytics = {
     elapsedMs: 12,
     eventLineCount: 10,
     invoiceLineCount: 5,
-    queryCount: 6,
+    queryCount: 9,
   },
 };
 
@@ -1682,6 +1699,11 @@ const inboxDetail = {
     senderAuthenticated: false,
   },
   parsed: null,
+  routeSuggestion: {
+    kind: 'other',
+    legalEntityId: null,
+    partnerId: null,
+  },
   routingTarget: {
     auto: 'never',
     autoThreshold: null,
@@ -2921,7 +2943,7 @@ describe('inbox rules', () => {
     expect((await response.json()).rules).toEqual([rule]);
   });
 
-  it('creates a rule, passes the two 422 codes through, and refuses a bad body', async () => {
+  it('creates a rule, passes rule_limit through, and refuses a bad body', async () => {
     let posts = 0;
     const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe(
@@ -2966,10 +2988,7 @@ describe('inbox rules', () => {
       error: 'inbox_rule_rejected',
     });
     expect(invoice.status).toBe(422);
-    expect(await invoice.json()).toEqual({
-      code: 'not_available',
-      error: 'inbox_rule_rejected',
-    });
+    expect(await invoice.json()).toEqual({ error: 'inbox_rule_rejected' });
     expect(await unknownCode.json()).toEqual({ error: 'inbox_rule_rejected' });
     expect(noCondition.status).toBe(400);
     expect(noAction.status).toBe(400);

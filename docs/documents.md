@@ -510,12 +510,22 @@ and narrows to nothing if any requested id is outside the scope; none given
 reads the whole caller scope. It publishes the invoice list capped at 50 rows,
 expense and revenue by month of `effective_date` and account, by `activity_code`
 on expense and revenue accounts, VAT by line kind and regime, and totals by
-account. Every query filters by `organization_id`, the event line aggregates
-read the caller's entity scope from `app.economic_event.legal_entity_id` rather
-than joining the register, and each grouping reads both sides in one pass with
+account. The invoice list and the VAT regime totals read only current versions
+(`is_current`), like the event aggregates, whose superseded events are deleted.
+For the page charts it also publishes `byMonthTotals`, the 12 calendar months
+ending at the newest month with data (empty months as zero) with revenue (credit
+minus debit on revenue accounts), expense (debit minus credit on expense
+accounts) and `vatBalance` (credit minus debit on 343, output minus input VAT);
+`byPartner`, the 10 largest partners by printed `app.document.total_amount`,
+issued and received apart, read from the current invoices in scope like the
+invoice list; and `currencyCodes`, the sorted currencies of those same invoices,
+since the amounts are never converted. Every query filters by `organization_id`,
+the event line aggregates read the caller's entity scope from
+`app.economic_event.legal_entity_id` rather than joining the register, and each
+grouping reads both sides in one pass with
 `coalesce(sum(...) filter (where side = ...), 0)`. Nothing is recomputed in
 TypeScript: the amounts cross the boundary as the decimal strings PostgreSQL
-printed. The response also reports its own cost in `stats`: the six statements
+printed. The response also reports its own cost in `stats`: the nine statements
 it ran, the uncapped `documentCount` of invoices whose economic event is in
 scope, the event and invoice line counts those statements already carried, and
 the wall clock milliseconds they took.

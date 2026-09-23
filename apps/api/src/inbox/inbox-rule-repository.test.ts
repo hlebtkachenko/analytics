@@ -188,49 +188,52 @@ describe('decideAutoRoute', () => {
         totalAmount: '121',
       },
     ],
-  ])('routes %s from an email only through a sender-bound rule', (_kind, draft) => {
-    const parsed = parsedRow(draft);
-    const email = (senderAuthenticated: boolean) =>
-      facts({ emailChild: true, parsed, senderAuthenticated });
-    const neverTarget = { ...target, auto: 'never' as const };
+  ])(
+    'routes %s from an email only through a sender-bound rule',
+    (_kind, draft) => {
+      const parsed = parsedRow(draft);
+      const email = (senderAuthenticated: boolean) =>
+        facts({ emailChild: true, parsed, senderAuthenticated });
+      const neverTarget = { ...target, auto: 'never' as const };
 
-    // Target-only auto, an authenticated sender or not.
-    expect(decide({ facts: email(true) }).reason).toContain(
-      'sender-bound rule',
-    );
-    expect(decide({ facts: email(false) }).reason).toContain(
-      'sender-bound rule',
-    );
-    // A rule with no sender pattern.
-    expect(
-      decide({
-        autoRouteRule: autoRule(null),
-        facts: email(true),
-        target: neverTarget,
-      }).reason,
-    ).toContain('sender-bound rule');
-    // A sender-bound rule with an unauthenticated sender.
-    expect(
-      decide({
-        autoRouteRule: autoRule('@supplier.test'),
-        facts: email(false),
-        target: neverTarget,
-      }).reason,
-    ).toContain('sender-bound rule');
-    // A sender-bound rule with an authenticated sender is the one way through.
-    expect(
-      decide({
-        autoRouteRule: autoRule('@supplier.test'),
-        facts: email(true),
-        target: neverTarget,
-      }),
-    ).toEqual({ job: 'route', reason: null });
-    // Uploads and API items keep the target default guard.
-    expect(decide({ facts: facts({ parsed }) })).toEqual({
-      job: 'route',
-      reason: null,
-    });
-  });
+      // Target-only auto, an authenticated sender or not.
+      expect(decide({ facts: email(true) }).reason).toContain(
+        'sender-bound rule',
+      );
+      expect(decide({ facts: email(false) }).reason).toContain(
+        'sender-bound rule',
+      );
+      // A rule with no sender pattern.
+      expect(
+        decide({
+          autoRouteRule: autoRule(null),
+          facts: email(true),
+          target: neverTarget,
+        }).reason,
+      ).toContain('sender-bound rule');
+      // A sender-bound rule with an unauthenticated sender.
+      expect(
+        decide({
+          autoRouteRule: autoRule('@supplier.test'),
+          facts: email(false),
+          target: neverTarget,
+        }).reason,
+      ).toContain('sender-bound rule');
+      // A sender-bound rule with an authenticated sender is the one way through.
+      expect(
+        decide({
+          autoRouteRule: autoRule('@supplier.test'),
+          facts: email(true),
+          target: neverTarget,
+        }),
+      ).toEqual({ job: 'route', reason: null });
+      // Uploads and API items keep the target default guard.
+      expect(decide({ facts: facts({ parsed }) })).toEqual({
+        job: 'route',
+        reason: null,
+      });
+    },
+  );
 
   it('never routes an advance tax document', () => {
     const advance = parsedRow({

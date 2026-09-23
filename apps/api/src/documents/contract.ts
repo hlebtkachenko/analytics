@@ -866,6 +866,10 @@ export type DirectiveAccountListResponse = z.infer<
 
 // The analytics read answers from stored columns only, so it publishes a bounded document list beside its aggregates.
 export const MAX_ANALYTICS_DOCUMENTS = 50;
+// The partner chart shows the largest partners only; the invoice list keeps the rest.
+export const MAX_ANALYTICS_PARTNERS = 10;
+// The month charts read one accounting year; the month grid keeps the full history.
+export const ANALYTICS_CHART_MONTHS = 12;
 
 export const documentAnalyticsQuerySchema = z
   .object({
@@ -938,6 +942,26 @@ export const analyticsAccountRowSchema = z
   })
   .strict();
 
+// One calendar month of the chart window: signed nets, so a month with more input than output VAT reads negative.
+export const analyticsMonthTotalRowSchema = z
+  .object({
+    expense: decimalStringSchema,
+    month: z.iso.date(),
+    revenue: decimalStringSchema,
+    vatBalance: decimalStringSchema,
+  })
+  .strict();
+
+// The printed totals of one partner's invoices, issued and received apart.
+export const analyticsPartnerRowSchema = z
+  .object({
+    issued: nonNegativeDecimalStringSchema,
+    partnerId: partnerIdentifierSchema,
+    partnerName: partnerNameSchema,
+    received: nonNegativeDecimalStringSchema,
+  })
+  .strict();
+
 // What the route read and what it cost, so the page can state its own cost instead of implying a free answer.
 export const analyticsStatsSchema = z
   .object({
@@ -954,7 +978,12 @@ export const documentAnalyticsResponseSchema = z
     byAccount: z.array(analyticsAccountRowSchema),
     byActivity: z.array(analyticsActivityRowSchema),
     byMonth: z.array(analyticsMonthRowSchema),
+    byMonthTotals: z
+      .array(analyticsMonthTotalRowSchema)
+      .max(ANALYTICS_CHART_MONTHS),
+    byPartner: z.array(analyticsPartnerRowSchema).max(MAX_ANALYTICS_PARTNERS),
     byVatRegime: z.array(analyticsVatRegimeRowSchema),
+    currencyCodes: z.array(currencyCodeSchema),
     documents: z.array(analyticsDocumentSchema).max(MAX_ANALYTICS_DOCUMENTS),
     stats: analyticsStatsSchema,
   })
@@ -1628,6 +1657,53 @@ export const documentAnalyticsOpenApiSchema = {
       },
       type: 'array',
     },
+    byMonthTotals: {
+      description:
+        'Twelve calendar months ending at the newest month with data, months without data as zero.',
+      items: {
+        additionalProperties: false,
+        properties: {
+          expense: {
+            ...moneyProperty,
+            description: 'Debit minus credit on expense accounts.',
+          },
+          month: {
+            ...dateProperty,
+            description: 'The first day of the month of the leg tax point.',
+          },
+          revenue: {
+            ...moneyProperty,
+            description: 'Credit minus debit on revenue accounts.',
+          },
+          vatBalance: {
+            ...moneyProperty,
+            description:
+              'Credit minus debit on account 343: output VAT minus input VAT.',
+          },
+        },
+        required: ['expense', 'month', 'revenue', 'vatBalance'],
+        type: 'object',
+      },
+      maxItems: ANALYTICS_CHART_MONTHS,
+      type: 'array',
+    },
+    byPartner: {
+      description:
+        'The largest partners by printed invoice total, issued plus received, descending.',
+      items: {
+        additionalProperties: false,
+        properties: {
+          issued: amountProperty,
+          partnerId: uuidProperty,
+          partnerName: { maxLength: 200, minLength: 1, type: 'string' },
+          received: amountProperty,
+        },
+        required: ['issued', 'partnerId', 'partnerName', 'received'],
+        type: 'object',
+      },
+      maxItems: MAX_ANALYTICS_PARTNERS,
+      type: 'array',
+    },
     byVatRegime: {
       items: {
         additionalProperties: false,
@@ -1651,6 +1727,12 @@ export const documentAnalyticsOpenApiSchema = {
       },
       type: 'array',
     },
+    currencyCodes: {
+      description:
+        'The distinct currencies of the invoices in scope, sorted; the amounts are not converted.',
+      items: { pattern: '^[A-Z]{3}$', type: 'string' },
+      type: 'array',
+    },
     documents: {
       items: analyticsDocumentOpenApiSchema,
       maxItems: MAX_ANALYTICS_DOCUMENTS,
@@ -1659,7 +1741,7 @@ export const documentAnalyticsOpenApiSchema = {
     stats: {
       additionalProperties: false,
       description:
-        'What the route read and what it cost: the six queries it ran, the rows behind them and their wall clock time.',
+        'What the route read and what it cost: the nine queries it ran, the rows behind them and their wall clock time.',
       properties: {
         documentCount: lineCountProperty,
         elapsedMs: lineCountProperty,
@@ -1681,7 +1763,10 @@ export const documentAnalyticsOpenApiSchema = {
     'byAccount',
     'byActivity',
     'byMonth',
+    'byMonthTotals',
+    'byPartner',
     'byVatRegime',
+    'currencyCodes',
     'documents',
     'stats',
   ],

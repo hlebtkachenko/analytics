@@ -21,6 +21,7 @@ const LEGAL_ENTITY_ID = '9b7d1c30-6a4b-4d1f-9c2e-7a5f0e3b8d21';
 const OTHER_LEGAL_ENTITY_ID = '1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
 const INVOICE_LINE_ID = '00000000-0000-4000-8000-000000000020';
 const DOCUMENT_ID = '00000000-0000-4000-8000-000000000010';
+const PARTNER_ID = '00000000-0000-4000-8000-000000000030';
 
 const standardLine = {
   baseAmount: '1000',
@@ -521,6 +522,22 @@ describe('documentAnalyticsResponseSchema', () => {
         month: '2026-01-01',
       },
     ],
+    byMonthTotals: [
+      {
+        expense: '5000.0000',
+        month: '2026-01-01',
+        revenue: '0.0000',
+        vatBalance: '-1050.0000',
+      },
+    ],
+    byPartner: [
+      {
+        issued: '0.0000',
+        partnerId: PARTNER_ID,
+        partnerName: 'Placeholder Supplier',
+        received: '6050.0000',
+      },
+    ],
     byVatRegime: [
       {
         baseAmount: '5000.0000',
@@ -531,6 +548,7 @@ describe('documentAnalyticsResponseSchema', () => {
         vatRate: '21',
       },
     ],
+    currencyCodes: ['CZK'],
     documents: [
       {
         advanceTotal: '0.0000',
@@ -552,7 +570,7 @@ describe('documentAnalyticsResponseSchema', () => {
       elapsedMs: 12,
       eventLineCount: 10,
       invoiceLineCount: 5,
-      queryCount: 6,
+      queryCount: 9,
     },
   };
 
@@ -610,6 +628,35 @@ describe('documentAnalyticsResponseSchema', () => {
         ...analytics,
         byMonth: [{ ...analytics.byMonth[0], month: '2026-01' }],
       }).success,
+    ).toBe(false);
+  });
+
+  it('holds the chart fields to the route caps and shapes', () => {
+    expect(
+      documentAnalyticsResponseSchema.safeParse({
+        ...analytics,
+        byMonthTotals: Array.from(
+          { length: 13 },
+          () => analytics.byMonthTotals[0],
+        ),
+      }).success,
+    ).toBe(false);
+    expect(
+      documentAnalyticsResponseSchema.safeParse({
+        ...analytics,
+        byPartner: Array.from({ length: 11 }, () => analytics.byPartner[0]),
+      }).success,
+    ).toBe(false);
+    expect(
+      documentAnalyticsResponseSchema.safeParse({
+        ...analytics,
+        currencyCodes: ['EURO'],
+      }).success,
+    ).toBe(false);
+    const withoutCurrencies: Record<string, unknown> = { ...analytics };
+    delete withoutCurrencies.currencyCodes;
+    expect(
+      documentAnalyticsResponseSchema.safeParse(withoutCurrencies).success,
     ).toBe(false);
   });
 });

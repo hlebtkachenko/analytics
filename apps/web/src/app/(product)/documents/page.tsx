@@ -293,13 +293,16 @@ export default function DocumentsPage() {
     }
 
     const controller = new AbortController();
+    // A superseded request may still resolve, so only the live one writes its result.
     void getJson(documentsPath(organizationId, query), controller.signal)
       .then((payload) => documentListResponseSchema.parse(payload))
       .then((payload) => {
-        setResult({ key: queryKey, value: payload });
+        if (!controller.signal.aborted) {
+          setResult({ key: queryKey, value: payload });
+        }
       })
-      .catch((error: unknown) => {
-        if (!isAbortError(error)) {
+      .catch(() => {
+        if (!controller.signal.aborted) {
           setResult({ key: queryKey });
         }
       });
@@ -872,13 +875,13 @@ export default function DocumentsPage() {
           <TabList aria-label={t('documents.list.tabsLabel')}>
             {documentTabs.map((name) => (
               <Tab key={name}>
-                {t('documents.list.tabWithCount', {
-                  count:
-                    counts === undefined
-                      ? 0
-                      : counts[documentTabCountKeys[name]],
-                  label: t(documentTabLabelKeys[name]),
-                })}
+                {/* A reloading scope has no count yet, so the label carries none rather than a fake zero. */}
+                {counts === undefined
+                  ? t(documentTabLabelKeys[name])
+                  : t('documents.list.tabWithCount', {
+                      count: counts[documentTabCountKeys[name]],
+                      label: t(documentTabLabelKeys[name]),
+                    })}
               </Tab>
             ))}
           </TabList>

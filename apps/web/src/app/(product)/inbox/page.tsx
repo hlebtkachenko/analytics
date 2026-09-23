@@ -47,7 +47,7 @@ import { useTranslation } from 'react-i18next';
 import { UploadModal } from '../../../components/inbox/upload-modal';
 import PageContainer from '../../../components/page-container';
 import { StatusIndicator } from '../../../components/status-indicator';
-import { getJson, isAbortError } from '../../../lib/datasets/client';
+import { getJson } from '../../../lib/datasets/client';
 import { withOrganization } from '../../../lib/documents/client';
 import { bulkInboxItems, inboxItemsPath } from '../../../lib/inbox/client';
 import { inboxLastSeenKey, isNewSince } from '../../../lib/inbox/last-seen.ts';
@@ -65,6 +65,7 @@ import type {
   BulkInboxItemsResponse,
   InboxBulkAction,
   InboxConfidenceBand,
+  InboxDetectedType,
   InboxDiscardReason,
   InboxIssueCode,
   InboxItemCounts,
@@ -121,7 +122,7 @@ const detectedTypeIcons: Readonly<Record<string, typeof Document>> = {
   tabular: DataTable,
   text: Txt,
   unknown: DocumentUnknown,
-};
+} satisfies Record<InboxDetectedType, typeof Document>;
 
 // Fallback icon per payload kind when the detected type is missing or unmapped.
 const payloadIcons: Readonly<Record<string, typeof Document>> = {
@@ -250,13 +251,16 @@ export default function InboxPage() {
     }
 
     const controller = new AbortController();
+    // A superseded request may still resolve, so only the live one writes its result.
     void getJson(inboxItemsPath(organizationId, query), controller.signal)
       .then((payload) => inboxItemListResponseSchema.parse(payload))
       .then((payload) => {
-        setResult({ key: queryKey, value: payload });
+        if (!controller.signal.aborted) {
+          setResult({ key: queryKey, value: payload });
+        }
       })
-      .catch((error: unknown) => {
-        if (!isAbortError(error)) {
+      .catch(() => {
+        if (!controller.signal.aborted) {
           setResult({ key: queryKey });
         }
       });
@@ -794,7 +798,12 @@ export default function InboxPage() {
               </Button>
             ) : null}
             {canManage || canManageChannels ? (
-              <OverflowMenu aria-label={t('inbox.actions')} flipped size="md">
+              <OverflowMenu
+                aria-label={t('inbox.actions')}
+                flipped
+                iconDescription={t('inbox.actions')}
+                size="md"
+              >
                 {canManageChannels ? (
                   <OverflowMenuItem
                     href={withOrganization(
@@ -808,15 +817,6 @@ export default function InboxPage() {
                   <OverflowMenuItem
                     href={withOrganization('/inbox/rules', organization.slug)}
                     itemText={t('inbox.rules')}
-                  />
-                ) : null}
-                {canManageChannels ? (
-                  <OverflowMenuItem
-                    href={withOrganization(
-                      '/inbox/settings',
-                      organization.slug,
-                    )}
-                    itemText={t('inbox.settings')}
                   />
                 ) : null}
               </OverflowMenu>
@@ -886,11 +886,13 @@ export default function InboxPage() {
             <TabList aria-label={t('inbox.list.tabsLabel')}>
               {inboxTabs.map((name) => (
                 <Tab key={name}>
-                  {t('inbox.list.tabWithCount', {
-                    count:
-                      counts === undefined ? 0 : counts[tabCountKeys[name]],
-                    label: t(tabLabelKeys[name]),
-                  })}
+                  {/* A reloading list has no count yet, so the label carries none rather than a fake zero. */}
+                  {counts === undefined
+                    ? t(tabLabelKeys[name])
+                    : t('inbox.list.tabWithCount', {
+                        count: counts[tabCountKeys[name]],
+                        label: t(tabLabelKeys[name]),
+                      })}
                 </Tab>
               ))}
             </TabList>

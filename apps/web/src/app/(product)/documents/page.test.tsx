@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -241,6 +242,68 @@ describe('DocumentsPage', () => {
     expect(screen.getByRole('tab', { name: 'Needs review (1)' })).toBeVisible();
     expect(screen.getByRole('tab', { name: 'Verified (1)' })).toBeVisible();
     expect(screen.getByRole('tab', { name: 'Archived (0)' })).toBeVisible();
+  });
+
+  it('names the tabs without a count until the counts load, never a fake zero', async () => {
+    const base = respondWith([documentSummary]);
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string) => {
+        if (input.includes('/documents?')) {
+          await held;
+        }
+        return base(input);
+      }),
+    );
+
+    renderDocumentsPage();
+
+    expect(await screen.findByRole('tab', { name: 'All' })).toBeVisible();
+    expect(screen.queryByRole('tab', { name: /\(/ })).toBeNull();
+
+    release();
+    expect(await screen.findByRole('tab', { name: 'All (3)' })).toBeVisible();
+  });
+
+  it('keeps the newer scope when the superseded request answers last', async () => {
+    const base = respondWith([documentSummary], true, true, twoLegalEntities);
+    let releaseUnscoped = () => {};
+    const unscopedHeld = new Promise<void>((resolve) => {
+      releaseUnscoped = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string) => {
+        if (
+          input.includes('/documents?') &&
+          !input.includes('legalEntityId=')
+        ) {
+          await unscopedHeld;
+        }
+        return base(input);
+      }),
+    );
+
+    renderDocumentsPage();
+
+    // The scope changes while the first, unscoped request is still open.
+    fireEvent.click(
+      await screen.findByRole('combobox', { name: 'Legal entity' }),
+    );
+    fireEvent.click(screen.getByRole('option', { name: 'Entity One' }));
+    expect(await screen.findByRole('tab', { name: 'All (7)' })).toBeVisible();
+
+    // The unscoped answer lands last and must not replace the scoped one.
+    await act(async () => {
+      releaseUnscoped();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.getByRole('tab', { name: 'All (7)' })).toBeVisible();
+    expect(screen.getByText('Placeholder document')).toBeVisible();
   });
 
   it('maps each tab to its status filter in the query', async () => {

@@ -156,7 +156,9 @@ test('protects the authenticated BAP access contract without browser token leaka
   const visibleState = JSON.stringify(browserState);
   authenticatedExpect(visibleState).not.toContain(email);
   authenticatedExpect(visibleState).not.toContain(password);
-  authenticatedExpect(visibleState).not.toMatch(/token|jwt|bearer/i);
+  authenticatedExpect(visibleState).not.toMatch(
+    /\b(?:token|jwt|bearer)\b|eyJ[\w-]{8,}\.[\w-]{8,}/i,
+  );
 
   const manageMembers = page.getByRole('link', { name: 'Manage members' });
   await authenticatedExpect(manageMembers).toHaveAttribute(

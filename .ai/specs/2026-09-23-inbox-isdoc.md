@@ -2,10 +2,10 @@
 
 **Date:** 2026-09-23
 
-**Correction (2026-09-23):** Review found that sender authentication alone
-could file attacker-supplied email invoices. Parsed email children now require
-an authenticated sender and a matched live sender-bound auto-route rule; the
-route job checks again under the item lock.
+**Correction (2026-09-23):** Review found that sender authentication alone could
+file attacker-supplied email invoices. Parsed email children now require an
+authenticated sender and a matched live sender-bound auto-route rule; the route
+job checks again under the item lock.
 
 ## Problem
 

@@ -183,6 +183,22 @@ const analytics: DocumentAnalyticsResponse = {
       month: '2026-09-01',
     },
   ],
+  byMonthTotals: [
+    {
+      expense: '0.0000',
+      month: '2026-09-01',
+      revenue: '1000.0000',
+      vatBalance: '210.0000',
+    },
+  ],
+  byPartner: [
+    {
+      issued: '1210.0000',
+      partnerId: PARTNER_ID,
+      partnerName: 'Placeholder Partner',
+      received: '0.0000',
+    },
+  ],
   byVatRegime: [
     {
       baseAmount: '1000.0000',
@@ -193,6 +209,7 @@ const analytics: DocumentAnalyticsResponse = {
       vatRate: '21.00',
     },
   ],
+  currencyCodes: ['CZK'],
   documents: [
     {
       advanceTotal: '0.0000',
@@ -214,7 +231,7 @@ const analytics: DocumentAnalyticsResponse = {
     elapsedMs: 3,
     eventLineCount: 2,
     invoiceLineCount: 1,
-    queryCount: 6,
+    queryCount: 9,
   },
 };
 
@@ -1146,5 +1163,26 @@ describe('application document routes', () => {
       'total',
       'totalsByCurrency',
     ]);
+
+    const analyticsRoute = document.paths[
+      '/v1/organizations/{organizationId}/documents/analytics'
+    ]?.get?.responses['200'] as unknown as {
+      content: Record<string, { schema: { required: string[] } }>;
+    };
+
+    // The chart fields are published too, so the BFF mirror and the page can rely on them.
+    expect(analyticsRoute.content['application/json']?.schema.required).toEqual(
+      [
+        'byAccount',
+        'byActivity',
+        'byMonth',
+        'byMonthTotals',
+        'byPartner',
+        'byVatRegime',
+        'currencyCodes',
+        'documents',
+        'stats',
+      ],
+    );
   });
 });

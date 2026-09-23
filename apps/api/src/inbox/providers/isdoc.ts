@@ -811,7 +811,8 @@ export function parseIsdoc(bytes: Uint8Array): IsdocParseResult {
     issues.push({
       code: 'unsupported_type',
       field: 'attributes.foreign_currency_code',
-      message: 'Invoice/ForeignCurrencyCode is not a three-letter currency code.',
+      message:
+        'Invoice/ForeignCurrencyCode is not a three-letter currency code.',
     });
   } else if (foreign !== null) {
     attributes.foreign_currency_code = foreign.toUpperCase();

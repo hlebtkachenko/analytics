@@ -24,7 +24,7 @@ export const RULE_SET_VERSION = 'cz-default-2026-09.1';
 // The receivable and the payable: the only accounts that carry the partner.
 const RECEIVABLE_ACCOUNT = '311';
 const PAYABLE_ACCOUNT = '321';
-const VAT_ACCOUNT = '343';
+export const VAT_ACCOUNT = '343';
 
 // The advance already paid to a supplier and the one a customer already paid us.
 const ADVANCE_PAID_ACCOUNT = '314';

@@ -697,10 +697,7 @@ describe('parseIsdoc', () => {
     ).toEqual([]);
     expect(
       refusal(
-        body.replace(
-          '<IssuingSystem>Placeholder',
-          `<IssuingSystem>${base64}`,
-        ),
+        body.replace('<IssuingSystem>Placeholder', `<IssuingSystem>${base64}`),
       ),
     ).toBe('too_large');
   });
@@ -932,7 +929,9 @@ describe('storableOutput', () => {
     const output = resolveIsdoc(parsed(isdocInvoice()), receiving).output;
     const broken = {
       ...output,
-      reasons: [{ evidence: 'x'.repeat(501), step: 'parse' as const, weight: 1 }],
+      reasons: [
+        { evidence: 'x'.repeat(501), step: 'parse' as const, weight: 1 },
+      ],
     };
 
     expect(storableOutput(output)).toBe(output);

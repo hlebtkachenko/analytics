@@ -34,7 +34,6 @@ const childLabelKeys: Readonly<
   inbox: {
     channels: 'shell.nav.inboxChannels',
     rules: 'shell.nav.inboxRules',
-    settings: 'shell.nav.inboxSettings',
   },
   workspaces: { new: 'shell.nav.workspacesNew' },
 };

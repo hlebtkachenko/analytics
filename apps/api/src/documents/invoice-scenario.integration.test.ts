@@ -38,6 +38,7 @@ import { readDocumentAnalytics } from './analytics-repository.js';
 import { DocumentController } from './document.controller.js';
 import {
   createDocument,
+  createDocumentInTransaction,
   createDocumentLink,
   deleteDocument,
   deleteDocumentLink,
@@ -47,6 +48,8 @@ import {
   updateDocument,
   DocumentRepository,
 } from './document-repository.js';
+import { supersedeDocument } from '../inbox/inbox-repository.js';
+import { createDocumentRequestSchema } from './contract.js';
 import { createPartner } from './partner-repository.js';
 
 const postgresImage =
@@ -163,11 +166,12 @@ function poolFor(role: DatabaseRole): DatabasePool {
 
 async function asTenant<T>(
   operation: (transaction: PoolClient) => Promise<T>,
+  context: TenantContext = creator,
 ): Promise<T> {
   const client = await apiPool.connect();
 
   try {
-    return await withTenantContext(client, creator, operation);
+    return await withTenantContext(client, context, operation);
   } finally {
     client.release();
   }
@@ -184,11 +188,78 @@ async function rows<T extends Record<string, unknown>>(
   });
 }
 
-function postDocument(body: Record<string, unknown>): request.Test {
+function postDocument(
+  body: Record<string, unknown>,
+  organizationId = ORGANIZATION_ID,
+): request.Test {
   return request(application.getHttpServer())
-    .post(`/v1/organizations/${ORGANIZATION_ID}/documents`)
+    .post(`/v1/organizations/${organizationId}/documents`)
     .set('Authorization', 'Bearer caller')
     .send(body);
+}
+
+function getAnalytics(organizationId: string, search = ''): request.Test {
+  return request(application.getHttpServer())
+    .get(`/v1/organizations/${organizationId}/documents/analytics${search}`)
+    .set('Authorization', 'Bearer caller')
+    .expect(200);
+}
+
+// A fresh organization owned by the same user, so a describe block can seed its own rows without moving the scenario's numbers.
+async function seedOrganization(
+  organizationId: string,
+): Promise<TenantContext> {
+  const migrator = await migratorPool.connect();
+
+  try {
+    await migrator.query('begin');
+    await migrator.query('set local role bap_owner');
+    await migrator.query(
+      'insert into auth.organization (id, name, slug) values ($1, $1, $1)',
+      [organizationId],
+    );
+    await migrator.query(
+      "insert into auth.member (id, organization_id, user_id, role) values ($1, $2, 'user-1', 'owner')",
+      [`member-${organizationId}`, organizationId],
+    );
+    await migrator.query('commit');
+  } finally {
+    migrator.release();
+  }
+
+  return { ...creator, organizationId };
+}
+
+async function seedEntity(
+  context: TenantContext,
+  name: string,
+): Promise<string> {
+  return asTenant(async (transaction) => {
+    const created = await transaction.query<{ id: string }>(
+      `insert into app.legal_entity (organization_id, name, kind, created_by)
+       values ($1, $2, 'company', $3)
+       returning id`,
+      [context.organizationId, name, context.userId],
+    );
+    return created.rows[0]?.id ?? '';
+  }, context);
+}
+
+async function seedPartner(
+  context: TenantContext,
+  name: string,
+): Promise<string> {
+  const partner = await createPartner(apiPool, {
+    ...context,
+    countryCode: 'CZ',
+    defaultLineCategory: null,
+    legalEntityId: null,
+    legalEntityIds: null,
+    name,
+    registrationNumber: null,
+    vatNumber: null,
+  });
+  return partner?.id ?? '';
 }
 
 beforeAll(async () => {
@@ -719,11 +790,51 @@ describe('a five month invoice with mixed VAT, a deducted advance and rounding',
       ),
     ).toMatchObject({ credit: '458000.0000', debit: '0.0000' });
 
+    // Twelve months ending in May: 501, 518 and the 548 rounding as expense; standard input VAT against the deducted advance in May.
+    const scenarioMonths = analytics.byMonthTotals.map(
+      (row: { month: string }) => row.month,
+    );
+    expect(scenarioMonths).toHaveLength(12);
+    expect(scenarioMonths[0]).toBe('2025-06-01');
+    expect(analytics.byMonthTotals.slice(7)).toEqual([
+      ...['2026-01-01', '2026-02-01', '2026-03-01', '2026-04-01'].map(
+        (month) => ({
+          expense: '178999.9600',
+          month,
+          revenue: '0.0000',
+          vatBalance: '-21000.0000',
+        }),
+      ),
+      {
+        expense: '179000.1600',
+        month: '2026-05-01',
+        revenue: '0.0000',
+        vatBalance: '21000.0000',
+      },
+    ]);
+    expect(analytics.byMonthTotals.slice(0, 7)).toEqual(
+      scenarioMonths.slice(0, 7).map((month: string) => ({
+        expense: '0.0000',
+        month,
+        revenue: '0.0000',
+        vatBalance: '0.0000',
+      })),
+    );
+    expect(analytics.byPartner).toEqual([
+      {
+        issued: '0.0000',
+        partnerId,
+        partnerName: 'Placeholder Supplier',
+        received: '1000000.0000',
+      },
+    ]);
+    expect(analytics.currencyCodes).toEqual(['CZK']);
+
     expect(analytics.stats).toMatchObject({
       documentCount: 1,
       eventLineCount: stored?.count,
       invoiceLineCount: 22,
-      queryCount: 6,
+      queryCount: 9,
     });
     expect(analytics.stats.elapsedMs).toBeGreaterThanOrEqual(0);
   });
@@ -744,13 +855,16 @@ describe('a five month invoice with mixed VAT, a deducted advance and rounding',
         byAccount: [],
         byActivity: [],
         byMonth: [],
+        byMonthTotals: [],
+        byPartner: [],
         byVatRegime: [],
+        currencyCodes: [],
         documents: [],
         stats: {
           documentCount: 0,
           eventLineCount: 0,
           invoiceLineCount: 0,
-          queryCount: 6,
+          queryCount: 9,
         },
       });
     } finally {
@@ -798,5 +912,324 @@ describe('a five month invoice with mixed VAT, a deducted advance and rounding',
         created.body.document.id,
       ]),
     ).toEqual([{ total_amount: '100.0000' }]);
+  });
+});
+
+describe('the analytics after an invoice is replaced by a newer version', () => {
+  const organizationId = 'org-versions';
+  let context: TenantContext;
+  let currentId = '';
+
+  // Two versions of one invoice: the first carries 1000 of base, the one replacing it 400.
+  function versionBody(
+    legalEntityId: string,
+    baseAmount: string,
+    vatAmount: string,
+  ) {
+    return {
+      documentDate: '2026-03-10',
+      invoice: {
+        lines: [
+          {
+            baseAmount,
+            category: 'services',
+            description: 'placeholder versioned line',
+            vatAmount,
+            vatMode: 'standard',
+            vatRate: '21.00',
+          },
+        ],
+      },
+      kind: 'issued_invoice',
+      legalEntityId,
+      reference: 'PLACEHOLDER-VERSIONED',
+      title: 'Placeholder versioned invoice',
+    };
+  }
+
+  beforeAll(async () => {
+    context = await seedOrganization(organizationId);
+    const legalEntityId = await seedEntity(context, 'Placeholder Versions');
+    const first = await postDocument(
+      versionBody(legalEntityId, '1000.00', '210.00'),
+      organizationId,
+    ).expect(201);
+
+    // The inbox version route, without the inbox: flip the old row, then insert its successor in one transaction.
+    currentId = await asTenant(async (transaction) => {
+      await supersedeDocument(transaction, first.body.document.id);
+      const created = await createDocumentInTransaction(transaction, {
+        ...context,
+        body: createDocumentRequestSchema.parse(
+          versionBody(legalEntityId, '400.00', '84.00'),
+        ),
+        legalEntityIds: null,
+        supersedes: { documentId: first.body.document.id, version: 1 },
+      });
+      return created?.document.id ?? '';
+    }, context);
+  });
+
+  it('lists and sums only the current version, matching the event based totals', async () => {
+    const analytics = (await getAnalytics(organizationId)).body;
+
+    expect(analytics.documents.map((row: { id: string }) => row.id)).toEqual([
+      currentId,
+    ]);
+    expect(analytics.byVatRegime).toEqual([
+      {
+        baseAmount: '400.0000',
+        lineCount: 1,
+        lineKind: 'item',
+        vatAmount: '84.0000',
+        vatMode: 'standard',
+        vatRate: '21.00',
+      },
+    ]);
+    expect(
+      analytics.byAccount.find(
+        (row: { accountCode: string }) => row.accountCode === '343',
+      ),
+    ).toMatchObject({ credit: '84.0000', debit: '0.0000' });
+    expect(analytics.stats).toMatchObject({
+      documentCount: 1,
+      invoiceLineCount: 1,
+    });
+  });
+});
+
+describe('the analytics chart fields across partners, entities and currencies', () => {
+  const organizationId = 'org-charts';
+  let entityA = '';
+  let entityB = '';
+  // Eleven partners, so the top ten cap drops one.
+  const partners: string[] = [];
+
+  interface MonthTotal {
+    expense: string;
+    month: string;
+    revenue: string;
+    vatBalance: string;
+  }
+
+  interface PartnerTotal {
+    issued: string;
+    partnerId: string;
+    partnerName: string;
+    received: string;
+  }
+
+  function receivedInvoice(
+    legalEntityId: string,
+    partner: string,
+    baseAmount: string,
+    documentDate: string,
+    reference: string,
+    currencyCode = 'CZK',
+  ) {
+    return {
+      currencyCode,
+      documentDate,
+      invoice: {
+        lines: [
+          {
+            baseAmount,
+            category: 'services',
+            description: 'placeholder exempt line',
+            vatMode: 'exempt',
+          },
+        ],
+      },
+      kind: 'received_invoice',
+      legalEntityId,
+      partnerId: partner,
+      reference,
+      title: 'Placeholder received invoice',
+    };
+  }
+
+  // Only the months that carry data; every other month of the window must read zero.
+  function nonZero(rows: MonthTotal[]): MonthTotal[] {
+    return rows.filter(
+      (row) =>
+        row.revenue !== '0.0000' ||
+        row.expense !== '0.0000' ||
+        row.vatBalance !== '0.0000',
+    );
+  }
+
+  function partnerTotals(rows: PartnerTotal[]) {
+    return rows.map((row) => [row.partnerName, row.issued, row.received]);
+  }
+
+  beforeAll(async () => {
+    const context = await seedOrganization(organizationId);
+    entityA = await seedEntity(context, 'Placeholder Charts A');
+    entityB = await seedEntity(context, 'Placeholder Charts B');
+
+    for (let index = 1; index <= 11; index += 1) {
+      const name = `Placeholder Partner ${String(index).padStart(2, '0')}`;
+      partners.push(await seedPartner(context, name));
+    }
+
+    // Partner n receives n hundred in March; together 6600 of March expense in entity A.
+    for (const [index, partner] of partners.entries()) {
+      await postDocument(
+        receivedInvoice(
+          entityA,
+          partner,
+          `${(index + 1) * 100}.00`,
+          '2026-03-15',
+          `PLACEHOLDER-MARCH-${index + 1}`,
+        ),
+        organizationId,
+      ).expect(201);
+    }
+
+    // Older than the window: it stays in the month grid and the partner total, never in the month chart.
+    await postDocument(
+      receivedInvoice(
+        entityA,
+        partners[1] ?? '',
+        '50.00',
+        '2024-01-10',
+        'PLACEHOLDER-OLD',
+      ),
+      organizationId,
+    ).expect(201);
+
+    // An issued standard VAT invoice rounded down by 0.30: its printed total is 1209.70.
+    await postDocument(
+      {
+        documentDate: '2026-08-20',
+        invoice: {
+          lines: [
+            {
+              baseAmount: '1000.00',
+              category: 'services',
+              description: 'placeholder issued line',
+              vatAmount: '210.00',
+              vatMode: 'standard',
+              vatRate: '21.00',
+            },
+          ],
+          roundingAmount: '-0.30',
+        },
+        kind: 'issued_invoice',
+        legalEntityId: entityA,
+        partnerId: partners[0],
+        reference: 'PLACEHOLDER-ISSUED',
+        title: 'Placeholder issued invoice',
+      },
+      organizationId,
+    ).expect(201);
+
+    // The second entity's only invoice, in another currency.
+    await postDocument(
+      receivedInvoice(
+        entityB,
+        partners[10] ?? '',
+        '5000.00',
+        '2026-05-05',
+        'PLACEHOLDER-EUR',
+        'EUR',
+      ),
+      organizationId,
+    ).expect(201);
+  });
+
+  it('charts twelve months ending at the newest month, gaps as zero, older months left out', async () => {
+    const analytics = (await getAnalytics(organizationId)).body;
+    const months = analytics.byMonthTotals.map((row: MonthTotal) => row.month);
+
+    expect(months).toHaveLength(12);
+    expect(months[0]).toBe('2025-09-01');
+    expect(months[11]).toBe('2026-08-01');
+    expect(nonZero(analytics.byMonthTotals)).toEqual([
+      {
+        expense: '6600.0000',
+        month: '2026-03-01',
+        revenue: '0.0000',
+        vatBalance: '0.0000',
+      },
+      {
+        expense: '5000.0000',
+        month: '2026-05-01',
+        revenue: '0.0000',
+        vatBalance: '0.0000',
+      },
+      // The rounding down is a 548 expense leg on the issued side, and the output VAT counts positive.
+      {
+        expense: '0.3000',
+        month: '2026-08-01',
+        revenue: '1000.0000',
+        vatBalance: '210.0000',
+      },
+    ]);
+    // The month grid keeps the full history the chart window leaves out.
+    expect(
+      analytics.byMonth.some(
+        (row: { month: string }) => row.month === '2024-01-01',
+      ),
+    ).toBe(true);
+  });
+
+  it('ranks the ten largest partners by printed total, issued plus received', async () => {
+    const analytics = (await getAnalytics(organizationId)).body;
+
+    expect(analytics.byPartner).toHaveLength(10);
+    expect(analytics.byPartner[1]).toEqual({
+      issued: '1209.7000',
+      partnerId: partners[0],
+      partnerName: 'Placeholder Partner 01',
+      received: '100.0000',
+    });
+    expect(partnerTotals(analytics.byPartner)).toEqual([
+      ['Placeholder Partner 11', '0.0000', '6100.0000'],
+      ['Placeholder Partner 01', '1209.7000', '100.0000'],
+      ['Placeholder Partner 10', '0.0000', '1000.0000'],
+      ['Placeholder Partner 09', '0.0000', '900.0000'],
+      ['Placeholder Partner 08', '0.0000', '800.0000'],
+      ['Placeholder Partner 07', '0.0000', '700.0000'],
+      ['Placeholder Partner 06', '0.0000', '600.0000'],
+      ['Placeholder Partner 05', '0.0000', '500.0000'],
+      ['Placeholder Partner 04', '0.0000', '400.0000'],
+      ['Placeholder Partner 03', '0.0000', '300.0000'],
+    ]);
+    expect(analytics.currencyCodes).toEqual(['CZK', 'EUR']);
+  });
+
+  it('narrows every chart field to the requested entity', async () => {
+    const onlyA = (
+      await getAnalytics(organizationId, `?legalEntityId=${entityA}`)
+    ).body;
+
+    expect(
+      nonZero(onlyA.byMonthTotals).map((row: MonthTotal) => row.month),
+    ).toEqual(['2026-03-01', '2026-08-01']);
+    expect(partnerTotals(onlyA.byPartner).slice(0, 3)).toEqual([
+      ['Placeholder Partner 01', '1209.7000', '100.0000'],
+      ['Placeholder Partner 11', '0.0000', '1100.0000'],
+      ['Placeholder Partner 10', '0.0000', '1000.0000'],
+    ]);
+    expect(onlyA.currencyCodes).toEqual(['CZK']);
+
+    const onlyB = (
+      await getAnalytics(organizationId, `?legalEntityId=${entityB}`)
+    ).body;
+
+    // A single month of data still opens a full window ending at that month.
+    expect(onlyB.byMonthTotals).toHaveLength(12);
+    expect(onlyB.byMonthTotals[11]).toEqual({
+      expense: '5000.0000',
+      month: '2026-05-01',
+      revenue: '0.0000',
+      vatBalance: '0.0000',
+    });
+    expect(partnerTotals(onlyB.byPartner)).toEqual([
+      ['Placeholder Partner 11', '0.0000', '5000.0000'],
+    ]);
+    expect(onlyB.currencyCodes).toEqual(['EUR']);
+    expect(onlyB.stats.queryCount).toBe(9);
   });
 });

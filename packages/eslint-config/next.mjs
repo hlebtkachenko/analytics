@@ -44,6 +44,8 @@ export default [
       'src/app/(product)/[[]orgSlug[]]/**',
       // The access page only redirects to /account/access, so it renders no PageContainer.
       'src/app/(product)/access/**',
+      // The inbox settings page only redirects to /inbox/rules, so it renders no PageContainer.
+      'src/app/(product)/inbox/settings/**',
     ],
     plugins: { bap },
     rules: {

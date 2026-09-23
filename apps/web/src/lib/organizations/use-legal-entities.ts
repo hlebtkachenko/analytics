@@ -13,13 +13,20 @@ import type { LegalEntity } from '../datasets/client';
 // The answer carries the organization it described, so another tenant's entities never linger.
 type LegalEntitiesResult = Readonly<{
   key: string;
-  legalEntities: LegalEntity[];
+  legalEntities: LegalEntity[] | undefined;
 }>;
 
 const noLegalEntities: LegalEntity[] = [];
 
 // The entity filter every scoped page offers; a failed read leaves the whole organization selected.
 export function useLegalEntities(organizationId: string): LegalEntity[] {
+  return useLegalEntityList(organizationId) ?? noLegalEntities;
+}
+
+// The same read, undefined while pending or failed, for a page that must not name an entity before the list arrives.
+export function useLegalEntityList(
+  organizationId: string,
+): LegalEntity[] | undefined {
   const [result, setResult] = useState<LegalEntitiesResult>();
 
   useEffect(() => {
@@ -38,7 +45,7 @@ export function useLegalEntities(organizationId: string): LegalEntity[] {
       })
       .catch((error: unknown) => {
         if (!isAbortError(error)) {
-          setResult({ key: organizationId, legalEntities: [] });
+          setResult({ key: organizationId, legalEntities: undefined });
         }
       });
     return () => {
@@ -46,7 +53,5 @@ export function useLegalEntities(organizationId: string): LegalEntity[] {
     };
   }, [organizationId]);
 
-  return result?.key === organizationId
-    ? result.legalEntities
-    : noLegalEntities;
+  return result?.key === organizationId ? result.legalEntities : undefined;
 }

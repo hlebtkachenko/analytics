@@ -74,6 +74,22 @@ export function isInlineMediaType(mediaType: string): boolean {
   return (INLINE_MEDIA_TYPES as readonly string[]).includes(mediaType);
 }
 
+// Mirrors DETECTED_TYPES of apps/api inbox contract, in its order.
+export const INBOX_DETECTED_TYPES = [
+  'isdoc_invoice',
+  'money_s3_export',
+  'pohoda_export',
+  'camt_statement',
+  'gpc_statement',
+  'tabular',
+  'pdf',
+  'image',
+  'text',
+  'unknown',
+] as const;
+
+export type InboxDetectedType = (typeof INBOX_DETECTED_TYPES)[number];
+
 const TOKEN_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const MEDIA_TYPE_PATTERN =
   /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/;
@@ -855,11 +871,7 @@ export const putInboxRuleOrderRequestSchema = z
   .strict()
   .refine((body) => new Set(body.ruleIds).size === body.ruleIds.length);
 
-// The two refusals a rule write names beside the generic rejection code.
-export const inboxRuleRefusalCodeSchema = z.enum([
-  'rule_limit',
-  'not_available',
-]);
+export const inboxRuleRefusalCodeSchema = z.enum(['rule_limit']);
 
 // An intake secret: the fixed prefix, then 32 random bytes in base64url. The 8 characters after the prefix are shown.
 export const INTAKE_SECRET_PREFIX = 'bap_intake_';

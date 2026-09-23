@@ -21,6 +21,11 @@ describe('formatMonth', () => {
   it('returns a value it cannot parse unchanged, so nothing invents a month', () => {
     expect(formatMonth('not-a-date', 'en')).toBe('not-a-date');
   });
+
+  it('shortens the month name for chart ticks, in the same UI language', () => {
+    expect(formatMonth('2026-06-01', 'en', 'short')).toBe('Jun 2026');
+    expect(formatMonth('not-a-date', 'en', 'short')).toBe('not-a-date');
+  });
 });
 
 describe('formatDate', () => {

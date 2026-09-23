@@ -220,10 +220,14 @@ async function gotoStable(page, url) {
   }
 }
 
-async function capture(page, name, url, viewport, rail, waitSelector) {
+async function capture(page, name, url, viewport, rail, waitSelector, prepare) {
   await page.setViewportSize(viewport);
   await gotoStable(page, url);
   await page.addStyleTag({ content: scrollbarCss }).catch(() => {});
+  // A state the plain navigation never reaches, such as an open accordion.
+  if (prepare) {
+    await prepare(page);
+  }
   // Late content names an anchor; wait until it carries text.
   if (waitSelector) {
     await page
@@ -237,7 +241,7 @@ async function capture(page, name, url, viewport, rail, waitSelector) {
   await page.screenshot({ path: file, fullPage: false });
   const data = await measure(page);
   reportTable(`${name} @ ${suffix}`, data);
-  // Pace the run so 21 navigations never trip the API rate limit.
+  // Pace the run so 22 navigations never trip the API rate limit.
   await page.waitForTimeout(400);
 }
 
@@ -297,11 +301,26 @@ async function main() {
       await capture(page, name, url, viewport, false);
     }
   }
-  // The three inbox settings pages and the inline text preview, shot at 1440x900 only.
+  // The inbox rules and sources pages, workspace settings and the inline text preview, shot at 1440x900 only.
   const wide = { width: 1440, height: 900 };
-  await capture(page, 'inbox-rules', `/inbox/rules${q}`, wide, false);
-  await capture(page, 'inbox-settings', `/inbox/settings${q}`, wide, false);
+  await capture(
+    page,
+    'inbox-rules',
+    `/inbox/rules${q}`,
+    wide,
+    false,
+    undefined,
+    (rulesPage) =>
+      rulesPage.getByRole('button', { name: /^Defaults \(\d+\)$/ }).click(),
+  );
   await capture(page, 'inbox-channels', `/inbox/channels${q}`, wide, false);
+  await capture(
+    page,
+    'workspace-settings',
+    `/${encodeURIComponent(slug)}/settings`,
+    wide,
+    false,
+  );
   await capture(
     page,
     'inbox-text-item',
@@ -312,6 +331,16 @@ async function main() {
   );
   // The upload modal is a state the page loop never reaches, so it is shot on its own.
   await captureInboxUploadModal(page, `/inbox${q}`);
+  // The demo owner's theme is system, so a dark OS preference proves the charts follow the g100 theme.
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await capture(
+    page,
+    'documents-analytics-dark',
+    `/documents/analytics${q}`,
+    wide,
+    false,
+  );
+  await page.emulateMedia({ colorScheme: 'light' });
   // Rail-expanded pass: pin the rail by cookie and reshoot at 1440.
   await context.addCookies([
     { name: 'bap_rail', value: 'pinned', url: baseURL },

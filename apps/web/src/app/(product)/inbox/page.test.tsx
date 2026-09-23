@@ -228,6 +228,33 @@ describe('InboxPage', () => {
     );
   });
 
+  it('names the tabs without a count until the counts load, never a fake zero', async () => {
+    const base = respondWith([inboxItem]);
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string, init?: RequestInit) => {
+        if (input.includes('/inbox/items?')) {
+          await held;
+        }
+        return base(input, init);
+      }),
+    );
+
+    renderInboxPage();
+
+    expect(await screen.findByRole('tab', { name: 'To review' })).toBeVisible();
+    expect(screen.queryByRole('tab', { name: /\(/ })).toBeNull();
+
+    release();
+    expect(
+      await screen.findByRole('tab', { name: 'To review (3)' }),
+    ).toBeVisible();
+  });
+
   it('links each row to the item with the current tab and reads Review on To review', async () => {
     vi.stubGlobal('fetch', respondWith([inboxItem]));
     renderInboxPage();
@@ -572,5 +599,18 @@ describe('InboxPage', () => {
 
     expect(screen.queryByLabelText('Select all rows')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Upload' })).toBeNull();
+  });
+
+  it('offers Sources and Rules in the overflow menu and no Settings entry', async () => {
+    vi.stubGlobal('fetch', respondWith([inboxItem], true, true));
+
+    renderInboxPage();
+    await screen.findByText('Placeholder Holding');
+    // The overflow button is named by its icon description; its items mount in a portal.
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions' }));
+    const option = { selector: '.cds--overflow-menu-options__option-content' };
+    expect(await screen.findByText('Sources', option)).toBeInTheDocument();
+    expect(screen.getByText('Rules', option)).toBeInTheDocument();
+    expect(screen.queryByText('Settings', option)).toBeNull();
   });
 });

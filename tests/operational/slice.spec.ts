@@ -140,6 +140,8 @@ test('imports an uploaded CSV and renders its rows and chart', async ({
   const visibleState = JSON.stringify(browserState);
   expect(visibleState).not.toContain(email);
   expect(visibleState).not.toContain(password);
-  expect(visibleState).not.toMatch(/token|jwt|bearer/i);
+  expect(visibleState).not.toMatch(
+    /\b(?:token|jwt|bearer)\b|eyJ[\w-]{8,}\.[\w-]{8,}/i,
+  );
   expect(consoleErrors).toEqual([]);
 });
