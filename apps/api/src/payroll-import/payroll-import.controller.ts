@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { rename } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import {
   BadRequestException,
   ConflictException,
@@ -61,6 +62,7 @@ import { PayrollImportEntityNotFoundError } from './payroll-import-repository.js
 const key = z.string().uuid();
 const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-01$/);
 const safeFilename = /^[^\p{Cc}\p{Cf}\\/]{1,255}$/u;
+const temporaryFilename = z.string().regex(/^[0-9a-f]{32}$/);
 const mediaTypes: Record<'csv' | 'xlsx', ReadonlySet<string>> = {
   csv: new Set([
     'application/csv',
@@ -84,7 +86,13 @@ const fileLimit = {
     fieldSize: 64,
   },
 };
+const temporaryUploadPath = (directory: string, filename: string) => {
+  const parsed = temporaryFilename.safeParse(filename);
+  if (!parsed.success) throw new BadRequestException();
+  return join(resolve(directory), parsed.data);
+};
 interface UploadedPayrollFile {
+  filename: string;
   mimetype: string;
   originalname: string;
   path: string;
@@ -246,7 +254,10 @@ export class PayrollImportController {
         throw new NotFoundException();
       const uploadId = randomUUID();
       cleanupId = uploadId;
-      await rename(file.path, resolveStagedFilePath(dir, uploadId));
+      await rename(
+        temporaryUploadPath(dir, file.filename),
+        resolveStagedFilePath(dir, uploadId),
+      );
       tmp = undefined;
       let created;
       try {

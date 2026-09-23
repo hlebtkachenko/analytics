@@ -71,11 +71,41 @@ describe('payroll import controller', () => {
         } as never,
         {
           mimetype: 'application/pdf',
+          filename: '5ec1cb22b6c671b7c36415d41bce6cb5',
           originalname: 'payroll.csv',
           path: '/tmp/not-used',
           size: 1,
         },
       ),
     ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('rejects an unsafe temporary upload filename', async () => {
+    const repo = { create: vi.fn() };
+    const controller = new PayrollImportController(
+      repo as never,
+      {} as never,
+      {} as never,
+    );
+    await expect(
+      controller.create(
+        'org',
+        {
+          body: {
+            legalEntityId: payrollImport.legalEntityId,
+            payrollMonth: '2026-09-01',
+          },
+          headers: { 'idempotency-key': payrollImport.id },
+        } as never,
+        {
+          mimetype: 'text/csv',
+          originalname: 'payroll.csv',
+          filename: '../untrusted-upload',
+          path: '/var/lib/bap/uploads/5ec1cb22b6c671b7c36415d41bce6cb5',
+          size: 1,
+        },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(repo.create).not.toHaveBeenCalled();
   });
 });
