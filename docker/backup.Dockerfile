@@ -2,7 +2,7 @@
 
 FROM restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510 AS restic
 
-FROM postgres:18.6-bookworm@sha256:1c59e2c3c818eaa0f0628f695b36e7c9e362d6b219b36a54a32df645cbd7e1af
+FROM postgres:18.6-bookworm@sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650
 COPY --from=restic /usr/bin/restic /usr/local/bin/restic
 COPY --chmod=0555 scripts/backup-stage-entrypoint.sh /usr/local/bin/backup-stage-entrypoint
 COPY --chmod=0555 scripts/backup-entrypoint.sh /usr/local/bin/backup-entrypoint
