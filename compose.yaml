@@ -300,7 +300,7 @@ services:
       - no-new-privileges:true
 
   clamd:
-    image: clamav/clamav:1.5.4@sha256:9cb27d7660bdf66e9878c832cb433dd8aa152cfbe16f3c2c0084c80b04ae22b4
+    image: clamav/clamav:1.5.4@sha256:0e31ce089574268aefa0b543767d66b70240ab51ed49eec53e07f18d5629d817
     # Docker Hub publishes ClamAV for amd64 only; Apple Silicon hosts run it under emulation.
     platform: linux/amd64
     # The image entrypoint needs a writable root and chown, so the daemon runs directly.
@@ -342,7 +342,7 @@ services:
       - no-new-privileges:true
 
   freshclam:
-    image: clamav/clamav:1.5.4@sha256:9cb27d7660bdf66e9878c832cb433dd8aa152cfbe16f3c2c0084c80b04ae22b4
+    image: clamav/clamav:1.5.4@sha256:0e31ce089574268aefa0b543767d66b70240ab51ed49eec53e07f18d5629d817
     platform: linux/amd64
     entrypoint: ['freshclam']
     command:
